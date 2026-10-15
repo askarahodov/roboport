@@ -24,7 +24,8 @@ def _dsn(request: Request) -> str | None:
     raw=os.getenv("ROBOport_DATABASE_URL","")
     host=urlsplit(raw).hostname
     if (os.getenv("ROBOport_SYNTHETIC_AUTH_API") != "1"
-        or host != "127.0.0.1" or request.url.hostname not in ("127.0.0.1","localhost")):
+        or host != "127.0.0.1" or request.url.hostname not in ("127.0.0.1","localhost")
+        or request.url.scheme != "https"):
         return None
     return raw.replace("postgresql+psycopg://","postgresql://",1)
 
