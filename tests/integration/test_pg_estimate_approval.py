@@ -17,7 +17,7 @@ def test_outdated_quote_rejected_and_latest_decision_is_immutable():
                 conn.execute("INSERT INTO estimate_approval(id,estimate_id,actor_id,decision) VALUES (%s,%s,%s,'APPROVED')",(uuid4(),older,actor))
         conn.execute("INSERT INTO estimate_approval(id,estimate_id,actor_id,decision) VALUES (%s,%s,%s,'APPROVED')",(decision,latest,actor))
         assert conn.execute("SELECT state FROM estimate WHERE id=%s",(latest,)).fetchone()[0] == "APPROVED"
-        with pytest.raises(psycopg.errors.UniqueViolation):
+        with pytest.raises(psycopg.errors.RaiseException):
             with conn.transaction():
                 conn.execute("INSERT INTO estimate_approval(id,estimate_id,actor_id,decision) VALUES (%s,%s,%s,'DECLINED')",(uuid4(),latest,actor))
         with pytest.raises(psycopg.errors.RaiseException):
