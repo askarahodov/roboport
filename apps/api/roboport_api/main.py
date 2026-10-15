@@ -260,3 +260,37 @@ def dev_owned_tickets(request: Request, limit: int = 20, offset: int = 0, state:
     return JSONResponse(content={"items":result,"limit":limit,"offset":offset}, headers={"Cache-Control":"no-store"})
 
 
+
+
+@app.get("/api/v1/dev/authorized/tickets/{ticket_id}", include_in_schema=False)
+def dev_authorized_ticket(ticket_id: str, request: Request):
+    """Experimental RBAC/ACL read with durable decision audit, loopback only."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .authorization import authorized_ticket_read_audited
+
+    if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
+        return not_found(request)
+    if request.url.scheme != "https" or request.url.hostname not in ("127.0.0.1", "localhost"):
+        return not_found(request)
+    raw = os.getenv("ROBOport_DATABASE_URL", "")
+    try:
+        dsn = urlsplit(raw)
+        if (dsn.scheme not in ("postgresql", "postgresql+psycopg")
+                or dsn.hostname != "127.0.0.1" or dsn.port is None):
+            return not_found(request)
+        ident = UUID(ticket_id)
+    except ValueError:
+        return not_found(request)
+    token = request.cookies.get("rp_session", "")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id,
+        }, headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        allowed=authorized_ticket_read_audited(conn,token,ident)
+    if not allowed:
+        return not_found(request)
+    return JSONResponse(content={"id":str(ident)},headers={"Cache-Control":"no-store"})
