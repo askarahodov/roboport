@@ -12,6 +12,9 @@ from .session_service import issue_session, revoke_session, verify_csrf
 from .session_lookup import session_subject
 from .session_cookie import set_session_cookie, clear_session_cookie
 
+# Fixed Argon2id sentinel for absent accounts; never a usable credential.
+_DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$SeTItVGGw+BtNGFsMzzl9A$/JMANrplfkaKb911s04/mF1zlsBuSozi3Vg46p9it20"
+
 router=APIRouter(include_in_schema=False)
 
 
@@ -85,7 +88,9 @@ async def login(request: Request):
             JOIN local_credential c ON c.user_id=u.id
             WHERE u.normalized_login=%s AND u.status='ACTIVE' AND c.must_change_password=false""",
             (normalized,)).fetchone()
-        if row is None or not verify_password(credentials.password,row[1]):
+        # Argon2id cost is paid even when the username does not exist.
+        password_ok=verify_password(credentials.password,row[1] if row else _DUMMY_PASSWORD_HASH)
+        if row is None or not password_ok:
             return _error(request,401)
         tokens=issue_session(conn,row[0])
         if tokens is not None:
