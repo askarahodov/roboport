@@ -176,7 +176,7 @@ def dev_owned_tickets(request: Request, limit: int = 20, offset: int = 0, state:
     import os
     from urllib.parse import urlsplit
     import psycopg
-    from .ticket_read import owned_ticket_list
+    from .ticket_read import owned_ticket_list, TICKET_STATES
 
     if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
         return not_found(request)
@@ -188,7 +188,8 @@ def dev_owned_tickets(request: Request, limit: int = 20, offset: int = 0, state:
             return not_found(request)
     except ValueError:
         return not_found(request)
-    if not 1 <= limit <= 50 or not 0 <= offset <= 10000:
+    if (not 1 <= limit <= 50 or not 0 <= offset <= 10000
+            or (state is not None and state not in TICKET_STATES)):
         return JSONResponse(status_code=422, content={"code":"INVALID_INPUT","requestId":request.state.request_id}, headers={"Cache-Control":"no-store"})
     token = request.cookies.get("rp_session", "")
     if not token:

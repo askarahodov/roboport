@@ -3,6 +3,9 @@ from uuid import UUID
 import psycopg
 from .session_tokens import token_digest
 
+# Must mirror 0001_core.STATES / ck_ticket_state.
+TICKET_STATES = frozenset(['DRAFT','SUBMITTED','TRIAGE','AWAITING_DELIVERY','RECEIVED','DIAGNOSING','SAFETY_HOLD','ESTIMATE_DRAFT','AWAITING_APPROVAL','APPROVED','DECLINED','AWAITING_PARTS','REPAIRING','QC_PENDING','QC_FAILED','READY_FOR_HANDOVER','COMPLETED','CANCELLED','UNREPAIRABLE','WARRANTY_ROUTE'])
+
 
 def owned_ticket_state(conn: psycopg.Connection, token: str, ticket: UUID) -> dict | None:
     if not isinstance(token, str) or len(token) != 43:
@@ -36,6 +39,8 @@ def owned_ticket_list(
         raise ValueError("limit must be 1..50")
     if not isinstance(offset, int) or not 0 <= offset <= 10000:
         raise ValueError("offset must be 0..10000")
+    if state is not None and state not in TICKET_STATES:
+        raise ValueError("unsupported ticket state")
     # Query session first; no access is granted by request headers or caller-supplied user IDs.
     from .session_lookup import session_subject
     subject = session_subject(conn, token)
