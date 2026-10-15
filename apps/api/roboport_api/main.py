@@ -92,7 +92,7 @@ def dev_ticket_keyset(request: Request, limit: int = 20, state: str | None = Non
             if len(before)>256:
                 return invalid()
             payload = json.loads(base64.urlsafe_b64decode(before + "=" * (-len(before)%4)))
-            if not isinstance(payload,list) or len(payload)!=2:
+            if not isinstance(payload,list) or len(payload)!=3 or payload[2]!=state:
                 return invalid()
             stamp,ident = datetime.fromisoformat(payload[0]), UUID(payload[1])
             if stamp.tzinfo is None:
@@ -113,7 +113,7 @@ def dev_ticket_keyset(request: Request, limit: int = 20, state: str | None = Non
         },headers={"Cache-Control":"no-store"})
     items,following=result
     cursor=(base64.urlsafe_b64encode(json.dumps([
-        following[0].isoformat(),str(following[1])
+        following[0].isoformat(),str(following[1]),state
     ]).encode()).decode().rstrip("=")) if following else None
     return JSONResponse(content={"items":items,"nextCursor":cursor},
                         headers={"Cache-Control":"no-store"})

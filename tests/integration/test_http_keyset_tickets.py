@@ -34,6 +34,7 @@ def test_keyset_pagination_and_revocation(monkeypatch):
     first=client.get(path,params={"limit":2})
     assert first.status_code==200,first.text
     assert first.json()["nextCursor"]
+    assert client.get(path,params={"before":first.json()["nextCursor"],"state":"COMPLETED"}).status_code==422
     second=client.get(path,params={"limit":2,"before":first.json()["nextCursor"]})
     assert second.status_code==200,second.text
     collected=first.json()["items"]+second.json()["items"]
