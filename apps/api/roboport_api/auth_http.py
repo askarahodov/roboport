@@ -45,12 +45,12 @@ async def login(request: Request):
         return _error(request,403)
     if not _origin_ok(request):
         return _error(request,403)
-    normalized=credentials.login.strip().lower()
-    login_hash=hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     try:
         credentials=Credentials.model_validate(await request.json())
     except (ValueError, ValidationError):
         return JSONResponse(status_code=422,content={"code":"INVALID_INPUT","message":"Некорректный запрос","requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    normalized=credentials.login.strip().lower()
+    login_hash=hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     with psycopg.connect(dsn,autocommit=True) as conn:
         failures=conn.execute("""
             INSERT INTO auth_login_throttle(login_hash,failures) VALUES (%s,1)
