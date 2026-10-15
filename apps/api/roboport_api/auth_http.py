@@ -22,9 +22,17 @@ class Credentials(BaseModel):
 
 def _dsn(request: Request) -> str | None:
     raw=os.getenv("ROBOport_DATABASE_URL","")
-    host=urlsplit(raw).hostname
+    # A bad DSN must fail closed, without leaking an exception through HTTP.
+    try:
+        parsed=urlsplit(raw)
+        host=parsed.hostname
+        port=parsed.port
+    except ValueError:
+        return None
     if (os.getenv("ROBOport_SYNTHETIC_AUTH_API") != "1"
-        or host != "127.0.0.1" or request.url.hostname not in ("127.0.0.1","localhost")
+        or parsed.scheme not in ("postgresql", "postgresql+psycopg")
+        or host != "127.0.0.1" or port is None
+        or request.url.hostname not in ("127.0.0.1","localhost")
         or request.url.scheme != "https"):
         return None
     return raw.replace("postgresql+psycopg://","postgresql://",1)
