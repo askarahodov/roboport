@@ -50,17 +50,11 @@ jobs:
           done
           docker compose -f infra/dev/compose.minio.yml logs --tail 60
           exit 1
-      - name: Install MinIO client
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$RUNNER_TEMP/mc"
-          chmod +x "$RUNNER_TEMP/mc"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Verify bucket policy and S3 operations
         shell: bash
         run: |
           set -euo pipefail
+          mc() { docker compose -f infra/dev/compose.minio.yml exec -T minio mc "$@"; }
           mc alias set root http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
           mc mb -p root/roboport-documents-dev
           mc mb -p root/roboport-quarantine-dev
@@ -70,12 +64,10 @@ jobs:
           mc admin policy create root roboport-app-readwrite infra/dev/minio-app-policy.json
           mc admin policy attach root roboport-app-readwrite --user "$MINIO_APP_ACCESS_KEY"
           mc alias set app http://127.0.0.1:9000 "$MINIO_APP_ACCESS_KEY" "$MINIO_APP_SECRET_KEY"
-          printf 'synthetic-robot-object-one' > "$RUNNER_TEMP/one.txt"
-          printf 'synthetic-robot-object-two' > "$RUNNER_TEMP/two.txt"
-          mc cp "$RUNNER_TEMP/one.txt" app/roboport-documents-dev/test-one.txt
-          mc cp "$RUNNER_TEMP/two.txt" app/roboport-documents-dev/test-two.txt
-          mc cat app/roboport-documents-dev/test-one.txt | cmp - "$RUNNER_TEMP/one.txt"
-          mc cat app/roboport-documents-dev/test-two.txt | cmp - "$RUNNER_TEMP/two.txt"
+          printf 'synthetic-robot-object-one' | mc pipe app/roboport-documents-dev/test-one.txt
+          printf 'synthetic-robot-object-two' | mc pipe app/roboport-documents-dev/test-two.txt
+          test "$(mc cat app/roboport-documents-dev/test-one.txt)" = 'synthetic-robot-object-one'
+          test "$(mc cat app/roboport-documents-dev/test-two.txt)" = 'synthetic-robot-object-two'
           for url in \
             'http://127.0.0.1:9000/roboport-documents-dev/test-one.txt' \
             'http://127.0.0.1:9000/roboport-documents-dev/?list-type=2' \
