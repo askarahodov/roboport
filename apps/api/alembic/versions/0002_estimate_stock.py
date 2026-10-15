@@ -47,7 +47,7 @@ def upgrade():
       BEGIN
         IF EXISTS (
           SELECT 1 FROM estimate e
-          WHERE e.id = COALESCE(NEW.estimate_id, OLD.estimate_id)
+          WHERE e.id IN (NEW.estimate_id, OLD.estimate_id)
             AND e.state <> 'DRAFT'
         ) THEN
           RAISE EXCEPTION 'estimate lines frozen';
@@ -63,6 +63,12 @@ def upgrade():
     op.execute("""
       CREATE FUNCTION prevent_frozen_estimate_header() RETURNS trigger LANGUAGE plpgsql AS $body$
       BEGIN
+        IF OLD.state <> 'DRAFT' AND NEW.state NOT IN ('APPROVED', 'DECLINED') THEN
+          RAISE EXCEPTION 'estimate cannot return to draft';
+        END IF;
+        IF OLD.state IN ('APPROVED', 'DECLINED') AND NEW.state IS DISTINCT FROM OLD.state THEN
+          RAISE EXCEPTION 'estimate decision is terminal';
+        END IF;
         IF OLD.state <> 'DRAFT' AND
            (NEW.total_minor IS DISTINCT FROM OLD.total_minor OR
             NEW.currency IS DISTINCT FROM OLD.currency OR
