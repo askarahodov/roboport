@@ -1,22 +1,13 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Link, NavLink, Routes, Route } from 'react-router-dom';
 import type { paths } from './shared/api/schema';
 import './style.css';
 
 type Brands = paths['/api/v1/catalog/brands']['get']['responses']['200']['content']['application/json'];
 type Models = paths['/api/v1/catalog/models']['get']['responses']['200']['content']['application/json'];
 type CatalogItem = { id: string; name: string };
-type View = 'home' | 'brands' | 'models' | 'account' | 'staff' | 'not-found';
 type Theme = 'light' | 'dark' | 'auto';
-
-function route(): View {
-  if (window.location.pathname === '/catalog/brands') return 'brands';
-  if (window.location.pathname === '/catalog/models') return 'models';
-  if (window.location.pathname === '/account') return 'account';
-  if (window.location.pathname === '/staff') return 'staff';
-  if (window.location.pathname === '/') return 'home';
-  return 'not-found';
-}
 
 function Catalog({ kind }: { kind: 'brands' | 'models' }) {
   const [items, setItems] = React.useState<CatalogItem[]>([]);
@@ -75,33 +66,32 @@ function App() {
     return () => media.removeEventListener('change', update);
   }, []);
   const dark = theme === 'dark' || (theme === 'auto' && systemDark);
-  const view = route();
   return <main className={dark ? 'app dark' : 'app'}>
     <header>
-      <a href="/" aria-label="ROBOport — главная">
+      <Link to="/" aria-label="ROBOport — главная">
         <picture><source media="(prefers-color-scheme: dark)" srcSet="/logo-dark.svg" />
           <img src="/logo-light.svg" alt="" width="64" height="64" /></picture>
         <strong>ROBOport</strong>
-      </a>
+      </Link>
       <nav aria-label="Разделы сервиса">
-        <a href="/" aria-current={view === 'home' ? 'page' : undefined}>Главная</a>
-        <a href="/catalog/brands" aria-current={view === 'brands' ? 'page' : undefined}>Бренды</a>
-        <a href="/catalog/models" aria-current={view === 'models' ? 'page' : undefined}>Модели</a>
-        <a href="/account" aria-current={view === 'account' ? 'page' : undefined}>Личный кабинет</a>
-        <a href="/staff" aria-current={view === 'staff' ? 'page' : undefined}>Сотрудникам</a>
+        <NavLink to="/" end>Главная</NavLink>
+        <NavLink to="/catalog/brands" end>Бренды</NavLink>
+        <NavLink to="/catalog/models" end>Модели</NavLink>
+        <NavLink to="/account" end>Личный кабинет</NavLink>
+        <NavLink to="/staff" end>Сотрудникам</NavLink>
       </nav>
       <label>Тема <select aria-label="Тема оформления" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="auto">Авто</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
     </header>
-    {view === 'account' || view === 'staff'
-      ? <section><h1>{view === 'account' ? 'Личный кабинет' : 'Портал сотрудников'}</h1><p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p><a href="/">На главную</a></section>
-      : view === 'not-found'
-      ? <section><h1>Страница не найдена</h1><p>Такого раздела пока нет.</p><a href="/">Вернуться на главную</a></section>
-      : view === 'home'
-      ? <section><h1>Сервис обслуживания роботов</h1>
-          <p>Синтетический стенд разработки. Приём реальных заявок пока закрыт.</p>
-          <p>Изучите <a href="/catalog/brands">бренды</a> и <a href="/catalog/models">модели</a> роботов.</p>
-        </section>
-      : <Catalog kind={view} />}
+    <Routes>
+      <Route path="/" element={<section><h1>Сервис обслуживания роботов</h1>
+        <p>Синтетический стенд разработки. Приём реальных заявок пока закрыт.</p>
+        <p>Изучите <Link to="/catalog/brands">бренды</Link> и <Link to="/catalog/models">модели</Link> роботов.</p></section>} />
+      <Route path="/catalog/brands" element={<Catalog kind="brands" />} />
+      <Route path="/catalog/models" element={<Catalog kind="models" />} />
+      <Route path="/account" element={<section><h1>Личный кабинет</h1><p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p><Link to="/">На главную</Link></section>} />
+      <Route path="/staff" element={<section><h1>Портал сотрудников</h1><p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p><Link to="/">На главную</Link></section>} />
+      <Route path="*" element={<section><h1>Страница не найдена</h1><p>Такого раздела пока нет.</p><Link to="/">Вернуться на главную</Link></section>} />
+    </Routes>
   </main>;
 }
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+createRoot(document.getElementById('root')!).render(<React.StrictMode><BrowserRouter><App /></BrowserRouter></React.StrictMode>);
