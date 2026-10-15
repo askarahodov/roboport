@@ -59,7 +59,6 @@ def test_unauthenticated_customer_api_cannot_disclose_profile():
 
 def test_synthetic_auth_handlers_remain_forbidden_without_opt_in():
     # HTTP handlers доступны только по отдельному opt-in и loopback.
-    for path in ("/api/v1/auth/login", "/api/v1/auth/logout"):
+    for path in ("/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/change-password"):
         assert CLIENT.post(path, json={}).status_code == 403
     assert CLIENT.get("/api/v1/auth/me").status_code == 403
-    assert CLIENT.post("/api/v1/auth/change-password", json={}).status_code == 404
