@@ -57,8 +57,9 @@ def test_unauthenticated_customer_api_cannot_disclose_profile():
     assert "customerId" not in response.text
 
 
-def test_auth_handlers_are_not_claimed_as_implemented():
-    # До Issue #13 отсутствие реализации отражается отказом маршрута.
-    for path in ("/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/change-password"):
-        assert CLIENT.post(path, json={}).status_code == 404
-    assert CLIENT.get("/api/v1/auth/me").status_code == 404
+def test_synthetic_auth_handlers_remain_forbidden_without_opt_in():
+    # HTTP handlers доступны только по отдельному opt-in и loopback.
+    for path in ("/api/v1/auth/login", "/api/v1/auth/logout"):
+        assert CLIENT.post(path, json={}).status_code == 403
+    assert CLIENT.get("/api/v1/auth/me").status_code == 403
+    assert CLIENT.post("/api/v1/auth/change-password", json={}).status_code == 404
