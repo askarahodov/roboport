@@ -30,3 +30,28 @@ test('переключение темы и отсутствие формы ре�
   await expect(page.getByText('Приём реальных заявок пока закрыт.')).toBeVisible();
   await expect(page.locator('form')).toHaveCount(0);
 });
+
+test('неизвестный URL не маскируется главной страницей', async ({ page }) => {
+  await page.goto('/unknown-section');
+  await expect(page.getByRole('heading', { name: 'Страница не найдена' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Сервис обслуживания роботов' })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Вернуться на главную' }).click();
+  await expect(page).toHaveURL('/');
+});
+
+test('после сетевой ошибки каталог можно повторно загрузить', async ({ page }) => {
+  let attempts = 0;
+  await page.route('**/api/v1/catalog/models', async route => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({ status: 503, body: '{}' });
+    } else {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' });
+    }
+  });
+  await page.goto('/catalog/models');
+  await expect(page.getByRole('alert')).toBeVisible();
+  await page.getByRole('button', { name: 'Повторить запрос' }).click();
+  await expect(page.getByText('Пока нет опубликованных моделей.')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
