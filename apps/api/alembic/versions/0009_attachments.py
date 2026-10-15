@@ -31,6 +31,91 @@ def upgrade():
     """)
     op.execute("CREATE INDEX ix_attachment_ticket ON attachment(ticket_id)")
     op.execute("""
+      CREATE TABLE attachment_upload_dedupe (
+        actor_id uuid NOT NULL REFERENCES app_user(id) ON DELETE RESTRICT,
+        ticket_id uuid NOT NULL REFERENCES service_ticket(id) ON DELETE RESTRICT,
+        key_hash char(64) NOT NULL CHECK (key_hash ~ '^[0-9a-f]{64}
+    op.execute("""
+      CREATE FUNCTION guard_attachment_identity() RETURNS trigger LANGUAGE plpgsql AS $body$
+      BEGIN
+        IF (NEW.id,NEW.ticket_id,NEW.object_key,NEW.created_by,NEW.created_at,
+            NEW.sha256,NEW.mime,NEW.byte_size)
+           IS DISTINCT FROM
+           (OLD.id,OLD.ticket_id,OLD.object_key,OLD.created_by,OLD.created_at,
+            OLD.sha256,OLD.mime,OLD.byte_size) THEN
+          RAISE EXCEPTION 'attachment identity immutable';
+        END IF;
+        IF OLD.upload_state IN ('FAILED','DELETED') AND
+           NEW.upload_state IS DISTINCT FROM OLD.upload_state THEN
+          RAISE EXCEPTION 'terminal attachment state immutable';
+        END IF;
+        IF OLD.quarantine_state='QUARANTINED' AND
+           NEW.quarantine_state IS DISTINCT FROM OLD.quarantine_state THEN
+          RAISE EXCEPTION 'quarantine irreversible';
+        END IF;
+        IF NEW.upload_state IS DISTINCT FROM OLD.upload_state AND NOT (
+            OLD.upload_state='PENDING' AND
+            NEW.upload_state IN ('READY','FAILED','DELETED')
+            OR OLD.upload_state='READY' AND NEW.upload_state IN ('DELETED','FAILED')
+        ) THEN
+          RAISE EXCEPTION 'invalid attachment state change';
+        END IF;
+        NEW.updated_at=now();
+        RETURN NEW;
+      END $body$;
+    """)
+    op.execute("""CREATE TRIGGER attachment_identity_guard BEFORE UPDATE ON attachment
+                  FOR EACH ROW EXECUTE FUNCTION guard_attachment_identity()""")
+
+
+def downgrade():
+    op.execute("DROP TABLE attachment_upload_dedupe")
+    op.execute("DROP TABLE attachment")
+    op.execute("DROP FUNCTION guard_attachment_identity()")
+),
+        payload_hash char(64) NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}
+    op.execute("""
+      CREATE FUNCTION guard_attachment_identity() RETURNS trigger LANGUAGE plpgsql AS $body$
+      BEGIN
+        IF (NEW.id,NEW.ticket_id,NEW.object_key,NEW.created_by,NEW.created_at,
+            NEW.sha256,NEW.mime,NEW.byte_size)
+           IS DISTINCT FROM
+           (OLD.id,OLD.ticket_id,OLD.object_key,OLD.created_by,OLD.created_at,
+            OLD.sha256,OLD.mime,OLD.byte_size) THEN
+          RAISE EXCEPTION 'attachment identity immutable';
+        END IF;
+        IF OLD.upload_state IN ('FAILED','DELETED') AND
+           NEW.upload_state IS DISTINCT FROM OLD.upload_state THEN
+          RAISE EXCEPTION 'terminal attachment state immutable';
+        END IF;
+        IF OLD.quarantine_state='QUARANTINED' AND
+           NEW.quarantine_state IS DISTINCT FROM OLD.quarantine_state THEN
+          RAISE EXCEPTION 'quarantine irreversible';
+        END IF;
+        IF NEW.upload_state IS DISTINCT FROM OLD.upload_state AND NOT (
+            OLD.upload_state='PENDING' AND
+            NEW.upload_state IN ('READY','FAILED','DELETED')
+            OR OLD.upload_state='READY' AND NEW.upload_state IN ('DELETED','FAILED')
+        ) THEN
+          RAISE EXCEPTION 'invalid attachment state change';
+        END IF;
+        NEW.updated_at=now();
+        RETURN NEW;
+      END $body$;
+    """)
+    op.execute("""CREATE TRIGGER attachment_identity_guard BEFORE UPDATE ON attachment
+                  FOR EACH ROW EXECUTE FUNCTION guard_attachment_identity()""")
+
+
+def downgrade():
+    op.execute("DROP TABLE attachment")
+    op.execute("DROP FUNCTION guard_attachment_identity()")
+),
+        attachment_id uuid NOT NULL REFERENCES attachment(id) ON DELETE RESTRICT,
+        PRIMARY KEY (actor_id,ticket_id,key_hash)
+      )
+    """)
+    op.execute("""
       CREATE FUNCTION guard_attachment_identity() RETURNS trigger LANGUAGE plpgsql AS $body$
       BEGIN
         IF (NEW.id,NEW.ticket_id,NEW.object_key,NEW.created_by,NEW.created_at,
