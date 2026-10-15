@@ -356,6 +356,7 @@ async def dev_upload_attachment(ticket_id: str, request: Request):
     import psycopg
     from .auth_http import _mutation_ok
     from .document_upload import create_attachment
+    from .document_access import authorize_attachment_upload
     from .storage import MinioFileStorage, MAX_SIZE, MIME
 
     if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
@@ -391,6 +392,8 @@ async def dev_upload_attachment(ticket_id: str, request: Request):
             return JSONResponse(status_code=403,content={
                 "code":"FORBIDDEN","requestId":request.state.request_id,
             },headers={"Cache-Control":"no-store"})
+        if authorize_attachment_upload(conn,request.cookies.get("rp_session",""),ticket) is None:
+            return not_found(request)
         try:
             attachment_id=create_attachment(conn,MinioFileStorage.from_environment(),
                                             request.cookies.get("rp_session",""),
