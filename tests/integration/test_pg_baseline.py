@@ -5,7 +5,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-DSN = os.environ["ROBOport_DATABASE_URL"]
+DSN = os.environ["ROBOport_DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://", 1)
 
 
 def test_foreign_key_and_ticket_state_and_version():
