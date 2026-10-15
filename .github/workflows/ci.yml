@@ -14,10 +14,12 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+      - run: python -m pip install openapi-spec-validator==0.7.2
       - run: python -m pip check
       - run: PYTHONPATH=apps/api python -m pytest -q tests/bootstrap
       - run: PYTHONPATH=apps/api python -m pytest -q tests/contract
       - run: python scripts/check_contract.py
+      - run: python -m openapi_spec_validator contracts/openapi.yaml
   web:
     runs-on: ubuntu-latest
     steps:
