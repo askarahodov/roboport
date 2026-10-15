@@ -50,3 +50,35 @@ def audited_attachment_gate(conn: psycopg.Connection, token: str, attachment_id:
         (uuid4(),actor,'ALLOW' if row else 'DENY'),
     )
     return row
+
+
+def authorize_attachment_upload(conn: psycopg.Connection, token: str, ticket_id: UUID) -> UUID | None:
+    """Return current actor ONLY for a live session with ticket-specific write permission."""
+    if not isinstance(token,str) or len(token)!=43 or not isinstance(ticket_id,UUID):
+        return None
+    row=conn.execute(
+        """SELECT u.id FROM user_session s
+           JOIN app_user u ON u.id=s.user_id AND u.status='ACTIVE'
+           JOIN service_ticket t ON t.id=%s
+           WHERE s.token_hash=%s AND s.revoked_at IS NULL
+             AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
+             AND t.state NOT IN ('SAFETY_HOLD','QC_FAILED')
+             AND (
+               EXISTS (SELECT 1 FROM user_role r
+                 JOIN account_customer_link l ON l.user_id=r.user_id
+                   AND l.customer_id=t.customer_id AND l.revoked_at IS NULL
+                 WHERE r.user_id=u.id AND r.role_code='CLIENT'
+                   AND r.revoked_at IS NULL
+                   AND (r.expires_at IS NULL OR r.expires_at>now()))
+               OR EXISTS (SELECT 1 FROM user_role r
+                 JOIN acl_entry a ON a.user_id=r.user_id
+                   AND a.ticket_id=t.id AND a.action IN ('ticket.intake','ticket.manage')
+                   AND a.revoked_at IS NULL
+                   AND (a.expires_at IS NULL OR a.expires_at>now())
+                 WHERE r.user_id=u.id AND r.role_code IN ('INTAKE','MANAGER')
+                   AND r.revoked_at IS NULL
+                   AND (r.expires_at IS NULL OR r.expires_at>now()))
+             )""",
+        (ticket_id,token_digest(token)),
+    ).fetchone()
+    return row[0] if row else None
