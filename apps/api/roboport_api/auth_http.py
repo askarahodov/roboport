@@ -63,8 +63,9 @@ async def login(request: Request):
     if not _origin_ok(request):
         return _error(request,403)
     try:
-        credentials=Credentials.model_validate(await request.json())
-    except (ValueError, ValidationError):
+        raw_payload=await request.json()
+        credentials=Credentials.model_validate(raw_payload)
+    except (ValueError, ValidationError, UnicodeDecodeError, TypeError):
         return JSONResponse(status_code=422,content={"code":"INVALID_INPUT","message":"Некорректный запрос","requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
     normalized=credentials.login.strip().lower()
     login_hash=hashlib.sha256(normalized.encode("utf-8")).hexdigest()
