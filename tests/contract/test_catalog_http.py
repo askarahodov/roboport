@@ -30,7 +30,7 @@ def test_synthetic_catalog_read_only():
     for path in ("/api/v1/catalog/brands", "/api/v1/catalog/models"):
         response = client.get(path)
         assert response.status_code == 200
-        assert isinstance(response.json(), list)
+        assert response.json() == {'items': []}
         assert client.post(path, json={}).status_code == 405
 
 
