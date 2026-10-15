@@ -260,3 +260,164 @@ def dev_owned_tickets(request: Request, limit: int = 20, offset: int = 0, state:
     return JSONResponse(content={"items":result,"limit":limit,"offset":offset}, headers={"Cache-Control":"no-store"})
 
 
+
+
+@app.get("/api/v1/dev/authorized/tickets/{ticket_id}", include_in_schema=False)
+def dev_authorized_ticket(ticket_id: str, request: Request):
+    """Experimental RBAC/ACL read with durable decision audit, loopback only."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .authorization import authorized_ticket_read_audited
+
+    if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
+        return not_found(request)
+    if request.url.scheme != "https" or request.url.hostname not in ("127.0.0.1", "localhost"):
+        return not_found(request)
+    raw = os.getenv("ROBOport_DATABASE_URL", "")
+    try:
+        dsn = urlsplit(raw)
+        if (dsn.scheme not in ("postgresql", "postgresql+psycopg")
+                or dsn.hostname != "127.0.0.1" or dsn.port is None):
+            return not_found(request)
+        ident = UUID(ticket_id)
+    except ValueError:
+        return not_found(request)
+    token = request.cookies.get("rp_session", "")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id,
+        }, headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        allowed=authorized_ticket_read_audited(conn,token,ident)
+    if not allowed:
+        return not_found(request)
+    return JSONResponse(content={"id":str(ident)},headers={"Cache-Control":"no-store"})
+
+
+@app.get("/api/v1/dev/attachments/{attachment_id}/content", include_in_schema=False)
+def dev_attachment_content(attachment_id: str, request: Request):
+    """Synthetic private read: always check PostgreSQL ACL before MinIO."""
+    import hashlib
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from fastapi.responses import Response
+    from .document_access import audited_attachment_gate
+    from .storage import MinioFileStorage
+
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1"
+            or request.url.scheme != "https"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    dsn=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        target=urlsplit(dsn)
+        if (target.scheme not in ("postgresql","postgresql+psycopg")
+                or target.hostname != "127.0.0.1" or target.port is None):
+            return not_found(request)
+        ident=UUID(attachment_id)
+    except ValueError:
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    with psycopg.connect(dsn.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        meta=audited_attachment_gate(conn,token,ident)
+    if meta is None:
+        return not_found(request)
+    try:
+        data=MinioFileStorage.from_environment().get(meta[0])
+    except Exception:
+        # Never expose storage secrets, bucket names or opaque object keys.
+        return JSONResponse(status_code=503,content={
+            "code":"STORAGE_UNAVAILABLE","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    if len(data)!=meta[3] or hashlib.sha256(data).hexdigest()!=meta[2]:
+        return JSONResponse(status_code=503,content={
+            "code":"STORAGE_UNAVAILABLE","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    return Response(data,media_type=meta[1],headers={
+        "Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+        "Content-Disposition":"attachment",
+    })
+
+
+@app.post("/api/v1/dev/tickets/{ticket_id}/attachments", include_in_schema=False)
+async def dev_upload_attachment(ticket_id: str, request: Request):
+    """Synthetic-only binary upload with current ACL and mandatory Origin/CSRF."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .auth_http import _mutation_ok
+    from .document_upload import create_attachment
+    from .document_access import authorize_attachment_upload
+    from .storage import MinioFileStorage, MAX_SIZE, MIME
+
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        parsed=urlsplit(raw)
+        if (parsed.scheme not in ("postgresql","postgresql+psycopg")
+                or parsed.hostname!="127.0.0.1" or parsed.port is None):
+            return not_found(request)
+        ticket=UUID(ticket_id)
+    except ValueError:
+        return not_found(request)
+    mime=request.headers.get("content-type","").split(";")[0].strip().lower()
+    if mime not in MIME:
+        return JSONResponse(status_code=422,content={
+            "code":"INVALID_INPUT","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    if request.headers.get("content-length","").isdigit() and int(
+            request.headers["content-length"])>MAX_SIZE:
+        return JSONResponse(status_code=413,content={
+            "code":"PAYLOAD_TOO_LARGE","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    payload=await request.body()
+    if not 0<len(payload)<=MAX_SIZE:
+        return JSONResponse(status_code=413,content={
+            "code":"PAYLOAD_TOO_LARGE","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1),autocommit=True) as conn:
+        if not _mutation_ok(request,conn):
+            return JSONResponse(status_code=403,content={
+                "code":"FORBIDDEN","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+        actor=authorize_attachment_upload(conn,request.cookies.get("rp_session",""),ticket)
+        from uuid import uuid4
+        conn.execute(
+            "INSERT INTO authorization_audit(id,actor_id,action,outcome) VALUES(%s,%s,'attachment.write',%s)",
+            (uuid4(),actor,'ALLOW' if actor else 'DENY'),
+        )
+        if actor is None:
+            return not_found(request)
+        retry_key=request.headers.get("idempotency-key")
+        if retry_key is not None and not 1<=len(retry_key)<=128:
+            return JSONResponse(status_code=422,content={
+                "code":"INVALID_INPUT","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+        try:
+            attachment_id=create_attachment(conn,MinioFileStorage.from_environment(),
+                                            request.cookies.get("rp_session",""),
+                                            ticket,payload,mime,retry_key)
+        except ValueError:
+            return JSONResponse(status_code=409,content={
+                "code":"CONFLICT","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+        except Exception:
+            return JSONResponse(status_code=503,content={
+                "code":"STORAGE_UNAVAILABLE","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+    if attachment_id is None:
+        return not_found(request)
+    return JSONResponse(status_code=201,content={"id":str(attachment_id)},
+                        headers={"Cache-Control":"no-store"})
