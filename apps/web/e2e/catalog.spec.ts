@@ -40,10 +40,9 @@ test('неизвестный URL не маскируется главной ст
 });
 
 test('после сетевой ошибки каталог можно повторно загрузить', async ({ page }) => {
-  let attempts = 0;
+  let recovered = false;
   await page.route('**/api/v1/catalog/models', async route => {
-    attempts += 1;
-    if (attempts === 1) {
+    if (!recovered) {
       await route.fulfill({ status: 503, body: '{}' });
     } else {
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' });
@@ -51,6 +50,7 @@ test('после сетевой ошибки каталог можно повт�
   });
   await page.goto('/catalog/models');
   await expect(page.getByRole('alert')).toBeVisible();
+  recovered = true;
   await page.getByRole('button', { name: 'Повторить запрос' }).click();
   await expect(page.getByText('Пока нет опубликованных моделей.')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
