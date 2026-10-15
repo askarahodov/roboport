@@ -128,5 +128,19 @@ def test_audited_http_permission_and_revoke_bundle(monkeypatch):
             (user,)).fetchall()]
     assert outcomes==["DENY","ALLOW","DENY"]
     assert client.get(url,headers={"X-User-ID":str(user)}).status_code==404
+    # A replay hint must never bypass authorization after revocation.
+    assert client.get(url,headers={"Idempotency-Key":"replay-synthetic-1"}).status_code==404
+    with psycopg.connect(DSN) as conn:
+        audit_id=conn.execute(
+            "SELECT id FROM authorization_audit WHERE actor_id=%s LIMIT 1",
+            (user,)).fetchone()[0]
+        with pytest.raises(psycopg.errors.RaiseException):
+            with conn.transaction():
+                conn.execute("UPDATE authorization_audit SET outcome='ALLOW' WHERE id=%s",
+                             (audit_id,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with conn.transaction():
+                conn.execute("DELETE FROM authorization_audit WHERE id=%s",
+                             (audit_id,))
     monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API")
     assert client.get(url).status_code==404
