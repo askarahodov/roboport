@@ -160,3 +160,41 @@ def test_concurrent_version_conflict_does_not_duplicate_events():
                           (ticket,)).fetchone()==("SUBMITTED",2)
         assert db.execute("SELECT count(*) FROM ticket_state_event WHERE ticket_id=%s",
                           (ticket,)).fetchone()[0]==1
+
+
+def test_independent_safety_expert_release_and_revoke():
+    from roboport_api.ticket_fsm import record_safety_review, release_safety_hold
+    users=[uuid4(),uuid4()]
+    tokens=[new_token(),new_token()]
+    ticket,customer=uuid4(),uuid4()
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
+        db.execute("INSERT INTO service_ticket(id,customer_id,state) VALUES(%s,%s,'SAFETY_HOLD')",
+                   (ticket,customer))
+        for user,token,role,action in zip(users,tokens,("ENGINEER","MANAGER"),
+                                          ("ticket.diagnose","ticket.manage")):
+            db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
+                       (user,"safety-"+user.hex))
+            db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+                          VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+                       (uuid4(),user,token_digest(token),token_digest(new_token()),now,
+                        now+timedelta(minutes=30),now+timedelta(hours=4)))
+            db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",
+                       (uuid4(),user,role))
+            db.execute("INSERT INTO acl_entry(id,user_id,ticket_id,action) VALUES(%s,%s,%s,%s)",
+                       (uuid4(),user,ticket,action))
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(TransitionConflict):
+            release_safety_hold(db,tokens[1],ticket,1)
+        assert record_safety_review(db,tokens[0],ticket,1,True)=="ENGINEER"
+        with pytest.raises(TransitionConflict):
+            release_safety_hold(db,tokens[1],ticket,1)
+        assert record_safety_review(db,tokens[1],ticket,1,True)=="MANAGER"
+        assert release_safety_hold(db,tokens[1],ticket,1)["version"]==2
+        assert db.execute("SELECT state,version FROM service_ticket WHERE id=%s",
+                          (ticket,)).fetchone()==("DIAGNOSING",2)
+        with pytest.raises(TransitionConflict):
+            release_safety_hold(db,tokens[1],ticket,1)
+        assert db.execute("SELECT count(*) FROM ticket_state_event WHERE ticket_id=%s",
+                          (ticket,)).fetchone()[0]==1
