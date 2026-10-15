@@ -1,0 +1,40 @@
+"""Real PostgreSQL 17 constraints; executed only against disposable CI DB."""
+import os
+from uuid import uuid4
+
+import psycopg
+import pytest
+
+DSN = os.environ["ROBOport_DATABASE_URL"]
+
+
+def test_foreign_key_and_ticket_state_and_version():
+    with psycopg.connect(DSN) as conn:
+        with conn.transaction():
+            customer, ticket = uuid4(), uuid4()
+            with pytest.raises(psycopg.errors.ForeignKeyViolation):
+                with conn.transaction():
+                    conn.execute(
+                        "INSERT INTO service_ticket(id,customer_id) VALUES (%s,%s)",
+                        (ticket, customer),
+                    )
+            conn.execute("INSERT INTO customer(id,label) VALUES(%s,'synthetic')", (customer,))
+            conn.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)", (ticket, customer))
+            with pytest.raises(psycopg.errors.CheckViolation):
+                with conn.transaction():
+                    conn.execute("UPDATE service_ticket SET state='WRONG_STATE' WHERE id=%s", (ticket,))
+            with pytest.raises(psycopg.errors.CheckViolation):
+                with conn.transaction():
+                    conn.execute("UPDATE service_ticket SET version=0 WHERE id=%s", (ticket,))
+
+
+def test_ticket_owner_is_fixed_on_creation():
+    with psycopg.connect(DSN) as conn:
+        first, second, ticket = uuid4(), uuid4(), uuid4()
+        conn.execute("INSERT INTO customer(id,label) VALUES(%s,'first'),(%s,'second')", (first,second))
+        conn.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)", (ticket,first))
+        owner=conn.execute("SELECT customer_id FROM service_ticket WHERE id=%s",(ticket,)).fetchone()[0]
+        assert owner == first
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            with conn.transaction():
+                conn.execute("UPDATE service_ticket SET customer_id=%s WHERE id=%s",(uuid4(),ticket))
