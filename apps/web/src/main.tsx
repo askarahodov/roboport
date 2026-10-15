@@ -6,16 +6,18 @@ import './style.css';
 type Brands = paths['/api/v1/catalog/brands']['get']['responses']['200']['content']['application/json'];
 type Models = paths['/api/v1/catalog/models']['get']['responses']['200']['content']['application/json'];
 type CatalogItem = { id: string; name: string };
-type View = 'home' | 'brands' | 'models';
+type View = 'home' | 'brands' | 'models' | 'not-found';
 
 function route(): View {
   if (window.location.pathname === '/catalog/brands') return 'brands';
   if (window.location.pathname === '/catalog/models') return 'models';
-  return 'home';
+  if (window.location.pathname === '/') return 'home';
+  return 'not-found';
 }
 
 function Catalog({ kind }: { kind: 'brands' | 'models' }) {
   const [items, setItems] = React.useState<CatalogItem[]>([]);
+  const [attempt, setAttempt] = React.useState(0);
   const [status, setStatus] = React.useState<'loading' | 'success' | 'error'>('loading');
   React.useEffect(() => {
     const controller = new AbortController();
@@ -35,13 +37,13 @@ function Catalog({ kind }: { kind: 'brands' | 'models' }) {
     }
     void load();
     return () => controller.abort();
-  }, [kind]);
+  }, [kind, attempt]);
   const title = kind === 'brands' ? 'Бренды роботов' : 'Модели роботов';
   return <section aria-live="polite">
     <h1>{title}</h1>
     <p>Демонстрационный каталог. Реальные обращения пока не принимаются.</p>
     {status === 'loading' && <p role="status">Загрузка каталога…</p>}
-    {status === 'error' && <p role="alert">Каталог сейчас недоступен. Попробуйте обновить страницу.</p>}
+    {status === 'error' && <div><p role="alert">Каталог сейчас недоступен. Попробуйте повторить запрос.</p><button type="button" onClick={() => setAttempt(n => n + 1)}>Повторить запрос</button></div>}
     {status === 'success' && (items.length
       ? <ul>{items.map(item => <li key={item.id}>{item.name}</li>)}</ul>
       : <p>Пока нет опубликованных {kind === 'brands' ? 'брендов' : 'моделей'}.</p>)}
@@ -59,13 +61,15 @@ function App() {
         <strong>ROBOport</strong>
       </a>
       <nav aria-label="Разделы сервиса">
-        <a href="/">Главная</a>
-        <a href="/catalog/brands">Бренды</a>
-        <a href="/catalog/models">Модели</a>
+        <a href="/" aria-current={view === 'home' ? 'page' : undefined}>Главная</a>
+        <a href="/catalog/brands" aria-current={view === 'brands' ? 'page' : undefined}>Бренды</a>
+        <a href="/catalog/models" aria-current={view === 'models' ? 'page' : undefined}>Модели</a>
       </nav>
       <button onClick={() => setDark(!dark)} aria-label="Переключить тему">Тема</button>
     </header>
-    {view === 'home'
+    {view === 'not-found'
+      ? <section><h1>Страница не найдена</h1><p>Такого раздела пока нет.</p><a href="/">Вернуться на главную</a></section>
+      : view === 'home'
       ? <section><h1>Сервис обслуживания роботов</h1>
           <p>Синтетический стенд разработки. Приём реальных заявок пока закрыт.</p>
           <p>Изучите <a href="/catalog/brands">бренды</a> и <a href="/catalog/models">модели</a> роботов.</p>
