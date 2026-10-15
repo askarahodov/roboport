@@ -1,0 +1,31 @@
+name: ROBOport bootstrap CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r apps/api/requirements-dev.txt
+      - run: PYTHONPATH=apps/api python -m pytest -q tests/bootstrap
+      - run: python scripts/check_contract.py
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - working-directory: apps/web
+        run: npm install --no-audit --no-fund
+      - working-directory: apps/web
+        run: npm run typecheck
+      - working-directory: apps/web
+        run: npm run build
