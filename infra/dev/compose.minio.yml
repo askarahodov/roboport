@@ -1,0 +1,24 @@
+# Только изолированный синтетический dev-контур.
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    env_file:
+      - path: .env.local
+        required: true
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - roboport_minio_data:/data
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  roboport_minio_data:
