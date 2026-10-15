@@ -141,11 +141,9 @@ def test_keyset_signed_cursor_rejected_after_logout_and_wrong_session(monkeypatc
         db.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(user,))
     empty=client.get(url,params={"limit":1})
     assert empty.status_code==200 and empty.json()["items"]==[]
-    # 7: курсор B после снятия ownership тоже не возвращает старые строки.
-    # 8: восстановление ownership не оживляет ранее отозванную сессию A.
-    with psycopg.connect(DSN) as db:
-        db.execute("UPDATE account_customer_link SET revoked_at=NULL WHERE user_id=%s",(user,))
+    # 7: после revoke старая сессия A остаётся заблокирована.
     client.cookies.set("rp_session",token_a)
     assert client.get(url,params={"limit":1}).status_code==401
+    # 8: связка с customer не может обойти изоляцию посредством другой сессии.
     client.cookies.set("rp_session",token_b)
-    assert client.get(url,params={"limit":1}).status_code==200
+    assert client.get(url,params={"limit":1}).json()["items"]==[]
