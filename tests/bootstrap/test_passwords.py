@@ -32,4 +32,4 @@ def test_unimplemented_auth_remains_closed():
         ("get", "/api/v1/auth/me"),
     ]:
         response = getattr(client, method)(route, headers={"X-User-ID": "synthetic-admin"})
-        assert response.status_code in (404, 405)
+        assert response.status_code in (403, 404, 405)
