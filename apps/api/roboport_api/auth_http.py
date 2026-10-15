@@ -84,7 +84,7 @@ def logout(request: Request):
     dsn=_dsn(request)
     if dsn is None or not _origin_ok(request):
         return _error(request,403)
-    token=request.cookies.get("roboport_session","")
+    token=request.cookies.get("rp_session","")
     csrf=request.headers.get("x-csrf-token","")
     with psycopg.connect(dsn,autocommit=True) as conn:
         if not verify_csrf(conn,token,csrf):
@@ -101,7 +101,7 @@ def me(request: Request):
     if dsn is None:
         return _error(request,403)
     with psycopg.connect(dsn,autocommit=True) as conn:
-        subject=session_subject(conn,request.cookies.get("roboport_session",""))
+        subject=session_subject(conn,request.cookies.get("rp_session",""))
     if subject is None:
         return _error(request,401)
     return JSONResponse(content={"subjectId":str(subject)},headers={"Cache-Control":"no-store"})
