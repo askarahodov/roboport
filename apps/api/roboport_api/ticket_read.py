@@ -47,9 +47,12 @@ def owned_ticket_list(
            JOIN account_customer_link l ON l.customer_id=t.customer_id
              AND l.user_id=%s AND l.revoked_at IS NULL
            JOIN app_user u ON u.id=l.user_id AND u.status='ACTIVE'
+           JOIN user_session s ON s.user_id=u.id AND s.token_hash=%s
+             AND s.revoked_at IS NULL AND s.idle_expires_at>now()
+             AND s.absolute_expires_at>now()
            WHERE (%s::text IS NULL OR t.state=%s)
            ORDER BY t.created_at DESC, t.id DESC
            LIMIT %s OFFSET %s""",
-        (subject, state, state, limit, offset),
+        (subject, token_digest(token), state, state, limit, offset),
     ).fetchall()
     return [{"id":str(row[0]), "state":row[1], "version":row[2]} for row in rows]
