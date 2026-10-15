@@ -68,23 +68,23 @@ def upgrade():
 
     # Триггеры защищают инварианты даже при прямом SQL в обход API.
     op.execute("""
-        CREATE FUNCTION reject_ticket_customer_change() RETURNS trigger LANGUAGE plpgsql AS $
+        CREATE FUNCTION reject_ticket_customer_change() RETURNS trigger LANGUAGE plpgsql AS $body$
         BEGIN
           IF NEW.customer_id IS DISTINCT FROM OLD.customer_id THEN
             RAISE EXCEPTION 'ticket customer is immutable';
           END IF;
           RETURN NEW;
-        END $;
+        END $body$;
     """)
     op.execute("""
         CREATE TRIGGER ticket_customer_immutable BEFORE UPDATE ON service_ticket
         FOR EACH ROW EXECUTE FUNCTION reject_ticket_customer_change()
     """)
     op.execute("""
-        CREATE FUNCTION reject_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS $
+        CREATE FUNCTION reject_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS $body$
         BEGIN
           RAISE EXCEPTION 'audit events are append only';
-        END $;
+        END $body$;
     """)
     op.execute("""
         CREATE TRIGGER audit_append_only BEFORE UPDATE OR DELETE ON audit_event
