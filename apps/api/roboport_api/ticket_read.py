@@ -61,3 +61,47 @@ def owned_ticket_list(
         (subject, token_digest(token), state, state, limit, offset),
     ).fetchall()
     return [{"id":str(row[0]), "state":row[1], "version":row[2]} for row in rows]
+
+
+def owned_ticket_keyset_page(
+    conn: psycopg.Connection, token: str, *, limit: int = 20,
+    before_created_at=None, before_id: UUID | None = None,
+    state: str | None = None,
+) -> tuple[list[dict], tuple | None] | None:
+    """Keyset pagination uses (created_at, id) rather than mutable offsets.
+
+    A live session, active user and active ownership link are joined in the
+    same statement as the ticket rows. Cursor input is never used as identity.
+    """
+    from datetime import datetime
+    if not isinstance(token, str) or len(token) != 43:
+        return None
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("invalid limit")
+    if state is not None and state not in TICKET_STATES:
+        raise ValueError("invalid state")
+    if (before_created_at is None) != (before_id is None):
+        raise ValueError("cursor must have both fields")
+    if before_created_at is not None and (
+        not isinstance(before_created_at, datetime)
+        or before_created_at.tzinfo is None
+        or not isinstance(before_id, UUID)
+    ):
+        raise ValueError("invalid cursor")
+    rows = conn.execute(
+        """SELECT DISTINCT t.id,t.state,t.version,t.created_at
+           FROM user_session s
+           JOIN app_user u ON u.id=s.user_id AND u.status='ACTIVE'
+           JOIN account_customer_link l ON l.user_id=u.id AND l.revoked_at IS NULL
+           JOIN service_ticket t ON t.customer_id=l.customer_id
+           WHERE s.token_hash=%s AND s.revoked_at IS NULL
+             AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
+             AND (%s::text IS NULL OR t.state=%s)
+             AND (%s::timestamptz IS NULL OR
+                  (t.created_at,t.id)<(%s::timestamptz,%s::uuid))
+           ORDER BY t.created_at DESC,t.id DESC LIMIT %s""",
+        (token_digest(token),state,state,before_created_at,before_created_at,before_id,limit+1),
+    ).fetchall()
+    visible=rows[:limit]
+    next_cursor=(visible[-1][3],visible[-1][0]) if len(rows)>limit else None
+    return ([{"id":str(v[0]),"state":v[1],"version":v[2]} for v in visible],next_cursor)
