@@ -87,3 +87,45 @@ def authorized_ticket_read_audited(
          "ALLOW" if allowed else "DENY"),
     )
     return allowed
+
+
+def authorize_estimate(
+    conn: psycopg.Connection, token: str, action: str, estimate_id: UUID,
+) -> bool:
+    """One-statement estimate ACL; client can only act on latest SENT estimate."""
+    if (not isinstance(token,str) or len(token)!=43 or not isinstance(estimate_id,UUID)
+            or action not in ("estimate.read","estimate.approve")):
+        return False
+    row=conn.execute(
+        """SELECT e.state,
+          e.version=(SELECT MAX(version) FROM estimate WHERE ticket_id=e.ticket_id) AS latest,
+          EXISTS(SELECT 1 FROM user_role r
+            JOIN account_customer_link l ON l.user_id=r.user_id
+              AND l.customer_id=t.customer_id AND l.revoked_at IS NULL
+            WHERE r.user_id=u.id AND r.role_code='CLIENT'
+              AND r.revoked_at IS NULL
+              AND (r.expires_at IS NULL OR r.expires_at>now())) AS client_permission,
+          EXISTS(SELECT 1 FROM user_role r
+            JOIN acl_entry a ON a.user_id=r.user_id
+              AND a.ticket_id=t.id AND a.action=%s
+              AND a.revoked_at IS NULL
+              AND (a.expires_at IS NULL OR a.expires_at>now())
+            WHERE r.user_id=u.id AND r.revoked_at IS NULL
+              AND (r.expires_at IS NULL OR r.expires_at>now())
+              AND ((r.role_code='FINANCE' AND %s='estimate.read')
+                OR (r.role_code='MANAGER' AND %s IN ('estimate.read','estimate.approve'))))
+            AS delegated_permission
+         FROM user_session s
+         JOIN app_user u ON u.id=s.user_id AND u.status='ACTIVE'
+         JOIN estimate e ON e.id=%s
+         JOIN service_ticket t ON t.id=e.ticket_id
+         WHERE s.token_hash=%s AND s.revoked_at IS NULL
+           AND s.idle_expires_at>now() AND s.absolute_expires_at>now()""",
+        (action,action,action,estimate_id,token_digest(token)),
+    ).fetchone()
+    if row is None:
+        return False
+    state,latest,client,delegated=row
+    if action=="estimate.read":
+        return bool(delegated or (client and state in ("SENT","APPROVED","DECLINED")))
+    return bool(latest and state=="SENT" and (client or delegated))
