@@ -1,7 +1,7 @@
 openapi: 3.1.2
 info:
   title: ROBOport — API contract (draft, synthetic only)
-  version: 0.12.0-draft
+  version: 0.13.0-draft
   description: Проектный контракт. Нет серверной реализации, не собирать реальные клиентские данные. Методы и статусы
     подлежат независимому ревью. Маркеры x-roboport-roles/guards — проектная документация; безопасность требует реализации.
     Статус-токен передаётся только в заголовке. Полноценный защищённый клиентский кабинет — обязательная часть MVP; API
@@ -25,6 +25,7 @@ tags:
 - name: Reports
 - name: Attachments
 - name: CustomerPortal
+- name: Auth
 components:
   securitySchemes:
     localSession:
@@ -38,6 +39,53 @@ components:
       name: X-ROBOport-Status-Token
       description: Opaque random short-lived token, hash stored server-side; never include in URLs or logs.
   schemas:
+    LoginRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          minLength: 1
+          maxLength: 254
+        password:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    AuthSession:
+      type: object
+      required: [userId, roles, csrfToken]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        roles:
+          type: array
+          items:
+            type: string
+        csrfToken:
+          type: string
+          minLength: 16
+          description: Token returned only after authenticating; send via X-CSRF-Token for unsafe requests.
+      additionalProperties: false
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+        newPassword:
+          type: string
+          minLength: 12
+      additionalProperties: false
+    AuthResult:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+      additionalProperties: false
     Error:
       type: object
       required:
@@ -1178,6 +1226,184 @@ components:
       required: true
       schema: *id001
 paths:
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Локальный вход (контракт; не реализован)
+      operationId: loginLocal
+      description: Проверка Origin и rate limit обязательны. Успешный вход выдаёт серверную opaque cookie rp_session; HttpOnly, SameSite=Lax, Secure при HTTPS. Нельзя возвращать session secret в JSON.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешный вход, Set-Cookie rp_session (HttpOnly; SameSite=Lax; Secure при TLS)
+          headers:
+            Set-Cookie:
+              description: Opaque rp_session (never in JSON)
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '400':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Отзыв текущей сессии (контракт; не реализован)
+      operationId: logoutLocal
+      security:
+        - localSession: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 16}
+      responses:
+        '200':
+          description: Отзыв сессии; cookie удаляется
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+        '401':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Текущая сессия (контракт; не реализован)
+      operationId: getLocalSession
+      security:
+        - localSession: []
+      responses:
+        '200':
+          description: Данные текущей сессии без cookie secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Смена локального пароля (контракт; не реализован)
+      operationId: changeLocalPassword
+      security:
+        - localSession: []
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 16}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Пароль изменён, остальные сессии отозваны
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+        '400':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Ошибка безопасности или запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/catalog/brands:
     get:
       tags:
