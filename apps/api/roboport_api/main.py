@@ -294,3 +294,54 @@ def dev_authorized_ticket(ticket_id: str, request: Request):
     if not allowed:
         return not_found(request)
     return JSONResponse(content={"id":str(ident)},headers={"Cache-Control":"no-store"})
+
+
+@app.get("/api/v1/dev/attachments/{attachment_id}/content", include_in_schema=False)
+def dev_attachment_content(attachment_id: str, request: Request):
+    """Synthetic private read: always check PostgreSQL ACL before MinIO."""
+    import hashlib
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from fastapi.responses import Response
+    from .document_access import audited_attachment_gate
+    from .storage import MinioFileStorage
+
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1"
+            or request.url.scheme != "https"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    dsn=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        target=urlsplit(dsn)
+        if (target.scheme not in ("postgresql","postgresql+psycopg")
+                or target.hostname != "127.0.0.1" or target.port is None):
+            return not_found(request)
+        ident=UUID(attachment_id)
+    except ValueError:
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    with psycopg.connect(dsn.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        meta=audited_attachment_gate(conn,token,ident)
+    if meta is None:
+        return not_found(request)
+    try:
+        data=MinioFileStorage.from_environment().get(meta[0])
+    except Exception:
+        # Never expose storage secrets, bucket names or opaque object keys.
+        return JSONResponse(status_code=503,content={
+            "code":"STORAGE_UNAVAILABLE","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    if len(data)!=meta[3] or hashlib.sha256(data).hexdigest()!=meta[2]:
+        return JSONResponse(status_code=503,content={
+            "code":"STORAGE_UNAVAILABLE","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    return Response(data,media_type=meta[1],headers={
+        "Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+        "Content-Disposition":"attachment",
+    })
