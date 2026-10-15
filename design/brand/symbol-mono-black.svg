@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="ROBOport symbol">
+<rect width="128" height="128" rx="20" fill="#f4fafb"/>
+<path d="M82 29 H53 Q24 29 24 64 T53 99 H82" fill="none" stroke="#12343b" stroke-width="13" stroke-linejoin="miter"/>
+<path d="M57 48 H76 Q94 48 94 61 Q94 73 76 73 H57 Z" fill="none" stroke="#12343b" stroke-width="9"/>
+<path d="M75 73 L98 100" fill="none" stroke="#12343b" stroke-width="10" stroke-linecap="square"/>
+</svg>
