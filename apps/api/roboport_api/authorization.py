@@ -65,3 +65,25 @@ def authorize_ticket(conn: psycopg.Connection, token: str, action: str, ticket_i
     if action == "ticket.manage" and state in ("SAFETY_HOLD", "QC_FAILED"):
         return False
     return bool(delegated_allowed)
+
+
+def authorized_ticket_read_audited(
+    conn: psycopg.Connection, token: str, ticket_id: UUID,
+    *, action: str = "ticket.read",
+) -> bool:
+    """Audit an authorization decision without storing tokens or PII.
+
+    Caller must use a dedicated transaction and commit both decision and read
+    as one unit; the audit record stores only actor UUID and ticket UUID.
+    """
+    from uuid import uuid4
+    from .session_lookup import session_subject
+    actor = session_subject(conn, token)
+    allowed = authorize_ticket(conn, token, action, ticket_id)
+    conn.execute(
+        """INSERT INTO authorization_audit(id,actor_id,ticket_id,action,outcome)
+           VALUES (%s,%s,%s,%s,%s)""",
+        (uuid4(), actor, ticket_id if allowed else None, action,
+         "ALLOW" if allowed else "DENY"),
+    )
+    return allowed
