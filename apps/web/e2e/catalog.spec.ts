@@ -88,3 +88,14 @@ test('тема сохраняется после перезагрузки и п�
   const stored = await page.evaluate(() => Object.keys(localStorage));
   expect(stored).toEqual(['roboport-theme']);
 });
+
+test('React Router сохраняет SPA навигацию и историю браузера', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('navigation').getByRole('link', { name: 'Бренды' }).click();
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Бренды' })).toHaveAttribute('aria-current', 'page');
+  await page.getByRole('navigation').getByRole('link', { name: 'Модели' }).click();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/catalog\/brands$/);
+  await expect(page.getByRole('heading', { name: 'Бренды роботов' })).toBeVisible();
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Бренды' })).toHaveAttribute('aria-current', 'page');
+});
