@@ -7,7 +7,11 @@ from roboport_api.session_tokens import new_token,token_digest
 from test_pg_baseline import DSN
 
 
-def test_estimate_acl_status_latest_and_revoke_bundle():
+def test_estimate_acl_status_latest_and_revoke_bundle(monkeypatch):
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    monkeypatch.setenv('ROBOport_SYNTHETIC_ACCESS_API','1')
+    monkeypatch.setenv('ROBOport_DATABASE_URL',DSN)
     client,finance,customer,ticket,estimate1,estimate2=(uuid4() for _ in range(6))
     tokens=(new_token(),new_token())
     now=datetime.now(timezone.utc)
@@ -31,9 +35,15 @@ def test_estimate_acl_status_latest_and_revoke_bundle():
         # DRAFT documents hidden even when a CLIENT has customer link.
         assert not authorize_estimate(db,tokens[0],"estimate.read",estimate1)
         assert not authorize_estimate(db,tokens[0],"estimate.approve",estimate2)
+        assert http.get(f"/api/v1/dev/estimates/{estimate2}/access").status_code==404
         db.execute("UPDATE estimate SET state='SENT' WHERE id=%s",(estimate2,))
         assert authorize_estimate(db,tokens[0],"estimate.read",estimate2)
         assert authorize_estimate(db,tokens[0],"estimate.approve",estimate2)
+        http=TestClient(app,base_url="https://127.0.0.1")
+        http.cookies.set("rp_session",tokens[0])
+        response=http.get(f"/api/v1/dev/estimates/{estimate2}/access")
+        assert response.status_code==200,response.text
+        assert response.headers["cache-control"]=="no-store"
         assert not authorize_estimate(db,tokens[0],"estimate.approve",estimate1)
         assert not authorize_estimate(db,tokens[1],"estimate.read",estimate2)
         acl=uuid4()
