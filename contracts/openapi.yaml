@@ -1,0 +1,2680 @@
+openapi: 3.1.2
+info:
+  title: ROBOport — API contract (draft, synthetic only)
+  version: 0.12.0-draft
+  description: Проектный контракт. Нет серверной реализации, не собирать реальные клиентские данные. Методы и статусы
+    подлежат независимому ревью. Маркеры x-roboport-roles/guards — проектная документация; безопасность требует реализации.
+    Статус-токен передаётся только в заголовке. Полноценный защищённый клиентский кабинет — обязательная часть MVP; API
+    ещё не реализован.
+servers:
+- url: https://api.example.invalid
+  description: Placeholder, not a live server
+tags:
+- name: Catalog
+- name: Requests
+- name: Tickets
+- name: Intake
+- name: Diagnosis
+- name: Estimates
+- name: Capabilities
+- name: Parts
+- name: Inventory
+- name: Quality
+- name: Suppliers
+- name: Audit
+- name: Reports
+- name: Attachments
+- name: CustomerPortal
+components:
+  securitySchemes:
+    localSession:
+      type: apiKey
+      in: cookie
+      name: rp_session
+      description: Server-managed opaque cookie session; HTTP-only; CSRF verification required for unsafe methods.
+    statusToken:
+      type: apiKey
+      in: header
+      name: X-ROBOport-Status-Token
+      description: Opaque random short-lived token, hash stored server-side; never include in URLs or logs.
+  schemas:
+    Error:
+      type: object
+      required:
+      - code
+      - message
+      - requestId
+      properties:
+        code:
+          type: string
+          example: PART_UNVERIFIED
+        message:
+          type: string
+          example: Операция недоступна
+        requestId: &id001
+          type: string
+          format: uuid
+        details:
+          type: object
+          additionalProperties: true
+      additionalProperties: false
+    Brand:
+      type: object
+      required:
+      - id
+      - name
+      properties:
+        id: *id001
+        name:
+          type: string
+        country:
+          type: string
+        officialUrl:
+          type: string
+          format: uri
+      additionalProperties: false
+    Model:
+      type: object
+      required:
+      - id
+      - brandId
+      - name
+      - category
+      - supportStatus
+      properties:
+        id: *id001
+        brandId: *id001
+        name:
+          type: string
+        category:
+          type: string
+          enum:
+          - vacuum
+          - window_cleaner
+          - lawn_mower
+          - pool_cleaner
+          - companion
+          - quadruped
+          - humanoid
+          - other
+        supportStatus:
+          type: string
+          enum:
+          - candidate
+          - evaluation
+          - supported
+          - restricted
+          - not_supported
+          - retired
+        sourceUrl:
+          type: string
+          format: uri
+      additionalProperties: false
+    ModelVariant:
+      type: object
+      required:
+      - id
+      - modelId
+      properties:
+        id: *id001
+        modelId: *id001
+        manufacturerSku:
+          type: string
+        regionCode:
+          type: string
+        hardwareRevision:
+          type: string
+        dockSku:
+          type: string
+      additionalProperties: false
+    CreateRequest:
+      type: object
+      required:
+      - contact
+      - symptoms
+      - consentVersion
+      properties:
+        modelId: *id001
+        contact:
+          type: object
+          required:
+          - preferredChannel
+          properties:
+            preferredChannel:
+              type: string
+              enum:
+              - email
+              - phone
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+          additionalProperties: false
+          allOf:
+          - if:
+              properties:
+                preferredChannel:
+                  const: email
+              required:
+              - preferredChannel
+            then:
+              required:
+              - email
+          - if:
+              properties:
+                preferredChannel:
+                  const: phone
+              required:
+              - preferredChannel
+            then:
+              required:
+              - phone
+        symptoms:
+          type: string
+          minLength: 10
+          maxLength: 3000
+        safetyFlags:
+          type: array
+          items:
+            type: string
+        consentVersion:
+          type: string
+        attachmentIds:
+          type: array
+          items: *id001
+      additionalProperties: false
+    RequestReceipt:
+      type: object
+      required:
+      - reference
+      - status
+      properties:
+        reference:
+          type: string
+          example: RP-DEMO-0002
+        status:
+          type: string
+          example: SUBMITTED
+        message:
+          type: string
+      additionalProperties: false
+    StatusSummary:
+      type: object
+      required:
+      - reference
+      - stage
+      - updatedAt
+      properties:
+        reference:
+          type: string
+        stage:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        publicNote:
+          type: string
+      additionalProperties: false
+    Ticket:
+      type: object
+      required:
+      - id
+      - reference
+      - state
+      - version
+      properties:
+        id: *id001
+        reference:
+          type: string
+        state:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        modelVariantId: *id001
+        safetyFlags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CreateTicket:
+      type: object
+      required:
+      - customerId
+      - symptoms
+      properties:
+        customerId: *id001
+        deviceId: *id001
+        symptoms:
+          type: string
+          minLength: 5
+        source:
+          type: string
+          enum:
+          - walk_in
+          - web
+          - partner
+        safetyFlags:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    Intake:
+      type: object
+      required:
+      - accessories
+      - conditionNotes
+      - signedDocumentId
+      properties:
+        accessories:
+          type: array
+          items:
+            type: string
+        conditionNotes:
+          type: string
+        signedDocumentId: *id001
+        attachmentIds:
+          type: array
+          items: *id001
+        expectedTicketVersion:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    Diagnosis:
+      type: object
+      required:
+      - observations
+      - riskLevel
+      - minutes
+      properties:
+        observations:
+          type: string
+        hypothesis:
+          type: string
+        confirmedFault:
+          type: string
+        riskLevel:
+          type: string
+          enum:
+          - low
+          - medium
+          - critical
+        minutes:
+          type: integer
+          minimum: 0
+        evidenceIds:
+          type: array
+          items: *id001
+      additionalProperties: false
+    EstimateLine:
+      type: object
+      required:
+      - kind
+      - description
+      - quantity
+      - unitPrice
+      properties:
+        kind:
+          type: string
+          enum:
+          - labor
+          - part
+          - logistics
+        description:
+          type: string
+        partId: *id001
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+        unitPrice:
+          type: string
+          pattern: ^[0-9]+(\.[0-9]{1,2})?$
+          example: '1500.00'
+        compatibilityEvidenceId: *id001
+      additionalProperties: false
+    EstimateInput:
+      type: object
+      required:
+      - lines
+      - currency
+      - expectedTicketVersion
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/EstimateLine'
+          minItems: 1
+        currency:
+          type: string
+          enum:
+          - RUB
+        expectedTicketVersion:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    Estimate:
+      type: object
+      required:
+      - id
+      - ticketId
+      - version
+      - status
+      - total
+      properties:
+        id: *id001
+        ticketId: *id001
+        version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - DRAFT
+          - SENT
+          - APPROVED
+          - DECLINED
+          - SUPERSEDED
+        total:
+          type: string
+          pattern: ^[0-9]+(\.[0-9]{1,2})?$
+        currency:
+          type: string
+          example: RUB
+      additionalProperties: false
+    EstimateApproval:
+      type: object
+      required:
+      - estimateVersion
+      - approvalMethod
+      properties:
+        estimateVersion:
+          type: integer
+          minimum: 1
+        approvalMethod:
+          type: string
+          enum:
+          - verified_account
+          - verified_signature
+      additionalProperties: false
+    EstimateDecline:
+      type: object
+      required:
+      - estimateVersion
+      properties:
+        estimateVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+      additionalProperties: false
+    Transition:
+      type: object
+      required:
+      - targetState
+      - expectedVersion
+      - reason
+      properties:
+        targetState:
+          type: string
+          enum:
+          - SUBMITTED
+          - TRIAGE
+          - AWAITING_DELIVERY
+          - RECEIVED
+          - DIAGNOSTICS
+          - ESTIMATE_PENDING
+          - AWAITING_APPROVAL
+          - APPROVED
+          - WAITING_PARTS
+          - IN_REPAIR
+          - QC
+          - READY_FOR_RETURN
+          - COMPLETED
+          - SAFETY_HOLD
+          - WARRANTY_ROUTE
+          - DECLINED
+          - UNREPAIRABLE
+          - QC_FAILED
+          - CANCELLED
+        expectedVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          minLength: 3
+      additionalProperties: false
+    CapabilityUpdate:
+      type: object
+      required:
+      - status
+      - evidenceId
+      - reviewerUserId
+      properties:
+        status:
+          type: string
+          enum:
+          - candidate
+          - evaluation
+          - approved
+          - restricted
+          - revoked
+        evidenceId: *id001
+        reason:
+          type: string
+      additionalProperties: false
+    Part:
+      type: object
+      required:
+      - id
+      - partNumber
+      - name
+      properties:
+        id: *id001
+        partNumber:
+          type: string
+        name:
+          type: string
+        compatibilityStatus:
+          type: string
+          enum:
+          - unverified
+          - manufacturer_documented
+          - technician_tested
+          - incompatible
+          - revoked
+      additionalProperties: false
+    CompatibilityInput:
+      type: object
+      required:
+      - modelVariantId
+      - status
+      - evidenceId
+      properties:
+        modelVariantId: *id001
+        status:
+          type: string
+          enum:
+          - unverified
+          - manufacturer_documented
+          - technician_tested
+          - incompatible
+          - revoked
+        evidenceId: *id001
+      additionalProperties: false
+    ReserveStock:
+      type: object
+      required:
+      - ticketId
+      - lotId
+      - partId
+      - quantity
+      - expectedTicketVersion
+      properties:
+        ticketId: *id001
+        lotId: *id001
+        partId: *id001
+        quantity:
+          type: integer
+          minimum: 1
+        expectedTicketVersion:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    ReleaseStock:
+      type: object
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+          minLength: 3
+      additionalProperties: false
+    StockMovement:
+      type: object
+      required:
+      - lotId
+      - deltaQty
+      - reason
+      properties:
+        lotId: *id001
+        ticketId: *id001
+        deltaQty:
+          type: integer
+        reason:
+          type: string
+          minLength: 3
+      additionalProperties: false
+    Worklog:
+      type: object
+      required:
+      - minutes
+      - description
+      - serviceOperationId
+      properties:
+        minutes:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+        serviceOperationId: *id001
+        partId: *id001
+      additionalProperties: false
+    QualityCheck:
+      type: object
+      required:
+      - checklistVersion
+      - result
+      - checks
+      properties:
+        checklistVersion:
+          type: string
+        result:
+          type: string
+          enum:
+          - PASS
+          - FAIL
+        checks:
+          type: array
+          items:
+            type: object
+            required:
+            - check
+            - passed
+            properties:
+              check:
+                type: string
+              passed:
+                type: boolean
+              note:
+                type: string
+            additionalProperties: false
+      additionalProperties: false
+    Handover:
+      type: object
+      required:
+      - outcome
+      - documentId
+      - recipientVerified
+      properties:
+        outcome:
+          type: string
+          enum:
+          - REPAIRED
+          - UNREPAIRED
+          - REFERRED
+        documentId: *id001
+        recipientVerified:
+          type: boolean
+      additionalProperties: false
+    Supplier:
+      type: object
+      required:
+      - id
+      - name
+      - verificationStatus
+      properties:
+        id: *id001
+        name:
+          type: string
+        verificationStatus:
+          type: string
+          enum:
+          - unverified
+          - contact_verified
+          - commercially_verified
+          - blocked
+      additionalProperties: false
+    SupplierQuote:
+      type: object
+      required:
+      - partId
+      - unitPrice
+      - currency
+      - minimumOrderQuantity
+      - validUntil
+      properties:
+        partId: *id001
+        unitPrice:
+          type: string
+          pattern: ^[0-9]+(\.[0-9]{1,2})?$
+        currency:
+          type: string
+        minimumOrderQuantity:
+          type: integer
+          minimum: 1
+        validUntil:
+          type: string
+          format: date
+        documentId: *id001
+      additionalProperties: false
+    AttachmentInit:
+      type: object
+      required:
+      - ticketId
+      - mimeType
+      - sizeBytes
+      properties:
+        ticketId: *id001
+        mimeType:
+          type: string
+          enum:
+          - image/jpeg
+          - image/png
+          - application/pdf
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 10000000
+      additionalProperties: false
+    AttachmentUpload:
+      type: object
+      required:
+      - id
+      - uploadUrl
+      - expiresAt
+      properties:
+        id: *id001
+        uploadUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AuditEvent:
+      type: object
+      required:
+      - id
+      - action
+      - time
+      properties:
+        id: *id001
+        action:
+          type: string
+        entityType:
+          type: string
+        time:
+          type: string
+          format: date-time
+      additionalProperties: false
+    OperationResult:
+      type: object
+      required:
+      - id
+      - status
+      properties:
+        id: *id001
+        status:
+          type: string
+        version:
+          type: integer
+      additionalProperties: false
+    PaginatedBrands:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Brand'
+        nextCursor:
+          type: string
+      additionalProperties: false
+    PaginatedModels:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Model'
+        nextCursor:
+          type: string
+      additionalProperties: false
+    PaginatedTickets:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ticket'
+        nextCursor:
+          type: string
+      additionalProperties: false
+    PaginatedParts:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Part'
+        nextCursor:
+          type: string
+      additionalProperties: false
+    PaginatedSuppliers:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Supplier'
+        nextCursor:
+          type: string
+      additionalProperties: false
+    PaginatedAudits:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        nextCursor:
+          type: string
+      additionalProperties: false
+    OperationsSummary:
+      type: object
+      required:
+      - newRequests
+      - safetyHolds
+      - qcFailed
+      properties:
+        newRequests:
+          type: integer
+        safetyHolds:
+          type: integer
+        qcFailed:
+          type: integer
+      additionalProperties: false
+    CustomerProfile:
+      type: object
+      required:
+      - accountId
+      - displayName
+      - locale
+      properties:
+        accountId: *id001
+        displayName:
+          type: string
+        locale:
+          type: string
+          enum:
+          - ru
+          - en
+        verifiedContacts:
+          type: array
+          items:
+            type: string
+        accountStatus:
+          type: string
+          enum:
+          - active
+          - blocked
+          - closed
+      additionalProperties: false
+    ProfileUpdate:
+      type: object
+      required:
+      - expectedVersion
+      properties:
+        displayName:
+          type: string
+          maxLength: 120
+        locale:
+          type: string
+          enum:
+          - ru
+          - en
+        expectedVersion:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    CustomerDevice:
+      type: object
+      required:
+      - id
+      - modelName
+      - supportStatus
+      properties:
+        id: *id001
+        modelName:
+          type: string
+        modelVariantId: *id001
+        maskedSerial:
+          type: string
+        supportStatus:
+          type: string
+          enum:
+          - candidate
+          - evaluation
+          - supported
+          - restricted
+          - not_supported
+        dockModel:
+          type: string
+        lastVisitAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CustomerDeviceDetail:
+      type: object
+      required:
+      - device
+      - tickets
+      properties:
+        device:
+          $ref: '#/components/schemas/CustomerDevice'
+        tickets:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerTicket'
+        note:
+          type: string
+      additionalProperties: false
+    CustomerTicket:
+      type: object
+      required:
+      - id
+      - reference
+      - state
+      - updatedAt
+      properties:
+        id: *id001
+        reference:
+          type: string
+        state:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        publicNote:
+          type: string
+        hasPendingEstimate:
+          type: boolean
+      additionalProperties: false
+    CustomerTicketDetail:
+      type: object
+      required:
+      - ticket
+      - timeline
+      - estimate
+      properties:
+        ticket:
+          $ref: '#/components/schemas/CustomerTicket'
+        timeline:
+          type: array
+          items:
+            type: object
+            required:
+            - state
+            - at
+            properties:
+              state:
+                type: string
+              at:
+                type: string
+                format: date-time
+              note:
+                type: string
+            additionalProperties: false
+        estimate:
+          $ref: '#/components/schemas/Estimate'
+      additionalProperties: false
+    CustomerDocument:
+      type: object
+      required:
+      - id
+      - ticketId
+      - type
+      - createdAt
+      properties:
+        id: *id001
+        ticketId: *id001
+        type:
+          type: string
+          enum:
+          - intake
+          - estimate
+          - handover
+          - warranty
+          - invoice
+        createdAt:
+          type: string
+          format: date-time
+        title:
+          type: string
+      additionalProperties: false
+    NotificationPreference:
+      type: object
+      required:
+      - eventType
+      - channel
+      - enabled
+      - purpose
+      properties:
+        eventType:
+          type: string
+        channel:
+          type: string
+          enum:
+          - email
+          - sms
+          - in_app
+        enabled:
+          type: boolean
+        purpose:
+          type: string
+          enum:
+          - service
+          - marketing
+      additionalProperties: false
+    NotificationPreferences:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationPreference'
+      additionalProperties: false
+    NotificationPreferenceUpdate:
+      type: object
+      required:
+      - items
+      - expectedVersion
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationPreference'
+        expectedVersion:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    ClaimRequest:
+      type: object
+      required:
+      - reference
+      - challengeReference
+      properties:
+        reference:
+          type: string
+          minLength: 8
+        challengeReference: *id001
+      additionalProperties: false
+    ClaimResult:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - pending_review
+          - rejected
+        message:
+          type: string
+      additionalProperties: false
+    RepeatRequest:
+      type: object
+      required:
+      - symptoms
+      - consentVersion
+      properties:
+        symptoms:
+          type: string
+          minLength: 10
+          maxLength: 3000
+        consentVersion:
+          type: string
+        safetyFlags:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    DocumentAccess:
+      type: object
+      required:
+      - downloadUrl
+      - expiresAt
+      properties:
+        downloadUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+        cachePolicy:
+          type: string
+          example: no-store
+      additionalProperties: false
+    CustomerDevices:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerDevice'
+        nextCursor:
+          type: string
+      additionalProperties: false
+    CustomerTickets:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerTicket'
+        nextCursor:
+          type: string
+      additionalProperties: false
+    CustomerDocuments:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerDocument'
+      additionalProperties: false
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    TicketId:
+      name: ticketId
+      in: path
+      required: true
+      schema: *id001
+    EstimateId:
+      name: estimateId
+      in: path
+      required: true
+      schema: *id001
+    PartId:
+      name: partId
+      in: path
+      required: true
+      schema: *id001
+    VariantId:
+      name: variantId
+      in: path
+      required: true
+      schema: *id001
+    SupplierId:
+      name: supplierId
+      in: path
+      required: true
+      schema: *id001
+    ReservationId:
+      name: reservationId
+      in: path
+      required: true
+      schema: *id001
+    ModelId:
+      name: modelId
+      in: path
+      required: true
+      schema: *id001
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+      description: Unique opaque request key per verified client account. In the synthetic v0.9 single-process fixture,
+        identical repeats reuse a successful response and a changed method/path/payload with the same key returns 409.
+        HTTP authorization is rechecked on every replay. NOT durable or cross-worker production idempotency.
+    AccessToken:
+      name: X-ROBOport-Status-Token
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 32
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema: *id001
+    DocumentId:
+      name: documentId
+      in: path
+      required: true
+      schema: *id001
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      schema: *id001
+paths:
+  /api/v1/catalog/brands:
+    get:
+      tags:
+      - Catalog
+      summary: Бренды
+      operationId: listBrands
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBrands'
+        '400': &id002
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: BAD_REQUEST
+                message: Действие запрещено
+                requestId: 550e8400-e29b-41d4-a716-446655440000
+          headers:
+            X-Request-ID:
+              description: Generated by server, not trusted from client input
+              schema:
+                type: string
+                format: uuid
+        '429': &id003
+          description: Слишком много запросов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: RATE_LIMITED
+                message: Действие запрещено
+                requestId: 550e8400-e29b-41d4-a716-446655440000
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+              description: Prevent caching status responses
+            Referrer-Policy:
+              schema:
+                type: string
+                example: no-referrer
+              description: No referral of status URL
+            X-Request-ID:
+              description: Generated by server, not trusted from client input
+              schema:
+                type: string
+                format: uuid
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-roboport-roles:
+      - PUBLIC
+  /api/v1/catalog/models:
+    get:
+      tags:
+      - Catalog
+      summary: Каталог моделей
+      operationId: listModels
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedModels'
+        '400': *id002
+        '429': *id003
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-roboport-roles:
+      - PUBLIC
+  /api/v1/catalog/models/{modelId}:
+    get:
+      tags:
+      - Catalog
+      summary: Публичная модель
+      operationId: getModel
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+        '404': &id004
+          description: Не найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: NOT_FOUND
+                message: Действие запрещено
+                requestId: 550e8400-e29b-41d4-a716-446655440000
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+              description: Prevent caching status responses
+            Referrer-Policy:
+              schema:
+                type: string
+                example: no-referrer
+              description: No referral of status URL
+            X-Request-ID:
+              description: Generated by server, not trusted from client input
+              schema:
+                type: string
+                format: uuid
+        '429': *id003
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/ModelId'
+      x-roboport-roles:
+      - PUBLIC
+  /api/v1/requests:
+    post:
+      tags:
+      - Requests
+      summary: Запрос на проверку обслуживания (disabled until legal approval)
+      operationId: createRequest
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestReceipt'
+        '400': *id002
+        '409': &id005
+          description: Конфликт состояния
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: CONFLICT
+                message: Действие запрещено
+                requestId: 550e8400-e29b-41d4-a716-446655440000
+          headers:
+            X-Request-ID:
+              description: Generated by server, not trusted from client input
+              schema:
+                type: string
+                format: uuid
+        '422': &id006
+          description: Доменные ограничения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_FAILED
+                message: Действие запрещено
+                requestId: 550e8400-e29b-41d4-a716-446655440000
+          headers:
+            X-Request-ID:
+              description: Generated by server, not trusted from client input
+              schema:
+                type: string
+                format: uuid
+        '429': *id003
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRequest'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - PUBLIC
+      x-roboport-guards:
+      - FEATURE_PUBLIC_INTAKE_DISABLED_UNTIL_LEGAL
+      - RATE_LIMIT
+      - DATA_MINIMIZATION
+      x-roboport-availability: disabled-until-legal-approval
+  /api/v1/public/status:
+    get:
+      tags:
+      - Requests
+      summary: Ограниченный статус; токен только в секретном заголовке
+      operationId: getPublicStatus
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusSummary'
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+              description: Prevent caching status responses
+            Referrer-Policy:
+              schema:
+                type: string
+                example: no-referrer
+              description: No referral of status URL
+        '404': *id004
+        '410':
+          description: Токен истёк
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: GONE
+                message: Действие запрещено
+                requestId: 550e8400-e29b-41d4-a716-446655440000
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+              description: Prevent caching status responses
+            Referrer-Policy:
+              schema:
+                type: string
+                example: no-referrer
+              description: No referral of status URL
+            X-Request-ID:
+              description: Generated by server, not trusted from client input
+              schema:
+                type: string
+                format: uuid
+        '429': *id003
+      security:
+      - statusToken: []
+      x-roboport-roles:
+      - PUBLIC
+      x-roboport-guards:
+      - HASHED_TOKEN_LOOKUP
+      - TOKEN_EXPIRY
+      - NO_PII
+      - RATE_LIMIT
+      - LOG_REDACTION
+  /api/v1/staff/tickets:
+    get:
+      tags:
+      - Tickets
+      summary: Очередь заявок
+      operationId: listTickets
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTickets'
+        '400': *id002
+        '401': &id007
+          description: Не аутентифицирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: AUTH_REQUIRED
+                message: Действие запрещено
+                requestId: 550e8400-e29b-41d4-a716-446655440000
+          headers:
+            X-Request-ID:
+              description: Generated by server, not trusted from client input
+              schema:
+                type: string
+                format: uuid
+        '403': &id008
+          description: Нет доступа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: ACCESS_DENIED
+                message: Действие запрещено
+                requestId: 550e8400-e29b-41d4-a716-446655440000
+          headers:
+            X-Request-ID:
+              description: Generated by server, not trusted from client input
+              schema:
+                type: string
+                format: uuid
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-roboport-roles:
+      - INTAKE
+      - ENGINEER
+      - MANAGER
+    post:
+      tags:
+      - Tickets
+      summary: Внутреннее создание заявки
+      operationId: createTicket
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicket'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - INTAKE
+      - MANAGER
+      x-roboport-guards:
+      - SCOPE_CLIENT
+      - NO_REAL_DATA_IN_PREP
+  /api/v1/staff/tickets/{ticketId}:
+    get:
+      tags:
+      - Tickets
+      summary: Карточка заявки
+      operationId: getTicket
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      x-roboport-roles:
+      - INTAKE
+      - ENGINEER
+      - MANAGER
+      - FINANCE
+  /api/v1/staff/tickets/{ticketId}/intake:
+    post:
+      tags:
+      - Intake
+      summary: Подтверждение приёмки
+      operationId: createIntake
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Intake'
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - INTAKE
+      x-roboport-guards:
+      - TICKET_VERSION
+      - INTAKE_DOCUMENT_REQUIRED
+  /api/v1/staff/tickets/{ticketId}/diagnoses:
+    post:
+      tags:
+      - Diagnosis
+      summary: Результат диагностики
+      operationId: createDiagnosis
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Diagnosis'
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - ENGINEER
+      x-roboport-guards:
+      - SAFETY_HOLD
+      - ASSIGNED_ENGINEER
+  /api/v1/staff/tickets/{ticketId}/estimates:
+    post:
+      tags:
+      - Estimates
+      summary: Новая версия сметы
+      operationId: createEstimate
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Estimate'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstimateInput'
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - INTAKE
+      - MANAGER
+      x-roboport-guards:
+      - ESTIMATE_VERSION
+      - PART_COMPATIBILITY
+      - CAPABILITY_APPROVAL
+  /api/v1/staff/estimates/{estimateId}/send:
+    post:
+      tags:
+      - Estimates
+      summary: Зафиксировать/отправить смету
+      operationId: sendEstimate
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Estimate'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      parameters:
+      - $ref: '#/components/parameters/EstimateId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - INTAKE
+      - MANAGER
+      x-roboport-guards:
+      - ESTIMATE_IMMUTABLE_ON_SEND
+  /api/v1/customer/estimates/{estimateId}/approve:
+    post:
+      tags:
+      - Estimates
+      summary: Согласие с конкретной версией
+      operationId: approveEstimate
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Estimate'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstimateApproval'
+      parameters:
+      - $ref: '#/components/parameters/EstimateId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - CLIENT_OWNERSHIP
+      - EXACT_VERSION
+      - PROOF_OF_APPROVAL
+      x-roboport-idempotency:
+        status: synthetic-test-only
+        scope: verified-account + hashed-key
+        fingerprint: HTTP method + concrete resource + canonical validated JSON
+        repeat: replay successful response without reexecuting side effect
+        conflict: 409 for same account/key and a different operation or payload
+        authorization: must be re-evaluated for every replay
+        errors: failed requests are not cached in the fixture
+        durability: in-memory single-process lock; NOT distributed or crash-safe
+  /api/v1/customer/estimates/{estimateId}/decline:
+    post:
+      tags:
+      - Estimates
+      summary: Отказ от сметы
+      operationId: declineEstimate
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Estimate'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstimateDecline'
+      parameters:
+      - $ref: '#/components/parameters/EstimateId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - CLIENT_OWNERSHIP
+      - EXACT_VERSION
+      x-roboport-idempotency:
+        status: synthetic-test-only
+        scope: verified-account + hashed-key
+        fingerprint: HTTP method + concrete resource + canonical validated JSON
+        repeat: replay successful response without reexecuting side effect
+        conflict: 409 for same account/key and a different operation or payload
+        authorization: must be re-evaluated for every replay
+        errors: failed requests are not cached in the fixture
+        durability: in-memory single-process lock; NOT distributed or crash-safe
+  /api/v1/staff/tickets/{ticketId}/transitions:
+    post:
+      tags:
+      - Tickets
+      summary: Переход конечного автомата
+      operationId: transitionTicket
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Transition'
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - INTAKE
+      - ENGINEER
+      - MANAGER
+      x-roboport-guards:
+      - FSM_ALLOWED_EDGE
+      - TICKET_VERSION
+      - SAFETY_HOLD
+  /api/v1/staff/models/{variantId}:
+    get:
+      tags:
+      - Catalog
+      summary: SKU и допуски
+      operationId: getVariant
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVariant'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      parameters:
+      - $ref: '#/components/parameters/VariantId'
+      x-roboport-roles:
+      - INTAKE
+      - ENGINEER
+      - MANAGER
+  /api/v1/staff/variants/{variantId}/capabilities/{operationId}:
+    patch:
+      tags:
+      - Capabilities
+      summary: Сервисный допуск с 2-person review
+      operationId: updateCapability
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CapabilityUpdate'
+      parameters:
+      - $ref: '#/components/parameters/VariantId'
+      - $ref: '#/components/parameters/OperationId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - MANAGER
+      x-roboport-guards:
+      - INDEPENDENT_SAFETY_REVIEWER
+      - EVIDENCE_REQUIRED
+  /api/v1/staff/parts:
+    get:
+      tags:
+      - Parts
+      summary: Реестр запчастей
+      operationId: listParts
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedParts'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-roboport-roles:
+      - INTAKE
+      - ENGINEER
+      - STOCK
+      - MANAGER
+  /api/v1/staff/parts/{partId}/compatibilities:
+    post:
+      tags:
+      - Parts
+      summary: Доказательство совместимости P/N и SKU
+      operationId: addPartCompatibility
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompatibilityInput'
+      parameters:
+      - $ref: '#/components/parameters/PartId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - ENGINEER
+      - MANAGER
+      x-roboport-guards:
+      - SKU_REVISION
+      - INDEPENDENT_TECH_REVIEWER
+  /api/v1/staff/stock/reservations:
+    post:
+      tags:
+      - Inventory
+      summary: Атомарная бронь запчасти
+      operationId: reservePart
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveStock'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - STOCK
+      x-roboport-guards:
+      - PART_COMPATIBILITY
+      - CAPABILITY_APPROVAL
+      - APPROVED_ESTIMATE
+      - ATOMIC_STOCK
+  /api/v1/staff/stock/reservations/{reservationId}/release:
+    post:
+      tags:
+      - Inventory
+      summary: Снятие брони
+      operationId: releaseReservation
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseStock'
+      parameters:
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - STOCK
+      x-roboport-guards:
+      - IDEMPOTENT_RELEASE
+      - ATOMIC_STOCK
+  /api/v1/staff/stock/movements:
+    post:
+      tags:
+      - Inventory
+      summary: Движение склада
+      operationId: createMovement
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockMovement'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - STOCK
+      x-roboport-guards:
+      - ATOMIC_STOCK
+      - APPEND_ONLY_LEDGER
+  /api/v1/staff/tickets/{ticketId}/worklogs:
+    post:
+      tags:
+      - Tickets
+      summary: Фиксация работ
+      operationId: recordWork
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Worklog'
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - ENGINEER
+      x-roboport-guards:
+      - IN_REPAIR
+      - APPROVED_SERVICE_OPERATION
+  /api/v1/staff/tickets/{ticketId}/quality-checks:
+    post:
+      tags:
+      - Quality
+      summary: Контрольный тест
+      operationId: createQualityCheck
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityCheck'
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - ENGINEER
+      - MANAGER
+      x-roboport-guards:
+      - CHECKLIST_VERSION
+      - INDEPENDENT_REVIEW_WHERE_RISKY
+  /api/v1/staff/tickets/{ticketId}/handover:
+    post:
+      tags:
+      - Tickets
+      summary: Выдача устройства
+      operationId: handoverTicket
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Handover'
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - INTAKE
+      x-roboport-guards:
+      - QC_PASS_FOR_REPAIRED
+      - SIGNED_HANDOVER
+  /api/v1/staff/suppliers:
+    get:
+      tags:
+      - Suppliers
+      summary: Кандидаты поставщиков
+      operationId: listSuppliers
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSuppliers'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-roboport-roles:
+      - STOCK
+      - MANAGER
+      - FINANCE
+  /api/v1/staff/suppliers/{supplierId}/quotes:
+    post:
+      tags:
+      - Suppliers
+      summary: Регистрация коммерческого предложения
+      operationId: addSupplierQuote
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierQuote'
+      parameters:
+      - $ref: '#/components/parameters/SupplierId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - STOCK
+      - MANAGER
+      x-roboport-guards:
+      - PROVENANCE
+      - NO_AUTO_VERIFICATION
+  /api/v1/staff/audit/events:
+    get:
+      tags:
+      - Audit
+      summary: Маскированный журнал
+      operationId: listAudit
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAudits'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-roboport-roles:
+      - AUDITOR
+      - MANAGER
+  /api/v1/staff/reports/operations:
+    get:
+      tags:
+      - Reports
+      summary: Операционные показатели
+      operationId: getReport
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationsSummary'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      x-roboport-roles:
+      - MANAGER
+      - FINANCE
+  /api/v1/staff/attachments/initiate:
+    post:
+      tags:
+      - Attachments
+      summary: Приватная загрузка с quarantine
+      operationId: initiateUpload
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentUpload'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachmentInit'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - INTAKE
+      - ENGINEER
+      x-roboport-guards:
+      - MIME_SIZE_LIMIT
+      - QUARANTINE
+      - PRIVATE_ATTACHMENT
+  /api/v1/customer/me:
+    get:
+      tags:
+      - CustomerPortal
+      summary: Мой профиль
+      operationId: getMyProfile
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerProfile'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      x-roboport-roles:
+      - CLIENT
+    patch:
+      tags:
+      - CustomerPortal
+      summary: Мои настройки
+      operationId: updateMyProfile
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerProfile'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - VERIFIED_CLIENT_IDENTITY
+      - FIELD_WHITELIST
+      - EXPECTED_VERSION
+      - CONTACT_REVERIFY
+      x-roboport-idempotency:
+        status: synthetic-test-only
+        scope: verified-account + hashed-key
+        fingerprint: HTTP method + concrete resource + canonical validated JSON
+        repeat: replay successful response without reexecuting side effect
+        conflict: 409 for same account/key and a different operation or payload
+        authorization: must be re-evaluated for every replay
+        errors: failed requests are not cached in the fixture
+        durability: in-memory single-process lock; NOT distributed or crash-safe
+  /api/v1/customer/devices:
+    get:
+      tags:
+      - CustomerPortal
+      summary: Мои роботы
+      operationId: listMyDevices
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDevices'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - VERIFIED_CLIENT_IDENTITY
+      - OBJECT_LEVEL_OWNERSHIP
+      - PREVIOUS_OWNER_REDACTION
+  /api/v1/customer/devices/{deviceId}:
+    get:
+      tags:
+      - CustomerPortal
+      summary: Мой робот и разрешённая история
+      operationId: getMyDevice
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDeviceDetail'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      parameters:
+      - $ref: '#/components/parameters/DeviceId'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - VERIFIED_CLIENT_IDENTITY
+      - OBJECT_LEVEL_OWNERSHIP
+      - PREVIOUS_OWNER_REDACTION
+  /api/v1/customer/tickets:
+    get:
+      tags:
+      - CustomerPortal
+      summary: Мои заявки
+      operationId: listMyTickets
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerTickets'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - VERIFIED_CLIENT_IDENTITY
+      - OBJECT_LEVEL_OWNERSHIP
+      - PREVIOUS_OWNER_REDACTION
+  /api/v1/customer/tickets/{ticketId}:
+    get:
+      tags:
+      - CustomerPortal
+      summary: Моя заявка
+      operationId: getMyTicket
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerTicketDetail'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - VERIFIED_CLIENT_IDENTITY
+      - OBJECT_LEVEL_OWNERSHIP
+      - PREVIOUS_OWNER_REDACTION
+  /api/v1/customer/tickets/{ticketId}/documents:
+    get:
+      tags:
+      - CustomerPortal
+      summary: Документы по моей заявке
+      operationId: listMyDocuments
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDocuments'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - VERIFIED_CLIENT_IDENTITY
+      - OBJECT_LEVEL_OWNERSHIP
+      - PREVIOUS_OWNER_REDACTION
+  /api/v1/customer/notification-preferences:
+    get:
+      tags:
+      - CustomerPortal
+      summary: Настройки уведомлений
+      operationId: getMyNotificationPreferences
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      x-roboport-roles:
+      - CLIENT
+    patch:
+      tags:
+      - CustomerPortal
+      summary: Изменить уведомления
+      operationId: updateMyNotificationPreferences
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreferenceUpdate'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - VERIFIED_CLIENT_IDENTITY
+      - MARKETING_CONSENT_SEPARATE
+      - EXPECTED_VERSION
+      x-roboport-idempotency:
+        status: synthetic-test-only
+        scope: verified-account + hashed-key
+        fingerprint: HTTP method + concrete resource + canonical validated JSON
+        repeat: replay successful response without reexecuting side effect
+        conflict: 409 for same account/key and a different operation or payload
+        authorization: must be re-evaluated for every replay
+        errors: failed requests are not cached in the fixture
+        durability: in-memory single-process lock; NOT distributed or crash-safe
+  /api/v1/customer/claims:
+    post:
+      tags:
+      - CustomerPortal
+      summary: Запросить проверку гостевой заявки
+      operationId: claimGuestTicket
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimResult'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '409': *id005
+        '422': *id006
+        '429': *id003
+      security:
+      - localSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimRequest'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - VERIFIED_CLIENT_IDENTITY
+      - INDEPENDENT_CLAIM_PROOF
+      - ANTI_ACCOUNT_TAKEOVER
+      - RATE_LIMIT
+      - NO_AUTO_LINK
+      x-roboport-idempotency:
+        status: synthetic-test-only
+        scope: verified-account + hashed-key
+        fingerprint: HTTP method + concrete resource + canonical validated JSON
+        repeat: replay successful response without reexecuting side effect
+        conflict: 409 for same account/key and a different operation or payload
+        authorization: must be re-evaluated for every replay
+        errors: failed requests are not cached in the fixture
+        durability: in-memory single-process lock; NOT distributed or crash-safe
+  /api/v1/customer/tickets/{ticketId}/repeat-request:
+    post:
+      tags:
+      - CustomerPortal
+      summary: Повторное обращение
+      operationId: repeatMyTicket
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestReceipt'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RepeatRequest'
+      parameters:
+      - $ref: '#/components/parameters/TicketId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - OBJECT_OWNERSHIP
+      - NO_CROSS_OWNER_HISTORY
+      - SAFETY_RECHECK
+      - IDEMPOTENT_CREATION
+      x-roboport-idempotency:
+        status: synthetic-test-only
+        scope: verified-account + hashed-key
+        fingerprint: HTTP method + concrete resource + canonical validated JSON
+        repeat: replay successful response without reexecuting side effect
+        conflict: 409 for same account/key and a different operation or payload
+        authorization: must be re-evaluated for every replay
+        errors: failed requests are not cached in the fixture
+        durability: in-memory single-process lock; NOT distributed or crash-safe
+  /api/v1/customer/documents/{documentId}/access:
+    post:
+      tags:
+      - CustomerPortal
+      summary: Временный доступ к своему документу
+      operationId: accessMyDocument
+      responses:
+        '200':
+          description: Успешно
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentAccess'
+        '400': *id002
+        '401': *id007
+        '403': *id008
+        '404': *id004
+        '409': *id005
+        '422': *id006
+      security:
+      - localSession: []
+      parameters:
+      - $ref: '#/components/parameters/DocumentId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-roboport-roles:
+      - CLIENT
+      x-roboport-guards:
+      - DOCUMENT_LEVEL_OWNERSHIP
+      - SHORT_TTL
+      - DOWNLOAD_AUDIT
+      - NO_CACHE
+      - NO_PII_LOGGING
+      x-roboport-idempotency:
+        status: synthetic-test-only
+        scope: verified-account + hashed-key
+        fingerprint: HTTP method + concrete resource + canonical validated JSON
+        repeat: replay successful response without reexecuting side effect
+        conflict: 409 for same account/key and a different operation or payload
+        authorization: must be re-evaluated for every replay
+        errors: failed requests are not cached in the fixture
+        durability: in-memory single-process lock; NOT distributed or crash-safe
+security:
+- localSession: []
+x-roboport-gates:
+- no repair for candidate/unknown model
+- no stock reservation for unverified compatibility
+- estimate is versioned and immutable after send
+- QC_FAIL prevents repaired handover
+- critical safety flag triggers SAFETY_HOLD

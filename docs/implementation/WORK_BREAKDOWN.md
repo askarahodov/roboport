@@ -12,14 +12,16 @@
 | [#11](https://github.com/askarahodov/roboport/issues/11) | Alembic PostgreSQL baseline | #10, #17 | upgrade/rollback на disposable PG |
 | [#12](https://github.com/askarahodov/roboport/issues/12) | Публичный каталог end-to-end | #10, #15, #16 | API+UI read-only, отрицательные HTTP tests |
 | [#18](https://github.com/askarahodov/roboport/issues/18) | Совместимость техники и допуски | #11, #17 | variant/SKU/region/revision guards |
-| [#13](https://github.com/askarahodov/roboport/issues/13) | Реальный OIDC/ABAC | #11, #17 | JWT+2 клиента, отзыв, BOLA deny |
+| [#13](https://github.com/askarahodov/roboport/issues/13) | Локальные аккаунты и сессии | #11, #15, #17 | Argon2id, HttpOnly, CSRF, TTL, отзыв, rate-limit |
+| [#27](https://github.com/askarahodov/roboport/issues/27) | RBAC + ACL и объектные политики | #11, #13, #17 | client A/B, transfer, revoke, deny by default |
 | [#19](https://github.com/askarahodov/roboport/issues/19) | Заявка/FSM/safety/audit | #11, #13 | транзакции и отказ опасных переходов |
 | [#20](https://github.com/askarahodov/roboport/issues/20) | Сметы и согласие | #19, #13 | immutable SENT + версия + replay |
 | [#21](https://github.com/askarahodov/roboport/issues/21) | Склад и резервы | #18, #20 | no negative stock, 2-worker race |
 | [#22](https://github.com/askarahodov/roboport/issues/22) | Outbox | #19, #20 | atomic write + retry/duplicate tests |
-| [#23](https://github.com/askarahodov/roboport/issues/23) | Клиентский кабинет | #13, #16, #19, #20 | Light/Dark + 2 клиента + 6 экранов |
+| [#23](https://github.com/askarahodov/roboport/issues/23) | Клиентский кабинет | #13, #27, #16, #19, #20 | Light/Dark + 2 клиента + 6 экранов, CSRF |
 | [#24](https://github.com/askarahodov/roboport/issues/24) | CRM | #16, #19, #21 | 7 рабочих сценариев + QC FAIL |
-| [#25](https://github.com/askarahodov/roboport/issues/25) | Документы и хранение файлов | #11, #13, #23 | private download + audit, storage adapter |
+| [#28](https://github.com/askarahodov/roboport/issues/28) | Приватный dev MinIO | #10 | compose, buckets, тест S3 и deny anonymous |
+| [#25](https://github.com/askarahodov/roboport/issues/25) | Документы и хранение файлов | #11, #13, #27, #28 | MinIO private download + ACL guard + audit |
 | [#26](https://github.com/askarahodov/roboport/issues/26) | Интеграционные / release проверки | #21…#25 | реальный dev контур + доказательства security/QA |
 
 Список задач будет добавляться по мере декомпозиции. **Созданы ли эти Issues и их текущий статус нужно сверять в GitHub**, а не считать выполненными по наличию строки здесь. Таблица описывает целевую структуру, не текущие достижения.

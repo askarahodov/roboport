@@ -1,6 +1,6 @@
 # Матрица приёмочных проверок ROBOport
 
-**PASS означает фактический запуск теста** с кодом завершения 0 и воспроизводимым окружением. Не путать синтетические unit/browser tests с интеграционными PG/OIDC/S3.
+**PASS означает фактический запуск теста** с кодом завершения 0 и воспроизводимым окружением. Не путать синтетические unit/browser tests с интеграционными PG/локальными сессиями/MinIO.
 
 | ID | Слой | Приёмочное поведение |
 |---|---|---|
@@ -13,9 +13,9 @@
 | AC-007 | Security | A не читает ticket/attachment B даже при знании UUID |
 | AC-008 | Security | новый владелец B не видит прежние заявки и документы A |
 | AC-009 | Security | отозванный subject не обходит запрет через idem replay |
-| AC-010 | OIDC | issuer/audience/exp/signature/JWKS проверяются на dev IdP |
+| AC-010 | Local Auth | Argon2id, opaque cookie session, idle/absolute TTL, logout/revoke, CSRF, блокировка перебора |
 | AC-011 | Claim | телефон/SN/номер заявки не доказывают владение без proof/review |
-| AC-012 | Files | private storage, TTL, audit и quarantine в реальном test backend |
+| AC-012 | Files | приватный MinIO, backend object guard, audit/quarantine, анонимный GET/LIST запрещён |
 | AC-013 | UI | Light/Dark/Auto, исходный C, 390px, keyboard |
 | AC-014 | UI | loading/empty/401/403/404/409/Safety hold/revoked по-русски |
 | AC-015 | API | 2xx и 4xx схемы Error, 429/500, без PII leakage |
@@ -31,4 +31,4 @@
 
 ## Проверка старта
 
-`PYTHONPATH=apps/api python -m pytest -q tests/bootstrap` и `python scripts/check_contract.py` — локальные проверки без внешнего IdP/PG. `cd apps/web && npm ci && npm run build` нужно выполнить и подтвердить после lockfile (#10).
+`PYTHONPATH=apps/api python -m pytest -q tests/bootstrap` и `python scripts/check_contract.py` — локальные проверки без PostgreSQL/MinIO/реальных сессий. `cd apps/web && npm ci && npm run build` нужно выполнить и подтвердить после lockfile (#10).

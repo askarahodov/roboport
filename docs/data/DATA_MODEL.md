@@ -4,7 +4,7 @@
 
 ## Клиенты и устройства
 
-- `customer` — сторона заказа; `customer_account` — кабинет; `account_identity` — внешний OIDC subject; `account_customer_link` — проверенная и отзывная связь аккаунта и клиента.
+- `app_user` — локальный субъект; `local_credential` — Argon2id hash и политика пароля; `user_session` — hash случайной сессии и сроки/revocation; `role`, `user_role` и `acl_entry` — роли и явные права на объекты. `customer` — сторона заказа, `customer_account` — кабинет; `account_customer_link` — подтверждённая и отзывная связь; `account_identity` оставить для возможного внешнего IdP позже. Никакого самоприсвоения заявки по телефону/SN.
 - `robot_device` — устройство с идентификатором/вариантом; `device_ownership` — временная история владения, не правило доступа ко всем старым заявкам.
 - `service_ticket.customer_id` определяет заявителя конкретного заказа; его доступ к акту/сметам не следует автоматически за новым владельцем `robot_device`.
 
@@ -21,7 +21,7 @@
 
 ## Файлы и события
 
-- `attachment` (метаданные файла и объектная привязка), `document_access_audit`, `audit_event` — запись доступа, append-only аудит.
+- `attachment` (метаданные файла и объектная привязка к приватному dev MinIO через `FileStorage`), `document_access_audit`, `audit_event` — запись доступа, append-only аудит.
 - `notification_outbox`, `idempotency_request` — транзакционные события и обработка повторов. Не отправлять внешние сообщения в dev.
 
 ## Требования к DDL

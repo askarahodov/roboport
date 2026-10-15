@@ -8,7 +8,8 @@ React / Vite: публичный сайт + кабинет + staff CRM
           ▼
 FastAPI: маршруты → application use-case → guard → transaction
           ├── catalog: бренд, модель, вариант, допуск
-          ├── identity: OIDC, аккаунт, подтверждённые связи
+          ├── identity: локальный пароль/сессия, аккаунт, подтверждённые связи
+          ├── authorization: RBAC + ACL + object/state guards
           ├── customers: клиент, робот, история владения
           ├── tickets: заявка, приёмка, диагностика, FSM
           ├── estimates: версия сметы и подтверждение
@@ -19,14 +20,15 @@ FastAPI: маршруты → application use-case → guard → transaction
           └── audit: неизменяемые события
                  │
               PostgreSQL 17
-          внешние: OIDC; FileStorage (позднее)
+          файлы: приватный MinIO через FileStorage (dev)
+          внешний OIDC/SSO: только будущий ADR
 ```
 
 Все модули работают в одном процессе приложения и используют одну транзакционную БД, но **каждый модуль владеет своими таблицами и бизнес-методами**. Прямые вызовы чужих ORM-моделей и обход guard запрещены. Для межмодульных операций описывать интерфейс application service и общую транзакцию.
 
 ## Правила направленности зависимостей
 
-`HTTP роутер → application service → domain policy → repository/storage adapter`. Domain не импортирует FastAPI, web, конкретный PostgreSQL driver, S3 SDK или OIDC SDK. Проверка прав — серверный guard *до* чтения/изменения конкретного объекта и перед выдачей файла. Frontend не решает, кому доступна история ремонта.
+`HTTP роутер → application service → domain policy → repository/storage adapter`. Domain не импортирует FastAPI, web, конкретный PostgreSQL driver, S3 SDK или будущий OIDC SDK. Проверка прав — серверный guard *до* чтения/изменения конкретного объекта и перед выдачей файла. Frontend не решает, кому доступна история ремонта.
 
 Транзакция охватывает бизнес-изменение, события и durable idempotency/outbox. Обновление финансового `SENT` документа допускается только через выпуск новой версии. `SAFETY_HOLD` и `QC_FAILED` проверяются на сервере и на уровне невозможных переходов/ограничений.
 

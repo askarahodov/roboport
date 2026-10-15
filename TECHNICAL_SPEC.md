@@ -1,4 +1,4 @@
-# Техническое задание на разработку ROBOport — каноническая спецификация v1.0
+# Техническое задание на разработку ROBOport — каноническая спецификация v1.2
 
 **Дата:** 15.10.2026 · **Статус:** baseline for implementation, не разрешение эксплуатации · **Репозиторий:** `askarahodov/roboport` (публичный: никаких настоящих данных, адресов, телефонов, сертификатов, ключей, внутренних URL). **Законодательные/коммерческие вопросы:** ведутся отдельным track и не блокируют кодирование на синтетике; обязательны до реального клиента, платежа, печати и публикации.
 
@@ -23,11 +23,11 @@
 - PW-05: ограниченный статус по токену как вспомогательный маршрут (не заменить им кабинет); токен передаётся **в HTTP header**, не в URL, не логируется, хранится как hash и истекает.
 
 ### CUSTOMER ACCOUNT (обязательный MVP)
-- CA-01: OIDC вход, выход, восстановление сессии, step-up для чувствительных действий, доступность без паролей внутри ROBOport; `account_identity` отделён от `customer`.
+- CA-01: локальная учётная запись в PostgreSQL, Argon2id для пароля, вход/выход, непрозрачная серверная cookie-сессия с TTL и отзывом; `app_user` отделён от `customer`, связывание подтверждается отдельно. Саморегистрация выключена на dev; внешние OIDC/Keycloak отложены.
 - CA-02: `Мои роботы`: устройства, точный variant, маскировка серийника, безопасная история владения; новый владелец не видит чужие ремонты.
 - CA-03: `Мои заявки`: статус, таймлайн, действия, диагностика в рамках disclosure policy.
 - CA-04: смета: только своё обращение, точная **SENT** версия, сумма и строки immutable после отправки, ответ approve/decline с серверно созданным доказательством; повторное согласование той же версии не даёт повторного эффекта.
-- CA-05: доступ к квитанциям/актам/гарантии через отдельно авторизованную ссылку TTL, no-store и аудит; приватный S3, никакого публичного ACL.
+- CA-05: доступ к квитанциям/актам/гарантии только после RBAC+ACL проверки конкретного заказа; в dev приватный MinIO через FileStorage, предпочтительно поток через API, no-store и аудит; никакого публичного bucket.
 - CA-06: персональные предпочтения уведомлений (операционные и маркетинговые цели разделить).
 - CA-07: защищённое связывание гостевой заявки со своим аккаунтом: reference/телефон/SN недостаточны; отдельный proof + staff review; до подтверждения объект скрыт.
 - CA-08: повторное обращение, профили, изменение контакта только с reverify; отклонённая/отозванная связь запрещает дальнейший доступ, включая idempotent replay.
@@ -44,11 +44,11 @@
 - CRM-08: справочники моделей, поддерживаемых операций, сотрудников и прав; допуск операции должен проверять два разных ответственных участника.
 
 ### DOCUMENTS & NOTIFICATIONS
-- DOC-01: метаданные в PG, blob в private S3; MIME allowlist, quota, malware/quarantine workflow (dev может быть stub), подписи URL только после object-level auth.
+- DOC-01: метаданные в PG, бинарные объекты в приватном **MinIO** в dev через `FileStorage`; MIME allowlist, quota, quarantine (dev stub с блоком выдачи), API stream после проверки ACL. Presigned URL — только после отдельного ADR.
 - NTF-01: transactional outbox в одной транзакции со сменой заказа; worker с retries/backoff/dead-letter, без внешних доставок в dev.
 
 ## 3. Чёткие нефункциональные требования
-- Безопасность: OIDC issuer/audience/JWKS verification, expire/revoke, least-privilege, ABAC/BOLA on **every** object; deny-by-default, CSP/CSRF where applicable, no direct trusting `customerId` header. Изменения ролей и доступа аудируются.
+- Безопасность: локальные аккаунты (Argon2id), криптографически случайные серверные сессии в HttpOnly/Secure cookie, expiry/revoke, CSRF, rate-limit; RBAC+ACL и BOLA на **каждом** объекте; deny-by-default, не доверять `customerId`/`X-User-ID`. Изменения ролей, прав и сессий аудируются.
 - PII: в dev только fixture; журналы не содержат токены, содержимое документов, телефоны, email, полные серийные номера; encrypted transport TLS на стендах, secrets via environment/secret manager, no keys in Git.
 - Database: PostgreSQL ACID, UTC timestamptz, migration via Alembic, FK/unique/check/partial indexes, transactions and row locks; idempotency durable account+key+fingerprint.
 - Contract: OpenAPI 3.1.2, единый Error `{code,message,requestId}`, `X-Request-ID` server-issued, 401/403/404/409/422/429/500 documented and tested; errors do not disclose existence of another customer's ticket. 42 drafted operations as target, **not a statement of implementation**.
@@ -63,8 +63,8 @@
 | Backend | Python 3.13, FastAPI, Pydantic 2 | Existing OpenAPI/TestClient PoC; typing and contract tests |
 | Persistence | PostgreSQL 17.x, SQLAlchemy 2.0.x, Alembic, psycopg3 | ACID and row-level constraints; migrations need real PG tests |
 | Frontend | React 19, TypeScript 5.x, Vite 8, React Router, TanStack Query | SPA for site + customer + staff, shared design system; SSR deferred; public SEO review separately |
-| Identity | Keycloak-compatible OIDC (realm for dev test), PKCE | external IdP; staff/client roles; MFA on sensitive actions |
-| Files | S3-compatible private store (MinIO locally) | encrypted and signed read links; access checks in API |
+| Identity | PostgreSQL local accounts, Argon2id, opaque sessions, HttpOnly cookie; RBAC + ACL | Встроенная auth-модель на первый этап, внешний OIDC/Keycloak позже |
+| Files | Приватный dev MinIO (S3 API) через FileStorage | Файлы/фотографии; объектные guards перед streaming, без публичного bucket |
 | Async | DB outbox + Python worker; no Kafka in MVP | atomic events and retry without premature microservices |
 | CI | GitHub Actions; Python pytest/ruff/mypy; ESLint/TS/Vite/Playwright; dependency scans | reproducible gates; lockfiles required |
 | Runtime | Docker Compose for dev only; container images for later staging | don't require Rancher/RKE2/K8s for MVP dev |
@@ -73,10 +73,10 @@
 **ADR:** modular monolith, no NestJS/Next.js swap without new ADR; production infra/cost decisions after baseline tests. Versions must be locked by dependency files/CI; package ranges in scaffolds aren't lockfiles. See `docs/architecture/ADR.md`.
 
 ## 5. Архитектура и границы данных
-`apps/web` (routes `/`, `/robots`, `/account/*`, `/staff/*`) → `apps/api` REST `/api/v1/*` → domains `catalog, identity, customer, ticket, estimate, compatibility, stock, quality, documents, notification, audit`. All domains share one PG database with explicit module ownership; changes through services, no bypass via UI. Blob store and Keycloak external. Notifications via outbox worker. See `docs/architecture/BOUNDARIES.md`, `docs/data/DATA_MODEL.md`.
+`apps/web` (routes `/`, `/robots`, `/account/*`, `/staff/*`) → `apps/api` REST `/api/v1/*` → domains `catalog, identity, customer, ticket, estimate, compatibility, stock, quality, documents, notification, audit`. All domains share one PG database with explicit module ownership; changes through services, no bypass via UI. Приватный MinIO — отдельный dev-сервис; авторизация и сессии внутри API + PostgreSQL. Notifications via outbox worker. See `docs/architecture/BOUNDARIES.md`, `docs/data/DATA_MODEL.md`.
 
 ### Источники истины и связь
-- `customer_account/account_identity` — verified login; `account_customer_link` — explicit proof and revocation; `customer` — legal customer; `device_ownership` — owner over time; `service_ticket.customer_id` — applicant/rights for that ticket; `attachment.ticket_id` — document protection.
+- `app_user/local_credential/user_session` — локальный вход, Argon2id и отзывные сессии; `role/user_role/acl_entry` — RBAC+ACL. `customer_account/account_identity` — аккаунт и резерв для будущего OIDC; `account_customer_link` — explicit proof and revocation; `customer` — legal customer; `device_ownership` — owner over time; `service_ticket.customer_id` — applicant/rights for that ticket; `attachment.ticket_id` — document protection.
 - `robot_model/model_variant/dock_variant` — model identity; `service_capability` exact variant & operation, approved by authorized parties; `part_compatibility` exact P/N and variant revision.
 - `estimate/estimate_line/estimate_approval` — immutable financial version; `inventory_reservation` and `stock_movement` require atomicity; `ticket_state_event` and `audit_event` append-only; `notification_outbox` independently retryable.
 
@@ -86,7 +86,7 @@ Canonical graph is `docs/domain/TICKET_FSM.md`. Include full statuses `DRAFT,SUB
 ## 7. REST contract and error model
 `contracts/openapi.yaml` is the v0.10 draft baseline (42 operations, 56 schemas), preserve operationIds where possible. New backend implements by vertical slice; **do not assert 42 implemented**. All mutation operations need authorization + Idempotency-Key with proper semantics (replay returns same response; altered fingerprint 409; authorization rechecked on replay). Cursor pagination, filtering, stable envelope and Problem/Error normalization tested against OpenAPI for 2xx and 4xx. Work under `docs/api/API_IMPLEMENTATION.md`. Do not use public token in URL; don't expose complete diagnosis in emails/SMS.
 
-## 8. RBAC/ABAC
+## 8. RBAC/ACL/ABAC
 Roles: `PUBLIC, CLIENT, INTAKE, ENGINEER, STOCK, MANAGER, FINANCE, ADMIN, AUDITOR`; no implicit ADMIN universal right over PII. The API verifies role and object relationship, scope, ticket state, service capability and data class. Table in `docs/security/SECURITY_MODEL.md`. Required negative tests: A cannot access B's ticket/attachment, device transfer B cannot read A's history, duplicate approve, stale estimate, revoked account, forged headers, wrong stock/part, safety hold bypass, QC FAIL handover, replay after logout.
 
 ## 9. UX and design-system handoff
@@ -95,7 +95,7 @@ Roles: `PUBLIC, CLIENT, INTAKE, ENGINEER, STOCK, MANAGER, FINANCE, ADMIN, AUDITO
 ## 10. Implementation slices (strict dependency order)
 1. **S0 Repository/CI**: structure, AGENTS, ADR, health endpoint, pytest, OpenAPI static validation, frontend dev build, no env secrets. `dev-ready` after green checks.
 2. **S1 DB migration**: new Alembic initial schema, stand-alone disposable PostgreSQL 17, negative FK/constraint/trigger/reservation tests, backup/restore. Draft SQL 001–006 are read-only research until all conflicts reconciled.
-3. **S2 Identity/authorization**: dev Keycloak realm, strict OIDC issuer/audience/PKCE/JWKS, CLIENT/STAFF roles, ownership proof, deny-by-default. Synthetic TestClient and actual IdP tests.
+3. **S2 Identity/authorization**: локальные аккаунты и Argon2id, PostgreSQL user_session, CSRF-protected cookie, роли RBAC и object ACL/ownership, deny-by-default. Реальные HTTP+PG тесты для двух синтетических клиентов; Keycloak не нужен.
 4. **S3 Catalog & compatibility**: exact variant, service capabilities, part P/N approval, public filters; no candidate auto-support.
 5. **S4 Ticket + intake + FSM + audit**: create, intake, diagnose, Safety hold; current version and guarded transitions.
 6. **S5 Estimate + approval + stock**: immutable estimate version, ownership, double approval, stock reservation concurrency and idempotency/outbox.
@@ -120,7 +120,7 @@ Use `AGENTS.md`: Planner/Architect splits dependency DAG into small tasks; Build
 Development `localhost` only, no cloud resource creation required. `compose.dev.yml` is **future dev compose** until tested with Docker and disposable PostgreSQL; do not ship or run against any real database. `.env.example` placeholders only; `SECURITY.md` describes key isolation. CI never references real IDs. Production infrastructure only after separate ADR and review. Document backup restoration and migrations before any deployed DB.
 
 ## 14. Phased release gates and exclusions
-`G-DEV`: source/tests/CI; `G-DB`: migrations & backups actual PG; `G-AUTH`: genuine OIDC and ABAC; `G-DOC`: secured S3; `G-DESIGN`: approved brand & usability; `G-SECURITY`: independent audit; `G-LEGAL`: lawful data processing+trademark; `G-BIZ`: economic go/no-go. **Only G-DEV authorizes development; none of these are automatically evidence of public launch.**
+`G-DEV`: source/tests/CI; `G-DB`: migrations & backups actual PG; `G-AUTH`: реальные локальные сессии, RBAC+ACL и тесты защиты от CSRF/IDOR; `G-DOC`: приватный dev MinIO с объектными guards API; `G-DESIGN`: approved brand & usability; `G-SECURITY`: independent audit; `G-LEGAL`: lawful data processing+trademark; `G-BIZ`: economic go/no-go. **Only G-DEV authorizes development; none of these are automatically evidence of public launch.**
 
 ## 15. Traceability / inherited artifacts
 Canonical source notes archived in Google Drive `robo` (not mirrored to public GitHub due sensitive/non-public context). OpenAPI draft and SQL experiments carried forward from TechPrep v0.10; latest design reference v0.4. Existing legacy 115 FastAPI tests validate synthetic adapter, **not production backend**. Design v0.4 has 91 structural/browser tests, **not user-facing readiness**. See `docs/implementation/SOURCE_INVENTORY.md` and baseline check in `docs/quality/ACCEPTANCE_TESTS.md`.
@@ -133,5 +133,5 @@ Canonical source notes archived in Google Drive `robo` (not mirrored to public G
 - Язык всей смысловой документации и GitHub Issues — **русский**; код, имена файлов, API/SQL-поля, библиотеки и команды остаются в оригинальном техническом написании. 
 - Канонический идентификатор задачи — номер GitHub Issue (`#10`, `#11`, ...); исторические номера `RP-001...` в старых материалах конфликтовали и **не должны использоваться для новых зависимостей**. Список и порядок: `docs/implementation/WORK_BREAKDOWN.md`, `docs/implementation/DEVELOPMENT_ROADMAP.md`.
 - Монорепозиторий и границы: `docs/REPOSITORY_STRUCTURE.md`. Фиксация выбора стека и отложенных компонентов: `docs/TECH_STACK.md`.
-- S3 — **интерфейс совместимости хранения файлов**, а не обязательная облачная услуга. Для первого API каталога хранилище не требуется. На этапе документов (#25) нужно выбрать конкретный приватный backend и подтвердить тестами, затем обновить ADR-025.
+- **MinIO** принят как S3-совместимое приватное файловое хранилище для разработки (#28 стенд, #25 адаптер); для каталога #12 не нужен. **Keycloak/OIDC отложен**, пока #13 локальные сессии, #27 RBAC+ACL. В OpenAPI `securitySchemes` уже заменена на `localSession` cookie; маршруты login/logout и CSRF контракты ещё предстоит добавить в #13/#15.
 - В GitHub Issues должны быть точные входы/выходы, файлы, зависимости, измеримые acceptance criteria, negative tests, команды и журнал реальных тестов. До согласования очередности запрещена самовольная одновременная реализация нескольких высокорисковых модулей.

@@ -12,7 +12,8 @@
 | [`data/DATA_MODEL.md`](data/DATA_MODEL.md) | Сущности и ограничения | Backend, БД |
 | [`domain/TICKET_FSM.md`](domain/TICKET_FSM.md) | Состояния заявки и guards | Backend, QA |
 | [`api/API_IMPLEMENTATION.md`](api/API_IMPLEMENTATION.md) | Точность OpenAPI/HTTP | Backend, Frontend |
-| [`security/SECURITY_MODEL.md`](security/SECURITY_MODEL.md) | RBAC/ABAC и негативные сценарии | Backend, Security |
+| [`security/SECURITY_MODEL.md`](security/SECURITY_MODEL.md) | RBAC/ACL/ABAC и негативные сценарии | Backend, Security |
+| [`security/LOCAL_AUTH_AND_MINIO.md`](security/LOCAL_AUTH_AND_MINIO.md) | Локальная аутентификация, сессии, ACL и приватный MinIO в dev | Backend, DevOps, AI-агенты |
 | [`design/PRELIMINARY_BRANDBOOK.md`](design/PRELIMINARY_BRANDBOOK.md) | Разработческий брендбук и две темы | Design, Frontend |
 | [`implementation/WORK_BREAKDOWN.md`](implementation/WORK_BREAKDOWN.md) | Список GitHub Issues и зависимости | Оркестратор |
 | [`implementation/ISSUE_STANDARD.md`](implementation/ISSUE_STANDARD.md) | Обязательная структура каждой задачи | Все |

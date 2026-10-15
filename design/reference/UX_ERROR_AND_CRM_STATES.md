@@ -27,4 +27,4 @@
 - Семь CRM-вкладок работают как независимые макеты; Safety hold и QC FAIL хорошо различимы.
 - Нет настоящего согласия, скачивания, резерва, создания заявки и внешних HTTP-запросов.
 
-До production нужны независимый UX-review, полный WCAG 2.2 AA и screenreader, реальные серверные права на PostgreSQL/IdP и юридические release gates.
+До production нужны независимый UX-review, полный WCAG 2.2 AA и screenreader, реальные серверные права на PostgreSQL/локальных сессиях (RBAC + ACL) и юридические release gates.

@@ -23,7 +23,8 @@ roboport/
 │   │   │   ├── core/             # целевое: конфигурация, ошибки, auth, DI
 │   │   │   ├── modules/          # целевое: бизнес-модули
 │   │   │   │   ├── catalog/
-│   │   │   │   ├── identity/
+│   │   │   │   ├── identity/       # локальные пользователи, сессии
+│   │   │   │   ├── authorization/  # RBAC+ACL, объектные политики
 │   │   │   │   ├── customers/
 │   │   │   │   ├── tickets/
 │   │   │   │   ├── estimates/
@@ -67,12 +68,12 @@ roboport/
 ├── tests/
 │   ├── bootstrap/               # текущие тесты FastAPI/контракта
 │   ├── unit/                    # целевое
-│   ├── integration/             # целевое: disposable PostgreSQL/IdP
+│   ├── integration/             # целевое: disposable PostgreSQL/MinIO
 │   ├── contract/                # целевое: OpenAPI 2xx/4xx
 │   ├── e2e/                     # целевое: Playwright
 │   └── security/                # целевое: BOLA, отзыв прав, fail-closed
 ├── scripts/                       # повторяемые команды/проверки
-└── infra/dev/                    # целевое: compose с test-only PG/IdP/storage
+└── infra/dev/                    # целевое: compose с test-only PostgreSQL и MinIO
 ```
 
 **Важно:** обозначенные «целевое» каталоги не выдаются за уже созданные. Агент добавляет их в рамках конкретной GitHub Issue с тестом и без пустых папок.
