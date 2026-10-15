@@ -6,6 +6,33 @@ on:
 permissions:
   contents: read
 jobs:
+  refresh-lock:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/roboport-development-baseline'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Regenerate npm lock and commit once
+        run: |
+          set -euo pipefail
+          cd apps/web
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --no-audit --no-fund
+          npm run generate:api
+          test -s src/shared/api/schema.d.ts
+          npm run typecheck
+          npm run build
+          cd ../..
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/web/package-lock.json apps/web/src/shared/api/schema.d.ts
+          git commit -m 'chore(api): lock generator and commit generated OpenAPI types'
+          git pull --rebase origin feat/roboport-development-baseline
+          git push origin HEAD:feat/roboport-development-baseline
   api:
     runs-on: ubuntu-latest
     steps:
