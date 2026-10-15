@@ -27,5 +27,7 @@ def test_ticket_fsm_and_openapi_state_mismatch_is_explicitly_documented():
     state = contract["components"]["schemas"]["Ticket"]["properties"]["state"]
     audit = (ROOT / "docs/data/SCHEMA_RECONCILIATION.md").read_text(encoding="utf-8")
     assert state["type"] == "string"
-    assert "enum" not in state, "Ticket state enum was added: reconcile FSM and SQL"
-    assert "Критический GAP" in audit and "Ticket.state" in audit
+    expected = [entry.strip("`,. ") for entry in (ROOT / "docs/domain/TICKET_FSM.md").read_text(encoding="utf-8").split("## Состояния (проектный набор)")[1].split("\n", 3)[2].split(",")]
+    assert set(state["enum"]) == set(expected), (state["enum"], expected)
+    assert len(state["enum"]) == 20 and len(set(state["enum"])) == 20
+    assert "Ticket.state" in audit
