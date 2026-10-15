@@ -31,6 +31,11 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - working-directory: apps/web
         run: npm ci --no-audit --no-fund
+      - name: Generate TypeScript types from versioned OpenAPI
+        run: |
+          mkdir -p apps/web/src/shared/api
+          npx --yes --package openapi-typescript@7.10.1 openapi-typescript contracts/openapi.yaml -o apps/web/src/shared/api/schema.d.ts
+          test -s apps/web/src/shared/api/schema.d.ts
       - working-directory: apps/web
         run: npm run typecheck
       - working-directory: apps/web
