@@ -1,0 +1,39 @@
+/* Generated from tokens/theme.json. CSS theme toggle uses data-theme. */
+:root, [data-theme="light"] {
+  --canvas: #F3F8FA;
+  --surface: #FFFFFF;
+  --surface-raised: #F8FCFD;
+  --text: #102736;
+  --muted: #4D6470;
+  --line: #D2E0E5;
+  --sidebar: #0C2530;
+  --accent: #008C84;
+  --accent-ink: #006D67;
+  --action: #006D67;
+  --action-text: #FFFFFF;
+  --focus: #007CBA;
+  --success: #17684D;
+  --warning: #93610A;
+  --danger: #B52439;
+  --chip: #DCF5F1;
+  --shadow: 0 22px 60px rgba(13,44,59,.11);
+}
+[data-theme="dark"] {
+  --canvas: #071820;
+  --surface: #102731;
+  --surface-raised: #173440;
+  --text: #F3FAFC;
+  --muted: #B0C6D0;
+  --line: #2B4752;
+  --sidebar: #061117;
+  --accent: #38D9C9;
+  --accent-ink: #38D9C9;
+  --action: #11766F;
+  --action-text: #FFFFFF;
+  --focus: #7BDAFF;
+  --success: #6CE3B3;
+  --warning: #F4C574;
+  --danger: #FF7F93;
+  --chip: #13483F;
+  --shadow: 0 25px 65px rgba(0,0,0,.3);
+}

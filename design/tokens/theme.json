@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "name": "ROBOport Design System v0.4",
+    "status": "approved-direction not final trademark-validated brandbook",
+    "logoSource": "C Industrial Lab / original angular R geometry",
+    "themeSource": "A Precision Service calm teal/night system",
+    "notes": "C angular R + A teal light/dark; extra user-state & staff-workflow prototypes, still not legal/trademark cleared"
+  },
+  "light": {
+    "canvas": "#F3F8FA",
+    "surface": "#FFFFFF",
+    "surfaceRaised": "#F8FCFD",
+    "text": "#102736",
+    "muted": "#4D6470",
+    "line": "#D2E0E5",
+    "sidebar": "#0C2530",
+    "accent": "#008C84",
+    "action": "#006D67",
+    "actionText": "#FFFFFF",
+    "focus": "#007CBA",
+    "success": "#17684D",
+    "warning": "#93610A",
+    "danger": "#B52439",
+    "chip": "#DCF5F1",
+    "shadow": "0 22px 60px rgba(13,44,59,.11)",
+    "accentInk": "#006D67"
+  },
+  "dark": {
+    "canvas": "#071820",
+    "surface": "#102731",
+    "surfaceRaised": "#173440",
+    "text": "#F3FAFC",
+    "muted": "#B0C6D0",
+    "line": "#2B4752",
+    "sidebar": "#061117",
+    "accent": "#38D9C9",
+    "action": "#11766F",
+    "actionText": "#FFFFFF",
+    "focus": "#7BDAFF",
+    "success": "#6CE3B3",
+    "warning": "#F4C574",
+    "danger": "#FF7F93",
+    "chip": "#13483F",
+    "shadow": "0 25px 65px rgba(0,0,0,.3)",
+    "accentInk": "#38D9C9"
+  },
+  "spacing": [
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64
+  ],
+  "radius": {
+    "small": 8,
+    "medium": 14,
+    "large": 22
+  },
+  "typography": {
+    "body": "Inter, Arial, system-ui, sans-serif"
+  },
+  "minTargetPx": 44
+}

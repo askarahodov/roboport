@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080">
+<rect width="1600" height="1080" fill="#EDF4F6"/>
+<text x="90" y="106" font-family="Arial" font-size="25" font-weight="bold" letter-spacing="4" fill="#007C75">ROBOport / DESIGN SYSTEM 0.2</text>
+<text x="90" y="170" font-family="Arial" font-size="64" font-weight="800" fill="#102736">Знак C. Две темы. Единый бренд.</text>
+<text x="90" y="211" font-family="Arial" font-size="24" fill="#526975">Industrial Lab angular R · Precision Service teal · подготовительная концепция</text>
+<rect x="70" y="255" width="710" height="540" rx="28" fill="#FFFFFF" stroke="#D2E0E5" stroke-width="2"/>
+<rect x="820" y="255" width="710" height="540" rx="28" fill="#071820"/>
+<text x="111" y="327" font-family="Arial" font-size="22" font-weight="bold" fill="#4D6470">DAY / LIGHT</text>
+<text x="862" y="327" font-family="Arial" font-size="22" font-weight="bold" fill="#A8C3CA">NIGHT / DARK</text>
+<g transform="translate(128 355) scale(2.6)"><g transform="translate(12 12)"><path d="M13 12 H58 L78 30 L65 43 H45 L72 69 L57 86 L10 40 H40 L51 30 H13 Z" fill="#102736"/><path d="M12 63 L36 49 L53 65 L26 90 H12 Z" fill="#008C84"/><path d="M63 15 L83 34 L74 44 L55 26" fill="#008C84"/></g></g>
+<g transform="translate(876 355) scale(2.6)"><g transform="translate(12 12)"><path d="M13 12 H58 L78 30 L65 43 H45 L72 69 L57 86 L10 40 H40 L51 30 H13 Z" fill="#F3FAFC"/><path d="M12 63 L36 49 L53 65 L26 90 H12 Z" fill="#38D9C9"/><path d="M63 15 L83 34 L74 44 L55 26" fill="#38D9C9"/></g></g>
+<text x="390" y="505" font-family="Arial" font-size="58" font-weight="800" fill="#102736">ROBO</text>
+<text x="570" y="505" font-family="Arial" font-size="58" font-weight="800" fill="#008C84">port</text>
+<text x="1123" y="505" font-family="Arial" font-size="58" font-weight="800" fill="#F3FAFC">ROBO</text>
+<text x="1303" y="505" font-family="Arial" font-size="58" font-weight="800" fill="#38D9C9">port</text>
+<text x="387" y="536" font-family="Arial" font-size="18" letter-spacing="2" fill="#102736">СЕРВИС РОБОТОТЕХНИКИ</text>
+<text x="1123" y="536" font-family="Arial" font-size="18" letter-spacing="2" fill="#F3FAFC">СЕРВИС РОБОТОТЕХНИКИ</text>
+<rect x="115" y="645" width="160" height="59" rx="12" fill="#006D67"/><text x="153" y="682" font-family="Arial" font-size="20" font-weight="bold" fill="white">Действие</text>
+<rect x="852" y="645" width="160" height="59" rx="12" fill="#168D82"/><text x="894" y="682" font-family="Arial" font-size="20" font-weight="bold" fill="white">Действие</text>
+<text x="115" y="739" font-family="Arial" font-size="19" fill="#4D6470">#102736     #008C84     #F3F8FA</text>
+<text x="852" y="739" font-family="Arial" font-size="19" fill="#B0C6D0">#071820     #38D9C9     #102731</text>
+<rect x="70" y="834" width="1460" height="135" rx="20" fill="#FFFFFF" stroke="#D2E0E5" stroke-width="2"/>
+<text x="112" y="889" font-family="Arial" font-weight="bold" font-size="26" fill="#102736">Исходник: угловая R из C Industrial Lab — без замены геометрии.</text>
+<text x="112" y="933" font-family="Arial" font-size="22" fill="#4D6470">Для сайта, личного кабинета и CRM. Палитры и маркировка — до юридической проверки.</text>
+<text x="86" y="1032" font-family="Arial" font-size="19" fill="#526975">ROBOport — концепт v0.2 / 15.10.2026 / НЕ УТВЕРЖДЁННЫЙ БРЕНДБУК</text>
+</svg>
