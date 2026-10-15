@@ -387,7 +387,7 @@ async def dev_upload_attachment(ticket_id: str, request: Request):
         return JSONResponse(status_code=413,content={
             "code":"PAYLOAD_TOO_LARGE","requestId":request.state.request_id,
         },headers={"Cache-Control":"no-store"})
-    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1),autocommit=True) as conn:
         if not _mutation_ok(request,conn):
             return JSONResponse(status_code=403,content={
                 "code":"FORBIDDEN","requestId":request.state.request_id,
