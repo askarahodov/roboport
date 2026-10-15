@@ -59,6 +59,7 @@ def model(modelId: str, request: Request):
 def dev_ticket_access(ticket_id: str, request: Request):
     """Synthetic-only read probe, disabled without explicit opt-in and disposable DB."""
     import os
+    from urllib.parse import urlsplit
     from uuid import UUID
     import psycopg
     from .session_lookup import session_can_read_ticket
@@ -66,7 +67,7 @@ def dev_ticket_access(ticket_id: str, request: Request):
     if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
         return not_found(request)
     raw_dsn = os.getenv("ROBOport_DATABASE_URL", "")
-    if not raw_dsn or "127.0.0.1" not in raw_dsn:
+    if not raw_dsn or urlsplit(raw_dsn).hostname != "127.0.0.1":
         return not_found(request)
     token = request.cookies.get("roboport_session")
     if not token:
