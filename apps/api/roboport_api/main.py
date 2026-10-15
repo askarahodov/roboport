@@ -421,3 +421,43 @@ async def dev_upload_attachment(ticket_id: str, request: Request):
         return not_found(request)
     return JSONResponse(status_code=201,content={"id":str(attachment_id)},
                         headers={"Cache-Control":"no-store"})
+
+
+@app.get("/api/v1/dev/estimates/{estimate_id}/access", include_in_schema=False)
+def dev_estimate_access(estimate_id: str, request: Request):
+    """Synthetic estimate access probe with current role, ACL and state."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID,uuid4
+    import psycopg
+    from .authorization import authorize_estimate
+    from .session_lookup import session_subject
+
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        db=urlsplit(raw)
+        if (db.scheme not in ("postgresql","postgresql+psycopg")
+                or db.hostname!="127.0.0.1" or db.port is None):
+            return not_found(request)
+        ident=UUID(estimate_id)
+    except ValueError:
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        actor=session_subject(conn,token)
+        allowed=authorize_estimate(conn,token,"estimate.read",ident)
+        conn.execute("""INSERT INTO authorization_audit(id,actor_id,action,outcome)
+                        VALUES(%s,%s,'estimate.read',%s)""",
+                     (uuid4(),actor,"ALLOW" if allowed else "DENY"))
+    if not allowed:
+        return not_found(request)
+    return JSONResponse(content={"id":str(ident),"accessible":True},
+                        headers={"Cache-Control":"no-store"})

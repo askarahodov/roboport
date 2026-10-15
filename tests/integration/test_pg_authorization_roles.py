@@ -144,3 +144,30 @@ def test_audited_http_permission_and_revoke_bundle(monkeypatch):
                              (audit_id,))
     monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API")
     assert client.get(url).status_code==404
+
+
+def test_intake_without_assignment_and_admin_not_implicit_pii():
+    staff,admin,customer,ticket=(uuid4() for _ in range(4))
+    tokens=(new_token(),new_token())
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
+        db.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",(ticket,customer))
+        for user,token,role in ((staff,tokens[0],"INTAKE"),(admin,tokens[1],"ADMIN")):
+            db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
+                       (user,"staff-acl-"+user.hex))
+            db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",
+                       (uuid4(),user,role))
+            db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+                          VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+                       (uuid4(),user,token_digest(token),token_digest(new_token()),
+                        now,now+timedelta(minutes=30),now+timedelta(hours=4)))
+        assert not authorize_ticket(db,tokens[0],"ticket.read",ticket)
+        assert not authorize_ticket(db,tokens[1],"ticket.read",ticket)
+        grant=uuid4()
+        db.execute("INSERT INTO acl_entry(id,user_id,ticket_id,action) VALUES(%s,%s,%s,'ticket.read')",
+                   (grant,staff,ticket))
+        assert authorize_ticket(db,tokens[0],"ticket.read",ticket)
+        assert not authorize_ticket(db,tokens[1],"ticket.read",ticket)
+        db.execute("UPDATE acl_entry SET revoked_at=now() WHERE id=%s",(grant,))
+        assert not authorize_ticket(db,tokens[0],"ticket.read",ticket)
