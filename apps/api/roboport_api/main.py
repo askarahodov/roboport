@@ -168,3 +168,33 @@ def dev_ticket_state(ticket_id: str, request: Request):
     if result is None:
         return not_found(request)
     return JSONResponse(content=result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/v1/dev/tickets", include_in_schema=False)
+def dev_owned_tickets(request: Request, limit: int = 20, offset: int = 0, state: str | None = None):
+    """Synthetic-only paginated list, disabled by default."""
+    import os
+    from urllib.parse import urlsplit
+    import psycopg
+    from .ticket_read import owned_ticket_list
+
+    if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
+        return not_found(request)
+    raw = os.getenv("ROBOport_DATABASE_URL", "")
+    try:
+        target = urlsplit(raw)
+        if (target.scheme not in ("postgresql", "postgresql+psycopg")
+                or target.hostname != "127.0.0.1" or target.port is None):
+            return not_found(request)
+    except ValueError:
+        return not_found(request)
+    if not 1 <= limit <= 50 or not 0 <= offset <= 10000:
+        return JSONResponse(status_code=422, content={"code":"INVALID_INPUT","requestId":request.state.request_id}, headers={"Cache-Control":"no-store"})
+    token = request.cookies.get("rp_session", "")
+    if not token:
+        return JSONResponse(status_code=401, content={"code":"UNAUTHENTICATED","requestId":request.state.request_id}, headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+        result = owned_ticket_list(conn, token, limit=limit, offset=offset, state=state)
+    if result is None:
+        return JSONResponse(status_code=401, content={"code":"UNAUTHENTICATED","requestId":request.state.request_id}, headers={"Cache-Control":"no-store"})
+    return JSONResponse(content={"items":result,"limit":limit,"offset":offset}, headers={"Cache-Control":"no-store"})
