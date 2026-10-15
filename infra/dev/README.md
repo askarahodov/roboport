@@ -62,3 +62,28 @@ docker compose -f infra/dev/compose.minio.yml down -v
 
 **Статус:** конфигурация подготовлена, запуск/отрицательные проверки **не подтверждены**:
 в текущем CI/терминале отсутствует Docker. #28 до независимого TESTER остаётся BLOCKED.
+
+
+## Резервная копия и восстановление dev-bucket (только синтетика)
+
+С помощью `mc alias set rp-app` из раздела запуска, на локальной машине,
+экспортируйте приватные документы **в директорию вне Git**:
+
+```bash
+mkdir -p /tmp/roboport-minio-dev-backup
+mc mirror rp-app/roboport-documents-dev /tmp/roboport-minio-dev-backup/documents
+mc mirror rp-app/roboport-quarantine-dev /tmp/roboport-minio-dev-backup/quarantine
+# Восстанавливать только после проверки PostgreSQL attachment metadata:
+mc mirror /tmp/roboport-minio-dev-backup/documents rp-app/roboport-documents-dev
+mc mirror /tmp/roboport-minio-dev-backup/quarantine rp-app/roboport-quarantine-dev
+```
+
+Это локальное копирование синтетики, **не** production backup: консистентную пару
+PostgreSQL + S3 необходимо обеспечивать отдельно. В CI тестируется резервная
+копия, удаление и восстановление одного synthetic object в Docker MinIO.
+После завершения удалить директорию резервной копии вручную.
+
+Отдельная служебная функция `storage_reconcile.purge_old_orphans` удаляет
+объекты без записи `attachment` старше часа из bucket документов. Quarantine
+не обрабатывается ей, чтобы не нарушить forensic evidence. Нельзя вызывать
+эту функцию из пользовательского HTTP.
