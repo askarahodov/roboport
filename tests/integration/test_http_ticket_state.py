@@ -23,7 +23,7 @@ def test_ticket_state_is_private_and_revocable(monkeypatch):
             VALUES (%s,%s,%s,%s,%s,%s,%s)""",
             (session,user,token_digest(raw),token_digest(new_token()),now,
              now+timedelta(minutes=30),now+timedelta(hours=4)))
-    client=TestClient(app)
+    client=TestClient(app, base_url="https://127.0.0.1")
     url=f"/api/v1/dev/tickets/{ticket}/state"
     assert client.get(url,headers={"X-User-ID":str(user)}).status_code==401
     client.cookies.set("rp_session",raw)
