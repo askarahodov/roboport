@@ -31,6 +31,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+      - run: python scripts/check_python_pins.py
       - name: Real PostgreSQL upgrade / downgrade / re-upgrade
         run: |
           python -m alembic -c apps/api/alembic.ini upgrade head
@@ -63,6 +64,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+      - run: python scripts/check_python_pins.py
       - run: python -m pip install openapi-spec-validator==0.7.2
       - run: python -m pip check
       - run: PYTHONPATH=apps/api python -m pytest -q tests/bootstrap
@@ -94,6 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+          python scripts/check_python_pins.py
           PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000 > /tmp/roboport-api.log 2>&1 &
           API_PID=$!
           (cd apps/web && npm run dev -- --host 127.0.0.1 --port 5173) > /tmp/roboport-vite.log 2>&1 &
@@ -118,6 +121,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+      - run: python scripts/check_python_pins.py
       - working-directory: apps/web
         run: npm ci --no-audit --no-fund
       - name: Install browser test runner and Chromium
