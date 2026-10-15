@@ -41,26 +41,31 @@ def owned_ticket_list(
         raise ValueError("offset must be 0..10000")
     if state is not None and state not in TICKET_STATES:
         raise ValueError("unsupported ticket state")
-    # Query session first; no access is granted by request headers or caller-supplied user IDs.
-    from .session_lookup import session_subject
-    subject = session_subject(conn, token)
-    if subject is None:
-        return None
+    # Session validation and ticket selection must share one SQL snapshot.
+    # LEFT JOIN LATERAL preserves 401 for revoked sessions versus 200 for
+    # active sessions without visible tickets, including after ACL revoke.
     rows = conn.execute(
-        """SELECT DISTINCT t.id, t.state, t.version, t.created_at
-           FROM service_ticket t
-           JOIN account_customer_link l ON l.customer_id=t.customer_id
-             AND l.user_id=%s AND l.revoked_at IS NULL
-           JOIN app_user u ON u.id=l.user_id AND u.status='ACTIVE'
-           JOIN user_session s ON s.user_id=u.id AND s.token_hash=%s
-             AND s.revoked_at IS NULL AND s.idle_expires_at>now()
-             AND s.absolute_expires_at>now()
-           WHERE (%s::text IS NULL OR t.state=%s)
-           ORDER BY t.created_at DESC, t.id DESC
-           LIMIT %s OFFSET %s""",
-        (subject, token_digest(token), state, state, limit, offset),
+        """SELECT page.id,page.state,page.version
+           FROM user_session s
+           JOIN app_user u ON u.id=s.user_id AND u.status='ACTIVE'
+           LEFT JOIN LATERAL (
+             SELECT DISTINCT t.id,t.state,t.version,t.created_at
+             FROM account_customer_link l
+             JOIN service_ticket t ON t.customer_id=l.customer_id
+             WHERE l.user_id=u.id AND l.revoked_at IS NULL
+               AND (%s::text IS NULL OR t.state=%s)
+             ORDER BY t.created_at DESC,t.id DESC
+             LIMIT %s OFFSET %s
+           ) page ON TRUE
+           WHERE s.token_hash=%s AND s.revoked_at IS NULL
+             AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
+           ORDER BY page.created_at DESC NULLS LAST,page.id DESC NULLS LAST""",
+        (state,state,limit,offset,token_digest(token)),
     ).fetchall()
-    return [{"id":str(row[0]), "state":row[1], "version":row[2]} for row in rows]
+    if not rows:
+        return None
+    return [{"id":str(row[0]), "state":row[1], "version":row[2]}
+            for row in rows if row[0] is not None]
 
 
 def owned_ticket_keyset_page(
