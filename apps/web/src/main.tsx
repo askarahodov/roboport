@@ -6,11 +6,14 @@ import './style.css';
 type Brands = paths['/api/v1/catalog/brands']['get']['responses']['200']['content']['application/json'];
 type Models = paths['/api/v1/catalog/models']['get']['responses']['200']['content']['application/json'];
 type CatalogItem = { id: string; name: string };
-type View = 'home' | 'brands' | 'models' | 'not-found';
+type View = 'home' | 'brands' | 'models' | 'account' | 'staff' | 'not-found';
+type Theme = 'light' | 'dark' | 'auto';
 
 function route(): View {
   if (window.location.pathname === '/catalog/brands') return 'brands';
   if (window.location.pathname === '/catalog/models') return 'models';
+  if (window.location.pathname === '/account') return 'account';
+  if (window.location.pathname === '/staff') return 'staff';
   if (window.location.pathname === '/') return 'home';
   return 'not-found';
 }
@@ -51,7 +54,15 @@ function Catalog({ kind }: { kind: 'brands' | 'models' }) {
 }
 
 function App() {
-  const [dark, setDark] = React.useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [theme, setTheme] = React.useState<Theme>('auto');
+  const [systemDark, setSystemDark] = React.useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  React.useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => setSystemDark(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  const dark = theme === 'dark' || (theme === 'auto' && systemDark);
   const view = route();
   return <main className={dark ? 'app dark' : 'app'}>
     <header>
@@ -64,10 +75,14 @@ function App() {
         <a href="/" aria-current={view === 'home' ? 'page' : undefined}>Главная</a>
         <a href="/catalog/brands" aria-current={view === 'brands' ? 'page' : undefined}>Бренды</a>
         <a href="/catalog/models" aria-current={view === 'models' ? 'page' : undefined}>Модели</a>
+        <a href="/account" aria-current={view === 'account' ? 'page' : undefined}>Личный кабинет</a>
+        <a href="/staff" aria-current={view === 'staff' ? 'page' : undefined}>Сотрудникам</a>
       </nav>
-      <button onClick={() => setDark(!dark)} aria-label="Переключить тему">Тема</button>
+      <label>Тема <select aria-label="Тема оформления" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="auto">Авто</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
     </header>
-    {view === 'not-found'
+    {view === 'account' || view === 'staff'
+      ? <section><h1>{view === 'account' ? 'Личный кабинет' : 'Портал сотрудников'}</h1><p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p><a href="/">На главную</a></section>
+      : view === 'not-found'
       ? <section><h1>Страница не найдена</h1><p>Такого раздела пока нет.</p><a href="/">Вернуться на главную</a></section>
       : view === 'home'
       ? <section><h1>Сервис обслуживания роботов</h1>
