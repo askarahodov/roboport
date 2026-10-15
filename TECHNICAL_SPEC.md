@@ -95,7 +95,7 @@ Roles: `PUBLIC, CLIENT, INTAKE, ENGINEER, STOCK, MANAGER, FINANCE, ADMIN, AUDITO
 ## 10. Implementation slices (strict dependency order)
 1. **S0 Repository/CI**: structure, AGENTS, ADR, health endpoint, pytest, OpenAPI static validation, frontend dev build, no env secrets. `dev-ready` after green checks.
 2. **S1 DB migration**: new Alembic initial schema, stand-alone disposable PostgreSQL 17, negative FK/constraint/trigger/reservation tests, backup/restore. Draft SQL 001–006 are read-only research until all conflicts reconciled.
-3. **S2 Identity/authorization**: dev Keycloak realm, strict OIDC issuer/audience/PKCE/JWKS, CLIENT/ST AFF roles, ownership proof, deny-by-default. Synthetic TestClient and actual IdP tests.
+3. **S2 Identity/authorization**: dev Keycloak realm, strict OIDC issuer/audience/PKCE/JWKS, CLIENT/STAFF roles, ownership proof, deny-by-default. Synthetic TestClient and actual IdP tests.
 4. **S3 Catalog & compatibility**: exact variant, service capabilities, part P/N approval, public filters; no candidate auto-support.
 5. **S4 Ticket + intake + FSM + audit**: create, intake, diagnose, Safety hold; current version and guarded transitions.
 6. **S5 Estimate + approval + stock**: immutable estimate version, ownership, double approval, stock reservation concurrency and idempotency/outbox.
@@ -124,3 +124,6 @@ Development `localhost` only, no cloud resource creation required. `compose.dev.
 
 ## 15. Traceability / inherited artifacts
 Canonical source notes archived in Google Drive `robo` (not mirrored to public GitHub due sensitive/non-public context). OpenAPI draft and SQL experiments carried forward from TechPrep v0.10; latest design reference v0.4. Existing legacy 115 FastAPI tests validate synthetic adapter, **not production backend**. Design v0.4 has 91 structural/browser tests, **not user-facing readiness**. See `docs/implementation/SOURCE_INVENTORY.md` and baseline check in `docs/quality/ACCEPTANCE_TESTS.md`.
+
+## 16. Реальное состояние первого кода (15.10.2026)
+В первый вертикальный срез входит только публичный read-only каталог синтетических брендов и кандидатов-моделей: `GET /api/v1/catalog/brands`, `GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/{modelId}`. Зафиксированы `items/nextCursor`, ограничение `limit` (1–100), неизвестная модель → безопасный 404, неверный курсор → 400, неизвестная поддержка остаётся candidate/evaluation. Локальные TestClient/JSON Schema/регрессионные тесты: 12 PASS. **Нет** реального Postgres, каталога OEM, настоящих заявок и production auth. Дальше выполнить RP-001 CI и lockfile, RP-002 PostgreSQL миграции, RP-003 расширение vertical slice; всё через PR с фактически исполненными тестами.

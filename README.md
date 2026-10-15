@@ -11,7 +11,7 @@ Multibrand household robotics repair/service platform: public site and limited c
 Python 3.13 + FastAPI + Pydantic v2; PostgreSQL 17.x (supported, dev target) + SQLAlchemy 2.0 + Alembic; Keycloak-compatible OIDC; S3-compatible private object store; React 19 + TypeScript + Vite 8; Node.js 24 LTS; Docker Compose for local dependencies; GitHub Actions for CI. No Kubernetes requirement for local MVP. Version tags are **targets**, not evidence packages are installed; use lockfiles before deploy.
 
 ## What runs today
-`apps/api` is a *new minimal application bootstrap*, not a service-business implementation. Tests verify health/meta, restricted operations and placeholders; **no real identity, DB, client account or stock workflow exists**.
+`apps/api` is a *new minimal application bootstrap*, not a service-business implementation. Tests verify health/meta, restricted operations and placeholders. A **synthetic read-only public catalog** implements three API operations (`/api/v1/catalog/brands`, `/models`, `/models/{modelId}`) with schema tests; **no real identity, DB, client account or stock workflow exists**.
 
 ```bash
 python -m pip install -r apps/api/requirements-dev.txt
@@ -24,7 +24,7 @@ Frontend is a React/Vite source scaffold, dependencies need `npm install`/lockfi
 ## Project layout
 - `TECHNICAL_SPEC.md` — one authoritative end-to-end development assignment (Russian).
 - `docs/` — bounded contexts, ADR, RBAC/FSM, API lifecycle, data model, threat model, tests, operations, design and agent workplan.
-- `contracts/openapi.yaml` — existing **draft** OpenAPI 3.1.2, 42 operations; currently 14 served only in archived synthetic test adapter, none certified production-ready.
+- `contracts/openapi.yaml` — existing **draft** OpenAPI 3.1.2, 42 operations; currently 14 served only in archived synthetic test adapter, 3 public catalog operations implemented with synthetic fixtures; none certified production-ready.
 - `db/legacy_drafts/` — six **untested** historical SQL drafts; **DO NOT** auto-apply; new Alembic baseline required.
 - `design/` — original C Industrial Lab angular R and A Precision palette, day/night/auto, editable tokens and previews.
 - `apps/api`, `apps/web` — initial code scaffolds with explicit nonimplemented behaviors.
