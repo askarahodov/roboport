@@ -61,7 +61,7 @@ jobs:
           mc anonymous set none root/roboport-documents-dev
           mc anonymous set none root/roboport-quarantine-dev
           mc admin user add root "$MINIO_APP_ACCESS_KEY" "$MINIO_APP_SECRET_KEY"
-          mc admin policy create root roboport-app-readwrite infra/dev/minio-app-policy.json
+          cat infra/dev/minio-app-policy.json | mc admin policy create root roboport-app-readwrite /dev/stdin
           mc admin policy attach root roboport-app-readwrite --user "$MINIO_APP_ACCESS_KEY"
           mc alias set app http://127.0.0.1:9000 "$MINIO_APP_ACCESS_KEY" "$MINIO_APP_SECRET_KEY"
           printf 'synthetic-robot-object-one' | mc pipe app/roboport-documents-dev/test-one.txt
