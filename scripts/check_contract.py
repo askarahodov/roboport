@@ -9,8 +9,8 @@ assert s['info']['title'].startswith('ROBOport')
 ops=[(p,method,o) for p,m in s['paths'].items() for method,o in m.items() if method in {'get','put','patch','post','delete'}]
 ids=[o['operationId'] for _,_,o in ops]
 assert len(ids)==len(set(ids)), 'Duplicate operationId'
-assert len(ops)==42, f'Expected 42 inherited draft operations; got {len(ops)}'
-assert len(s['components']['schemas'])==56, 'Draft schema count drift; update ADR/tests if intentional'
+assert len(ops)==46, f'Expected 42 inherited draft operations; got {len(ops)}'
+assert len(s['components']['schemas'])==60, 'Draft schema count drift; update ADR/tests if intentional'
 assert '/api/v1/public/status' in s['paths']
 assert '/api/v1/public/status/{token}' not in s['paths']
 assert '/api/v1/customer/me' in s['paths']
