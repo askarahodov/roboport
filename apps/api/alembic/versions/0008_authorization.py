@@ -47,17 +47,21 @@ def upgrade():
     op.execute("""
         CREATE FUNCTION protect_access_revoke() RETURNS trigger LANGUAGE plpgsql AS $body$
         BEGIN
-          IF (TG_TABLE_NAME='user_role' AND
-             (NEW.user_id,NEW.role_code,NEW.granted_at,NEW.expires_at)
-             IS DISTINCT FROM
-             (OLD.user_id,OLD.role_code,OLD.granted_at,OLD.expires_at))
-            OR (TG_TABLE_NAME='acl_entry' AND
-             (NEW.user_id,NEW.ticket_id,NEW.action,NEW.granted_at,NEW.expires_at)
-             IS DISTINCT FROM
-             (OLD.user_id,OLD.ticket_id,OLD.action,OLD.granted_at,OLD.expires_at))
-            OR (OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at)
-          THEN
-             RAISE EXCEPTION 'access grant immutable / revoke irreversible';
+          IF TG_TABLE_NAME = 'user_role' THEN
+            IF (NEW.user_id,NEW.role_code,NEW.granted_at,NEW.expires_at)
+               IS DISTINCT FROM (OLD.user_id,OLD.role_code,OLD.granted_at,OLD.expires_at) THEN
+              RAISE EXCEPTION 'role grant identity immutable';
+            END IF;
+          ELSIF TG_TABLE_NAME = 'acl_entry' THEN
+            IF (NEW.user_id,NEW.ticket_id,NEW.action,NEW.granted_at,NEW.expires_at)
+               IS DISTINCT FROM (OLD.user_id,OLD.ticket_id,OLD.action,OLD.granted_at,OLD.expires_at) THEN
+              RAISE EXCEPTION 'ACL grant identity immutable';
+            END IF;
+          ELSE
+            RAISE EXCEPTION 'unknown grant table';
+          END IF;
+          IF OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at THEN
+            RAISE EXCEPTION 'access revocation irreversible';
           END IF;
           RETURN NEW;
         END $body$;
