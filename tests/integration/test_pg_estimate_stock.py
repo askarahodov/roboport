@@ -24,6 +24,7 @@ def test_sent_estimate_lines_and_header_are_frozen():
             ("DELETE FROM estimate_line WHERE id=%s",(line,)),
             ("INSERT INTO estimate_line(id,estimate_id,description,amount_minor) VALUES (%s,%s,'hidden',100)",(uuid4(),estimate)),
             ("UPDATE estimate SET total_minor=900 WHERE id=%s",(estimate,)),
+            ("UPDATE estimate SET state='DRAFT' WHERE id=%s",(estimate,)),
         ]:
             with pytest.raises(psycopg.errors.RaiseException):
                 with conn.transaction():
@@ -48,3 +49,16 @@ def test_stock_bounds_and_estimate_nonnegative_amounts():
         with pytest.raises(psycopg.errors.CheckViolation):
             with conn.transaction():
                 conn.execute("INSERT INTO estimate(id,ticket_id,version,total_minor,currency) VALUES (%s,%s,1,-1,'RUB')",(estimate,ticket))
+
+def test_line_cannot_be_reparented_out_of_sent_estimate():
+    with psycopg.connect(DSN) as conn:
+        customer, ticket, old_estimate, fresh_estimate, line = (uuid4() for _ in range(5))
+        conn.execute("INSERT INTO customer(id,label) VALUES (%s,'transfer-block')",(customer,))
+        conn.execute("INSERT INTO service_ticket(id,customer_id) VALUES (%s,%s)",(ticket,customer))
+        for key, version in [(old_estimate,1),(fresh_estimate,2)]:
+            conn.execute("INSERT INTO estimate(id,ticket_id,version,total_minor,currency) VALUES (%s,%s,%s,500,'RUB')",(key,ticket,version))
+        conn.execute("INSERT INTO estimate_line(id,estimate_id,description,amount_minor) VALUES (%s,%s,'fixed',500)",(line,old_estimate))
+        conn.execute("UPDATE estimate SET state='SENT' WHERE id=%s",(old_estimate,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with conn.transaction():
+                conn.execute("UPDATE estimate_line SET estimate_id=%s WHERE id=%s",(fresh_estimate,line))
