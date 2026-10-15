@@ -519,3 +519,76 @@ async def dev_ticket_transition(ticket_id: str, request: Request):
                 "code":"CONFLICT","requestId":request.state.request_id,
             },headers={"Cache-Control":"no-store"})
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+
+async def _safety_mutation(request: Request, ticket_id: str, operation: str):
+    """Private synthetic reviewer workflow, same session/CSRF/Origin guarantees."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .auth_http import _origin_ok
+    from .session_service import verify_csrf
+    from .ticket_fsm import record_safety_review, release_safety_hold, TransitionConflict
+
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1"
+            or request.url.scheme != "https"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        dsn=urlsplit(raw)
+        if (dsn.scheme not in ("postgresql","postgresql+psycopg")
+                or dsn.hostname != "127.0.0.1" or dsn.port is None):
+            return not_found(request)
+        ticket=UUID(ticket_id)
+    except ValueError:
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    if not _origin_ok(request):
+        return JSONResponse(status_code=403,content={
+            "code":"FORBIDDEN","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    try:
+        payload=await request.json()
+        if (not isinstance(payload,dict) or
+                type(payload.get("expectedVersion")) is not int or
+                (operation=="review" and type(payload.get("approved")) is not bool)):
+            raise ValueError("invalid request")
+    except (ValueError,TypeError):
+        return JSONResponse(status_code=422,content={
+            "code":"INVALID_INPUT","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        if not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={
+                "code":"FORBIDDEN","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+        try:
+            if operation=="review":
+                reviewer_role=record_safety_review(
+                    conn,token,ticket,payload["expectedVersion"],payload["approved"])
+                result={"recorded":True,"role":reviewer_role}
+            else:
+                result=release_safety_hold(conn,token,ticket,payload["expectedVersion"])
+        except (TransitionConflict,psycopg.errors.UniqueViolation):
+            conn.rollback()
+            return JSONResponse(status_code=409,content={
+                "code":"CONFLICT","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@app.post("/api/v1/dev/tickets/{ticket_id}/safety-review", include_in_schema=False)
+async def dev_ticket_safety_review(ticket_id: str, request: Request):
+    return await _safety_mutation(request,ticket_id,"review")
+
+
+@app.post("/api/v1/dev/tickets/{ticket_id}/safety-release", include_in_schema=False)
+async def dev_ticket_safety_release(ticket_id: str, request: Request):
+    return await _safety_mutation(request,ticket_id,"release")
