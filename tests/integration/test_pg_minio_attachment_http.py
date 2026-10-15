@@ -12,7 +12,8 @@ from test_pg_baseline import DSN
 
 
 @pytest.mark.skipif(os.getenv('ROBOport_MINIO_ENDPOINT') != 'http://127.0.0.1:9000',
-                    reason='needs real isolated MinIO and PostgreSQL')\ndef test_real_private_http_document_bytes_then_revoke_and_quarantine(monkeypatch):
+                    reason='needs real isolated MinIO and PostgreSQL')
+def test_real_private_http_document_bytes_then_revoke_and_quarantine(monkeypatch):
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
     storage=MinioFileStorage.from_environment()
