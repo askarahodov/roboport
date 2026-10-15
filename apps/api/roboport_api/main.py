@@ -72,7 +72,7 @@ def dev_ticket_access(ticket_id: str, request: Request):
     raw_dsn = os.getenv("ROBOport_DATABASE_URL", "")
     if not raw_dsn or urlsplit(raw_dsn).hostname != "127.0.0.1":
         return not_found(request)
-    token = request.cookies.get("roboport_session")
+    token = request.cookies.get("rp_session")
     if not token:
         return JSONResponse(status_code=401, content={
             "code": "UNAUTHENTICATED", "message": "Требуется вход",
