@@ -69,7 +69,7 @@ def dev_ticket_keyset(request: Request, limit: int = 20, state: str | None = Non
     from urllib.parse import urlsplit
     from uuid import UUID
     import psycopg
-    from .ticket_read import TICKET_STATES, owned_ticket_keyset_page
+    from .ticket_read import TICKET_STATES, owned_ticket_keyset_page\n    from .keyset_cursor import decode_cursor, encode_cursor
 
     if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
         return not_found(request)
@@ -86,24 +86,17 @@ def dev_ticket_keyset(request: Request, limit: int = 20, state: str | None = Non
     }, headers={"Cache-Control":"no-store"})
     if not 1 <= limit <= 50 or (state is not None and state not in TICKET_STATES):
         return invalid()
-    stamp = ident = None
-    if before is not None:
-        try:
-            if len(before)>256:
-                return invalid()
-            payload = json.loads(base64.urlsafe_b64decode(before + "=" * (-len(before)%4)))
-            if not isinstance(payload,list) or len(payload)!=3 or payload[2]!=state:
-                return invalid()
-            stamp,ident = datetime.fromisoformat(payload[0]), UUID(payload[1])
-            if stamp.tzinfo is None:
-                return invalid()
-        except (ValueError,TypeError,KeyError,UnicodeDecodeError,OverflowError):
-            return invalid()
     token = request.cookies.get("rp_session", "")
     if not token:
         return JSONResponse(status_code=401, content={
             "code":"UNAUTHENTICATED","requestId":request.state.request_id
         },headers={"Cache-Control":"no-store"})
+    stamp = ident = None
+    if before is not None:
+        try:
+            stamp, ident = decode_cursor(before, state, token)
+        except ValueError:
+            return invalid()
     with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
         result=owned_ticket_keyset_page(conn,token,limit=limit,state=state,
                                         before_created_at=stamp,before_id=ident)
@@ -112,9 +105,7 @@ def dev_ticket_keyset(request: Request, limit: int = 20, state: str | None = Non
             "code":"UNAUTHENTICATED","requestId":request.state.request_id
         },headers={"Cache-Control":"no-store"})
     items,following=result
-    cursor=(base64.urlsafe_b64encode(json.dumps([
-        following[0].isoformat(),str(following[1]),state
-    ]).encode()).decode().rstrip("=")) if following else None
+    cursor=encode_cursor(following[0],following[1],state,token) if following else None
     return JSONResponse(content={"items":items,"nextCursor":cursor},
                         headers={"Cache-Control":"no-store"})
 
