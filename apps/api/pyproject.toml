@@ -1,0 +1,6 @@
+[project]
+name = "roboport-api"
+version = "0.1.0"
+requires-python = ">=3.13"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
