@@ -100,3 +100,38 @@ def dev_ticket_access(ticket_id: str, request: Request):
         content={"id": str(parsed), "accessible": True},
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.get("/api/v1/dev/tickets/{ticket_id}", include_in_schema=False)
+def dev_ticket_minimal_read(ticket_id: str, request: Request):
+    """Synthetic only; return strictly the UUID after DB ownership validation."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .session_lookup import session_can_read_ticket
+
+    if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
+        return not_found(request)
+    dsn = os.getenv("ROBOport_DATABASE_URL", "")
+    try:
+        parsed_dsn = urlsplit(dsn)
+        if (parsed_dsn.scheme not in ("postgresql", "postgresql+psycopg")
+            or parsed_dsn.hostname != "127.0.0.1"
+            or parsed_dsn.port is None):
+            return not_found(request)
+        ticket = UUID(ticket_id)
+    except ValueError:
+        return not_found(request)
+    token = request.cookies.get("rp_session", "")
+    if not token:
+        return JSONResponse(
+            status_code=401,
+            content={"code": "UNAUTHENTICATED", "message": "Требуется вход",
+                     "requestId": request.state.request_id},
+            headers={"Cache-Control": "no-store"},
+        )
+    with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+        if not session_can_read_ticket(conn, token, ticket):
+            return not_found(request)
+    return JSONResponse(content={"id": str(ticket)}, headers={"Cache-Control": "no-store"})
