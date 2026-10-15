@@ -99,3 +99,16 @@ test('React Router сохраняет SPA навигацию и историю �
   await expect(page.getByRole('heading', { name: 'Бренды роботов' })).toBeVisible();
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Бренды' })).toHaveAttribute('aria-current', 'page');
 });
+
+test('приёмочные скриншоты desktop/mobile и 401-заглушек', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Сервис обслуживания роботов' })).toBeVisible();
+  await page.screenshot({ path: 'test-results/roboport-home-desktop.png', fullPage: true });
+  await page.getByRole('combobox', { name: 'Тема оформления' }).selectOption('dark');
+  await page.screenshot({ path: 'test-results/roboport-home-dark.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/account');
+  await expect(page.getByRole('status')).toContainText('401 — требуется локальная авторизация');
+  await page.screenshot({ path: 'test-results/roboport-account-mobile.png', fullPage: true });
+});
