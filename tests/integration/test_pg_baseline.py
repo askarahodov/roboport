@@ -35,7 +35,7 @@ def test_ticket_owner_is_fixed_on_creation():
         conn.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)", (ticket,first))
         owner=conn.execute("SELECT customer_id FROM service_ticket WHERE id=%s",(ticket,)).fetchone()[0]
         assert owner == first
-        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        with pytest.raises(psycopg.errors.RaiseException):
             with conn.transaction():
                 conn.execute("UPDATE service_ticket SET customer_id=%s WHERE id=%s",(uuid4(),ticket))
 
