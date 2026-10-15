@@ -111,6 +111,17 @@ jobs:
           python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
           python -m alembic -c apps/api/alembic.ini upgrade head
           PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_minio_attachment_http.py
+      - name: Verify disposable dev bucket backup and restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          mc() { docker compose -f infra/dev/compose.minio.yml exec -T minio mc "$@"; }
+          printf 'synthetic-backup-restore' | mc pipe app/roboport-documents-dev/backup-probe.txt
+          mc mirror app/roboport-documents-dev /tmp/roboport-backup
+          mc rm app/roboport-documents-dev/backup-probe.txt
+          mc mirror /tmp/roboport-backup app/roboport-documents-dev
+          test "$(mc cat app/roboport-documents-dev/backup-probe.txt)" = 'synthetic-backup-restore'
+          mc rm app/roboport-documents-dev/backup-probe.txt
       - name: Tear down disposable volumes
         if: always()
         run: docker compose -f infra/dev/compose.minio.yml down -v --remove-orphans
