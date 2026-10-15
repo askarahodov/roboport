@@ -14,6 +14,23 @@ jobs:
   minio:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: roboport
+          POSTGRES_PASSWORD: roboport
+          POSTGRES_DB: roboport
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U roboport -d roboport"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ROBOport_DATABASE_URL: postgresql+psycopg://roboport:roboport@127.0.0.1:5432/roboport
+      PYTHONPATH: apps/api
     steps:
       - uses: actions/checkout@v4
       - name: Generate disposable credentials
@@ -85,6 +102,15 @@ jobs:
           set -euo pipefail
           python -m pip install --quiet minio==7.2.20 pytest==9.1.1
           PYTHONPATH=apps/api python -m pytest -q tests/integration/test_minio_storage.py
+      - name: Run real PostgreSQL and MinIO HTTP attachment ACL integration
+        env:
+          ROBOport_MINIO_ENDPOINT: http://127.0.0.1:9000
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+          python -m alembic -c apps/api/alembic.ini upgrade head
+          PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_minio_attachment_http.py
       - name: Tear down disposable volumes
         if: always()
         run: docker compose -f infra/dev/compose.minio.yml down -v --remove-orphans
