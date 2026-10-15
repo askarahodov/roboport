@@ -1,0 +1,2 @@
+# Reporting & repository safety
+This repository is public. **Never** commit secret keys, credentials, personal data, supplier contacts, internal IPs, customer documents, real serial numbers, unapproved financial data, commercial terms or production URLs. Report security vulnerabilities privately to maintainers; do not open public issues containing exploit material or PII. All examples and tests must be synthetic. Any leaking commit requires immediate revocation and incident handling, not only git history rewrite.
