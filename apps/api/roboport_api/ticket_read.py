@@ -88,20 +88,29 @@ def owned_ticket_keyset_page(
         or not isinstance(before_id, UUID)
     ):
         raise ValueError("invalid cursor")
+    # Start from a valid session and LEFT JOIN visible tickets. This preserves
+    # the difference between a revoked session (zero rows) and an active
+    # session with no visible tickets (one row with NULL ticket fields).
+    # All authorization checks and ticket reads happen in ONE statement.
     rows = conn.execute(
         """SELECT DISTINCT t.id,t.state,t.version,t.created_at
            FROM user_session s
            JOIN app_user u ON u.id=s.user_id AND u.status='ACTIVE'
-           JOIN account_customer_link l ON l.user_id=u.id AND l.revoked_at IS NULL
-           JOIN service_ticket t ON t.customer_id=l.customer_id
-           WHERE s.token_hash=%s AND s.revoked_at IS NULL
-             AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
+           LEFT JOIN account_customer_link l
+             ON l.user_id=u.id AND l.revoked_at IS NULL
+           LEFT JOIN service_ticket t
+             ON t.customer_id=l.customer_id
              AND (%s::text IS NULL OR t.state=%s)
              AND (%s::timestamptz IS NULL OR
                   (t.created_at,t.id)<(%s::timestamptz,%s::uuid))
-           ORDER BY t.created_at DESC,t.id DESC LIMIT %s""",
-        (token_digest(token),state,state,before_created_at,before_created_at,before_id,limit+1),
+           WHERE s.token_hash=%s AND s.revoked_at IS NULL
+             AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
+           ORDER BY t.created_at DESC NULLS LAST,t.id DESC NULLS LAST LIMIT %s""",
+        (state,state,before_created_at,before_created_at,before_id,
+         token_digest(token),limit+1),
     ).fetchall()
-    visible=rows[:limit]
+    if not rows:
+        return None
+    visible=[row for row in rows if row[0] is not None][:limit]
     next_cursor=(visible[-1][3],visible[-1][0]) if len(rows)>limit else None
     return ([{"id":str(v[0]),"state":v[1],"version":v[2]} for v in visible],next_cursor)
