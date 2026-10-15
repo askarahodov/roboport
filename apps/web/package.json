@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "generate:api": "openapi-typescript ../../contracts/openapi.yaml -o src/shared/api/schema.d.ts"
   },
   "dependencies": {
     "react": "19.2.0",
@@ -16,6 +17,7 @@
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "typescript": "5.9.3",
-    "vite": "7.1.12"
+    "vite": "7.1.12",
+    "openapi-typescript": "7.10.1"
   }
 }
