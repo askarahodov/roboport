@@ -29,3 +29,13 @@
 4. **Открыто:** точные CHECK, FK, nullable, последовательности смет, SKU compatibility, audit/outbox/idempotency locking. Не отмечать #17 выполненной до подтверждения каждой связи.
 
 **Запрет:** не использовать живые данные клиентов, не применять файлы `db/legacy_drafts` к PostgreSQL и не закрывать #11/#17 из-за зелёных статических тестов.
+
+## PostgreSQL 17 checkpoint — ограниченная baseline 0001_core
+
+**Проверено на disposable PostgreSQL 17 в GitHub Actions, а не на реальной БД.**
+- `apps/api/alembic/versions/0001_core.py`: новая обратимая миграция customer, robot_device, service_ticket, ticket_state_event, audit_event. Не является полной схемой проекта и не использует пустые legacy SQL.
+- `alembic upgrade head → downgrade base → upgrade head` проходит в CI.
+- Проверены настоящими SQL-запросами: отказ по отсутствующему customer FK, отказ неизвестному Ticket.state, отказ version=0; trigger запрещает менять заявителя существующей заявки; второй trigger запрещает UPDATE/DELETE audit_event.
+- БД создаётся как service container `postgres:17` только на GitHub runner, строка подключения задаётся обязательным `ROBOport_DATABASE_URL`.
+
+**Не реализовано и не заявлено:** ограничения concurrent owner, frozen SENT estimate, stock, idempotency ledger, downgrade с реальными данными, `pg_dump/pg_restore`, полноценный runtime FSM/ACL и независимый DBA review. #17/#11 остаются открытыми. Нельзя развёртывать baseline как production schema.
