@@ -1,5 +1,6 @@
 """Explicit loopback-only synthetic authentication adapter. Not for production."""
 import os
+import hashlib
 from urllib.parse import urlsplit
 import psycopg
 from fastapi import APIRouter, Request
@@ -44,14 +45,29 @@ def login(credentials: Credentials, request: Request):
         return _error(request,403)
     if not _origin_ok(request):
         return _error(request,403)
+    normalized=credentials.login.strip().lower()
+    login_hash=hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     with psycopg.connect(dsn,autocommit=True) as conn:
+        failures=conn.execute("""
+            INSERT INTO auth_login_throttle(login_hash,failures) VALUES (%s,1)
+            ON CONFLICT(login_hash) DO UPDATE SET
+              failures=CASE WHEN auth_login_throttle.window_started_at < now()-interval '15 minutes'
+                THEN 1 ELSE auth_login_throttle.failures+1 END,
+              window_started_at=CASE WHEN auth_login_throttle.window_started_at < now()-interval '15 minutes'
+                THEN now() ELSE auth_login_throttle.window_started_at END
+            RETURNING failures
+        """,(login_hash,)).fetchone()[0]
+        if failures>5:
+            return JSONResponse(status_code=429,content={"code":"RATE_LIMITED","message":"Повторите позже","requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
         row=conn.execute("""SELECT u.id,c.password_hash FROM app_user u
             JOIN local_credential c ON c.user_id=u.id
             WHERE u.normalized_login=%s AND u.status='ACTIVE' AND c.must_change_password=false""",
-            (credentials.login.strip().lower(),)).fetchone()
+            (normalized,)).fetchone()
         if row is None or not verify_password(credentials.password,row[1]):
             return _error(request,401)
         tokens=issue_session(conn,row[0])
+        if tokens is not None:
+            conn.execute("DELETE FROM auth_login_throttle WHERE login_hash=%s",(login_hash,))
     if tokens is None:
         return _error(request,401)
     response=JSONResponse(content={"csrfToken":tokens[1]},headers={"Cache-Control":"no-store"})
