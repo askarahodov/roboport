@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from .passwords import verify_password
+from .passwords import verify_password, hash_password
 from .session_service import issue_session, revoke_session, verify_csrf
 from .session_lookup import session_subject
 from .session_cookie import set_session_cookie, clear_session_cookie
@@ -113,3 +113,36 @@ def me(request: Request):
     if subject is None:
         return _error(request,401)
     return JSONResponse(content={"subjectId":str(subject)},headers={"Cache-Control":"no-store"})
+
+
+class PasswordChange(BaseModel):
+    oldPassword: str = Field(min_length=1, max_length=1024)
+    newPassword: str = Field(min_length=12, max_length=1024)
+
+
+@router.post("/api/v1/auth/change-password")
+async def change_password(request: Request):
+    dsn=_dsn(request)
+    if dsn is None:
+        return _error(request,403)
+    with psycopg.connect(dsn,autocommit=True) as conn:
+        if not _mutation_ok(request,conn):
+            return _error(request,403)
+        try:
+            payload=PasswordChange.model_validate(await request.json())
+        except (ValueError, ValidationError):
+            return JSONResponse(status_code=422,content={"code":"INVALID_INPUT","message":"Некорректный запрос","requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        token=request.cookies.get("rp_session","")
+        with conn.transaction():
+            subject=session_subject(conn,token)
+            if subject is None:
+                return _error(request,401)
+            row=conn.execute("SELECT password_hash FROM local_credential WHERE user_id=%s FOR UPDATE",(subject,)).fetchone()
+            if row is None or not verify_password(payload.oldPassword,row[0]) or payload.oldPassword==payload.newPassword:
+                return _error(request,403)
+            conn.execute("UPDATE local_credential SET password_hash=%s,must_change_password=false,updated_at=now() WHERE user_id=%s",(hash_password(payload.newPassword),subject))
+            conn.execute("UPDATE app_user SET password_changed_at=now() WHERE id=%s",(subject,))
+            conn.execute("UPDATE user_session SET revoked_at=now() WHERE user_id=%s AND revoked_at IS NULL",(subject,))
+    response=JSONResponse(content={"changed":True},headers={"Cache-Control":"no-store"})
+    clear_session_cookie(response)
+    return response
