@@ -35,8 +35,6 @@ def test_estimate_acl_status_latest_and_revoke_bundle(monkeypatch):
         # DRAFT documents hidden even when a CLIENT has customer link.
         assert not authorize_estimate(db,tokens[0],"estimate.read",estimate1)
         assert not authorize_estimate(db,tokens[0],"estimate.approve",estimate2)
-        db.commit()
-        assert http.get(f"/api/v1/dev/estimates/{estimate2}/access").status_code==404
         db.execute("UPDATE estimate SET state='SENT' WHERE id=%s",(estimate2,))
         assert authorize_estimate(db,tokens[0],"estimate.read",estimate2)
         assert authorize_estimate(db,tokens[0],"estimate.approve",estimate2)
@@ -58,3 +56,5 @@ def test_estimate_acl_status_latest_and_revoke_bundle(monkeypatch):
         db.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(client,))
         assert not authorize_estimate(db,tokens[0],"estimate.read",estimate2)
         assert not authorize_estimate(db,tokens[0],"estimate.approve",estimate2)
+        db.commit()
+        assert http.get(f"/api/v1/dev/estimates/{estimate2}/access").status_code==404
