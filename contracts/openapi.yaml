@@ -1,7 +1,7 @@
 openapi: 3.1.2
 info:
   title: ROBOport — API contract (draft, synthetic only)
-  version: 0.13.0-draft
+  version: 0.14.0-draft
   description: Проектный контракт. Нет серверной реализации, не собирать реальные клиентские данные. Методы и статусы
     подлежат независимому ревью. Маркеры x-roboport-roles/guards — проектная документация; безопасность требует реализации.
     Статус-токен передаётся только в заголовке. Полноценный защищённый клиентский кабинет — обязательная часть MVP; API
@@ -277,6 +277,27 @@ components:
           type: string
         state:
           type: string
+          enum:
+          - DRAFT
+          - SUBMITTED
+          - TRIAGE
+          - AWAITING_DELIVERY
+          - RECEIVED
+          - DIAGNOSING
+          - SAFETY_HOLD
+          - ESTIMATE_DRAFT
+          - AWAITING_APPROVAL
+          - APPROVED
+          - DECLINED
+          - AWAITING_PARTS
+          - REPAIRING
+          - QC_PENDING
+          - QC_FAILED
+          - READY_FOR_HANDOVER
+          - COMPLETED
+          - CANCELLED
+          - UNREPAIRABLE
+          - WARRANTY_ROUTE
         version:
           type: integer
           minimum: 1
