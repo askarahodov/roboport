@@ -1,0 +1,90 @@
+name: minio-dev-integration
+
+on:
+  pull_request:
+    paths:
+      - "infra/dev/**"
+      - ".github/workflows/minio-dev.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  minio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate disposable credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_KEY="rp$(openssl rand -hex 12)"
+          APP_SECRET="$(openssl rand -hex 24)"
+          ROOT_SECRET="$(openssl rand -hex 24)"
+          echo "::add-mask::$ROOT_SECRET"
+          echo "::add-mask::$APP_KEY"
+          echo "::add-mask::$APP_SECRET"
+          printf 'MINIO_ROOT_USER=roboportroot\nMINIO_ROOT_PASSWORD=%s\n' "$ROOT_SECRET" > infra/dev/.env.local
+          chmod 600 infra/dev/.env.local
+          {
+            echo "MINIO_ROOT_USER=roboportroot"
+            echo "MINIO_ROOT_PASSWORD=$ROOT_SECRET"
+            echo "MINIO_APP_ACCESS_KEY=$APP_KEY"
+            echo "MINIO_APP_SECRET_KEY=$APP_SECRET"
+          } >> "$GITHUB_ENV"
+      - name: Start loopback-only MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f infra/dev/compose.minio.yml up -d
+          docker compose -f infra/dev/compose.minio.yml ps
+          if docker compose -f infra/dev/compose.minio.yml ps --format json | grep -Eq '"0\\.0\\.0\\.0:900[01]"'; then
+            echo 'public binding rejected' >&2
+            exit 1
+          fi
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker compose -f infra/dev/compose.minio.yml logs --tail 60
+          exit 1
+      - name: Verify bucket policy and S3 operations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mc() { docker compose -f infra/dev/compose.minio.yml exec -T minio mc "$@"; }
+          mc alias set root http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+          mc mb -p root/roboport-documents-dev
+          mc mb -p root/roboport-quarantine-dev
+          mc anonymous set none root/roboport-documents-dev
+          mc anonymous set none root/roboport-quarantine-dev
+          mc admin user add root "$MINIO_APP_ACCESS_KEY" "$MINIO_APP_SECRET_KEY"
+          cat infra/dev/minio-app-policy.json | mc admin policy create root roboport-app-readwrite /dev/stdin
+          mc admin policy attach root roboport-app-readwrite --user "$MINIO_APP_ACCESS_KEY"
+          mc alias set app http://127.0.0.1:9000 "$MINIO_APP_ACCESS_KEY" "$MINIO_APP_SECRET_KEY"
+          printf 'synthetic-robot-object-one' | mc pipe app/roboport-documents-dev/test-one.txt
+          printf 'synthetic-robot-object-two' | mc pipe app/roboport-documents-dev/test-two.txt
+          test "$(mc cat app/roboport-documents-dev/test-one.txt)" = 'synthetic-robot-object-one'
+          test "$(mc cat app/roboport-documents-dev/test-two.txt)" = 'synthetic-robot-object-two'
+          for url in \
+            'http://127.0.0.1:9000/roboport-documents-dev/test-one.txt' \
+            'http://127.0.0.1:9000/roboport-documents-dev/?list-type=2' \
+            'http://127.0.0.1:9000/roboport-quarantine-dev/?list-type=2'; do
+            result="$(curl -sS -o /dev/null -w '%{http_code}' "$url")"
+            if [ "$result" != 403 ]; then echo "anonymous access was $result" >&2; exit 1; fi
+          done
+          mc rm app/roboport-documents-dev/test-one.txt
+          mc rm app/roboport-documents-dev/test-two.txt
+      - name: Verify actual Python FileStorage against MinIO
+        env:
+          ROBOport_MINIO_ENDPOINT: http://127.0.0.1:9000
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet minio==7.2.20 pytest==9.1.1
+          PYTHONPATH=apps/api python -m pytest -q tests/integration/test_minio_storage.py
+      - name: Tear down disposable volumes
+        if: always()
+        run: docker compose -f infra/dev/compose.minio.yml down -v --remove-orphans
