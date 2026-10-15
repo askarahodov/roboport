@@ -63,3 +63,11 @@ def test_plain_http_cannot_enable_cookie_login(monkeypatch):
         headers={"Origin":"http://127.0.0.1"})
     assert response.status_code==403
     assert "set-cookie" not in response.headers
+
+
+def test_change_password_no_cookie_is_forbidden(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    client=TestClient(app,base_url=ORIGIN)
+    response=client.post("/api/v1/auth/change-password",json={},headers={"Origin":ORIGIN})
+    assert response.status_code==403
