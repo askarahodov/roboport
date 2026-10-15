@@ -839,7 +839,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             reference: string;
-            state: string;
+            /** @enum {string} */
+            state: "DRAFT" | "SUBMITTED" | "TRIAGE" | "AWAITING_DELIVERY" | "RECEIVED" | "DIAGNOSING" | "SAFETY_HOLD" | "ESTIMATE_DRAFT" | "AWAITING_APPROVAL" | "APPROVED" | "DECLINED" | "AWAITING_PARTS" | "REPAIRING" | "QC_PENDING" | "QC_FAILED" | "READY_FOR_HANDOVER" | "COMPLETED" | "CANCELLED" | "UNREPAIRABLE" | "WARRANTY_ROUTE";
             version: number;
             /** Format: uuid */
             modelVariantId?: string;
