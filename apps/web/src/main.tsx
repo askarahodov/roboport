@@ -54,7 +54,19 @@ function Catalog({ kind }: { kind: 'brands' | 'models' }) {
 }
 
 function App() {
-  const [theme, setTheme] = React.useState<Theme>('auto');
+  const [theme, setTheme] = React.useState<Theme>(() => {
+    try {
+      const stored = window.localStorage.getItem('roboport-theme');
+      return stored === 'light' || stored === 'dark' || stored === 'auto' ? stored : 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
+  React.useEffect(() => {
+    try { window.localStorage.setItem('roboport-theme', theme); } catch {
+      // Сайт работает и при запрещённом browser storage; никаких секретов здесь нет.
+    }
+  }, [theme]);
   const [systemDark, setSystemDark] = React.useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   React.useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
