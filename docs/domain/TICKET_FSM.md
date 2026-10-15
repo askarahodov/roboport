@@ -4,7 +4,7 @@
 
 `DRAFT`, `SUBMITTED`, `TRIAGE`, `AWAITING_DELIVERY`, `RECEIVED`, `DIAGNOSING`, `SAFETY_HOLD`, `ESTIMATE_DRAFT`, `AWAITING_APPROVAL`, `APPROVED`, `DECLINED`, `AWAITING_PARTS`, `REPAIRING`, `QC_PENDING`, `QC_FAILED`, `READY_FOR_HANDOVER`, `COMPLETED`, `CANCELLED`, `UNREPAIRABLE`, `WARRANTY_ROUTE`.
 
-Имена должны быть **сопоставлены с проектными enum SQL и OpenAPI в #17**. Пока это не означает, что все переходы реализованы.
+20 имён теперь закреплены в OpenAPI `Ticket.state` и автоматически сверяются с документом. Статическая разрешённая карта переходов — `docs/domain/TICKET_TRANSITIONS.json`; она намеренно закрыта по умолчанию для исключительных/опасных случаев и НЕ является работающим серверным FSM. SQL CHECK и транзакционные guards ещё предстоит реализовать.
 
 ## Переходы и запреты
 
