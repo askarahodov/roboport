@@ -25,7 +25,9 @@ def decode_cursor(cursor: str, state: str | None, token: str) -> tuple[datetime,
         raise ValueError("invalid cursor")
     try:
         blob = base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
-        if len(blob) <= 32:\n            raise ValueError("short cursor")\n        raw, signature = blob[:-32], blob[-32:]
+        if len(blob) <= 32:
+            raise ValueError("short cursor")
+        raw, signature = blob[:-32], blob[-32:]
         expected = hmac.new(_KEY, token.encode() + b":" + raw, hashlib.sha256).digest()
         if not hmac.compare_digest(signature, expected):
             raise ValueError("invalid signature")
