@@ -392,7 +392,13 @@ async def dev_upload_attachment(ticket_id: str, request: Request):
             return JSONResponse(status_code=403,content={
                 "code":"FORBIDDEN","requestId":request.state.request_id,
             },headers={"Cache-Control":"no-store"})
-        if authorize_attachment_upload(conn,request.cookies.get("rp_session",""),ticket) is None:
+        actor=authorize_attachment_upload(conn,request.cookies.get("rp_session",""),ticket)
+        from uuid import uuid4
+        conn.execute(
+            "INSERT INTO authorization_audit(id,actor_id,action,outcome) VALUES(%s,%s,'attachment.write',%s)",
+            (uuid4(),actor,'ALLOW' if actor else 'DENY'),
+        )
+        if actor is None:
             return not_found(request)
         try:
             attachment_id=create_attachment(conn,MinioFileStorage.from_environment(),
