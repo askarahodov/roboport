@@ -28,3 +28,12 @@ def test_design_sources_parse_and_preserve_logo_paths():
         assert len(paths)>=3
     tokens=json.loads((BASE/'design/tokens/theme.json').read_text())
     assert tokens
+
+
+def test_web_uses_original_c_logo_geometry():
+    src=(BASE/'apps/web/src/main.tsx').read_text()
+    assert 'logo-light.svg' in src and 'logo-dark.svg' in src
+    for mode in ('light','dark'):
+        canon=(BASE/'design/brand'/f'symbol-{mode}.svg').read_bytes()
+        embedded=(BASE/'apps/web/public'/f'logo-{mode}.svg').read_bytes()
+        assert embedded==canon
