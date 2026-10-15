@@ -86,12 +86,19 @@ def test_csrf_protected_upload_download_and_revoke(monkeypatch):
     url=f"/api/v1/dev/tickets/{ticket}/attachments"
     data=b"synthetic-upload-through-http"
     headers={"Content-Type":"text/plain","Origin":"https://127.0.0.1",
-             "X-CSRF-Token":csrf}
+             "X-CSRF-Token":csrf,"Idempotency-Key":"synthetic-upload-key"}
     assert client.post(url,content=data,headers={k:v for k,v in headers.items()
                   if k!="X-CSRF-Token"}).status_code==403
     success=client.post(url,content=data,headers=headers)
     assert success.status_code==201,success.text
     attachment_id=success.json()["id"]
+    replay=client.post(url,content=data,headers=headers)
+    assert replay.status_code==201 and replay.json()["id"]==attachment_id
+    conflict=client.post(url,content=b"different bytes",headers=headers)
+    assert conflict.status_code==409
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM attachment_upload_dedupe WHERE attachment_id=%s",
+                          (attachment_id,)).fetchone()[0]==1
     read=f"/api/v1/dev/attachments/{attachment_id}/content"
     result=client.get(read)
     assert result.status_code==200,result.text
