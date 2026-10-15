@@ -198,3 +198,50 @@ def test_independent_safety_expert_release_and_revoke():
             release_safety_hold(db,tokens[1],ticket,1)
         assert db.execute("SELECT count(*) FROM ticket_state_event WHERE ticket_id=%s",
                           (ticket,)).fetchone()[0]==1
+
+
+def test_http_safety_review_requires_two_independent_staff():
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    from pytest import MonkeyPatch
+    with MonkeyPatch.context() as patch:
+        patch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
+        patch.setenv("ROBOport_DATABASE_URL",DSN)
+        users=[uuid4(),uuid4()]
+        tokens=[new_token(),new_token()]
+        csrf=[new_token(),new_token()]
+        ticket,customer=uuid4(),uuid4()
+        now=datetime.now(timezone.utc)
+        with psycopg.connect(DSN) as db:
+            db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
+            db.execute("INSERT INTO service_ticket(id,customer_id,state) VALUES(%s,%s,'SAFETY_HOLD')",
+                       (ticket,customer))
+            for i,(user,role,action) in enumerate(zip(users,("ENGINEER","MANAGER"),
+                                                       ("ticket.diagnose","ticket.manage"))):
+                db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
+                           (user,"safety-http-"+user.hex))
+                db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+                              VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+                           (uuid4(),user,token_digest(tokens[i]),token_digest(csrf[i]),now,
+                            now+timedelta(minutes=30),now+timedelta(hours=4)))
+                db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",
+                           (uuid4(),user,role))
+                db.execute("INSERT INTO acl_entry(id,user_id,ticket_id,action) VALUES(%s,%s,%s,%s)",
+                           (uuid4(),user,ticket,action))
+        client=TestClient(app,base_url="https://127.0.0.1")
+        review=f"/api/v1/dev/tickets/{ticket}/safety-review"
+        release=f"/api/v1/dev/tickets/{ticket}/safety-release"
+        payload={"expectedVersion":1}
+        client.cookies.set("rp_session",tokens[1])
+        headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[1]}
+        assert client.post(release,json=payload,headers=headers).status_code==409
+        assert client.post(review,json={**payload,"approved":True},headers=headers).status_code==200
+        assert client.post(release,json=payload,headers=headers).status_code==409
+        client.cookies.clear()
+        client.cookies.set("rp_session",tokens[0])
+        eng_headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[0]}
+        assert client.post(review,json={**payload,"approved":True},headers=eng_headers).status_code==200
+        client.cookies.clear()
+        client.cookies.set("rp_session",tokens[1])
+        assert client.post(release,json=payload,headers=headers).status_code==200
+        assert client.post(release,json=payload,headers=headers).status_code==409
