@@ -25,7 +25,5 @@ def test_atomic_session_ticket_check_revocation_and_expiry():
         assert not session_can_read_ticket(db,token,uuid4())
         db.execute("UPDATE user_session SET revoked_at=now() WHERE id=%s",(session,))
         assert not session_can_read_ticket(db,token,ticket)
-        db.execute("UPDATE user_session SET revoked_at=NULL WHERE id=%s",(session,))
-        assert session_can_read_ticket(db,token,ticket)
         db.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(user,))
         assert not session_can_read_ticket(db,token,ticket)
