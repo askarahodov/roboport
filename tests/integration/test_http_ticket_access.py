@@ -32,7 +32,7 @@ def test_http_ticket_probe_denies_spoofing_and_revocations(monkeypatch):
     client=TestClient(app)
     address=f"/api/v1/dev/tickets/{ticket_a}/access"
     assert client.get(address,headers={"X-User-ID":str(user_a)}).status_code==401
-    client.cookies.set("roboport_session",token)
+    client.cookies.set("rp_session",token)
     ok=client.get(address)
     assert ok.status_code==200 and ok.json()=={"id":str(ticket_a),"accessible":True}
     assert ok.headers["cache-control"]=="no-store"
