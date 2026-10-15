@@ -69,7 +69,8 @@ def dev_ticket_keyset(request: Request, limit: int = 20, state: str | None = Non
     from urllib.parse import urlsplit
     from uuid import UUID
     import psycopg
-    from .ticket_read import TICKET_STATES, owned_ticket_keyset_page\n    from .keyset_cursor import decode_cursor, encode_cursor
+    from .ticket_read import TICKET_STATES, owned_ticket_keyset_page
+    from .keyset_cursor import decode_cursor, encode_cursor
 
     if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
         return not_found(request)
