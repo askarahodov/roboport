@@ -37,3 +37,30 @@ def test_draft_quote_cannot_be_approved():
         with pytest.raises(psycopg.errors.RaiseException,match="only SENT"):
             with conn.transaction():
                 conn.execute("INSERT INTO estimate_approval(id,estimate_id,actor_id,decision) VALUES (%s,%s,%s,'APPROVED')",(uuid4(),quote,actor))
+
+
+def test_concurrent_approval_records_exactly_one_decision():
+    import threading
+
+    customer,ticket,quote,actor=(uuid4() for _ in range(4))
+    with psycopg.connect(DSN) as conn:
+        conn.execute("INSERT INTO customer(id,label) VALUES (%s,'parallel approval')",(customer,))
+        conn.execute("INSERT INTO service_ticket(id,customer_id) VALUES (%s,%s)",(ticket,customer))
+        conn.execute("INSERT INTO estimate(id,ticket_id,version,state,total_minor,currency) VALUES (%s,%s,1,'SENT',100,'RUB')",(quote,ticket))
+    barrier=threading.Barrier(2)
+    results=[]
+    def attempt():
+        try:
+            with psycopg.connect(DSN) as conn:
+                barrier.wait(timeout=15)
+                conn.execute("INSERT INTO estimate_approval(id,estimate_id,actor_id,decision) VALUES (%s,%s,%s,'APPROVED')",(uuid4(),quote,actor))
+            results.append("ok")
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
+            results.append("rejected")
+    workers=[threading.Thread(target=attempt) for _ in range(2)]
+    for w in workers: w.start()
+    for w in workers: w.join(timeout=20)
+    assert all(not w.is_alive() for w in workers)
+    assert sorted(results) == ["ok","rejected"], results
+    with psycopg.connect(DSN) as conn:
+        assert conn.execute("SELECT count(*) FROM estimate_approval WHERE estimate_id=%s",(quote,)).fetchone()[0] == 1
