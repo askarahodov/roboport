@@ -13,8 +13,8 @@ def test_technical_spec_is_substantive_and_sanitized():
 def test_contract_draft_inventory_and_public_token_header():
     spec=yaml.safe_load((BASE/'contracts/openapi.yaml').read_text())
     ops=[(path,m,item) for path,entry in spec['paths'].items() for m,item in entry.items() if m in ('get','post','patch','delete','put')]
-    assert len(ops)==42
-    assert len(spec['components']['schemas'])==56
+    assert len(ops)==46
+    assert len(spec['components']['schemas'])==60
     assert len({item['operationId'] for _,_,item in ops})==len(ops)
     assert spec['components']['securitySchemes']['localSession']['in']=='cookie'
     assert 'staffBearer' not in spec['components']['securitySchemes']
