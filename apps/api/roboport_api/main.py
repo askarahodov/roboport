@@ -135,3 +135,36 @@ def dev_ticket_minimal_read(ticket_id: str, request: Request):
         if not session_can_read_ticket(conn, token, ticket):
             return not_found(request)
     return JSONResponse(content={"id": str(ticket)}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/v1/dev/tickets/{ticket_id}/state", include_in_schema=False)
+def dev_ticket_state(ticket_id: str, request: Request):
+    """Opt-in read-only status: no PII and no production route."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .ticket_read import owned_ticket_state
+
+    if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
+        return not_found(request)
+    raw = os.getenv("ROBOport_DATABASE_URL", "")
+    try:
+        url = urlsplit(raw)
+        if (url.scheme not in ("postgresql", "postgresql+psycopg")
+                or url.hostname != "127.0.0.1" or url.port is None):
+            return not_found(request)
+        ticket = UUID(ticket_id)
+    except ValueError:
+        return not_found(request)
+    token = request.cookies.get("rp_session", "")
+    if not token:
+        return JSONResponse(status_code=401, content={
+            "code": "UNAUTHENTICATED", "message": "Требуется вход",
+            "requestId": request.state.request_id,
+        }, headers={"Cache-Control": "no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+        result = owned_ticket_state(conn, token, ticket)
+    if result is None:
+        return not_found(request)
+    return JSONResponse(content=result, headers={"Cache-Control": "no-store"})
