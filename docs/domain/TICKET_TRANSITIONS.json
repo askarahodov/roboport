@@ -1,0 +1,59 @@
+{
+  "status": "draft-contract-only",
+  "notes": "Только статический перечень без выполнения переходов; guards RBAC/ACL, version, safety и QC проверяются сервером после #11/#19.",
+  "transitions": {
+    "DRAFT": [
+      "SUBMITTED"
+    ],
+    "SUBMITTED": [
+      "TRIAGE"
+    ],
+    "TRIAGE": [
+      "AWAITING_DELIVERY"
+    ],
+    "AWAITING_DELIVERY": [
+      "RECEIVED"
+    ],
+    "RECEIVED": [
+      "DIAGNOSING"
+    ],
+    "DIAGNOSING": [
+      "SAFETY_HOLD",
+      "ESTIMATE_DRAFT"
+    ],
+    "SAFETY_HOLD": [],
+    "ESTIMATE_DRAFT": [
+      "AWAITING_APPROVAL"
+    ],
+    "AWAITING_APPROVAL": [
+      "APPROVED",
+      "DECLINED"
+    ],
+    "APPROVED": [
+      "AWAITING_PARTS",
+      "REPAIRING"
+    ],
+    "DECLINED": [],
+    "AWAITING_PARTS": [
+      "REPAIRING"
+    ],
+    "REPAIRING": [
+      "QC_PENDING"
+    ],
+    "QC_PENDING": [
+      "QC_FAILED",
+      "READY_FOR_HANDOVER"
+    ],
+    "QC_FAILED": [
+      "REPAIRING"
+    ],
+    "READY_FOR_HANDOVER": [
+      "COMPLETED"
+    ],
+    "COMPLETED": [],
+    "CANCELLED": [],
+    "UNREPAIRABLE": [],
+    "WARRANTY_ROUTE": []
+  },
+  "exceptions": "CANCELLED, UNREPAIRABLE, WARRANTY_ROUTE требуют отдельных явно охраняемых действий и ADR; автоматические пути к ним запрещены. SAFETY_HOLD не разрешается без ручного экспертного разблокирования."
+}
