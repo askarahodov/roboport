@@ -1,0 +1,1 @@
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif}.app{min-height:100vh;background:#f5fbfb;color:#12343b;padding:2rem}.app.dark{background:#101e22;color:#f5fbfb}header{display:flex;align-items:center;gap:1rem}header button{margin-left:auto;padding:.6rem 1rem}section{max-width:48rem;margin:10vh auto}h1{font-size:clamp(2rem,5vw,4rem)}p{line-height:1.6}
