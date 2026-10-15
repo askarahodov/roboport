@@ -461,3 +461,61 @@ def dev_estimate_access(estimate_id: str, request: Request):
         return not_found(request)
     return JSONResponse(content={"id":str(ident),"accessible":True},
                         headers={"Cache-Control":"no-store"})
+
+
+@app.post("/api/v1/dev/tickets/{ticket_id}/transition", include_in_schema=False)
+async def dev_ticket_transition(ticket_id: str, request: Request):
+    """Explicit guarded FSM mutation; never accepts an arbitrary status PATCH."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .auth_http import _origin_ok
+    from .session_service import verify_csrf
+    from .ticket_fsm import transition_ticket, TransitionConflict
+
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1"
+            or request.url.scheme != "https"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        target=urlsplit(raw)
+        if (target.scheme not in ("postgresql","postgresql+psycopg")
+                or target.hostname != "127.0.0.1" or target.port is None):
+            return not_found(request)
+        ticket=UUID(ticket_id)
+    except ValueError:
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    if not _origin_ok(request):
+        return JSONResponse(status_code=403,content={
+            "code":"FORBIDDEN","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    try:
+        payload=await request.json()
+        if (not isinstance(payload,dict) or
+                not isinstance(payload.get("toState"),str) or
+                type(payload.get("expectedVersion")) is not int):
+            raise ValueError("invalid payload")
+    except (ValueError,TypeError):
+        return JSONResponse(status_code=422,content={
+            "code":"INVALID_INPUT","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        if not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={
+                "code":"FORBIDDEN","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+        try:
+            result=transition_ticket(conn,token,ticket,
+                                     payload["toState"],payload["expectedVersion"])
+        except TransitionConflict:
+            return JSONResponse(status_code=409,content={
+                "code":"CONFLICT","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
