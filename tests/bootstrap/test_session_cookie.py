@@ -10,7 +10,7 @@ def test_session_cookie_has_secure_server_only_attributes():
     raw=response.headers["set-cookie"]
     for item in ("HttpOnly", "Secure", "SameSite=lax", "Max-Age=43200", "Path=/"):
         assert item.lower() in raw.lower()
-    assert raw.startswith("roboport_session=synthetic-token;")
+    assert raw.startswith("rp_session=synthetic-token;")
 
 
 def test_plain_http_cookie_issue_is_explicitly_rejected():
@@ -21,5 +21,5 @@ def test_plain_http_cookie_issue_is_explicitly_rejected():
 def test_logout_cookie_clears_same_name_and_path():
     response=Response()
     clear_session_cookie(response)
-    assert "roboport_session=" in response.headers["set-cookie"]
+    assert "rp_session=" in response.headers["set-cookie"]
     assert "Max-Age=0" in response.headers["set-cookie"]
