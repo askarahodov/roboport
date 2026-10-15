@@ -21,21 +21,27 @@ def encode_cursor(stamp: datetime, ticket: UUID, state: str | None, token: str) 
 
 
 def decode_cursor(cursor: str, state: str | None, token: str) -> tuple[datetime, UUID]:
-    if not isinstance(cursor, str) or not cursor or len(cursor) > 256:
+    # Reject alternate textual encodings for the same signed bytes and oversized input.
+    # The cursor is a server-issued opaque value, not arbitrary caller JSON.
+    if (not isinstance(cursor, str) or not cursor or len(cursor) > 256
+            or not isinstance(token, str) or not token):
         raise ValueError("invalid cursor")
     try:
         blob = base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
-        if len(blob) <= 32:
-            raise ValueError("short cursor")
+        if (base64.urlsafe_b64encode(blob).decode().rstrip("=") != cursor
+                or len(blob) <= 32):
+            raise ValueError("noncanonical or short cursor")
         raw, signature = blob[:-32], blob[-32:]
         expected = hmac.new(_KEY, token.encode() + b":" + raw, hashlib.sha256).digest()
         if not hmac.compare_digest(signature, expected):
             raise ValueError("invalid signature")
         data = json.loads(raw)
-        if not isinstance(data, list) or len(data) != 3 or data[2] != state:
-            raise ValueError("invalid state")
+        if (not isinstance(data, list) or len(data) != 3
+                or data[2] != state or not isinstance(data[0], str)
+                or not isinstance(data[1], str)):
+            raise ValueError("invalid cursor payload")
         stamp, ticket = datetime.fromisoformat(data[0]), UUID(data[1])
-        if stamp.tzinfo is None:
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
             raise ValueError("timezone required")
         return stamp, ticket
     except (UnicodeError, TypeError, OverflowError, KeyError, json.JSONDecodeError) as exc:
