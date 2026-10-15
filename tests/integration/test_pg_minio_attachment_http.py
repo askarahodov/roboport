@@ -109,3 +109,33 @@ def test_csrf_protected_upload_download_and_revoke(monkeypatch):
         db.execute("UPDATE user_role SET revoked_at=now() WHERE id=%s",(grant,))
     assert client.get(read).status_code==404
     assert client.post(url,content=data,headers=headers).status_code==404
+
+
+@pytest.mark.skipif(os.getenv("ROBOport_MINIO_ENDPOINT")!="http://127.0.0.1:9000",
+                    reason="requires real disposable PostgreSQL and MinIO")
+def test_orphan_reconciliation_preserves_registered_document(monkeypatch):
+    from roboport_api.storage_reconcile import purge_old_orphans
+    import roboport_api.storage_reconcile as reconcile
+    storage=MinioFileStorage.from_environment()
+    orphan=storage.put(b"synthetic-unlinked-document","text/plain")
+    linked=storage.put(b"synthetic-linked-document","text/plain")
+    customer,user,ticket=(uuid4() for _ in range(3))
+    with psycopg.connect(DSN) as db:
+        db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
+                   (user,"orphan-cleaner-"+user.hex))
+        db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
+        db.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",(ticket,customer))
+        db.execute("""INSERT INTO attachment(id,ticket_id,object_key,mime,byte_size,sha256,created_by,upload_state)
+                      VALUES(%s,%s,%s,%s,%s,%s,%s,'READY')""",
+                   (uuid4(),ticket,linked.key,linked.mime,linked.size,linked.sha256,user))
+    class FutureClock:
+        @staticmethod
+        def now(tz):
+            return datetime.now(tz)+timedelta(hours=2)
+    monkeypatch.setattr(reconcile,"datetime",FutureClock)
+    with psycopg.connect(DSN) as db:
+        assert purge_old_orphans(db,storage)>=1
+    from minio.error import S3Error
+    with pytest.raises(S3Error):
+        storage.get(orphan.key)
+    assert storage.get(linked.key)==b"synthetic-linked-document"
