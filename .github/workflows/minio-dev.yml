@@ -77,6 +77,14 @@ jobs:
           done
           mc rm app/roboport-documents-dev/test-one.txt
           mc rm app/roboport-documents-dev/test-two.txt
+      - name: Verify actual Python FileStorage against MinIO
+        env:
+          ROBOport_MINIO_ENDPOINT: http://127.0.0.1:9000
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet minio==7.2.20 pytest==9.1.1
+          PYTHONPATH=apps/api python -m pytest -q tests/integration/test_minio_storage.py
       - name: Tear down disposable volumes
         if: always()
         run: docker compose -f infra/dev/compose.minio.yml down -v --remove-orphans
