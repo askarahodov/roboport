@@ -70,7 +70,16 @@ def dev_ticket_access(ticket_id: str, request: Request):
     if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
         return not_found(request)
     raw_dsn = os.getenv("ROBOport_DATABASE_URL", "")
-    if not raw_dsn or urlsplit(raw_dsn).hostname != "127.0.0.1":
+    try:
+        parsed_dsn = urlsplit(raw_dsn)
+        valid_dsn = (
+            parsed_dsn.scheme in ("postgresql", "postgresql+psycopg")
+            and parsed_dsn.hostname == "127.0.0.1"
+            and parsed_dsn.port is not None
+        )
+    except ValueError:
+        valid_dsn = False
+    if not valid_dsn:
         return not_found(request)
     token = request.cookies.get("rp_session")
     if not token:
