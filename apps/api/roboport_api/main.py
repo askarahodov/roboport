@@ -6,6 +6,9 @@ from fastapi.responses import JSONResponse
 
 app = FastAPI(title="ROBOport development API", version="0.1.0")
 
+from .auth_http import router as synthetic_auth_router
+app.include_router(synthetic_auth_router)
+
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
