@@ -40,5 +40,7 @@ def test_http_ticket_probe_denies_spoofing_and_revocations(monkeypatch):
     with psycopg.connect(DSN) as conn:
         conn.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(user_a,))
     assert client.get(address).status_code==404
+    monkeypatch.setenv("ROBOport_DATABASE_URL","postgresql://127.0.0.1@remote.example/roboport")
+    assert client.get(address).status_code==404
     monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API")
     assert client.get(address).status_code==404
