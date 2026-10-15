@@ -35,10 +35,12 @@ def test_estimate_acl_status_latest_and_revoke_bundle(monkeypatch):
         # DRAFT documents hidden even when a CLIENT has customer link.
         assert not authorize_estimate(db,tokens[0],"estimate.read",estimate1)
         assert not authorize_estimate(db,tokens[0],"estimate.approve",estimate2)
+        db.commit()
         assert http.get(f"/api/v1/dev/estimates/{estimate2}/access").status_code==404
         db.execute("UPDATE estimate SET state='SENT' WHERE id=%s",(estimate2,))
         assert authorize_estimate(db,tokens[0],"estimate.read",estimate2)
         assert authorize_estimate(db,tokens[0],"estimate.approve",estimate2)
+        db.commit()  # HTTP TestClient uses its own PostgreSQL connection
         http=TestClient(app,base_url="https://127.0.0.1")
         http.cookies.set("rp_session",tokens[0])
         response=http.get(f"/api/v1/dev/estimates/{estimate2}/access")
