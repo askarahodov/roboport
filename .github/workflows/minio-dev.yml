@@ -23,6 +23,9 @@ jobs:
           APP_KEY="rp$(openssl rand -hex 12)"
           APP_SECRET="$(openssl rand -hex 24)"
           ROOT_SECRET="$(openssl rand -hex 24)"
+          echo "::add-mask::$ROOT_SECRET"
+          echo "::add-mask::$APP_KEY"
+          echo "::add-mask::$APP_SECRET"
           printf 'MINIO_ROOT_USER=roboportroot\nMINIO_ROOT_PASSWORD=%s\n' "$ROOT_SECRET" > infra/dev/.env.local
           chmod 600 infra/dev/.env.local
           {
