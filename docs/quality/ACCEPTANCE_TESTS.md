@@ -1,36 +1,34 @@
-# Acceptance & QA matrix
+# Матрица приёмочных проверок ROBOport
 
-All cases use synthetic A/B clients and controlled IDs. PASS requires actual execution; mock-only or skipped is NOT pass.
+**PASS означает фактический запуск теста** с кодом завершения 0 и воспроизводимым окружением. Не путать синтетические unit/browser tests с интеграционными PG/OIDC/S3.
 
-| ID | Level | Acceptance / failure case |
+| ID | Слой | Приёмочное поведение |
 |---|---|---|
-| AC-001 | API | catalog CANDIDATE not shown as supported; unknown model 404 |
-| AC-002 | DB | exact variant SKU+region+revision and dock enforced |
-| AC-003 | DB | service capability demands two distinct approval staff |
-| AC-004 | DB | negative stock and parallel overreserve never succeed |
-| AC-005 | FSM | invalid transition 409; safety hold no work; QC FAIL no handover |
-| AC-006 | Estimate | SENT immutable; total=sum(lines); new price → new version and consent |
-| AC-007 | Security | client A cannot access B's ticket/attachment even if ID known |
-| AC-008 | Security | new owner B cannot read A's prior ticket/attachments |
-| AC-009 | Security | revoked/expired subject denied including Idempotency replay |
-| AC-010 | Auth | issuer/audience/exp/PKCE/JWKS verified in real dev IdP |
-| AC-011 | Claims | phone/serial/reference insufficient; proof+review required |
-| AC-012 | Docs | private blob, TTL link, access audit, quarantine restriction |
-| AC-013 | UI | Light/Dark/Auto, original angular R C, 390px and keyboard |
-| AC-014 | UI | loading/empty/401/403/404/409/Safety hold/revoked all localized |
-| AC-015 | API | errors match Error schema 401/403/404/409/422/429/500, no leaked customer data |
-| AC-016 | Replay | same key+request yields one effect; changed payload 409; two workers/restart |
-| AC-017 | DB | migrations upgrade/downgrade fresh disposable PG; backup restored |
-| AC-018 | Event | outbox atomic with estimate/state mutation, retry idempotent |
-| AC-019 | QA | CI pytest/type/lint/contract and Playwright against installed versions |
-| AC-020 | Safety | humanoid requests never enter active service workflow |
+| AC-001 | API | catalog candidate не становится supported, неизвестная модель 404 |
+| AC-002 | DB | точный variant SKU+region+revision+station проверяется |
+| AC-003 | DB | service capability требует доказуемых согласований разными ролями |
+| AC-004 | DB | конкурентные резервы не дают отрицательного остатка |
+| AC-005 | FSM | неверный переход 409, Safety hold блокирует работы, QC FAIL блокирует выдачу |
+| AC-006 | Estimate | SENT версия immutable, сумма точна, новая цена — новая версия/согласие |
+| AC-007 | Security | A не читает ticket/attachment B даже при знании UUID |
+| AC-008 | Security | новый владелец B не видит прежние заявки и документы A |
+| AC-009 | Security | отозванный subject не обходит запрет через idem replay |
+| AC-010 | OIDC | issuer/audience/exp/signature/JWKS проверяются на dev IdP |
+| AC-011 | Claim | телефон/SN/номер заявки не доказывают владение без proof/review |
+| AC-012 | Files | private storage, TTL, audit и quarantine в реальном test backend |
+| AC-013 | UI | Light/Dark/Auto, исходный C, 390px, keyboard |
+| AC-014 | UI | loading/empty/401/403/404/409/Safety hold/revoked по-русски |
+| AC-015 | API | 2xx и 4xx схемы Error, 429/500, без PII leakage |
+| AC-016 | Replay | одинаковый idem key — один эффект, changed payload 409, два worker/restart |
+| AC-017 | DB | миграции upgrade/downgrade/pg_dump/pg_restore на disposable PostgreSQL |
+| AC-018 | Event | outbox атомарный, worker retry безопасен |
+| AC-019 | CI | реальные pytest/type/lint/build/Playwright и отчёт GitHub run |
+| AC-020 | Safety | humanoid/quadruped не попадают в активный ремонтный workflow |
 
-## Gates
-- **S0**: bootstrap health/meta and `pytest` green; frontend build only after dependency installation.
-- **S1**: actually executed PostgreSQL 17 migration smoke + concurrency; absence of postgres is blocker, never PASS.
-- **S2**: real OIDC dev realm and two accounts, pen-test negative rights; fixture auth alone not enough.
-- **S3–S8**: relevant AC above green for each slice, no business mocks masked as real backend.
-- **Pre-release**: independent security, privacy, trademark, print and economic gates.
+## Обязательный отчёт тестировщика
 
-## Command contract
-`PYTHONPATH=apps/api pytest -q tests/bootstrap`; `python scripts/check_contract.py`; `npm ci && npm run build` in `apps/web` after generating `package-lock.json`; `pytest -q tests/integration` on disposable PG only when provisioned. CI report must list executed commands, exit codes, skipped, blockers and real artifact links.
+Для каждого AC: GitHub Issue, среда, точная команда, реальный exit code, PASS/FAIL/SKIP/BLOCKED, ссылка на CI/лог, что остаётся непроверенным. Форма «все тесты прошли» без журнала и разделения mock vs real environment запрещена.
+
+## Проверка старта
+
+`PYTHONPATH=apps/api python -m pytest -q tests/bootstrap` и `python scripts/check_contract.py` — локальные проверки без внешнего IdP/PG. `cd apps/web && npm ci && npm run build` нужно выполнить и подтвердить после lockfile (#10).

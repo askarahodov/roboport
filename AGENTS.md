@@ -1,29 +1,43 @@
-# ROBOport — obligatory instructions for all AI coding agents
+# Правила работы ИИ-агентов ROBOport
 
-**Language:** Russian for requirements, task reports, comments in business code; Python/TS identifiers in English. **Read `TECHNICAL_SPEC.md` before editing.** Do not extrapolate requirements from visual prototypes; security is never a frontend check.
+**Обязательный язык:** требования, объяснения, комментарии к бизнес-логике, описания PR и GitHub Issues — **русский**. Английский сохраняется для идентификаторов кода, библиотек, имен API/HTTP, SQL, путей, команд и стандартных терминов. Тексты UI — русский с подготовкой к i18n. Не переводить ключи JSON и названия таблиц произвольно.
 
-## Orchestration workflow
-Orchestrator creates a dependency DAG from `docs/implementation/WORK_BREAKDOWN.md`, selects one small vertical slice with measurable acceptance, summons domain specialists (backend/frontend/data/QA/Security/UX) only when useful and supplies exact file paths and contract. Delegation is expected on meaningful parallelizable subtasks; review must be independent of implementation. Do not spawn unlimited redundant agents. Every agent reports observable artifact, test output and blockers.
+## 1. Иерархия источников
 
-**Definition of task:** ticket ID, goal, modules, exact input, non-goals, architecture constraints, acceptance tests, test commands, negative test and dependency. Work in feature branches/PRs. No secret/PII in branches, logs, commits or issues. Public repo.
+1. Утверждённые ADR из `docs/architecture/ADR.md`.
+2. `TECHNICAL_SPEC.md` — бизнес-инварианты и MVP.
+3. `docs/TECH_STACK.md`, `docs/REPOSITORY_STRUCTURE.md`, `docs/security/SECURITY_MODEL.md`.
+4. Контракт `contracts/openapi.yaml`, FSM и data model; проектные расхождения оформлять ADR и обновлением тестов.
+5. Текущая GitHub Issue с критериями приёмки. **Номер `#N` — канонический идентификатор задачи.** Не использовать старую нумерацию RP в качестве источника истины.
 
-**Standard sequence:** inspect source & ADR → identify contradiction and decide by ADR → implement smallest correct change → run local format/lint/typecheck/tests → review security/contract migrations → peer QA independent check → summarize changed files/test results → PR. If tests fail, repair root cause and rerun. If unavoidable external blocker (PostgreSQL, packages, Keycloak), label `BLOCKED` and **never** claim integration passed.
+## 2. Роли
 
-**Nonnegotiable domain rules:**
-- No customer A sees B order/attachment, including previous owner after sale.
-- Safety hold blocks servicing; QC_FAIL blocks handover; part selection requires confirmed variant compatibility.
-- SENT/APPROVED estimate immutable; new version requires fresh consent.
-- Every API mutation checks durable idempotency; replay authorization is rechecked.
-- Audit append-only, data redaction and proof of claims; no trust in header customer_id.
-- No real external calls, purchases, brand publication or deploys without explicit user decision.
+- **Оркестратор:** прочитать зависимости, выбрать Ready-задачу, разбить на подзадачи, инициировать специализированных subagents, не дублировать одни и те же изменения.
+- **Архитектор:** сверить ADR/FSM/DDL/OpenAPI, выявить конфликт до реализации, ограничить область PR.
+- **Разработчик:** минимальный завершённый вертикальный срез, бизнес-guards на сервере, типы и тесты.
+- **Специалист по БД:** реальные одноразовые PostgreSQL миграции, ACID, отрицательные и конкурентные тесты.
+- **Тестировщик (независимый):** реально запустить тесты, проверить негативные сценарии; может остановить PR.
+- **Security-review:** BOLA/IDOR, OIDC, хранение секретов, аудит и проверки object-level доступа.
+- **Документатор/дизайнер:** русский текст, обновление контрактов, визуальные и accessibility checks.
 
-**Agent role charter**:
-- Architect: ADR, data boundaries, migration/contract review, no feature creep.
-- Backend: use-case+guard+transaction+outbox/API tests, not route-only mocks.
-- Frontend: semantic token Light/Dark/Auto, WCAG, shared components, typed generated API, no UI-only security.
-- DB specialist: real disposable PG 17 smoke, concurrency, backup/restore, no draft migration auto-apply.
-- Security: threat model, 401/403/404 leak prevention, OIDC, S3, idempotency replay.
-- Tester: actually execute relevant suites, record green/red and evidence, no optimistic reports.
-- Docs: update canonical spec & task traceability alongside code; never replace tested source with fictional status.
+## 3. Цикл задачи
 
-**For every PR report (mandatory):** `Scope`, `Contract diff`, `Migrations`, `Tests executed with exit codes`, `Security negative tests`, `Documentation`, `Unverified`, `Next dependency`. STOP with explicit blocker if API ownership or schema conflicts cannot be resolved safely.
+**Inspect → Plan → Implement → Test → Independent review → Update docs → PR**. Один GitHub Issue = одно проверяемое поведение/результат. Название ветки `feature/issue-N-short-name`; PR включает `Closes #N` **только если** завершены все критерии. При красных тестах искать первопричину и повторно запускать; запрет на отключение проверки ради зелёного отчёта. При отсутствии окружения написать `BLOCKED: <средство/ошибка>` и приложить вывод, не отмечая критерий как PASS.
+
+**Каждый PR обязательно содержит:** `Issue`, `Цель`, `Изменённые файлы`, `Контракт/API`, `Миграции`, `Выполненные команды + exit code`, `Негативные тесты`, `Риски и откат`, `Что не проверено`, `Скриншоты light/dark/mobile (для UI)`.
+
+## 4. Безусловные инварианты
+
+- A не видит заявки/документы B; смена владельца робота не передаёт старую историю.
+- `SAFETY_HOLD` блокирует ремонт, `QC_FAILED` блокирует выдачу.
+- `SENT` смета immutable; согласие на новую версию только отдельным действием.
+- Каждая мутация проверяет роль, объект, состояние и идемпотентность; replay не обходит отзыв доступа.
+- Совместимость запчастей только по подтверждённым P/N, ревизии, региону и модели.
+- Audit append-only; ни логи, ни Issues не содержат PII/токенов/клиентских документов.
+- Публичный бренд и реальные данные запрещены до специальных release-gates.
+
+## 5. Стоп-сигналы
+
+Не создавать внешние аккаунты, платежи, публичные сервисы и инфраструктуру без явной задачи. Не запускать `db/legacy_drafts/*.sql` на настоящих БД. Не объявлять draft OpenAPI реализованным. Не заменять оригинальный SVG угловой R (C) на гексагон A. При неразрешённой коллизии требований — блокировка узкой задачи + ADR, остальные независимые задачи можно продолжать.
+
+Формат постановки задач: [`docs/implementation/ISSUE_STANDARD.md`](docs/implementation/ISSUE_STANDARD.md).

@@ -1,27 +1,33 @@
-# Data model — authoritative logical design before migrations
+# Модель данных — согласуемый черновик
 
-Existing six SQL drafts are **not executed** and contain assumptions, not truth. Build fresh SQLAlchemy + Alembic baseline and test against a disposable PostgreSQL 17 instance (no SQLite substitution).
+**Эталон для миграции ещё не утверждён:** исторические SQL `db/legacy_drafts/001–006` НЕ исполнялись на PostgreSQL. Перед Alembic обязательна задача #17: сопоставить контракт API, FSM и таблицы.
 
-| Context | Entities (core) | Invariants |
-|---|---|---|
-| Catalog | brand, robot_model, model_variant, dock_variant, service_operation, service_capability | SKU+region+revision; capability approval by two distinct staff; CANDIDATE not SUPPORTED |
-| Identity | customer_account, account_identity, account_customer_link | unique IdP subject, verified link only; immutable verified fields, revokedAt permanent |
-| Customers | customer, robot_device, device_ownership | ownership time bounds; one current owner; don't transfer previous ticket access |
-| Tickets | service_ticket, intake_record, diagnosis, ticket_state_event | expected version, custody, safety holds, append-only state events |
-| Estimates | estimate, estimate_line, estimate_approval | immutable SENT/APPROVED amounts+lines, approval exact version, amount equals sum(lines) |
-| Inventory | part, part_compatibility, stock_lot, stock_movement, reservation | exact part number and hardware variant; unique/stock no negative; concurrent locks |
-| Work/QC | worklog, quality_check, handover | qualified actor; QC FAIL prevents handover; audit reason |
-| Docs | attachment, document_access_audit, quarantine_result | private bucket, malware, ticket-level permission, immutable audit |
-| Comms | notification_outbox, account_notification_preference | transactionally enqueued, service vs marketing separated, retries and idempotency |
-| Idempotency | idempotency_request | unique(account,key_hash), request fingerprint, IN_PROGRESS/SUCCEEDED, response_json, expires_at, actor auth rechecked |
+## Клиенты и устройства
 
-**Required columns policy:** UUID primary identifiers; `created_at,updated_at` UTC; optimistic `version` on mutable aggregates; `created_by` and actor audit; money integer minor units with currency; `deleted_at` only with explicit retention policy; FK `ON DELETE` explicit and tested. Model references cannot be inferred from serial alone. Do not embed secrets/OTP/proofs in rows or JSON error messages. Use `CHECK`, `FK`, `UNIQUE`, partial index for active relationships; all deterministic tests seed synthetic IDs.
+- `customer` — сторона заказа; `customer_account` — кабинет; `account_identity` — внешний OIDC subject; `account_customer_link` — проверенная и отзывная связь аккаунта и клиента.
+- `robot_device` — устройство с идентификатором/вариантом; `device_ownership` — временная история владения, не правило доступа ко всем старым заявкам.
+- `service_ticket.customer_id` определяет заявителя конкретного заказа; его доступ к акту/сметам не следует автоматически за новым владельцем `robot_device`.
 
-## Migration plan
-1. Publish new Alembic `0001_core_catalog_identity_ticket`; compare expected structure with legacy 001–006 in ADR diff.
-2. Add estimates & inventory `0002`; safety / status guards and append-only audit `0003`.
-3. Add documents/outbox/idempotency `0004`, explicit transactional replay implementation.
-4. Validate up/down on fresh disposable PG and PG minor version, `pg_dump/pg_restore` rehearsal, two connections concurrent stock reservation, stale estimate immutability, two-party service approval and REVOKED constraints.
-5. Never run migrations against company infrastructure or nonempty DB without authorization.
+## Каталог и совместимость
 
-See `docs/quality/ACCEPTANCE_TESTS.md` for SQL gate. Any nullable/constraint/transition disagreement among legacy schemas must be resolved with an ADR, not silently copied.
+- `brand`, `robot_model`, `model_variant`, `dock_variant` — точная модель, ревизия, регион и станция.
+- `service_capability` и `part_compatibility` — **подтверждение**, с ответственными, датой, evidence и статусом; нельзя вывести `SUPPORTED` по совпадению бренда.
+- `part`, `stock_lot`, `inventory_reservation`, `stock_movement` — P/N, партии и ACID-транзакции; остаток не может быть отрицательным даже при конкурентных запросах.
+
+## Заявки, сметы и качество
+
+- `service_ticket`, `ticket_state_event`, `diagnosis`, `safety_hold`, `work_log`, `qc_result` — guarded FSM и аудит.
+- `estimate`, `estimate_line`, `estimate_approval` — идентификатор версии, frozen `SENT` строки и сумма, явное клиентское действие. `QC_FAILED` блокирует выдачу.
+
+## Файлы и события
+
+- `attachment` (метаданные файла и объектная привязка), `document_access_audit`, `audit_event` — запись доступа, append-only аудит.
+- `notification_outbox`, `idempotency_request` — транзакционные события и обработка повторов. Не отправлять внешние сообщения в dev.
+
+## Требования к DDL
+
+UUID PK/FK; `timestamptz` UTC; денежные поля integer minor units; `NOT NULL/UNIQUE/CHECK/partial indexes`; ограничение единственной активной подтверждённой связи; индексы ticket/customer/owner/partition; запись аудита только добавлением; критические переходы с optimistic version/row lock. Каждое ограничение подтверждается **реальным** тестом на disposable PostgreSQL 17; SQLite этого не заменяет.
+
+## Что должно появиться после #17/#11
+
+Матрица `Сущность → поле → тип → constraint → владелец модуля → API schema → security guard → тест`, исполняемые Alembic-ревизии и журнал upgrade/downgrade/restore. Не выдумывать, что вся историческая схема уже готова.

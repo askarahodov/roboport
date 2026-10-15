@@ -1,22 +1,23 @@
-# Ticket finite-state machine and guards
+# Жизненный цикл сервисной заявки (FSM)
 
-Core statuses are draft until reconciled to existing six SQL drafts. Implementation must use one explicit Enum and typed transition map; no `PATCH status` from UI.
+## Состояния (проектный набор)
 
-```mermaid
-flowchart LR
- A[DRAFT] --> B[SUBMITTED] --> C[TRIAGE] --> D[AWAITING_DELIVERY] --> E[RECEIVED]
- C --> E
- E --> F[DIAGNOSING] --> G[ESTIMATE_DRAFT] --> H[AWAITING_APPROVAL]
- H --> I[APPROVED] --> J[AWAITING_PARTS] --> K[REPAIRING] --> L[QC_PENDING]
- I --> K
- L --> M[READY_FOR_HANDOVER] --> N[COMPLETED]
- L --> O[QC_FAILED] --> K
- H --> P[DECLINED]
- C --> Q[SAFETY_HOLD]
- F --> Q
- Q --> C
-```
+`DRAFT`, `SUBMITTED`, `TRIAGE`, `AWAITING_DELIVERY`, `RECEIVED`, `DIAGNOSING`, `SAFETY_HOLD`, `ESTIMATE_DRAFT`, `AWAITING_APPROVAL`, `APPROVED`, `DECLINED`, `AWAITING_PARTS`, `REPAIRING`, `QC_PENDING`, `QC_FAILED`, `READY_FOR_HANDOVER`, `COMPLETED`, `CANCELLED`, `UNREPAIRABLE`, `WARRANTY_ROUTE`.
 
-Other terminal/exception routes: `WARRANTY_ROUTE → COMPLETED`, `ANY OPEN → CANCELLED|UNREPAIRABLE` only with custody/consent/reason guards. FSM events from existing source sheet require reconciliation before coding. `AWAITING_APPROVAL` means exactly SENT estimate version. `APPROVED` is not a payment status. `SAFETY_HOLD` cannot transition directly to repairing or QC; requires qualified review and MANAGER second approval. `QC_FAILED` cannot handover. Every transition checks actor permission, expected current version (optimistic concurrency), safety context, device variant capability, stock reservations when applicable and write-once audit. Idempotency cannot bypass a guard.
+Имена должны быть **сопоставлены с проектными enum SQL и OpenAPI в #17**. Пока это не означает, что все переходы реализованы.
 
-**Mandatory tests:** invalid transitions return stable 409; stale version returns 409; safety hold emits audit and no service work; QC FAIL forbids handover; cancellation of received device requires custody; warranty route not labeled as our repair; approval on old estimate blocked.
+## Переходы и запреты
+
+- Новый заказ: `DRAFT → SUBMITTED → TRIAGE → AWAITING_DELIVERY → RECEIVED → DIAGNOSING` (пропуски возможны только через явный ADR/guard).
+- При опасности: `DIAGNOSING → SAFETY_HOLD`; из hold нельзя разрешать ремонт, работы и выдачу без отдельного экспертного подтверждения.
+- Смета: `DIAGNOSING → ESTIMATE_DRAFT → AWAITING_APPROVAL → APPROVED | DECLINED`; изменение цены после отправки создаёт **новую версию сметы** и повторное согласие.
+- Ремонт: `APPROVED → AWAITING_PARTS | REPAIRING → QC_PENDING → READY_FOR_HANDOVER → COMPLETED`; `QC_FAILED` направляет в повторные работы, не в выдачу.
+- `CANCELLED/UNREPAIRABLE/WARRANTY_ROUTE` — специальные решения с отдельными правами и письменной причиной; переходы не добавлять произвольно.
+
+## Инварианты транзакции
+
+Каждый переход задаётся действием/событием и ожидаемой версией (optimistic concurrency), а не свободным `PATCH status`. Проверяется роль, конкретная заявка, текущая версия, safety, состояние сметы, QC, физический получатель. Успех создаёт событие и аудит в той же транзакции; конфликт → `409 Error`, скрытый чужой объект → безопасный отказ. Время в UTC, PII не включать в лог.
+
+## Тесты
+
+Проверять как минимум: недопустимый переход, параллельный переход, bypass safety hold, выдачу после QC FAIL, повторный approve устаревшей сметы, запрет доступа другого клиента. Реальная PG проверка обязательна, UI-кнопка `disabled` её не заменяет.

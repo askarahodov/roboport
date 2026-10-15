@@ -1,12 +1,12 @@
-# Sprint 0 — first implementation checkpoint (start immediately)
+# Подготовительный этап разработки: Sprint 0
 
-Objective: repo becomes reproducible, AI agents can independently run tests and understand the product. No public deployment or real-data operations.
+Цель — привести репозиторий к состоянию, где любой независимый ИИ-агент может выполнить одну GitHub Issue, собрать продукт и предъявить проверяемые тесты. Это **не** публичный запуск.
 
-1. RP-001 `✅ initial source package`: working SPEC, docs, original design tokens & C logo, synthetic OpenAPI draft, AGENTS and ignore rules. Verify no secrets before push.
-2. RP-002 `✅ bootstrap API source`: FastAPI /health/live, /health/ready (503 before infrastructure), /api/v1/meta; 401 on unimplemented private routes; pytest tests.
-3. RP-003 `SCAFFOLD ONLY`: React/TS Vite with theme toggle and placeholder route; npm dependencies not installed in this environment; generate lockfile and actually run build on machine with registry access, fix failures.
-4. RP-004 `STRUCTURAL ONLY`: parse existing OpenAPI, count 42 ops/56 schemas, check route collision; independent OAS lint/codegen later.
-5. RP-018 `WORKING DESIGN BASELINE`: original angular R C, A teal Light/Dark/Auto, written preliminary brandbook and synthetic demo; legal/print not approved.
-6. Next execution order: fix CI/build; real PG17 integration + Alembic fresh baseline; dev OIDC with two synthetic subjects; then ticket/catalog vertical slice. Archive six SQL drafts never applied blindly.
+1. Ознакомиться с `AGENTS.md`, `TECHNICAL_SPEC.md` и конкретной GitHub Issue.
+2. **#10 CI/lockfiles:** зафиксировать версии, перейти к `npm ci`, проверить реальный GitHub Actions run; отсутствие запуска — блокер.
+3. **#14 Дизайн:** приложить редактируемые SVG C и Light/Dark/Auto токены; получить разработческий handoff, юридический выпуск позже.
+4. **#15 API:** независимый валидатор OpenAPI и проверка актуальных клиентских/публичных контрактов.
+5. **#16 Frontend:** React/TypeScript routing и сборка.
+6. **#17 Модель данных:** согласовать FSM, DDL 001–006 и OAS до создания новых Alembic-ревизий.
 
-**Stop condition Sprint 0:** tests + lint green for components *actually installed*, CI reproducible; blocked frontend/install and PG called out, not claimed green.
+Критерии конца этапа: PR с документацией и Issue-номерами, проходящая реальная CI, воспроизводимый build, независимые тесты, список заблокированных интеграционных критериев. Legacy SQL не запускается без ревью.

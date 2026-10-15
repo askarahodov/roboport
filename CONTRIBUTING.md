@@ -1,2 +1,3 @@
-# Contribution workflow
-Read TECHNICAL_SPEC.md + AGENTS.md. New work needs `RP-NNN` issue / PR with dependency, ADR, acceptance tests, risk. Branch `feature/RP-NNN-short-topic`. PR includes changelog, tests executed and blocked gates. All user-facing UI: Light/Dark and keyboard. All resource endpoints: ABAC negative tests. Draft SQL migrations never auto-apply. No direct main changes except repository bootstrap. No real customers or trademark publication until gates passed.
+# Порядок внесения изменений
+
+Язык документации, Issues и PR — русский; код и общепринятые технические имена не переводятся. Каждое изменение ссылается на конкретную GitHub Issue `#N`. Ветка `feature/issue-N-short-name`, один ограниченный срез. PR включает фактически выполненные проверки/ошибки, обновление OpenAPI/ADR при изменении контрактов, независимый QA review и способ отката. Не сливать красный CI и не публиковать реальные данные. Подробно в `AGENTS.md` и `docs/implementation/ISSUE_STANDARD.md`.

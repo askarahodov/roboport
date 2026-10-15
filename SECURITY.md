@@ -1,2 +1,3 @@
-# Reporting & repository safety
-This repository is public. **Never** commit secret keys, credentials, personal data, supplier contacts, internal IPs, customer documents, real serial numbers, unapproved financial data, commercial terms or production URLs. Report security vulnerabilities privately to maintainers; do not open public issues containing exploit material or PII. All examples and tests must be synthetic. Any leaking commit requires immediate revocation and incident handling, not only git history rewrite.
+# Безопасность разработки
+
+Публичный репозиторий: не добавлять персональные данные, реальные фото/документы клиентов, токены, пароли, адреса инфраструктуры, `.env`, TLS-ключи и частные внутренние URL. Использовать только синтетические fixtures. Авторизация — исключительно на сервере и на уровне каждого объекта. Уязвимости, обнаруженные до релиза, описывать в закрытом канале проекта, а не публиковать рабочие секреты в Issue. Никакие тестовые токены не разрешается использовать в развернутой среде. Подробности: `docs/security/SECURITY_MODEL.md`.

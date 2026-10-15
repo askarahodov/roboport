@@ -1,17 +1,16 @@
-# Architectural Decision Register (implementation baseline)
+# Реестр архитектурных решений (ADR)
 
-| ADR | Decision | State | Reason / consequences |
+| ADR | Решение | Статус | Причина и последствия |
 |---|---|---|---|
-| ADR-021 | FastAPI+Python 3.13 modular monolith | **BASELINE** | reuse testable PoC; no NestJS dual-stack |
-| ADR-022 | React 19+TS+Vite 8 single SPA, router areas `/`, `/account`, `/staff` | **BASELINE** | shared design, local auth PKCE; SEO/SSR later ADR |
-| ADR-023 | PostgreSQL 17, SQLAlchemy 2.0, Alembic migrations | **BASELINE** | ACID; real migration and rollback tests mandatory |
-| ADR-024 | external Keycloak-compatible OIDC + claims verification; no local passwords | **BASELINE** | issuer/aud/expiry/JWKS, MFA; client+staff auth isolated |
-| ADR-025 | private S3 store + attachment metadata + short read TTL | **BASELINE** | deny bucket access, audit reads, infection/quarantine |
-| ADR-026 | durable idempotency ledger + transactional outbox | **BASELINE** | atomic with mutation; concurrency/restart tests |
-| ADR-027 | exact SKU+revision service whitelist; safety hold+two-person review | **BASELINE** | no inferred hardware compatibility |
-| ADR-028 | original C angular R, muted A teal, Light/Dark/Auto | **DESIGN BASELINE** | owner-selected, legal/public approval pending |
-| ADR-029 | no public launch / real customer data before legal/security/business gates | **ACTIVE GATE** | development can start on synthetic fixtures |
+| ADR-021 | Python 3.13 + FastAPI, модульный монолит | Базовое для dev | Единые транзакции и тестируемый API; NestJS не внедрять без нового ADR |
+| ADR-022 | React 19 / TypeScript / Vite 8, один web frontend | Базовое для dev | Общие компоненты, разделы public/customer/staff; SEO/SSR отложен |
+| ADR-023 | PostgreSQL 17 + SQLAlchemy 2 + Alembic | Базовое, требует проверки | ACID, ограничения; миграции 001–006 — исторические черновики |
+| ADR-024 | Внешний OIDC, dev-кандидат Keycloak | Базовое, требует реальной интеграции | Не хранить локальные пароли; JWT issuer/audience/JWKS |
+| ADR-025 | `FileStorage` адаптер; MinIO/S3 — кандидат для модуля документов | **Отложено до #25** | Для каталога/смет файлы не обязательны; не привязывать backend к облаку на Sprint 0 |
+| ADR-026 | PostgreSQL idempotency ledger и transactional outbox | Базовое, требует проверки | Конкуренция и crash/retry, без Kafka для MVP |
+| ADR-027 | Подтверждение exact SKU, revision, region, safety/QC guards | Безусловный инвариант | Нельзя автоматически признавать модель обслуживаемой |
+| ADR-028 | Угловая R оригинального C + бирюзовый A; Light/Dark/Auto | Базовое для dev | Пользовательский выбор, внешняя проверка прав/печати позже |
+| ADR-029 | Dev на синтетике отделён от коммерческого запуска | Активное правило | Legal, security, finance gates перед реальным клиентом |
+| ADR-030 | GitHub Issue `#N` — каноническая идентичность задач | Принято | Исправляет конфликт номеров в старом WBS и Issues |
 
-Early docs mentioned NestJS/Next.js as alternatives. They are **superseded for initial implementation by ADR-021/022**. Implementing a different framework requires a new ADR, tests and owner review. Existing OpenAPI 3.1.2 remains draft. Preliminary performance/availability numbers are engineering targets, not a signed SLA.
-
-Further decisions pending: identity provider tenant strategy, web SEO solution, family accounts/B2B delegation, document retention and digital consent legal validity, print color profiles, trademark clearance, real deployment architecture, CI security scanner choices, payment support after MVP. Record these as separate issues and do not implement speculative complexity.
+Незакрытые решения: public SEO, реальная стратегия IdP и MFA, семейные/B2B учётные записи, файл storage backend на #25, согласие и хранение документов, варианты платформы развертывания, права на знак и изображения. Эти решения вносятся отдельным ADR до изменения стека. Переход на микросервисы, Kubernetes, Redis или Kafka без доказанной необходимости запрещён.

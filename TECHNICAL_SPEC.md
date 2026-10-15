@@ -3,7 +3,7 @@
 **Дата:** 15.10.2026 · **Статус:** baseline for implementation, не разрешение эксплуатации · **Репозиторий:** `askarahodov/roboport` (публичный: никаких настоящих данных, адресов, телефонов, сертификатов, ключей, внутренних URL). **Законодательные/коммерческие вопросы:** ведутся отдельным track и не блокируют кодирование на синтетике; обязательны до реального клиента, платежа, печати и публикации.
 
 ## 0. Приоритет и источник истины
-1. Данный `TECHNICAL_SPEC.md` — главный приказ для AI-агентов. Изменения требований только через PR+ADR+обновление тестов. При расхождении с Google Docs, заметками или ранним HTML приоритет: утверждённый ADR → эта спецификация → `docs/*` → `contracts/openapi.yaml` как **draft**, который приводят в соответствие решениям → архивы `db/legacy_drafts` как неисполняемые источники гипотез.
+1. Данный `TECHNICAL_SPEC.md` — каноническая разработческая спецификация для ИИ-агентов. Описания требований и задач — на русском языке, кроме кода, команд, API-полей и технических имён. Изменения требований только через PR+ADR+обновление тестов. При расхождении с Google Docs, заметками или ранним HTML приоритет: утверждённый ADR → эта спецификация → `docs/*` → `contracts/openapi.yaml` как **draft**, который приводят в соответствие решениям → архивы `db/legacy_drafts` как неисполняемые источники гипотез.
 2. AGENTS.md обязателен для всех ролей: orchestrator, architect, backend, frontend, QA, DevSecOps, docs; агент обязан действительно выполнять проверки, не выдавать мок за интеграцию и вести доказательства в PR.
 3. Два разных вида готовности: **dev-ready** — можно писать код и тестировать синтетикой; **release-ready** — есть все проверки безопасности, юридические и сервисные разрешения. Запуск реального сервиса запрещён до release-ready.
 
@@ -104,7 +104,7 @@ Roles: `PUBLIC, CLIENT, INTAKE, ENGINEER, STOCK, MANAGER, FINANCE, ADMIN, AUDITO
 9. **S8 Public site/forms**: release-safe catalog, legal toggle controls, status header token and SEO/accessibility.
 10. **S9 Pilot readiness**: disaster recovery, threat modelling, WCAG audit, no real users without legal/IP/financial gates.
 
-Slice acceptance and dependencies are enumerated as tickets in `docs/implementation/WORK_BREAKDOWN.md` and `docs/quality/ACCEPTANCE_TESTS.md`. If a lower slice fails, fix root cause before proceeding.
+Соответствие GitHub Issues, проверок и зависимостей приведено в `docs/implementation/WORK_BREAKDOWN.md` and `docs/quality/ACCEPTANCE_TESTS.md`. If a lower slice fails, fix root cause before proceeding.
 
 ## 11. Delivery / Definition of Done (DoD) mandatory for each PR
 - Requirement IDs and ADR linked; no speculative major dependencies.
@@ -126,4 +126,12 @@ Development `localhost` only, no cloud resource creation required. `compose.dev.
 Canonical source notes archived in Google Drive `robo` (not mirrored to public GitHub due sensitive/non-public context). OpenAPI draft and SQL experiments carried forward from TechPrep v0.10; latest design reference v0.4. Existing legacy 115 FastAPI tests validate synthetic adapter, **not production backend**. Design v0.4 has 91 structural/browser tests, **not user-facing readiness**. See `docs/implementation/SOURCE_INVENTORY.md` and baseline check in `docs/quality/ACCEPTANCE_TESTS.md`.
 
 ## 16. Реальное состояние первого кода (15.10.2026)
-В первый вертикальный срез входит только публичный read-only каталог синтетических брендов и кандидатов-моделей: `GET /api/v1/catalog/brands`, `GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/{modelId}`. Зафиксированы `items/nextCursor`, ограничение `limit` (1–100), неизвестная модель → безопасный 404, неверный курсор → 400, неизвестная поддержка остаётся candidate/evaluation. Локальные TestClient/JSON Schema/регрессионные тесты: 12 PASS. **Нет** реального Postgres, каталога OEM, настоящих заявок и production auth. Дальше выполнить RP-001 CI и lockfile, RP-002 PostgreSQL миграции, RP-003 расширение vertical slice; всё через PR с фактически исполненными тестами.
+В первый вертикальный срез входит только публичный read-only каталог синтетических брендов и кандидатов-моделей: `GET /api/v1/catalog/brands`, `GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/{modelId}`. Зафиксированы `items/nextCursor`, ограничение `limit` (1–100), неизвестная модель → безопасный 404, неверный курсор → 400, неизвестная поддержка остаётся candidate/evaluation. Локальные TestClient/JSON Schema/регрессионные тесты: 12 PASS. **Нет** реального Postgres, каталога OEM, настоящих заявок и production auth. Дальше выполнить GitHub #10 (CI и lockfiles), #15 (контракт), #16 (frontend), #17 (модель данных), #11 (Alembic PostgreSQL) и #12 (публичный каталог); всё через PR с фактически выполненными проверками. Приоритет и последовательность обсуждаются в `docs/implementation/DEVELOPMENT_ROADMAP.md`.
+
+## 17. Правила организации разработки (редакция 15.10.2026)
+
+- Язык всей смысловой документации и GitHub Issues — **русский**; код, имена файлов, API/SQL-поля, библиотеки и команды остаются в оригинальном техническом написании. 
+- Канонический идентификатор задачи — номер GitHub Issue (`#10`, `#11`, ...); исторические номера `RP-001...` в старых материалах конфликтовали и **не должны использоваться для новых зависимостей**. Список и порядок: `docs/implementation/WORK_BREAKDOWN.md`, `docs/implementation/DEVELOPMENT_ROADMAP.md`.
+- Монорепозиторий и границы: `docs/REPOSITORY_STRUCTURE.md`. Фиксация выбора стека и отложенных компонентов: `docs/TECH_STACK.md`.
+- S3 — **интерфейс совместимости хранения файлов**, а не обязательная облачная услуга. Для первого API каталога хранилище не требуется. На этапе документов (#25) нужно выбрать конкретный приватный backend и подтвердить тестами, затем обновить ADR-025.
+- В GitHub Issues должны быть точные входы/выходы, файлы, зависимости, измеримые acceptance criteria, negative tests, команды и журнал реальных тестов. До согласования очередности запрещена самовольная одновременная реализация нескольких высокорисковых модулей.

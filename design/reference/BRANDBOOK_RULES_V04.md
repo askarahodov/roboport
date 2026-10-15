@@ -1,31 +1,29 @@
-# ROBOport — rules of brand use / v0.4 DRAFT
+# ROBOport — правила применения фирменного стиля, черновик v0.4
 
-**Identity chosen by project owner:** C Industrial Lab's **three original path** angular **R**, combined with A Precision Service's muted turquoise colors. Never substitute A's hexagon; previous generated posters with hexagon are visual explorations, **not** the approved symbol direction. The mark remains a design direction pending clearance.
+**Выбор владельца:** оригинальная угловая **R из концепции C Industrial Lab (три исходных SVG path)** с бирюзовой палитрой A Precision Service. Знак-гексагон A нельзя использовать вместо C. Это утверждённое *направление разработки*, не публичная регистрация товарного знака.
 
-## Logo and variants
-- Source geometries are the three SVG paths in `brand/symbol-light.svg` / `symbol-dark.svg`. Preserve their paths, aspect ratio and negative spaces. Light on white; dark on near-black; mono when required; no gradients/rotations/shadows/recoloring of individual paths.
-- Logotype “ROBOport” and descriptor “Сервис робототехники” shall remain readable at physical output size; typo “R0BO” is prohibited.
-- Preliminary protected area around mark: at least `0.30 ×` total sign/symbol height in every direction; around full wordmark at least the height of the “O” glyph. This is a *draft* until proofed across signage and print.
-- Draft onscreen minimum standalone mark size **32 CSS px** on desktop / mobile UI; 24px is only an experiment threshold and is **not** approved; a physical/pixel legibility test remains. Draft print minimum sign height **12 mm**; test physical proof before approval. Logo with descriptor should not be set at 12mm.
-- Use vector SVG/PDF for production masters; raster exports 1×/2×/3× and PNG with transparency only for contexts that require them. Verify color output RGB for screens and CMYK by printer proof; do not equate HEX with press-ready CMYK.
+## Логотип и варианты
 
-## Color and accessibility
-- `Light` surface `#FFFFFF`, canvas `#F3F8FA`, primary text `#102736`, brand decoration `#008C84`, small accent labels `#006D67`, button `#006D67`.
-- `Dark` surface `#102731`, canvas `#071820`, text `#F3FAFC`, brand decoration `#38D9C9`, button `#11766F`.
-- Safety/errors use semantic `danger`, do not reuse industrial C's red as a brand primary. Display warning, Safety hold and QC FAIL with **text + structural block**; don't encode only with red.
-- Final WCAG AA contrast testing must include disabled controls, charts, focus, error text and assistive readers. Existing tests cover base pairs, **not** full accessibility.
+- Каноническая геометрия — `design/brand/symbol-light.svg` и `symbol-dark.svg`. Сохранять три `path`, соотношение сторон и отрицательное пространство; светлая/тёмная/монохромная версия.
+- Текст — «ROBOport», подпись — «Сервис робототехники». Опечатка `R0BO` недопустима.
+- **Предварительное** охранное поле: ≥0.30 высоты знака со всех сторон; для полной надписи — не менее высоты буквы O.
+- **Предварительный** минимум на экране 32 CSS px, в печати 12 мм для знака без подписи. Это нужно проверить в натуральном размере до утверждения.
+- Мастер-формат SVG/PDF, растровые 1×/2×/3× только для необходимого носителя. RGB для экрана; CMYK — только по реальной цветопробе типографии.
 
-## Do / do not
-**DO:** use C original geometry; apply light/dark variants based on background; preserve whitespace and safe margins; use service-oriented Russian copy; distinguish supported vs unverified models; separate estimates by version; show safety holds.
+## Палитра и доступность
 
-**DON'T:** substitute hexagon A; turn the C into a cute face; stretch logo; place on visually noisy photos without sufficient contrast; claim official affiliation with robot brands without proof; claim all models supported; label synthetic estimates legally accepted; expose previous-owner documents.
+Light: поверхность `#FFFFFF`, фон `#F3F8FA`, текст `#102736`, декоративный акцент `#008C84`, текстовый `#006D67`, кнопка `#006D67`. Dark: поверхность `#102731`, фон `#071820`, текст `#F3FAFC`, декоративный `#38D9C9`, кнопка `#11766F`.
 
-## Physical touchpoints / future deliverables
-- Storefront sign at actual facade size (daylight and night-lit version), interior navigation/acceptance area, name badge and clothing, business card, job sheet, acceptance receipt, estimate form, service act, guarantee explanation, device/box label with QR, packaging, presentation passport.
-- Every print master requires real legal entity details, trim size, bleed, safe zones, production file format, image license check and owner approval. **No print authorizations, spending or vendor outreach** performed.
+Ошибки/опасность — отдельные semantic роли; Safety hold, QC FAIL показывать **текстом + иконкой/контейнером**, а не только красным цветом. Контраст WCAG AA нужно дополнительно проверить для disabled, charts, focus, ошибок и screenreader: текущие тесты покрывают только базовые сочетания.
 
-## UI cross-product handoff
-Site, customer portal and CRM share semantic token keys; CRM may have denser tables but no other mark. Export favicon, wordmark, icon library, CSS tokens and product examples under `brand/` and `tokens/`. Version changes must be explicit, with screenshot regression on both themes. Read `UX_ERROR_AND_CRM_STATES.md` for restricted flows.
+## Применять / запрещено
 
-## Pending approvals
-Legal trademark/domain/image/font review; competitor review; owner signature on full brandbook; printer proof; independent WCAG/UX audit; integration contract. The current guide is **not a final signed brandbook**.
+**Применять:** оригинальный C знак, вариант с контрастом к фону, воздух вокруг, русские понятные тексты, точные статусы моделей и версионность смет. **Запрещено:** гексагон A вместо R, растяжение знака, лишние тени/повороты, размещение на пёстром фоне без контраста, недоказанная официальная связь с производителем, обещание обслуживания всех моделей, фальшивое юридическое согласие, раскрытие прежних документов владельца.
+
+## Будущие физические носители
+
+Вывеска день/ночь, навигация и приёмка, бейдж/форма, визитка, заказ-наряд, квитанция, смета, акт, гарантия, этикетка/QR, упаковка и паспорт проекта. Для print нужна реальная юридическая информация, размер, вылеты/поля, подготовка файла, права на изображения и отдельное согласование. Заказов печати не было.
+
+## Передача интерфейсам
+
+Сайт, кабинет и CRM используют общие ключи токенов и один знак. CRM может иметь более плотные таблицы, но не другую айдентику. Версии токенов менять явно; проверить screenshot-regression Light/Dark. Сценарии отказов описаны в `UX_ERROR_AND_CRM_STATES.md`. Открытые проверки: товарный знак, шрифты, аудит конкурентов, печатный proof, независимый UX/WCAG.

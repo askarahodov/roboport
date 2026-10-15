@@ -1,22 +1,33 @@
-# Modular monolith boundaries, dependency rules
+# Границы модулей ROBOport
+
+## Общая архитектура
 
 ```text
-apps/web (public+customer+staff)
-    └── REST /api/v1 → API/application adapters
-        ├── catalog: Brand/RobotModel/Variant/Dock/Operation
-        ├── identity: OIDC Principal/Account/Verified Link
-        ├── customers: Customer/Device/Ownership
-        ├── tickets: Ticket/Intake/Diagnosis/StateEvent
-        ├── estimates: Estimate/Line/Approval Version
-        ├── stock: Part/Compatibility/Lot/Reservation/Movement
-        ├── quality: Worklog/QC/Handover
-        ├── documents: Attachment/AccessAudit/Quarantine
-        ├── notification: Outbox/Preferences/Deliveries
-        └── reporting/audit: append-only events, read projections
-                  ├── PostgreSQL 17 (single transactional DB)
-                  └── external OIDC & private S3
+React / Vite: публичный сайт + кабинет + staff CRM
+          │ REST /api/v1
+          ▼
+FastAPI: маршруты → application use-case → guard → transaction
+          ├── catalog: бренд, модель, вариант, допуск
+          ├── identity: OIDC, аккаунт, подтверждённые связи
+          ├── customers: клиент, робот, история владения
+          ├── tickets: заявка, приёмка, диагностика, FSM
+          ├── estimates: версия сметы и подтверждение
+          ├── compatibility/inventory: P/N, партии, резервы
+          ├── quality: работы, QC и выдача
+          ├── documents: метаданные и защищённые файлы
+          ├── notifications: предпочтения и outbox
+          └── audit: неизменяемые события
+                 │
+              PostgreSQL 17
+          внешние: OIDC; FileStorage (позднее)
 ```
 
-Each bounded context owns its tables and migrations; cross-module relations are service interfaces and validated repository queries, never arbitrary ORM import cycles. Mutations go through use-cases with policy checks and DB transactions. All staff/customer access requires ABAC at service layer. UI never receives fields marked INTERNAL/SECRET/PII without role & object authorization. Avoid Kafka, Elasticsearch, microservices, RKE2 deployment templates until a measured need. No inventing alternate service roles or YAML charts during Sprint 0.
+Все модули работают в одном процессе приложения и используют одну транзакционную БД, но **каждый модуль владеет своими таблицами и бизнес-методами**. Прямые вызовы чужих ORM-моделей и обход guard запрещены. Для межмодульных операций описывать интерфейс application service и общую транзакцию.
 
-**Dependency direction:** HTTP schemas/adapters → usecases → domain model; repository adapters implement domain ports. Domain layer does not import FastAPI, ORM, cloud provider. All clock/UUID services injected for deterministic tests. Store event history immutable with actor, ticket, previous/next state and request correlation. Transactions own stock reservation, estimate approval and outbox rows. Strict DB scoped connections; no shared mutable production state.
+## Правила направленности зависимостей
+
+`HTTP роутер → application service → domain policy → repository/storage adapter`. Domain не импортирует FastAPI, web, конкретный PostgreSQL driver, S3 SDK или OIDC SDK. Проверка прав — серверный guard *до* чтения/изменения конкретного объекта и перед выдачей файла. Frontend не решает, кому доступна история ремонта.
+
+Транзакция охватывает бизнес-изменение, события и durable idempotency/outbox. Обновление финансового `SENT` документа допускается только через выпуск новой версии. `SAFETY_HOLD` и `QC_FAILED` проверяются на сервере и на уровне невозможных переходов/ограничений.
+
+**Масштабирование:** для MVP не вводить Kafka, Kubernetes и микросервисы. Сначала подтвердить p95/нагрузочные цели и реальную потребность через отдельное ADR.

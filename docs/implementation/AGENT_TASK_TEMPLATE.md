@@ -1,14 +1,14 @@
-# Issue / agent task template
+# Шаблон задачи агента
 
-## RP-NNN — Outcome
-**State:** TODO / IN_PROGRESS / BLOCKED / VERIFIED. **Depends:** RP-NNN. **Role:** Agent specialization, independent TESTER mandatory for risky changes.
+При создании GitHub Issue использовать **полную форму** из [ISSUE_STANDARD.md](ISSUE_STANDARD.md). Короткий чек-лист перед выдачей задания:
 
-**Business behavior** — precise observable user scenario, input and output.
-**Files to edit** — exact bounded paths, no unrelated architecture changes.
-**Preconditions** — data model/ADR/contract and available dependencies.
-**Functional AC** — happy path, negative path, role/ownership, error schema.
-**Nonfunctional AC** — audit, idempotency, WCAG, performance, localization.
-**Test plan** — exact commands; distinguish unit, mocked, integration, browser, external.
-**Evidence** — actual exit codes, test count and screenshots or SQL log.
-**Risks & rollback** — migrations / data / public behavior.
-**Ready-to-merge** — all required checks green; otherwise BLOCKED with reason.
+- [ ] Номер задачи — **GitHub `#N`**, без конкурирующего внутреннего номера.
+- [ ] На русском языке указано измеримое пользовательское/серверное поведение.
+- [ ] Даны точные зависимости и список разрешённых файлов.
+- [ ] Описаны happy-path, negative-path и проверки безопасности.
+- [ ] Написаны команды реального тестирования и критерии PASS.
+- [ ] Указаны явно не входящие в задачу работы.
+- [ ] Независимый TESTER и ответственный за review определены.
+- [ ] При внешнем блокере `BLOCKED` сопровождается логом и не маскируется как PASS.
+
+Шаблон PR: Issue; выполненные требования; изменения API/миграций; команды с exit code; негативные проверки; риски; оставшиеся ограничения и следующие зависимости.
