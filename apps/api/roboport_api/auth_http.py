@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .passwords import verify_password
 from .session_service import issue_session, revoke_session, verify_csrf
@@ -39,7 +39,7 @@ def _origin_ok(request: Request) -> bool:
 
 
 @router.post("/api/v1/auth/login")
-def login(credentials: Credentials, request: Request):
+async def login(request: Request):
     dsn=_dsn(request)
     if dsn is None:
         return _error(request,403)
@@ -47,6 +47,10 @@ def login(credentials: Credentials, request: Request):
         return _error(request,403)
     normalized=credentials.login.strip().lower()
     login_hash=hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    try:
+        credentials=Credentials.model_validate(await request.json())
+    except (ValueError, ValidationError):
+        return JSONResponse(status_code=422,content={"code":"INVALID_INPUT","message":"Некорректный запрос","requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
     with psycopg.connect(dsn,autocommit=True) as conn:
         failures=conn.execute("""
             INSERT INTO auth_login_throttle(login_hash,failures) VALUES (%s,1)
