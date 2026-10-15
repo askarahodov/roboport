@@ -86,3 +86,47 @@ def test_permission_matrix_defaults():
     assert not PERMISSIONS["ADMIN"]
     assert not PERMISSIONS["PUBLIC"]
     assert "ticket.read" not in PERMISSIONS["STOCK"]
+
+
+def test_audited_http_permission_and_revoke_bundle(monkeypatch):
+    """Пакет HTTP проверки RBAC, отзыва grant и аудита решений."""
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    user, customer, ticket, session, grant = (uuid4() for _ in range(5))
+    raw = new_token()
+    now = datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as conn:
+        conn.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
+                     (user, "http-role-"+user.hex))
+        conn.execute("INSERT INTO customer(id,label) VALUES(%s,%s)", (customer,customer.hex))
+        conn.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",
+                     (ticket,customer))
+        conn.execute("INSERT INTO account_customer_link(user_id,customer_id) VALUES(%s,%s)",
+                     (user,customer))
+        conn.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+                        VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+                     (session,user,token_digest(raw),token_digest(new_token()),now,
+                      now+timedelta(minutes=30),now+timedelta(hours=4)))
+    client=TestClient(app,base_url="https://127.0.0.1")
+    url=f"/api/v1/dev/authorized/tickets/{ticket}"
+    assert client.get(url).status_code==401
+    client.cookies.set("rp_session",raw)
+    # No role -> 404 and a durable denial audit.
+    assert client.get(url).status_code==404
+    with psycopg.connect(DSN) as conn:
+        conn.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,'CLIENT')",
+                     (grant,user))
+    assert client.get(url).status_code==200
+    with psycopg.connect(DSN) as conn:
+        conn.execute("UPDATE user_role SET revoked_at=now() WHERE id=%s",(grant,))
+    assert client.get(url).status_code==404
+    with psycopg.connect(DSN) as conn:
+        outcomes=[r[0] for r in conn.execute(
+            "SELECT outcome FROM authorization_audit WHERE actor_id=%s ORDER BY created_at",
+            (user,)).fetchall()]
+    assert outcomes==["DENY","ALLOW","DENY"]
+    assert client.get(url,headers={"X-User-ID":str(user)}).status_code==404
+    monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API")
+    assert client.get(url).status_code==404
