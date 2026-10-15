@@ -65,3 +65,30 @@ def test_reject_signed_cursor_with_invalid_json_shape(monkeypatch):
         cursor=base64.urlsafe_b64encode(raw+mac).decode().rstrip("=")
         with pytest.raises(ValueError):
             decode_cursor(cursor,"DRAFT",token)
+
+
+@pytest.mark.parametrize("payload,state", [
+    ([], None),                                         # отсутствуют обязательные поля
+    (["2026-10-15T10:00:00+00:00"], None),             # усечённый массив
+    (["2026-10-15T10:00:00+00:00", "bad-uuid", None], None),
+    (["not-a-date", str(uuid4()), None], None),
+    (["2026-10-15T10:00:00", str(uuid4()), None], None), # naive datetime
+    (["2026-10-15T10:00:00+00:00", str(uuid4()), "DRAFT"], None),
+    (["2026-10-15T10:00:00+00:00", str(uuid4()), None, "extra"], None),
+    ({"stamp":"2026-10-15T10:00:00+00:00"}, None),
+    ([True, str(uuid4()), None], None),
+    (["2026-10-15T10:00:00+00:00", 123, None], None),
+])
+def test_reject_malformed_even_correctly_signed_payload(payload, state):
+    """Отрицательная проверка после успешной криптографической верификации."""
+    import hashlib
+    import hmac
+    import json
+    import roboport_api.keyset_cursor as module
+
+    token="a"*43
+    raw=json.dumps(payload,separators=(",",":")).encode()
+    mac=hmac.new(module._KEY,token.encode()+b":"+raw,hashlib.sha256).digest()
+    cursor=base64.urlsafe_b64encode(raw+mac).decode().rstrip("=")
+    with pytest.raises(ValueError):
+        decode_cursor(cursor,state,token)
