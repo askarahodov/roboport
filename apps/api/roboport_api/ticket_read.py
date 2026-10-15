@@ -19,3 +19,40 @@ def owned_ticket_state(conn: psycopg.Connection, token: str, ticket: UUID) -> di
         (ticket,token_digest(token)),
     ).fetchone()
     return {"id":str(row[0]),"state":row[1],"version":row[2]} if row else None
+
+
+def owned_ticket_list(
+    conn: psycopg.Connection, token: str, *, limit: int = 20,
+    offset: int = 0, state: str | None = None,
+) -> list[dict] | None:
+    """None means unauthenticated; [] means authenticated with no visible tickets.
+
+    Authorization and ticket selection share a SQL statement. Stable ordering avoids
+    duplicates between pages for an unchanged data set.
+    """
+    if not isinstance(token, str) or len(token) != 43:
+        return None
+    if not isinstance(limit, int) or not 1 <= limit <= 50:
+        raise ValueError("limit must be 1..50")
+    if not isinstance(offset, int) or not 0 <= offset <= 10000:
+        raise ValueError("offset must be 0..10000")
+    # Query session first; no access is granted by request headers or caller-supplied user IDs.
+    from .session_lookup import session_subject
+    subject = session_subject(conn, token)
+    if subject is None:
+        return None
+    rows = conn.execute(
+        """SELECT DISTINCT t.id, t.state, t.version, t.created_at
+           FROM service_ticket t
+           JOIN account_customer_link l ON l.customer_id=t.customer_id
+             AND l.user_id=%s AND l.revoked_at IS NULL
+           JOIN app_user u ON u.id=l.user_id AND u.status='ACTIVE'
+           JOIN user_session s ON s.user_id=u.id AND s.token_hash=%s
+             AND s.revoked_at IS NULL AND s.idle_expires_at>now()
+             AND s.absolute_expires_at>now()
+           WHERE (%s::text IS NULL OR t.state=%s)
+           ORDER BY t.created_at DESC, t.id DESC
+           LIMIT %s OFFSET %s""",
+        (subject, token_digest(token), state, state, limit, offset),
+    ).fetchall()
+    return [{"id":str(row[0]), "state":row[1], "version":row[2]} for row in rows]
