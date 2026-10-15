@@ -6,6 +6,37 @@ on:
 permissions:
   contents: read
 jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: roboport
+          POSTGRES_PASSWORD: roboport
+          POSTGRES_DB: roboport
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U roboport -d roboport"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ROBOport_DATABASE_URL: postgresql+psycopg://roboport:roboport@127.0.0.1:5432/roboport
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+      - name: Real PostgreSQL upgrade / downgrade / re-upgrade
+        run: |
+          python -m alembic -c apps/api/alembic.ini upgrade head
+          python -m alembic -c apps/api/alembic.ini downgrade base
+          python -m alembic -c apps/api/alembic.ini upgrade head
+      - name: PostgreSQL integrity integration tests
+        run: python -m pytest -q tests/integration
   api:
     runs-on: ubuntu-latest
     steps:
