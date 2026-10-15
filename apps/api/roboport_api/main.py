@@ -58,6 +58,67 @@ def model(modelId: str, request: Request):
     return not_found(request)
 
 
+@app.get("/api/v1/dev/tickets/keyset", include_in_schema=False)
+def dev_ticket_keyset(request: Request, limit: int = 20, state: str | None = None,
+                      before: str | None = None):
+    """Opt-in keyset listing; opaque cursor is a timestamp and UUID, not a user ID."""
+    import os
+    import base64
+    import json
+    from datetime import datetime
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .ticket_read import TICKET_STATES, owned_ticket_keyset_page
+
+    if os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1":
+        return not_found(request)
+    raw = os.getenv("ROBOport_DATABASE_URL", "")
+    try:
+        db = urlsplit(raw)
+        if (db.scheme not in ("postgresql", "postgresql+psycopg")
+                or db.hostname != "127.0.0.1" or db.port is None):
+            return not_found(request)
+    except ValueError:
+        return not_found(request)
+    invalid = lambda: JSONResponse(status_code=422, content={
+        "code":"INVALID_INPUT","requestId":request.state.request_id
+    }, headers={"Cache-Control":"no-store"})
+    if not 1 <= limit <= 50 or (state is not None and state not in TICKET_STATES):
+        return invalid()
+    stamp = ident = None
+    if before is not None:
+        try:
+            if len(before)>256:
+                return invalid()
+            payload = json.loads(base64.urlsafe_b64decode(before + "=" * (-len(before)%4)))
+            if not isinstance(payload,list) or len(payload)!=2:
+                return invalid()
+            stamp,ident = datetime.fromisoformat(payload[0]), UUID(payload[1])
+            if stamp.tzinfo is None:
+                return invalid()
+        except (ValueError,TypeError,KeyError,UnicodeDecodeError,OverflowError):
+            return invalid()
+    token = request.cookies.get("rp_session", "")
+    if not token:
+        return JSONResponse(status_code=401, content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id
+        },headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        result=owned_ticket_keyset_page(conn,token,limit=limit,state=state,
+                                        before_created_at=stamp,before_id=ident)
+    if result is None:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id
+        },headers={"Cache-Control":"no-store"})
+    items,following=result
+    cursor=(base64.urlsafe_b64encode(json.dumps([
+        following[0].isoformat(),str(following[1])
+    ]).encode()).decode().rstrip("=")) if following else None
+    return JSONResponse(content={"items":items,"nextCursor":cursor},
+                        headers={"Cache-Control":"no-store"})
+
+
 @app.get("/api/v1/dev/tickets/{ticket_id}/access", include_in_schema=False)
 def dev_ticket_access(ticket_id: str, request: Request):
     """Synthetic-only read probe, disabled without explicit opt-in and disposable DB."""
@@ -199,3 +260,5 @@ def dev_owned_tickets(request: Request, limit: int = 20, offset: int = 0, state:
     if result is None:
         return JSONResponse(status_code=401, content={"code":"UNAUTHENTICATED","requestId":request.state.request_id}, headers={"Cache-Control":"no-store"})
     return JSONResponse(content={"items":result,"limit":limit,"offset":offset}, headers={"Cache-Control":"no-store"})
+
+
