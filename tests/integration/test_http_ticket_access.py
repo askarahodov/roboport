@@ -29,7 +29,7 @@ def test_http_ticket_probe_denies_spoofing_and_revocations(monkeypatch):
           (session,user_a,token_digest(token),token_digest(new_token()),
            now,now+timedelta(minutes=30),now+timedelta(hours=4)),
         )
-    client=TestClient(app)
+    client=TestClient(app, base_url="https://127.0.0.1")
     address=f"/api/v1/dev/tickets/{ticket_a}/access"
     assert client.get(address,headers={"X-User-ID":str(user_a)}).status_code==401
     client.cookies.set("rp_session",token)
