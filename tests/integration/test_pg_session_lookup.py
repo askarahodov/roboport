@@ -34,7 +34,13 @@ def test_opaque_session_requires_active_user_link_and_fresh_expiry():
         conn.execute("UPDATE app_user SET status='DISABLED' WHERE id=%s",(user,))
         assert session_subject(conn,raw) is None
         conn.execute("UPDATE app_user SET status='ACTIVE' WHERE id=%s",(user,))
-        conn.execute("UPDATE user_session SET idle_expires_at=now()-interval '1 second' WHERE id=%s",(session,))
-        assert session_subject(conn,raw) is None
-        conn.execute("UPDATE user_session SET idle_expires_at=%s, revoked_at=now() WHERE id=%s",(now+timedelta(minutes=30),session))
+        expired_token = new_token()
+        conn.execute(
+            """INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+            (uuid4(),user,token_digest(expired_token),token_digest(new_token()),
+             now-timedelta(days=1),now-timedelta(hours=1),now+timedelta(hours=1)),
+        )
+        assert session_subject(conn,expired_token) is None
+        conn.execute("UPDATE user_session SET revoked_at=now() WHERE id=%s",(session,))
         assert session_subject(conn,raw) is None
