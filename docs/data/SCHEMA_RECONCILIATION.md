@@ -1,0 +1,31 @@
+# Аудит источников модели данных — checkpoint #17
+
+**Дата:** 2026-10-15. **Статус:** частичный аудит; миграции #11 заблокированы до определения полной схемы.
+
+## Установленные факты
+
+- `db/legacy_drafts/001_initial.sql` … `006_idempotency_ledger.sql` существуют, но все шесть имеют **0 байт**. Их нельзя считать DDL, переносить в Alembic или использовать как доказательство полей / FK.
+- `docs/domain/TICKET_FSM.md` задаёт 20 проектных состояний, но `components.schemas.Ticket.properties.state` в `contracts/openapi.yaml` описан только как `type: string`, без enum. Сопоставление переходов невозможно доказать на уровне OAS.
+- `docs/data/DATA_MODEL.md` перечисляет таблицы и инварианты, а не миграционную схему.
+
+## Разграничение ответственности
+
+| Поле / связь | Планируемое хранение (НЕ утверждённый DDL) | API | Правило доступа и тест |
+|---|---|---|---|
+| service_ticket.id | UUID PK | Ticket.id | проверка ownership / ACL |
+| service_ticket.customer_id | FK → customer.id, NOT NULL | CreateTicket.customerId | заявитель фиксируется на момент обращения |
+| service_ticket.state | constrained enum после согласования FSM | Ticket.state | только guarded transition, не произвольный PATCH |
+| service_ticket.version | integer > 0, optimistic lock | Ticket.version | одновременный переход → 409 |
+| service_ticket.device_id | FK → robot_device.id, nullable при запросе | CreateTicket.deviceId | владение роботом не раскрывает чужие прошлые заявки |
+| estimate.version | integer, immutable after SENT | согласование сметы в контракте | нельзя одобрить старую редакцию |
+| user_session.token_hash | binary/string hash; только сервер | localSession cookie, opaque | отзыв и CSRF, без исходного token в БД |
+| idempotency_request.key_hash | hash + caller + fingerprint | Idempotency-Key | повтор требует повторной авторизации |
+
+## Решения и открытые расхождения
+
+1. **Правило владельца:** ticket принадлежит заявителю `service_ticket.customer_id`; смена `device_ownership` не переносит доступ к старому ticket. Это уточнение ADR-031.
+2. **Критический GAP:** пустые SQL 001–006. До #11 нужно написать новую нормализованную baseline-схему из актуальной модели, а не запускать пустые legacy файлы.
+3. **Критический GAP:** OAS `Ticket.state` не связан с FSM enum. Сначала согласовать точные состояния/переходы, затем синхронизировать OAS, SQL и сгенерированные TS-типы.
+4. **Открыто:** точные CHECK, FK, nullable, последовательности смет, SKU compatibility, audit/outbox/idempotency locking. Не отмечать #17 выполненной до подтверждения каждой связи.
+
+**Запрет:** не использовать живые данные клиентов, не применять файлы `db/legacy_drafts` к PostgreSQL и не закрывать #11/#17 из-за зелёных статических тестов.
