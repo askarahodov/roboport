@@ -80,3 +80,46 @@ def test_safety_and_qc_guard_deny_illegal_shortcuts():
         with pytest.raises(TransitionConflict):
             transition_ticket(db,token,ticket,"READY_FOR_HANDOVER",1)
         assert transition_ticket(db,token,ticket,"REPAIRING",1)["version"]==2
+
+ 
+def test_http_fsm_csrf_origin_version_and_revocation_bundle(monkeypatch):
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    user,customer,ticket,session,role,acl=(uuid4() for _ in range(6))
+    token,csrf=new_token(),new_token()
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
+                   (user,"fsm-http-"+user.hex))
+        db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
+        db.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",
+                   (ticket,customer))
+        db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+                      VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+                   (session,user,token_digest(token),token_digest(csrf),now,
+                    now+timedelta(minutes=30),now+timedelta(hours=4)))
+        db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,'INTAKE')",
+                   (role,user))
+        db.execute("INSERT INTO acl_entry(id,user_id,ticket_id,action) VALUES(%s,%s,%s,'ticket.intake')",
+                   (acl,user,ticket))
+    client=TestClient(app,base_url="https://127.0.0.1")
+    url=f"/api/v1/dev/tickets/{ticket}/transition"
+    payload={"toState":"SUBMITTED","expectedVersion":1}
+    assert client.post(url,json=payload).status_code==401
+    client.cookies.set("rp_session",token)
+    assert client.post(url,json=payload).status_code==403
+    assert client.post(url,json=payload,headers={"Origin":"https://127.0.0.1"}).status_code==403
+    hdr={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf}
+    ok=client.post(url,json=payload,headers=hdr)
+    assert ok.status_code==200,ok.text
+    assert ok.json()["version"]==2
+    assert client.post(url,json=payload,headers=hdr).status_code==409
+    assert client.post(url,json={"toState":"COMPLETED","expectedVersion":2},headers=hdr).status_code==409
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE acl_entry SET revoked_at=now() WHERE id=%s",(acl,))
+    assert client.post(url,json={"toState":"TRIAGE","expectedVersion":2},headers=hdr).status_code==409
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT state,version FROM service_ticket WHERE id=%s",(ticket,)).fetchone()==("SUBMITTED",2)
+        assert db.execute("SELECT count(*) FROM ticket_state_event WHERE ticket_id=%s",(ticket,)).fetchone()[0]==1
