@@ -76,3 +76,15 @@ test('мобильная навигация доступна с клавиату
   await page.getByRole('navigation').getByRole('link', { name: 'Личный кабинет' }).focus();
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Личный кабинет' })).toBeFocused();
 });
+
+test('тема сохраняется после перезагрузки и перехода, без auth данных в storage', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('combobox', { name: 'Тема оформления' }).selectOption('dark');
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: 'Тема оформления' })).toHaveValue('dark');
+  await expect(page.locator('main')).toHaveClass(/dark/);
+  await page.getByRole('navigation').getByRole('link', { name: 'Бренды' }).click();
+  await expect(page.getByRole('combobox', { name: 'Тема оформления' })).toHaveValue('dark');
+  const stored = await page.evaluate(() => Object.keys(localStorage));
+  expect(stored).toEqual(['roboport-theme']);
+});
