@@ -70,6 +70,7 @@ jobs:
       - run: PYTHONPATH=apps/api python -m pytest -q tests/bootstrap
       - run: PYTHONPATH=apps/api python -m pytest -q tests/contract
       - run: python scripts/check_contract.py
+      - run: python scripts/check_schema_contract.py
       - run: python -m openapi_spec_validator contracts/openapi.yaml
   web:
     runs-on: ubuntu-latest
