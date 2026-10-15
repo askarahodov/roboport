@@ -39,6 +39,14 @@ def _origin_ok(request: Request) -> bool:
     return origin is not None and origin==str(request.base_url).rstrip("/")
 
 
+def _mutation_ok(request: Request, conn: psycopg.Connection) -> bool:
+    """Shared same-origin + session-bound CSRF gate for authenticated mutations."""
+    if not _origin_ok(request):
+        return False
+    return verify_csrf(conn, request.cookies.get("rp_session", ""),
+                       request.headers.get("x-csrf-token", ""))
+
+
 @router.post("/api/v1/auth/login")
 async def login(request: Request):
     dsn=_dsn(request)
@@ -83,12 +91,11 @@ async def login(request: Request):
 @router.post("/api/v1/auth/logout")
 def logout(request: Request):
     dsn=_dsn(request)
-    if dsn is None or not _origin_ok(request):
+    if dsn is None:
         return _error(request,403)
     token=request.cookies.get("rp_session","")
-    csrf=request.headers.get("x-csrf-token","")
     with psycopg.connect(dsn,autocommit=True) as conn:
-        if not verify_csrf(conn,token,csrf):
+        if not _mutation_ok(request,conn):
             return _error(request,403)
         revoke_session(conn,token)
     response=JSONResponse(content={"loggedOut":True},headers={"Cache-Control":"no-store"})
