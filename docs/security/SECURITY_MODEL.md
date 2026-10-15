@@ -35,3 +35,31 @@
 Права: таблицы `role`, `user_role`, `acl_entry` (явные делегирования с отзывом и сроком), `account_customer_link` (подтверждённый субъект), `ticket.customer_id`; политика по объекту **не определяется одним serial/номером заявки**. ADMIN не может читать все приватные файлы по одному имени роли. `Idempotency-Key` не отменяет повторную проверку роли и связи.
 
 Документы: private MinIO в dev (#28), adapter `FileStorage` (#25). **MinIO не знает доменную ACL:** backend сначала выполняет объектный guard, потом отдаёт поток; публичные bucket и постоянные ключи в браузере запрещены. Quarantine запрещает доступ. Signed URL — только отдельным ADR. Ошибки `Error {code,message,requestId}`; пароли, сессии, токены, MinIO ключи и PII не писать в лог/Issue. Реальные PostgreSQL+HTTP+MinIO тесты — обязательны для отметки безопасности; фикстуры их не заменяют.
+
+
+## Реализуемый срез PostgreSQL ACL (#27)
+
+Миграция `0008_authorization` вводит `role`, `user_role`, `acl_entry` и append-only `authorization_audit`.
+Предметные права ticket в `authorization.py` намеренно меньше общей целевой матрицы:
+
+| Роль | Разрешённые ticket actions | Объектное условие |
+|---|---|---|
+| PUBLIC | нет | частные операции запрещены |
+| CLIENT | ticket.read | активная роль и account_customer_link к исходному customer заявки |
+| INTAKE | ticket.read, ticket.intake | действующая acl_entry на конкретный ticket/action |
+| ENGINEER | ticket.read, ticket.diagnose | действующая acl_entry на ticket/action |
+| STOCK | нет | складские операции в другом модуле |
+| MANAGER | ticket.read, ticket.manage | действующая acl_entry на ticket/action |
+| FINANCE | нет | денежные операции в другом модуле |
+| ADMIN | нет | администрирование роли не раскрывает PII |
+| AUDITOR | нет | только отдельный безопасный журнал |
+
+Для `ticket.diagnose` состояние `SAFETY_HOLD` запрещает действие; для `ticket.manage` дополнительно запрещено `QC_FAILED`.
+Роль или ACL без активной серверной сессии недостаточны. Одна лишь связь с устройством
+не даёт читать старую историю: доступ к заявке связан с неизменяемым `service_ticket.customer_id`.
+Отзыв роли/ACL необратим на уровне триггеров.
+
+**Граница реализации:** `authorize_ticket` — внутренний сервисный guard, а не законченный
+HTTP API. Аудит принятия/отклонения запросов, idempotency replay, ACL вложений,
+гарантия подтверждённости `account_customer_link` и защищённые staff HTTP-маршруты
+ещё требуют отдельной реализации и тестов; до этого #27 остаётся открытой.
