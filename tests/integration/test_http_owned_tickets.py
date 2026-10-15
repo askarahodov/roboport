@@ -26,7 +26,7 @@ def test_owned_ticket_list_pagination_and_revocation(monkeypatch):
         conn.execute("INSERT INTO service_ticket(id,customer_id) VALUES (%s,%s)", (other_id,theirs))
         conn.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
            VALUES (%s,%s,%s,%s,%s,%s,%s)""",(sid,uid,token_digest(token),token_digest(new_token()),now,now+timedelta(minutes=30),now+timedelta(hours=4)))
-    client=TestClient(app)
+    client=TestClient(app, base_url="https://127.0.0.1")
     path="/api/v1/dev/tickets"
     assert client.get(path,headers={"X-User-ID":str(uid)}).status_code==401
     client.cookies.set("rp_session",token)
