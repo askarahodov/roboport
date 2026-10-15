@@ -6,6 +6,33 @@ on:
 permissions:
   contents: read
 jobs:
+  prepare-lock:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/roboport-development-baseline'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Generate and commit missing npm lockfile once
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f apps/web/package-lock.json; then exit 0; fi
+          cd apps/web
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run build
+          cd ../..
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/web/package-lock.json
+          git commit -m 'chore(web): commit reproducible npm lockfile'
+          git pull --rebase origin feat/roboport-development-baseline
+          git push origin HEAD:feat/roboport-development-baseline
   api:
     runs-on: ubuntu-latest
     steps:
@@ -23,8 +50,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - working-directory: apps/web
-        run: npm install --no-audit --no-fund
+      - name: Install from committed lockfile
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
       - working-directory: apps/web
         run: npm run typecheck
       - working-directory: apps/web
