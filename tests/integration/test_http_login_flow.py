@@ -52,3 +52,14 @@ def test_auth_disabled_by_default_even_with_credentials(monkeypatch):
     monkeypatch.delenv("ROBOport_SYNTHETIC_AUTH_API",raising=False)
     c=TestClient(app,base_url=ORIGIN)
     assert c.post("/api/v1/auth/login",json={"login":"foo","password":"irrelevant"},headers={"Origin":ORIGIN}).status_code==403
+
+
+def test_plain_http_cannot_enable_cookie_login(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    client=TestClient(app,base_url="http://127.0.0.1")
+    response=client.post("/api/v1/auth/login",
+        json={"login":"synthetic-demo","password":"Synthetic-valid-passphrase-2026!"},
+        headers={"Origin":"http://127.0.0.1"})
+    assert response.status_code==403
+    assert "set-cookie" not in response.headers
