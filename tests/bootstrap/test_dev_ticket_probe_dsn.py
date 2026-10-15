@@ -5,7 +5,7 @@ from roboport_api.main import app
 
 def test_dev_ticket_probe_rejects_unsafe_database_urls(monkeypatch):
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API", "1")
-    client = TestClient(app)
+    client = TestClient(app, base_url="https://127.0.0.1")
     for dsn in (
         "postgresql://[invalid",
         "postgresql://127.0.0.1:bad/roboport",

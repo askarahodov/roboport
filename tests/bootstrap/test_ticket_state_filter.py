@@ -17,7 +17,7 @@ def test_states_match_database_migration():
 def test_state_filter_rejected_before_db_connect(monkeypatch):
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API", "1")
     monkeypatch.setenv("ROBOport_DATABASE_URL", "postgresql://u:p@127.0.0.1:1/nonexistent")
-    client = TestClient(app)
+    client = TestClient(app, base_url="https://127.0.0.1")
     for state in ("invalid", "draft", "DRAFT%27", "COMPLETED,REPAIRING"):
         response = client.get("/api/v1/dev/tickets", params={"state": state})
         assert response.status_code == 422, (state, response.text)
@@ -28,4 +28,4 @@ def test_state_filter_rejected_before_db_connect(monkeypatch):
 
 def test_dev_list_remains_disabled(monkeypatch):
     monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API", raising=False)
-    assert TestClient(app).get("/api/v1/dev/tickets", params={"state": "bad"}).status_code == 404
+    assert TestClient(app, base_url="https://127.0.0.1").get("/api/v1/dev/tickets", params={"state": "bad"}).status_code == 404

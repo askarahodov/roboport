@@ -27,7 +27,7 @@ def test_keyset_pagination_and_revocation(monkeypatch):
         db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
                       VALUES (%s,%s,%s,%s,%s,%s,%s)""",(sid,user,token_digest(token),
                       token_digest(new_token()),now,now+timedelta(minutes=30),now+timedelta(hours=4)))
-    client=TestClient(app)
+    client=TestClient(app, base_url="https://127.0.0.1")
     path="/api/v1/dev/tickets/keyset"
     assert client.get(path).status_code==401
     client.cookies.set("rp_session",token)
@@ -68,7 +68,7 @@ def test_newer_ticket_inserted_between_pages_does_not_shift_cursor(monkeypatch):
                       VALUES(%s,%s,%s,%s,%s,%s,%s)""",
                    (sid,user,token_digest(token),token_digest(new_token()),now,
                     now+timedelta(minutes=30),now+timedelta(hours=4)))
-    client=TestClient(app)
+    client=TestClient(app, base_url="https://127.0.0.1")
     client.cookies.set("rp_session",token)
     url="/api/v1/dev/tickets/keyset"
     first=client.get(url,params={"limit":1})

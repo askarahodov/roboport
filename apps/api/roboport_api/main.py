@@ -14,6 +14,12 @@ app.include_router(synthetic_auth_router)
 async def request_id_middleware(request: Request, call_next):
     # Идентификатор создаётся сервером; клиентский X-Request-ID не доверенный.
     request.state.request_id = str(uuid4())
+    # Dev tickets carry private session cookies. Reject insecure/non-loopback transport
+    # before any handler can validate a token or connect to PostgreSQL.
+    if request.url.path.startswith("/api/v1/dev/tickets"):
+        if (request.url.scheme != "https"
+                or request.url.hostname not in ("127.0.0.1", "localhost")):
+            return not_found(request)
     response = await call_next(request)
     response.headers["X-Request-ID"] = request.state.request_id
     return response
