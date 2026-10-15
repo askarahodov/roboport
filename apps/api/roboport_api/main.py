@@ -400,10 +400,19 @@ async def dev_upload_attachment(ticket_id: str, request: Request):
         )
         if actor is None:
             return not_found(request)
+        retry_key=request.headers.get("idempotency-key")
+        if retry_key is not None and not 1<=len(retry_key)<=128:
+            return JSONResponse(status_code=422,content={
+                "code":"INVALID_INPUT","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
         try:
             attachment_id=create_attachment(conn,MinioFileStorage.from_environment(),
                                             request.cookies.get("rp_session",""),
-                                            ticket,payload,mime)
+                                            ticket,payload,mime,retry_key)
+        except ValueError:
+            return JSONResponse(status_code=409,content={
+                "code":"CONFLICT","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
         except Exception:
             return JSONResponse(status_code=503,content={
                 "code":"STORAGE_UNAVAILABLE","requestId":request.state.request_id,
