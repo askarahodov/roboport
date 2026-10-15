@@ -24,6 +24,7 @@ jobs:
           --health-retries 10
     env:
       ROBOport_DATABASE_URL: postgresql+psycopg://roboport:roboport@127.0.0.1:5432/roboport
+      PYTHONPATH: apps/api
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
