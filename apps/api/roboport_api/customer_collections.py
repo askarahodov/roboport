@@ -8,9 +8,14 @@ from .session_tokens import token_digest
 def owned_collection(conn, token: str, kind: str) -> list[dict] | None:
     if not isinstance(token,str) or len(token)!=43:
         return None
-    if kind not in ("robots","estimates","documents"):
+    if kind not in ("robots","tickets","estimates","documents"):
         raise ValueError("unsupported collection")
     tables={
+        "tickets": """SELECT t.id,t.id AS ticket_id,t.state,t.version,
+             NULL::bigint AS total_minor
+           FROM account_customer_link l JOIN service_ticket t ON t.customer_id=l.customer_id
+           WHERE l.user_id=subject.id AND l.revoked_at IS NULL
+           ORDER BY t.created_at DESC,t.id DESC LIMIT 50""",
         "robots": """SELECT DISTINCT t.device_id AS id,
            NULL::uuid AS ticket_id, NULL::text AS state,
            NULL::integer AS version, NULL::bigint AS total_minor
