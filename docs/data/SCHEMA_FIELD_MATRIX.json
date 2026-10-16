@@ -7,168 +7,264 @@
       "migration": "0001_core",
       "api": "Ticket.id",
       "guard": "ticket.read + object ACL",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "uuid",
+      "constraint": "PRIMARY KEY NOT NULL",
+      "owner_module": "tickets",
+      "test_path": "tests/integration/test_pg_baseline.py"
     },
     {
       "field": "service_ticket.customer_id",
       "migration": "0001_core",
       "api": "CreateTicket.customerId",
-      "guard": "CLIENT + verified account_customer_link; immutable",
-      "status": "implemented"
+      "guard": "CreateTicket: INTAKE/MANAGER + SCOPE_CLIENT to select customer; subsequent CLIENT read only with verified account_customer_link; ownership immutable",
+      "status": "implemented",
+      "sql_type": "uuid",
+      "constraint": "NOT NULL FK customer(id); immutable ticket customer",
+      "owner_module": "tickets",
+      "test_path": "tests/integration/test_pg_ownership_guard.py"
     },
     {
       "field": "service_ticket.device_id",
       "migration": "0001_core",
       "api": "CreateTicket.deviceId",
       "guard": "object ownership does not transfer ticket",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "uuid",
+      "constraint": "NULLABLE FK robot_device(id)",
+      "owner_module": "tickets",
+      "test_path": "tests/integration/test_pg_baseline.py"
     },
     {
       "field": "service_ticket.state",
       "migration": "0001_core",
       "api": "Ticket.state",
       "guard": "ticket.manage or specific state transition guard",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "text",
+      "constraint": "NOT NULL CHECK 20 canonical states",
+      "owner_module": "tickets",
+      "test_path": "tests/integration/test_pg_ticket_fsm.py"
     },
     {
       "field": "service_ticket.version",
       "migration": "0001_core",
       "api": "Ticket.version",
       "guard": "optimistic version, 409",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "integer",
+      "constraint": "NOT NULL CHECK version > 0; optimistic concurrency",
+      "owner_module": "tickets",
+      "test_path": "tests/integration/test_pg_baseline.py"
     },
     {
       "field": "ticket_state_event.to_state",
       "migration": "0001_core",
       "api": "Transition.targetState",
       "guard": "role + ticket ACL + guarded FSM",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "text",
+      "constraint": "NOT NULL CHECK 20 canonical states; append-only event",
+      "owner_module": "tickets",
+      "test_path": "tests/integration/test_pg_ticket_fsm.py"
     },
     {
       "field": "estimate.id",
       "migration": "0002_estimate_stock",
       "api": "Estimate.id",
       "guard": "manager/owner scoped",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "uuid",
+      "constraint": "PRIMARY KEY NOT NULL",
+      "owner_module": "estimates",
+      "test_path": "tests/integration/test_pg_estimate_stock.py"
     },
     {
       "field": "estimate.ticket_id",
       "migration": "0002_estimate_stock",
       "api": "Estimate.ticketId",
       "guard": "ticket-specific ACL",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "uuid",
+      "constraint": "NOT NULL FK service_ticket(id)",
+      "owner_module": "estimates",
+      "test_path": "tests/integration/test_pg_estimate_stock.py"
     },
     {
       "field": "estimate.version",
       "migration": "0002_estimate_stock",
       "api": "Estimate.version",
       "guard": "exact immutable SENT version",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "integer",
+      "constraint": "NOT NULL CHECK >0; UNIQUE(ticket_id,version)",
+      "owner_module": "estimates",
+      "test_path": "tests/integration/test_pg_estimate_approval.py"
     },
     {
       "field": "estimate.state",
       "migration": "0002_estimate_stock",
       "api": "Estimate.status",
       "guard": "only four SQL states; SUPERSEDED computed",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "text",
+      "constraint": "NOT NULL CHECK DRAFT/SENT/APPROVED/DECLINED; SUPERSEDED is derived",
+      "owner_module": "estimates",
+      "test_path": "tests/integration/test_pg_estimate_stock.py"
     },
     {
       "field": "estimate.total_minor",
       "migration": "0002_estimate_stock",
       "api": "Estimate.total",
       "guard": "minor units to fixed decimal string",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "bigint",
+      "constraint": "NOT NULL CHECK >=0; immutable after SENT",
+      "owner_module": "estimates",
+      "test_path": "tests/integration/test_pg_estimate_stock.py"
     },
     {
       "field": "estimate_line.amount_minor",
       "migration": "0002_estimate_stock",
       "api": null,
       "guard": "cannot mutate after SENT",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "bigint",
+      "constraint": "NOT NULL CHECK >=0; frozen after SENT",
+      "owner_module": "estimates",
+      "test_path": "tests/integration/test_pg_estimate_stock.py"
     },
     {
       "field": "stock_lot.reserved_qty",
       "migration": "0002_estimate_stock",
       "api": null,
       "guard": "ACID row-lock and CHECK",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "bigint",
+      "constraint": "NOT NULL DEFAULT 0 CHECK >=0 AND <= available_qty",
+      "owner_module": "inventory",
+      "test_path": "tests/integration/test_pg_estimate_stock.py"
     },
     {
       "field": "idempotency_request.key_hash",
       "migration": "0003_idempotency",
       "api": null,
       "guard": "server-only per-actor request ledger",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "text",
+      "constraint": "NOT NULL CHECK length 64; UNIQUE(actor_id,operation,key_hash)",
+      "owner_module": "idempotency",
+      "test_path": "tests/integration/test_pg_idempotency_concurrency.py"
     },
     {
       "field": "user_session.token_hash",
       "migration": "0006_local_identity",
       "api": null,
       "guard": "opaque HttpOnly cookie; no raw token in SQL",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "char(64)",
+      "constraint": "NOT NULL UNIQUE; hex SHA256; immutable",
+      "owner_module": "identity",
+      "test_path": "tests/integration/test_pg_identity.py"
     },
     {
       "field": "acl_entry.ticket_id",
       "migration": "0008_authorization",
       "api": null,
       "guard": "deny-by-default role + ticket action",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "uuid",
+      "constraint": "NOT NULL FK service_ticket(id); grant is immutable",
+      "owner_module": "authorization",
+      "test_path": "tests/integration/test_pg_authorization_roles.py"
     },
     {
       "field": "estimate_approval.actor_id",
       "migration": "0004_approval",
       "api": null,
       "guard": "verified client consent; audit append-only",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "uuid",
+      "constraint": "NOT NULL FK app_user(id); append-only approval",
+      "owner_module": "estimates",
+      "test_path": "tests/integration/test_pg_estimate_approval.py"
     },
     {
       "field": "audit_event.action",
       "migration": "0001_core",
       "api": null,
       "guard": "append-only server action",
-      "status": "implemented"
+      "status": "implemented",
+      "sql_type": "text",
+      "constraint": "NOT NULL CHECK non-empty; append-only",
+      "owner_module": "audit",
+      "test_path": "tests/integration/test_pg_baseline.py"
     },
     {
       "field": "service_ticket.reference",
       "migration": "none",
       "api": "Ticket.reference",
       "guard": "never synthesize fabricated reference",
-      "status": "planned"
+      "status": "planned",
+      "sql_type": "text",
+      "constraint": "PLANNED: immutable unique reference; no SQL column yet",
+      "owner_module": "tickets",
+      "test_path": "tests/contract/test_schema_mapping_gate.py"
     },
     {
       "field": "service_ticket.symptoms",
       "migration": "none",
       "api": "CreateTicket.symptoms",
       "guard": "future persisted intake evidence, no fake value",
-      "status": "planned"
+      "status": "planned",
+      "sql_type": "text",
+      "constraint": "PLANNED: non-empty intake evidence, nullable policy pending migration",
+      "owner_module": "tickets",
+      "test_path": "tests/contract/test_schema_mapping_gate.py"
     },
     {
       "field": "robot_device.model_variant_id",
       "migration": "none",
       "api": "Ticket.modelVariantId",
       "guard": "catalog #18 model variant identity",
-      "status": "planned"
+      "status": "planned",
+      "sql_type": "uuid",
+      "constraint": "PLANNED: FK catalog model_variant; no SQL column yet",
+      "owner_module": "catalog",
+      "test_path": "tests/contract/test_schema_mapping_gate.py"
     },
     {
       "field": "ticket_state_event.reason",
       "migration": "none",
       "api": "Transition.reason",
       "guard": "future audited reason validation",
-      "status": "planned"
+      "status": "planned",
+      "sql_type": "text",
+      "constraint": "PLANNED: non-empty audit reason; no SQL column yet",
+      "owner_module": "tickets",
+      "test_path": "tests/contract/test_schema_mapping_gate.py"
     },
     {
       "field": "part_compatibility.evidence_id",
       "migration": "none",
       "api": null,
       "guard": "catalog #18 two-person approval; synthetic flag insufficient",
-      "status": "planned"
+      "status": "planned",
+      "sql_type": "uuid",
+      "constraint": "PLANNED: immutable FK validated evidence and independent approvals",
+      "owner_module": "compatibility",
+      "test_path": "tests/contract/test_schema_mapping_gate.py"
     },
     {
       "field": "notification_outbox.event_id",
       "migration": "none",
       "api": null,
       "guard": "outbox #22 pending",
-      "status": "planned"
+      "status": "planned",
+      "sql_type": "uuid",
+      "constraint": "PLANNED: idempotent FK event reference with unique processing key",
+      "owner_module": "outbox",
+      "test_path": "tests/contract/test_schema_mapping_gate.py"
     }
   ]
 }
