@@ -69,7 +69,7 @@ jobs:
         run: |
           openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 1 \
             -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
-          chmod 644 tls.crt
+          chmod 644 tls.crt tls.key  # disposable CI-only key; container runs as non-root
       - name: Start isolated real Keycloak with imported synthetic realm
         shell: bash
         run: |
