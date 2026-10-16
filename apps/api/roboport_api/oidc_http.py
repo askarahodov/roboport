@@ -120,10 +120,7 @@ def callback(request:Request,code:str="",state:str=""):
         if issued is None:
             return _deny(request)
         response=RedirectResponse("/account",status_code=303,headers={"Cache-Control":"no-store"})
-        set_session_cookie(response,issued[0],request)
+        set_session_cookie(response,issued[0])
         return response
     except (OIDCRejected,KeyError,psycopg.Error,httpx.HTTPError):
         return _deny(request)
-    finally:
-        # Failure also clears replayable state cookie via response cookies below?
-        pass
