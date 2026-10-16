@@ -160,3 +160,35 @@ async def change_password(request: Request):
     response=JSONResponse(content={"changed":True},headers={"Cache-Control":"no-store"})
     clear_session_cookie(response)
     return response
+
+
+@router.post("/api/v1/auth/csrf")
+def csrf_bootstrap(request: Request):
+    """Same-origin cookie-authenticated CSRF rotation for SPA after reload.
+
+    The only effect is replacing the old CSRF verifier; there is no business mutation.
+    No cross-origin caller can read the replacement token.
+    """
+    from .session_tokens import new_token,token_digest
+    dsn=_dsn(request)
+    if dsn is None or not _origin_ok(request):
+        return _error(request,403)
+    raw=request.cookies.get("rp_session","")
+    if not isinstance(raw,str) or len(raw)!=43:
+        return _error(request,401)
+    csrf=new_token()
+    with psycopg.connect(dsn,autocommit=True) as conn:
+        row=conn.execute("""SELECT s.id FROM user_session s
+             JOIN app_user u ON u.id=s.user_id AND u.status='ACTIVE'
+             WHERE s.token_hash=%s AND s.revoked_at IS NULL
+             AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
+             FOR UPDATE OF s""",(token_digest(raw),)).fetchone()
+        if row is not None:
+            conn.execute("""INSERT INTO user_session_csrf_rotation(session_id,csrf_hash,rotated_at)
+                VALUES(%s,%s,now()) ON CONFLICT(session_id) DO UPDATE
+                SET csrf_hash=excluded.csrf_hash,rotated_at=now()""",
+                (row[0],token_digest(csrf)))
+    if row is None:
+        return _error(request,401)
+    return JSONResponse(content={"csrfToken":csrf},
+        headers={"Cache-Control":"no-store"})
