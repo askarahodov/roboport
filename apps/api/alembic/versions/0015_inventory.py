@@ -40,6 +40,30 @@ def upgrade():
       created_at timestamptz NOT NULL DEFAULT now(),
       cancelled_at timestamptz
     )""")
+    op.execute("""CREATE FUNCTION guard_reservation_update() RETURNS trigger
+      LANGUAGE plpgsql AS $body$
+      BEGIN
+        IF ROW(NEW.id,NEW.lot_id,NEW.ticket_id,NEW.compatibility_id,NEW.actor_id,
+               NEW.qty,NEW.created_at) IS DISTINCT FROM
+           ROW(OLD.id,OLD.lot_id,OLD.ticket_id,OLD.compatibility_id,OLD.actor_id,
+               OLD.qty,OLD.created_at) THEN
+          RAISE EXCEPTION 'reservation identity immutable';
+        END IF;
+        IF OLD.status='CANCELLED' OR
+           NEW.status NOT IN ('ACTIVE','CANCELLED') OR
+           (OLD.status='ACTIVE' AND NEW.status='ACTIVE' AND
+            NEW.cancelled_at IS DISTINCT FROM OLD.cancelled_at) OR
+           (NEW.status='CANCELLED' AND (OLD.status<>'ACTIVE' OR NEW.cancelled_at IS NULL)) THEN
+          RAISE EXCEPTION 'reservation status transition forbidden';
+        END IF;
+        RETURN NEW;
+      END $body$""")
+    op.execute("""CREATE TRIGGER reservation_state_guard BEFORE UPDATE ON stock_reservation
+      FOR EACH ROW EXECUTE FUNCTION guard_reservation_update()""")
+    op.execute("""CREATE FUNCTION reject_reservation_delete() RETURNS trigger LANGUAGE plpgsql
+      AS $body$ BEGIN RAISE EXCEPTION 'reservation deletion forbidden'; END $body$""")
+    op.execute("""CREATE TRIGGER reservation_no_delete BEFORE DELETE ON stock_reservation
+      FOR EACH ROW EXECUTE FUNCTION reject_reservation_delete()""")
     op.execute("""CREATE TABLE stock_movement (
       id uuid PRIMARY KEY,
       reservation_id uuid NOT NULL REFERENCES stock_reservation(id),
@@ -73,5 +97,7 @@ def downgrade():
     op.execute("DROP TABLE inventory_receipt")
     op.execute("DROP TABLE stock_movement")
     op.execute("DROP TABLE stock_reservation")
+    op.execute("DROP FUNCTION guard_reservation_update()")
+    op.execute("DROP FUNCTION reject_reservation_delete()")
     op.execute("DROP TABLE part_compatibility")
     op.execute("DROP FUNCTION reject_inventory_ledger_change()")
