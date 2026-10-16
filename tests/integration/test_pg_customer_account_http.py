@@ -74,3 +74,34 @@ def test_account_ticket_list_live_two_users_and_revocation(monkeypatch):
     assert http.get(url+"?limit=51").status_code==422
     monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API")
     assert http.get(url).status_code==404
+
+
+def test_spa_csrf_rotation_and_real_logout(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    user,sid=uuid4(),uuid4()
+    token,old_csrf=new_token(),new_token()
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(user,user.hex))
+        db.execute("""INSERT INTO user_session
+          (id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+          VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+          (sid,user,token_digest(token),token_digest(old_csrf),now,
+           now+timedelta(minutes=30),now+timedelta(hours=4)))
+    http=TestClient(app,base_url="https://127.0.0.1")
+    url="/api/v1/auth/csrf"
+    assert http.post(url).status_code==403
+    http.cookies.set("rp_session",token)
+    assert http.post(url).status_code==403
+    headers={"Origin":"https://127.0.0.1"}
+    fresh=http.post(url,headers=headers)
+    assert fresh.status_code==200,fresh.text
+    csrf=fresh.json()["csrfToken"]
+    assert len(csrf)==43 and csrf!=old_csrf
+    # Old token may never be used for an authenticated mutation after rotation.
+    logout="/api/v1/auth/logout"
+    assert http.post(logout,headers={**headers,"X-CSRF-Token":old_csrf}).status_code==403
+    assert http.post(logout,headers={**headers,"X-CSRF-Token":csrf}).status_code==200
+    assert http.post(url,headers=headers).status_code==401
+    assert http.get("/api/v1/auth/me").status_code==401
