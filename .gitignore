@@ -1,3 +1,6 @@
 infra/dev/.env.local
 infra/dev/.env
 **/.env.local
+
+# Disposable local TLS must never be committed
+infra/dev/tls/
