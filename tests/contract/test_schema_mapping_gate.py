@@ -22,6 +22,12 @@ def validate_matrix(matrix=MATRIX,spec=SPEC):
     for row in matrix["fields"]:
         assert row["status"] in ("implemented","planned")
         assert row["guard"].strip(), "Missing security decision"
+        assert row["sql_type"].strip(), "Missing SQL type"
+        assert row["constraint"].strip(), "Missing SQL constraint or planned decision"
+        assert row["owner_module"].strip(), "Missing module owner"
+        assert (ROOT/row["test_path"]).is_file(), "Missing actual regression test path"
+        if row["status"]=="planned":
+            assert row["constraint"].startswith("PLANNED:"), "Planned field masquerades as implemented"
         if row["status"]=="planned":
             assert row["migration"]=="none", "Planned field masquerades as migrated"
         else:
@@ -89,3 +95,15 @@ def test_schema_adr_decisions_and_legacy_drafts_are_explicit():
     legacy=ROOT/"db/legacy_drafts"
     assert len(list(legacy.glob("*.sql")))==6
     assert all(p.stat().st_size==0 for p in legacy.glob("*.sql"))
+
+
+def test_missing_constraint_metadata_breaks_mapping_gate():
+    broken=deepcopy(MATRIX)
+    broken["fields"][0].pop("constraint")
+    with pytest.raises(KeyError):
+        validate_matrix(broken,SPEC)
+
+
+def test_ticket_customer_acl_separates_staff_create_from_client_read():
+    row=next(x for x in MATRIX["fields"] if x["field"]=="service_ticket.customer_id")
+    assert all(token in row["guard"] for token in ("INTAKE","MANAGER","SCOPE_CLIENT","CLIENT","account_customer_link"))
