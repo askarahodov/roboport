@@ -1,5 +1,6 @@
 import React from 'react';
 import { TicketWorkflow } from './TicketWorkflow';
+import { StaffEstimates, StaffStock } from './StaffOperations';
 
 type Role = 'INTAKE' | 'ENGINEER' | 'STOCK' | 'MANAGER' | 'FINANCE' | 'AUDITOR';
 const sections: {label:string; roles:Role[]}[] = [
@@ -88,7 +89,9 @@ export function StaffPortal() {
       <ul>{sections.filter(s=>s.roles.some(r=>roles.includes(r))).map(s=>
         <li key={s.label}>{s.label} — операции ещё не подключены</li>)}</ul>
       {roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r))&&<StaffQueue roles={roles}/>}
-      <p role="status">Операции изменения заявок доступны только после отдельной проверки прав сервером.</p>
+      {roles.some(r=>['FINANCE','MANAGER'].includes(r))&&<StaffEstimates />}
+      {roles.includes('STOCK')&&<StaffStock />}
+      <p role="status">Сервер проверяет ACL отдельно для каждой операции.</p>
     </>}
   </section>;
 }
