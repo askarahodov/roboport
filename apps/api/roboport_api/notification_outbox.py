@@ -8,10 +8,11 @@ from uuid import UUID
 MAX_ATTEMPTS = 5
 
 
-def claim_one(conn, worker_id: str, lease_seconds: int = 30):
+def claim_one(conn, worker_id: str, lease_seconds: int = 30, aggregate_id: UUID | None = None):
     if (not isinstance(worker_id,str) or not 1<=len(worker_id)<=96
             or not worker_id.isascii() or not worker_id.isprintable()
-            or type(lease_seconds) is not int or not 1<=lease_seconds<=3600):
+            or type(lease_seconds) is not int or not 1<=lease_seconds<=3600
+            or (aggregate_id is not None and not isinstance(aggregate_id,UUID))):
         raise ValueError("invalid worker/lease")
 
     # Reap claims that exhausted their allowance before crashing. No external effect.
@@ -23,9 +24,10 @@ def claim_one(conn, worker_id: str, lease_seconds: int = 30):
       (lease_seconds,))
     row=conn.execute("""WITH candidate AS (
         SELECT id FROM notification_outbox
-        WHERE (status='PENDING' AND available_at<=clock_timestamp())
+        WHERE ((status='PENDING' AND available_at<=clock_timestamp())
            OR (status='PROCESSING' AND attempts<5 AND
-               claimed_at<=clock_timestamp() - (%s * interval '1 second'))
+               claimed_at<=clock_timestamp() - (%s * interval '1 second')))
+          AND (%s::uuid IS NULL OR aggregate_id=%s::uuid)
         ORDER BY available_at,id
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -35,7 +37,7 @@ def claim_one(conn, worker_id: str, lease_seconds: int = 30):
         claimed_by=%s, claimed_at=clock_timestamp()
       FROM candidate WHERE o.id=candidate.id
       RETURNING o.id,o.attempts,o.event_type,o.payload""",
-      (lease_seconds,worker_id)).fetchone()
+      (lease_seconds,aggregate_id,aggregate_id,worker_id)).fetchone()
     if row is None:
         return None
     return {"id":row[0],"attempt":row[1],"eventType":row[2],"payload":row[3]}
@@ -71,9 +73,10 @@ def finish_one(conn, worker_id: str, event_id: UUID, attempt: int,
     return True
 
 
-def run_once(conn, worker_id: str, *, simulate_failure: bool=False):
+def run_once(conn, worker_id: str, *, simulate_failure: bool=False,
+             aggregate_id: UUID | None = None):
     """Caller supplies a writable transaction/connection, no external side effects."""
-    task=claim_one(conn,worker_id)
+    task=claim_one(conn,worker_id,aggregate_id=aggregate_id)
     if task is None:
         return None
     if not finish_one(conn,worker_id,task["id"],task["attempt"],
