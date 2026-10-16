@@ -49,8 +49,10 @@ def check():
                           ("dark",r"\.app\.dark\s*\{([^}]+)\}")):
         match=re.search(selector,stylesheet,re.S)
         assert match, f"missing {name} CSS roles"
-        actual={key.removeprefix("--rp-"):value.lower() for key,value in
-                re.findall(r"(--rp-[a-zA-Z]+)\s*:\s*(#[a-fA-F0-9]{6})",match.group(1))}
+        def css_key(key):
+            return re.sub(r"-([a-z])",lambda m:m.group(1).upper(),key.removeprefix("--rp-"))
+        actual={css_key(key):value.lower() for key,value in
+                re.findall(r"(--rp-[a-z-]+)\s*:\s*(#[a-fA-F0-9]{6})",match.group(1))}
         assert actual=={k:v.lower() for k,v in obj[name].items()},f"JSON/CSS mismatch {name}"
         theme=obj[name]
         for fg,bg in (("foreground","background"),("foreground","surface"),
