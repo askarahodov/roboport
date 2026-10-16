@@ -62,6 +62,56 @@ def upgrade():
       END $body$""")
     op.execute("""CREATE TRIGGER capability_reviewer_guard BEFORE INSERT ON capability_approval
       FOR EACH ROW EXECUTE FUNCTION guard_capability_reviewer()""")
+    op.execute("""CREATE TABLE part_compatibility (
+      id uuid PRIMARY KEY,
+      model_id uuid NOT NULL REFERENCES catalog_model(id),
+      part_number text NOT NULL CHECK(length(trim(part_number))>0),
+      evidence text NOT NULL CHECK(length(trim(evidence))>0),
+      status text NOT NULL DEFAULT 'CANDIDATE'
+        CHECK(status IN ('CANDIDATE','SUPPORTED','UNSUPPORTED')),
+      revoked_at timestamptz,
+      UNIQUE(model_id,part_number)
+    )""")
+    op.execute("""CREATE TABLE part_compatibility_approval (
+      id uuid PRIMARY KEY,
+      compatibility_id uuid NOT NULL REFERENCES part_compatibility(id),
+      actor_id uuid NOT NULL REFERENCES app_user(id),
+      role text NOT NULL CHECK(role IN ('ENGINEER','MANAGER')),
+      approved boolean NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE(compatibility_id,actor_id)
+    )""")
+    op.execute("""CREATE FUNCTION guard_part_reviewer() RETURNS trigger
+      LANGUAGE plpgsql AS $body$
+      BEGIN
+        IF NOT EXISTS(
+          SELECT 1 FROM app_user u JOIN user_role r ON r.user_id=u.id
+          WHERE u.id=NEW.actor_id AND u.status='ACTIVE'
+            AND r.role_code=NEW.role AND r.revoked_at IS NULL
+            AND (r.expires_at IS NULL OR r.expires_at>now())
+        ) THEN RAISE EXCEPTION 'part reviewer has no active role'; END IF;
+        RETURN NEW;
+      END $body$""")
+    op.execute("""CREATE TRIGGER part_reviewer_guard BEFORE INSERT ON part_compatibility_approval
+      FOR EACH ROW EXECUTE FUNCTION guard_part_reviewer()""")
+    op.execute("""CREATE FUNCTION guard_part_promotion() RETURNS trigger
+      LANGUAGE plpgsql AS $body$
+      BEGIN
+        IF NEW.status='SUPPORTED' AND OLD.status IS DISTINCT FROM NEW.status THEN
+          IF NEW.revoked_at IS NOT NULL OR NOT EXISTS(
+            SELECT 1 FROM catalog_model m WHERE m.id=NEW.model_id AND m.status='SUPPORTED'
+          ) OR NOT EXISTS(
+            SELECT 1 FROM part_compatibility_approval a
+            JOIN part_compatibility_approval b ON a.compatibility_id=b.compatibility_id
+             AND b.actor_id<>a.actor_id
+            WHERE a.compatibility_id=NEW.id AND a.role='ENGINEER' AND a.approved
+             AND b.role='MANAGER' AND b.approved
+          ) THEN RAISE EXCEPTION 'two independent part approvals required'; END IF;
+        END IF;
+        RETURN NEW;
+      END $body$""")
+    op.execute("""CREATE TRIGGER part_promotion_guard BEFORE UPDATE ON part_compatibility
+      FOR EACH ROW EXECUTE FUNCTION guard_part_promotion()""")
     op.execute("""CREATE TABLE catalog_audit (
       id uuid PRIMARY KEY,
       capability_id uuid NOT NULL REFERENCES service_capability(id),
@@ -73,7 +123,7 @@ def upgrade():
       LANGUAGE plpgsql AS $body$ BEGIN
         RAISE EXCEPTION 'catalog audit immutable';
       END $body$""")
-    for table in ('capability_approval','catalog_audit'):
+    for table in ('capability_approval','part_compatibility_approval','catalog_audit'):
         op.execute(f"""CREATE TRIGGER {table}_append_only
           BEFORE UPDATE OR DELETE ON {table}
           FOR EACH ROW EXECUTE FUNCTION prevent_catalog_audit_mutation()""")
@@ -103,9 +153,13 @@ def upgrade():
 
 def downgrade():
     op.execute("DROP TABLE catalog_audit")
+    op.execute("DROP TABLE part_compatibility_approval")
+    op.execute("DROP TABLE part_compatibility")
     op.execute("DROP TABLE capability_approval")
     op.execute("DROP TABLE service_capability")
     op.execute("DROP TABLE catalog_model")
     op.execute("DROP FUNCTION prevent_catalog_audit_mutation()")
     op.execute("DROP FUNCTION guard_capability_reviewer()")
+    op.execute("DROP FUNCTION guard_part_reviewer()")
+    op.execute("DROP FUNCTION guard_part_promotion()")
     op.execute("DROP FUNCTION validate_capability_promotion()")
