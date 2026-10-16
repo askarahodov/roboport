@@ -33,7 +33,11 @@
           "value": "synthetic-password-a",
           "temporary": false
         }
-      ]
+      ],
+      "firstName": "Synthetic",
+      "lastName": "Alpha",
+      "email": "synthetic-a@example.invalid",
+      "requiredActions": []
     },
     {
       "id": "22222222-2222-4222-8222-222222222222",
@@ -46,7 +50,11 @@
           "value": "synthetic-password-b",
           "temporary": false
         }
-      ]
+      ],
+      "firstName": "Synthetic",
+      "lastName": "Beta",
+      "email": "synthetic-b@example.invalid",
+      "requiredActions": []
     }
   ]
 }
