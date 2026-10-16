@@ -12,7 +12,13 @@ async function login(name,password,expectedUser,expectedTicket,forbiddenTicket){
     await page.locator('#username').fill(name);
     await page.locator('#password').fill(password);
     await page.locator('#kc-login').click();
-    await page.waitForURL(origin+'/account',{timeout:30000});
+    try {
+      await page.waitForURL(origin+'/account',{timeout:15000});
+    } catch (error) {
+      console.error('OIDC navigation result URL:',page.url());
+      console.error('OIDC displayed messages:',(await page.locator('h1,h2,[role="alert"],.alert-error,.kc-feedback-text').allTextContents()).join(' | ').slice(0,800));
+      throw error;
+    }
     const who=await context.request.get(origin+'/api/v1/auth/me');
     if(who.status()!==200) throw Error(name+' session status '+who.status()+' '+await who.text());
     const me=await who.json();
