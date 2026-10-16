@@ -111,14 +111,16 @@ def test_http_fsm_csrf_origin_version_and_revocation_bundle(monkeypatch):
     client.cookies.set("rp_session",token)
     assert client.post(url,json=payload).status_code==403
     assert client.post(url,json=payload,headers={"Origin":"https://127.0.0.1"}).status_code==403
-    hdr={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf}
+    hdr={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf,"Idempotency-Key":"fsm-"+ticket.hex}
     ok=client.post(url,json=payload,headers=hdr)
     assert ok.status_code==200,ok.text
     assert ok.json()["version"]==2
-    assert client.post(url,json=payload,headers=hdr).status_code==409
+    replay=client.post(url,json=payload,headers=hdr)
+    assert replay.status_code==200 and replay.json()==ok.json()
     assert client.post(url,json={"toState":"COMPLETED","expectedVersion":2},headers=hdr).status_code==409
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE acl_entry SET revoked_at=now() WHERE id=%s",(acl,))
+    assert client.post(url,json=payload,headers=hdr).status_code==409
     assert client.post(url,json={"toState":"TRIAGE","expectedVersion":2},headers=hdr).status_code==409
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT state,version FROM service_ticket WHERE id=%s",(ticket,)).fetchone()==("SUBMITTED",2)
@@ -243,13 +245,13 @@ def test_http_safety_review_requires_two_independent_staff():
         release=f"/api/v1/dev/tickets/{ticket}/safety-release"
         payload={"expectedVersion":1}
         client.cookies.set("rp_session",tokens[1])
-        headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[1]}
+        headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[1],"Idempotency-Key":"release-"+ticket.hex}
         assert client.post(release,json=payload,headers=headers).status_code==409
         assert client.post(review,json={**payload,"approved":True},headers=headers).status_code==200
         assert client.post(release,json=payload,headers=headers).status_code==409
         client.cookies.clear()
         client.cookies.set("rp_session",tokens[0])
-        eng_headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[0]}
+        eng_headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[0],"Idempotency-Key":"review-eng-"+ticket.hex}
         assert client.post(review,json={**payload,"approved":True},headers=eng_headers).status_code==200
         client.cookies.clear()
         client.cookies.set("rp_session",tokens[1])
