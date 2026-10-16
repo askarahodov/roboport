@@ -11,6 +11,12 @@ branch_labels=None
 depends_on=None
 
 def upgrade():
+    op.execute("""ALTER TABLE robot_device
+      ADD COLUMN model_variant text, ADD COLUMN region text, ADD COLUMN revision text""")
+    op.execute("ALTER TABLE acl_entry DROP CONSTRAINT acl_entry_action_check")
+    op.execute("""ALTER TABLE acl_entry ADD CONSTRAINT acl_entry_action_check CHECK
+      (action IN ('ticket.read','ticket.diagnose','ticket.intake','ticket.manage',
+                  'estimate.read','estimate.approve','stock.reserve'))""")
     op.execute("""CREATE TABLE part_compatibility (
       id uuid PRIMARY KEY,
       part_number text NOT NULL,
@@ -58,6 +64,12 @@ def upgrade():
                    ON {table} FOR EACH ROW EXECUTE FUNCTION reject_inventory_ledger_change()""")
 
 def downgrade():
+    op.execute("DELETE FROM acl_entry WHERE action='stock.reserve'")
+    op.execute("ALTER TABLE acl_entry DROP CONSTRAINT acl_entry_action_check")
+    op.execute("""ALTER TABLE acl_entry ADD CONSTRAINT acl_entry_action_check CHECK
+      (action IN ('ticket.read','ticket.diagnose','ticket.intake','ticket.manage',
+                  'estimate.read','estimate.approve'))""")
+    op.execute("ALTER TABLE robot_device DROP COLUMN model_variant, DROP COLUMN region, DROP COLUMN revision")
     op.execute("DROP TABLE inventory_receipt")
     op.execute("DROP TABLE stock_movement")
     op.execute("DROP TABLE stock_reservation")
