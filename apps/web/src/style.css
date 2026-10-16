@@ -20,3 +20,5 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,te
  header nav{order:3;width:100%}header label{margin-left:0}
  section{margin:3rem auto}h1{overflow-wrap:anywhere}
 }
+
+.customer-account nav{display:flex;flex-wrap:wrap;gap:.6rem;margin:1.2rem 0}.customer-account nav a{padding:.55rem .8rem;border:1px solid currentColor;border-radius:.5rem;color:inherit;text-decoration:none}.customer-account nav a[aria-current="page"]{font-weight:700;text-decoration:underline}.account-hint{opacity:.8}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
