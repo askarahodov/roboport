@@ -102,7 +102,7 @@
     },
     {
       "field": "user_session.token_hash",
-      "migration": "0006_auth",
+      "migration": "0006_local_identity",
       "api": null,
       "guard": "opaque HttpOnly cookie; no raw token in SQL",
       "status": "implemented"
