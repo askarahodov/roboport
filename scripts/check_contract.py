@@ -8,8 +8,8 @@ from openapi_spec_validator import validate_spec
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = yaml.safe_load((ROOT / "contracts/openapi.yaml").read_text(encoding="utf-8"))
 MANIFEST = json.loads((ROOT / "contracts/operation_ids.json").read_text(encoding="utf-8"))
-METHODS = {"get", "post", "put", "patch", "delete"}
-ERRORS = {"400", "401", "403", "404", "409", "422"}
+METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+ERRORS = {"400", "401", "403", "404", "409", "422", "429"}
 
 
 def check_contract(spec=SPEC, manifest=MANIFEST):
@@ -33,6 +33,13 @@ def check_contract(spec=SPEC, manifest=MANIFEST):
             schema = content.get("schema")
             assert schema == {"$ref": "#/components/schemas/Error"}, (
                 f"{verb} {path}: {code} must use canonical Error")
+    error=spec["components"]["schemas"]["Error"]
+    assert error["type"]=="object", "Error must be an object"
+    assert set(error["required"])=={"code","message","requestId"}, "Canonical Error fields changed"
+    assert error.get("additionalProperties") is False, "Canonical Error must reject unknown fields"
+    properties=error["properties"]
+    assert properties["code"]["type"]=="string" and properties["message"]["type"]=="string"
+    assert properties["requestId"]=={"type":"string","format":"uuid"}, "Canonical requestId changed"
     for verb, endpoint in (("get", "/api/v1/catalog/brands"),
                            ("get", "/api/v1/catalog/models"),
                            ("get", "/api/v1/catalog/models/{modelId}")):
