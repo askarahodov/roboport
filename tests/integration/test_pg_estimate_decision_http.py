@@ -22,7 +22,7 @@ def test_estimate_decision_http_replay_revocation_and_stale(monkeypatch):
     with psycopg.connect(DSN) as db:
         for c in (customer,other_customer):
             db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(c,c.hex))
-        db.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",(ticket,customer))
+        db.execute("INSERT INTO service_ticket(id,customer_id,state) VALUES(%s,%s,'AWAITING_APPROVAL')",(ticket,customer))
         for uid,token,secret in zip((owner,stranger),tokens,csrf):
             db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
                        (uid,"quote-owner-"+uid.hex))
@@ -76,7 +76,7 @@ def test_estimate_decline_is_immutable_and_requires_new_version():
     now=datetime.now(timezone.utc)
     with psycopg.connect(DSN) as db:
         db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
-        db.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",(ticket,customer))
+        db.execute("INSERT INTO service_ticket(id,customer_id,state) VALUES(%s,%s,'DIAGNOSING')",(ticket,customer))
         db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
                    (owner,"estimate-decline-"+owner.hex))
         db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,'CLIENT')",(uuid4(),owner))
