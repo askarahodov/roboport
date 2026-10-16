@@ -1,6 +1,7 @@
 import React from 'react';
 import { TicketWorkflow } from './TicketWorkflow';
 import { StaffEstimates, StaffStock } from './StaffOperations';
+import { StaffAudit } from './StaffAudit';
 
 type Role = 'INTAKE' | 'ENGINEER' | 'STOCK' | 'MANAGER' | 'FINANCE' | 'AUDITOR';
 const sections: {label:string; roles:Role[]}[] = [
@@ -91,6 +92,7 @@ export function StaffPortal() {
       {roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r))&&<StaffQueue roles={roles}/>}
       {roles.some(r=>['FINANCE','MANAGER'].includes(r))&&<StaffEstimates />}
       {roles.includes('STOCK')&&<StaffStock />}
+      {roles.includes('AUDITOR')&&<StaffAudit />}
       <p role="status">Сервер проверяет ACL отдельно для каждой операции.</p>
     </>}
   </section>;
