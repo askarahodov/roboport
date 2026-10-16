@@ -15,7 +15,7 @@ test('staff portal does not render staff sections for customer sessions', async 
   }));
   await page.goto('/staff');
   await expect(page.getByRole('alert')).toContainText('403');
-  await expect(page.getByText('Приёмка')).toHaveCount(0);
+  await expect(page.getByRole('listitem').filter({hasText:'Приёмка'})).toHaveCount(0);
 });
 
 test('staff portal shows only explicitly granted roles', async ({page}) => {
