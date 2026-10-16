@@ -40,6 +40,10 @@ def test_contract_endpoints_staff_replay_and_account_key_scope(monkeypatch):
     body={"currency":"RUB","expectedTicketVersion":1,
           "lines":[{"kind":"labor","description":"Diagnostics","quantity":2,"unitPrice":"12.50"}]}
     path=f"/api/v1/staff/tickets/{ticket}/estimates"
+    assert http.post(path,json={**body,"lines":[{"kind":"part","description":"Unknown part","quantity":1,"unitPrice":"12.50","partId":str(uuid4())}]},headers=headers).status_code==422
+    assert http.post(path,json={**body,"lines":[{"kind":"labor","quantity":1,"unitPrice":"12.50"}]},headers=headers).status_code==422
+    assert http.post(path,json={**body,"lines":[{"kind":"labor","description":"X","quantity":0,"unitPrice":"12.50"}]},headers=headers).status_code==422
+    assert http.post(path,json={**body,"lines":[{"kind":"labor","description":"X","quantity":1,"unitPrice":"12.500"}]},headers=headers).status_code==422
     assert http.post(path,json={**body,"expectedTicketVersion":2},headers=headers).status_code==409
     created=http.post(path,json=body,headers=headers)
     assert created.status_code==201,created.text
@@ -79,6 +83,8 @@ def test_contract_endpoints_staff_replay_and_account_key_scope(monkeypatch):
         assert db.execute("SELECT state FROM service_ticket WHERE id=%s",(ticket,)).fetchone()[0]=="APPROVED"
         assert db.execute("SELECT count(*) FROM estimate_approval WHERE estimate_id=%s",(eid,)).fetchone()[0]==1
         assert db.execute("SELECT count(*) FROM ticket_state_event WHERE ticket_id=%s",(ticket,)).fetchone()[0]==3
+        evidence=db.execute("SELECT consent_method,consent_fingerprint FROM estimate_approval WHERE estimate_id=%s",(eid,)).fetchone()
+        assert evidence[0]=="verified_account" and len(evidence[1])==64
 
 
 def test_decision_key_shared_across_two_estimates_of_same_account():
