@@ -128,3 +128,43 @@ test('QC failed cannot expose handover and stale transition returns 409',async (
   await page.getByRole('button',{name:'Вернуть в ремонт'}).click();
   await expect(page.getByRole('status').filter({hasText:'409'})).toBeVisible();
 });
+
+
+test('stock role can only access stock panel and no customer PII',async ({page})=>{
+  await page.route('**/api/v1/dev/staff/access',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"roles":["STOCK"]}'
+  }));
+  await page.goto('/staff');
+  await expect(page.getByRole('region',{name:'Операции склада'})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Работа со сметами'})).toHaveCount(0);
+  await expect(page.getByRole('region',{name:'Назначенные заявки'})).toHaveCount(0);
+  await expect(page.getByRole('region',{name:'Журнал аудита'})).toHaveCount(0);
+});
+
+test('auditor role journal is server scoped and does not offer mutation',async ({page})=>{
+  await page.route('**/api/v1/dev/staff/access',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"roles":["AUDITOR"]}'
+  }));
+  await page.route('**/api/v1/dev/staff/audit?*',route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[{id:'evt-1',ticketId:'ticket-1',action:'ticket.transition',
+      createdAt:'2026-10-16T10:00:00Z'}]})
+  }));
+  await page.goto('/staff');
+  await expect(page.getByRole('region',{name:'Журнал аудита'})).toContainText('ticket.transition');
+  await expect(page.getByRole('button',{name:'Выдать устройство'})).toHaveCount(0);
+  await expect(page.getByRole('region',{name:'Работа со сметами'})).toHaveCount(0);
+});
+
+test('mobile dark staff page is keyboard reachable without horizontal overflow',async ({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.route('**/api/v1/dev/staff/access',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"roles":["STOCK"]}'
+  }));
+  await page.goto('/staff');
+  await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
+  await expect(page.locator('main')).toHaveClass(/dark/);
+  await page.getByRole('button',{name:'Зарезервировать'}).focus();
+  await expect(page.getByRole('button',{name:'Зарезервировать'})).toBeFocused();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
