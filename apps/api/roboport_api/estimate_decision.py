@@ -49,13 +49,16 @@ def decide_estimate(conn, token: str, estimate_id: UUID, expected_version: int,
     fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
     stored = conn.execute(
         """SELECT fingerprint, response FROM estimate_decision_receipt
-           WHERE actor_id=%s AND estimate_id=%s AND request_key=%s""",
-        (actor, estimate_id, key),
+           WHERE actor_id=%s AND request_key=%s""",
+        (actor, key),
     ).fetchone()
     if stored:
         if stored[0] != fingerprint:
             raise EstimateConflict("key fingerprint conflict")
         return stored[1]
+    ticket_state=conn.execute("SELECT state FROM service_ticket WHERE id=%s",(ticket_id,)).fetchone()[0]
+    if ticket_state!="AWAITING_APPROVAL":
+        raise EstimateConflict("ticket is not awaiting approval")
     state_version = conn.execute(
         "SELECT state,version FROM estimate WHERE id=%s FOR UPDATE", (estimate_id,),
     ).fetchone()
@@ -66,6 +69,8 @@ def decide_estimate(conn, token: str, estimate_id: UUID, expected_version: int,
     ).fetchone()[0]
     if latest != expected_version:
         raise EstimateConflict("stale estimate")
+    conn.execute("UPDATE service_ticket SET state=%s,version=version+1 WHERE id=%s",
+                 (decision,ticket_id))
     conn.execute(
         """INSERT INTO estimate_approval(id,estimate_id,actor_id,decision)
            VALUES (%s,%s,%s,%s)""", (uuid4(),estimate_id,actor,decision),
@@ -98,7 +103,9 @@ def create_estimate_version(conn, token: str, ticket_id: UUID,
     actor=session_subject(conn,token)
     if actor is None:
         raise EstimateForbidden()
-    conn.execute("SELECT id FROM service_ticket WHERE id=%s FOR UPDATE",(ticket_id,))
+    locked=conn.execute("SELECT state,version FROM service_ticket WHERE id=%s FOR UPDATE",(ticket_id,)).fetchone()
+    if locked is None or locked[0] not in ("DIAGNOSING","ESTIMATE_DRAFT","AWAITING_APPROVAL"):
+        raise EstimateConflict("ticket not eligible for estimate")
     manager=conn.execute("""SELECT EXISTS(
        SELECT 1 FROM user_role r
        JOIN acl_entry a ON a.user_id=r.user_id AND a.ticket_id=%s
@@ -116,6 +123,10 @@ def create_estimate_version(conn, token: str, ticket_id: UUID,
     if last is not None and last[1]=="DRAFT":
         raise EstimateConflict("finish existing draft first")
     version=1 if last is None else last[0]+1
+    if locked[0]=="DIAGNOSING":
+        conn.execute("UPDATE service_ticket SET state='ESTIMATE_DRAFT',version=version+1 WHERE id=%s",(ticket_id,))
+    elif locked[0]=="AWAITING_APPROVAL":
+        conn.execute("UPDATE service_ticket SET state='ESTIMATE_DRAFT',version=version+1 WHERE id=%s",(ticket_id,))
     eid=uuid4()
     total=sum(amounts)
     conn.execute("""INSERT INTO estimate(id,ticket_id,version,state,total_minor,currency)
@@ -135,7 +146,9 @@ def send_estimate_version(conn, token: str, eid: UUID, expected_version: int) ->
     if row is None:
         raise EstimateForbidden()
     ticket=row[0]
-    conn.execute("SELECT id FROM service_ticket WHERE id=%s FOR UPDATE",(ticket,))
+    ticket_row=conn.execute("SELECT state FROM service_ticket WHERE id=%s FOR UPDATE",(ticket,)).fetchone()
+    if ticket_row is None or ticket_row[0]!="ESTIMATE_DRAFT":
+        raise EstimateConflict("ticket must be in ESTIMATE_DRAFT")
     allowed=conn.execute("""SELECT EXISTS(
       SELECT 1 FROM user_role r JOIN acl_entry a ON a.user_id=r.user_id
         AND a.ticket_id=%s AND a.action='estimate.approve'
@@ -157,4 +170,5 @@ def send_estimate_version(conn, token: str, eid: UUID, expected_version: int) ->
     if latest!=expected_version:
         raise EstimateConflict("stale version")
     conn.execute("UPDATE estimate SET state='SENT' WHERE id=%s",(eid,))
+    conn.execute("UPDATE service_ticket SET state='AWAITING_APPROVAL',version=version+1 WHERE id=%s",(ticket,))
     return {"id":str(eid),"version":expected_version,"state":"SENT","totalMinor":row[2]}
