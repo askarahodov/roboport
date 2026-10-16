@@ -9,7 +9,7 @@ if (Boolean(certPath)!==Boolean(keyPath)) {
   throw new Error('ROBOport local HTTPS requires both TLS certificate and key');
 }
 const tls=certPath && keyPath
-  ? { cert:readFileSync(certPath),key:readFileSync(keyPath) }
+  ? { cert:readFileSync(certPath,'utf8'),key:readFileSync(keyPath,'utf8') }
   : undefined;
 
 export default defineConfig({
