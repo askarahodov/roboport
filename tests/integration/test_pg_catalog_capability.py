@@ -118,3 +118,36 @@ def test_catalog_http_exact_and_live_review(monkeypatch):
     http.cookies.set("rp_session",tokens[1])
     second=http.post(route,json={"approved":True},headers={**headers,"X-CSRF-Token":csrf[1]})
     assert second.status_code==200 and second.json()["status"]=="SUPPORTED",second.text
+
+
+def test_part_compatibility_cannot_be_supported_without_independent_evidence():
+    from roboport_api.catalog_approval import approve_part
+    model,part,engineer,manager=(uuid4() for _ in range(4))
+    tokens=(new_token(),new_token())
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO catalog_model
+          (id,brand,model,variant,dock,region,revision,status)
+          VALUES(%s,'PART-BRAND','PART-MODEL','VAR','DOCK','RU','R1','SUPPORTED')""",(model,))
+        db.execute("""INSERT INTO part_compatibility(id,model_id,part_number,evidence)
+                      VALUES(%s,%s,'SYNTHETIC-PN','lab-validation-ref')""",(part,model))
+        for actor,role,token in ((engineer,'ENGINEER',tokens[0]),(manager,'MANAGER',tokens[1])):
+            db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(actor,actor.hex))
+            db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",(uuid4(),actor,role))
+            db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,
+              created_at,idle_expires_at,absolute_expires_at)
+              VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+              (uuid4(),actor,token_digest(token),token_digest(new_token()),now,
+               now+timedelta(minutes=30),now+timedelta(hours=4)))
+        assert db.execute("SELECT status FROM part_compatibility WHERE id=%s",(part,)).fetchone()[0]=='CANDIDATE'
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE part_compatibility SET status='SUPPORTED' WHERE id=%s",(part,))
+        assert approve_part(db,tokens[0],part,True)["status"]=="CANDIDATE"
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE part_compatibility SET status='SUPPORTED' WHERE id=%s",(part,))
+        assert approve_part(db,tokens[1],part,True)["status"]=="SUPPORTED"
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("DELETE FROM part_compatibility_approval WHERE compatibility_id=%s",(part,))
