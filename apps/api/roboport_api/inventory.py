@@ -73,9 +73,15 @@ def reserve(conn, token, ticket:UUID, lot:UUID, qty:int, key:str,
             raise StockConflict("lot unavailable")
         part,available,reserved=row
         compatible=conn.execute("""SELECT c.id,p.id FROM part_compatibility c
-          JOIN inventory_part p ON p.id=c.part_id
-          WHERE p.part_number=%s AND c.model_variant=%s AND c.region=%s AND c.revision=%s
-            AND c.verified=true AND c.revoked_at IS NULL""",
+          JOIN inventory_part p ON p.part_number=c.part_number
+          JOIN catalog_model m ON m.id=c.model_id
+          WHERE p.part_number=%s AND m.variant=%s AND m.region=%s AND m.revision=%s
+            AND m.status='SUPPORTED' AND c.status='SUPPORTED' AND c.revoked_at IS NULL
+            AND EXISTS(SELECT 1 FROM part_compatibility_approval e
+              JOIN part_compatibility_approval a ON a.compatibility_id=e.compatibility_id
+                AND a.actor_id<>e.actor_id
+              WHERE e.compatibility_id=c.id AND e.role='ENGINEER' AND e.approved
+                AND a.role='MANAGER' AND a.approved)""",
             (part,*identity[:3])).fetchone()
         if compatible is not None and part_id is not None and part_id!=compatible[1]:
             raise StockConflict("wrong part identity")
