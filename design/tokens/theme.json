@@ -2,11 +2,27 @@
   "light": {
     "background": "#f4fafb",
     "foreground": "#12343b",
-    "accent": "#19bbb5"
+    "surface": "#ffffff",
+    "accent": "#19bbb5",
+    "action": "#006d67",
+    "actionText": "#ffffff",
+    "errorText": "#9f1b23",
+    "errorSurface": "#fff3f2",
+    "safetyText": "#994900",
+    "safetySurface": "#fff4e3",
+    "focus": "#006d67"
   },
   "dark": {
     "background": "#101e22",
     "foreground": "#ecf9fa",
-    "accent": "#19bbb5"
+    "surface": "#1b3136",
+    "accent": "#19bbb5",
+    "action": "#19bbb5",
+    "actionText": "#071820",
+    "errorText": "#ffb4ad",
+    "errorSurface": "#441b1b",
+    "safetyText": "#ffd3a1",
+    "safetySurface": "#422900",
+    "focus": "#42dacf"
   }
 }
