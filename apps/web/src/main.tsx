@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, NavLink, Routes, Route } from 'react-router-dom';
 import type { paths } from './shared/api/schema';
 import './style.css';
+import { CustomerAccount } from './pages/customer/CustomerAccount';
+import { CustomerLogin } from './pages/customer/CustomerLogin';
 
 type Brands = paths['/api/v1/catalog/brands']['get']['responses']['200']['content']['application/json'];
 type Models = paths['/api/v1/catalog/models']['get']['responses']['200']['content']['application/json'];
@@ -88,7 +90,8 @@ function App() {
         <p>Изучите <Link to="/catalog/brands">бренды</Link> и <Link to="/catalog/models">модели</Link> роботов.</p></section>} />
       <Route path="/catalog/brands" element={<Catalog kind="brands" />} />
       <Route path="/catalog/models" element={<Catalog kind="models" />} />
-      <Route path="/account" element={<section><h1>Личный кабинет</h1><p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p><Link to="/">На главную</Link></section>} />
+      <Route path="/account/login" element={<CustomerLogin />} />
+      <Route path="/account/*" element={<CustomerAccount />} />
       <Route path="/staff" element={<section><h1>Портал сотрудников</h1><p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p><Link to="/">На главную</Link></section>} />
       <Route path="*" element={<section><h1>Страница не найдена</h1><p>Такого раздела пока нет.</p><Link to="/">Вернуться на главную</Link></section>} />
     </Routes>
