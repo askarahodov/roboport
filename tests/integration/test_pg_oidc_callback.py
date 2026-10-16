@@ -28,7 +28,7 @@ def test_oidc_callback_issues_only_prelinked_session(monkeypatch):
         db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,'CLIENT')",(uuid4(),user))
         db.execute("INSERT INTO oidc_identity(issuer,subject,user_id) VALUES(%s,%s,%s)",(issuer,subject,user))
     env={
-      "ROBOport_OIDC_ENABLED":"1","ROBOport_DATABASE_URL":DSN,
+      "ROBOport_OIDC_ENABLED":"1","ROBOport_SYNTHETIC_AUTH_API":"1","ROBOport_DATABASE_URL":DSN,
       "ROBOport_OIDC_ISSUER":issuer,
       "ROBOport_OIDC_AUTHORIZE":issuer+"/protocol/openid-connect/auth",
       "ROBOport_OIDC_TOKEN":issuer+"/protocol/openid-connect/token",
