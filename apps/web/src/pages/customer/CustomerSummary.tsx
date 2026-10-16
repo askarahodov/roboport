@@ -1,4 +1,5 @@
 import React from 'react';
+import { EstimateActions } from './EstimateActions';
 
 type Section = 'robots' | 'estimates' | 'documents';
 const labels: Record<Section,string> = {
@@ -48,7 +49,8 @@ export function CustomerSummary({ section }: { section: Section }) {
   return <ul>{items.map(item => <li key={item.id}>
     {section==='robots' && <>Робот {item.label || item.id}</>}
     {section==='estimates' && <>Смета {item.id}, версия {item.version}, статус {item.status},
-      сумма {typeof item.total_minor==='number' ? (item.total_minor/100).toFixed(2) : '—'} {item.currency}</>}
+      сумма {typeof item.total_minor==='number' ? (item.total_minor/100).toFixed(2) : '—'} {item.currency}
+      <EstimateActions estimate={item} afterSuccess={()=>setRetry(x=>x+1)}/></>}
     {section==='documents' && <>Документ {item.id}, тип {item.mime}, размер {item.byte_size} байт.
       Доступ к файлу возможен только через защищённый backend.</>}
   </li>)}</ul>;
