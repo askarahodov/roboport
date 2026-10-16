@@ -150,4 +150,10 @@ def test_part_compatibility_cannot_be_supported_without_independent_evidence():
         assert approve_part(db,tokens[1],part,True)["status"]=="SUPPORTED"
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
+                db.execute("UPDATE part_compatibility SET evidence='tampered' WHERE id=%s",(part,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE part_compatibility SET part_number='OTHER-PN' WHERE id=%s",(part,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
                 db.execute("DELETE FROM part_compatibility_approval WHERE compatibility_id=%s",(part,))
