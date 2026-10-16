@@ -67,7 +67,7 @@ test('раздел заявок загружает только серверны
     status: 200, contentType: 'application/json',
     body: '{"subjectId":"11111111-1111-4111-8111-111111111111"}',
   }));
-  await page.route('**/api/v1/dev/tickets/keyset?limit=20', route => route.fulfill({
+  await page.route('**/api/v1/dev/account/collections/tickets', route => route.fulfill({
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ items: [
       { id: '22222222-2222-4222-8222-222222222222', state: 'APPROVED', version: 4 },
@@ -75,8 +75,8 @@ test('раздел заявок загружает только серверны
   }));
   await page.goto('/account/tickets');
   await expect(page.getByText(/Заявка 22222222-2222-4222-8222-222222222222/)).toBeVisible();
-  await page.unroute('**/api/v1/dev/tickets/keyset?limit=20');
-  await page.route('**/api/v1/dev/tickets/keyset?limit=20', route => route.fulfill({
+  await page.unroute('**/api/v1/dev/account/collections/tickets');
+  await page.route('**/api/v1/dev/account/collections/tickets', route => route.fulfill({
     status: 401, contentType: 'application/json', body: '{"code":"UNAUTHENTICATED"}',
   }));
   await page.reload();
