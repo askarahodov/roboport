@@ -172,3 +172,41 @@ def send_estimate_version(conn, token: str, eid: UUID, expected_version: int) ->
     conn.execute("UPDATE estimate SET state='SENT' WHERE id=%s",(eid,))
     conn.execute("UPDATE service_ticket SET state='AWAITING_APPROVAL',version=version+1 WHERE id=%s",(ticket,))
     return {"id":str(eid),"version":expected_version,"state":"SENT","totalMinor":row[2]}
+
+
+def staff_idempotent(conn, token, target, operation, payload, key, effect):
+    """Lock actor identity and replay after live manager ACL reauthorization."""
+    actor=session_subject(conn,token)
+    if actor is None:
+        raise EstimateForbidden()
+    if not isinstance(key,str) or not (1<=len(key)<=128) or not key.isascii() or not key.isprintable():
+        raise ValueError("invalid idempotency key")
+    # Actor lock serializes keys reused across different ticket/estimate resources.
+    conn.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE",(actor,))
+    ticket=target if operation=="create" else (
+        conn.execute("SELECT ticket_id FROM estimate WHERE id=%s",(target,)).fetchone() or (None,))[0]
+    if ticket is None:
+        raise EstimateForbidden()
+    allowed=conn.execute("""SELECT EXISTS(
+      SELECT 1 FROM user_role r JOIN acl_entry a ON a.user_id=r.user_id
+        AND a.ticket_id=%s AND a.action='estimate.approve'
+        AND a.revoked_at IS NULL AND (a.expires_at IS NULL OR a.expires_at>now())
+      WHERE r.user_id=%s AND r.role_code='MANAGER' AND r.revoked_at IS NULL
+        AND (r.expires_at IS NULL OR r.expires_at>now())
+    )""",(ticket,actor)).fetchone()[0]
+    if not allowed:
+        raise EstimateForbidden()
+    fingerprint=hashlib.sha256(json.dumps(
+        {"operation":operation,"target":str(target),"payload":payload},
+        sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    old=conn.execute("SELECT fingerprint,response FROM estimate_staff_receipt WHERE actor_id=%s AND request_key=%s",
+                     (actor,key)).fetchone()
+    if old:
+        if old[0]!=fingerprint:
+            raise EstimateConflict("idempotency key conflict")
+        return old[1]
+    result=effect()
+    conn.execute("""INSERT INTO estimate_staff_receipt(actor_id,request_key,operation,fingerprint,response)
+                    VALUES (%s,%s,%s,%s,%s::jsonb)""",
+                 (actor,key,operation,fingerprint,json.dumps(result)))
+    return result
