@@ -120,3 +120,44 @@ test('overview: private resources are fail-closed and retry replaces errors with
  await expect(overview.getByText('нет доступных записей')).toHaveCount(2);
  await expect(page.getByText('Реальные обращения пока не принимаются.')).toHaveCount(0);
 });
+
+
+test('estimate exact SENT version rejects stale 409, retry and revoked rights',async({page})=>{
+ await page.route('**/api/v1/auth/me',r=>r.fulfill({status:200,contentType:'application/json',body:'{"subjectId":"00000000-0000-4000-8000-000000000001"}'}));
+ let revoked=false;
+ await page.route('**/api/v1/dev/account/summary/estimates',r=>r.fulfill({status:revoked?403:200,contentType:'application/json',body:revoked?'{}':JSON.stringify({items:[{id:'synthetic-quote',version:2,status:'SENT',total_minor:15000,currency:'RUB'}]})}));
+ await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+ let submitted=0;
+ await page.route('**/api/v1/customer/estimates/synthetic-quote/approve',r=>{
+  submitted++;
+  const payload=r.request().postDataJSON();
+  expect(payload.estimateVersion).toBe(2);
+  expect(r.request().headers()['idempotency-key']).toBeTruthy();
+  return r.fulfill({status:409,contentType:'application/json',body:'{"code":"VERSION_CONFLICT"}'});
+ });
+ await page.goto('/account/estimates');
+ await expect(page.getByText(/версия 2/)).toBeVisible();
+ await page.getByRole('button',{name:'Согласовать смету'}).click();
+ await expect(page.getByText('409 — смета изменилась. Загрузите актуальную версию перед решением.')).toBeVisible();
+ expect(submitted).toBe(1);
+ revoked=true;
+ await page.getByRole('button',{name:'Проверить доступ снова'}).click();
+ await page.goto('/account/estimates');
+ await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+ await expect(page.getByRole('button',{name:'Согласовать смету'})).toHaveCount(0);
+});
+
+test('documents fail closed when revoked, no object key or direct storage links',async({page})=>{
+ await page.route('**/api/v1/auth/me',r=>r.fulfill({status:200,contentType:'application/json',body:'{"subjectId":"00000000-0000-4000-8000-000000000001"}'}));
+ let revoked=false;
+ await page.route('**/api/v1/dev/account/summary/documents',r=>r.fulfill({status:revoked?403:200,contentType:'application/json',body:revoked?'{}':JSON.stringify({items:[{id:'synthetic-document',mime:'application/pdf',byte_size:42}]})}));
+ await page.goto('/account/documents');
+ const link=page.getByRole('link',{name:'Открыть через защищённый сервер'});
+ await expect(link).toHaveAttribute('href','/api/v1/dev/attachments/synthetic-document/content');
+ await expect(page.locator('a[href*="minio"],a[href*="s3://"]')).toHaveCount(0);
+ revoked=true;
+ await page.getByRole('button',{name:'Проверить доступ снова'}).click();
+ await page.goto('/account/documents');
+ await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+ await expect(link).toHaveCount(0);
+});
