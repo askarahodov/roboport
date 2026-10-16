@@ -26,6 +26,11 @@ ROBOport — единая система независимого мультиб
 
 Python 3.13 · FastAPI · Pydantic 2 · PostgreSQL 17 · SQLAlchemy 2 · Alembic · React 19 · TypeScript 5 · Vite 8 · Node.js 24 · pytest · Playwright · GitHub Actions. Для первого этапа — **локальные учётные записи PostgreSQL**, Argon2id, серверные cookie-сессии; права **RBAC + ACL** (#13/#27). Внешний OIDC/Keycloak отложен. Для файлов в разработке выбран приватный **MinIO** (#28/#25), **не нужен для каталога #12**. Подробно: [стек и ADR](docs/TECH_STACK.md).
 
+
+## Воспроизводимое локальное развёртывание
+
+Для PostgreSQL 17, Keycloak и MinIO используйте [локальный dev-стенд](infra/dev/LOCAL_STACK.md): `infra/dev/compose.local.yml` и `infra/dev/bootstrap-local.sh`. Стенд проверяется реальным CI `ROBOport local stack smoke`; API и frontend запускаются на хосте для сохранения loopback-only защитных проверок. Полный HTTPS reverse proxy для объединённого браузерного интерфейса — отдельный следующий этап. Не использовать реальные данные.
+
 ## Запуск проверяемой части
 
 ```bash
