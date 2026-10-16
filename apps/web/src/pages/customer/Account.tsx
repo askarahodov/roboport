@@ -1,3 +1,4 @@
+import { CustomerSettings } from './CustomerSettings';
 import * as React from 'react';
 import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom';
 
@@ -197,6 +198,7 @@ function Section({ id, csrf }: { id: SectionId; csrf:string|null }) {
   if (id === 'overview') return <Overview />;
   if (id === 'tickets') return <Tickets />;
   if (id === 'robots' || id === 'estimates' || id === 'documents') return <CustomerCollection kind={id} csrf={csrf} />;
+  if (id === 'settings') return <CustomerSettings />;
   const section = sections.find(item => item.id === id)!;
   return <section aria-labelledby={'account-' + id}>
     <h2 id={'account-' + id}>{section.label}</h2>
