@@ -8,7 +8,8 @@
 
 | Метод | Маршрут | Назначение | Границы |
 | --- | --- | --- | --- |
-| POST | `/api/v1/dev/tickets/{ticket_id}/estimates` | Создать DRAFT с `lines: [{description, amountMinor}]` | MANAGER + точный ACL `estimate.approve` по ticket |
+| POST | `/api/v1/dev/tickets/{ticket_id}/estimates` | Создать DRAFT с `lines: [{description, amountMinor}]` | MANAGER + точный ACL `estimate.approve` по ticket, только допустимое состояние FSM |
+| POST | `/api/v1/staff/tickets/{ticketId}/estimates` | Контрактный запрос `currency`, `expectedTicketVersion`, `lines` | Только synthetic adapter, guarded manager/ACL/FSM |
 | POST | `/api/v1/dev/estimates/{estimate_id}/send` | Зафиксировать `expectedVersion` | MANAGER + ACL; сумма равна сумме строк |
 | POST | `/api/v1/dev/estimates/{estimate_id}/decision` | `decision: APPROVED/DECLINED`, `expectedVersion` | Только CLIENT, связанный с владельцем заявки; обязательный `Idempotency-Key` |
 
@@ -25,6 +26,6 @@
 
 ## Граница реализации
 
-Маршруты `/api/v1/customer/*` и `/api/v1/staff/*` в общем `contracts/openapi.yaml` остаются проектным контрактом; перечисленные здесь `/dev/*` пути исполняемые **локальные прототипы**, `include_in_schema=False`, и не должны ошибочно приниматься за опубликованную реализацию публичного API. Для эксплуатационного запуска требуется самостоятельная интеграция с публичным контрактом.
+Контрактные `/api/v1/customer/estimates/{estimateId}/approve|decline` и `/api/v1/staff/.../estimates` маршруты добавлены как синтетические совместимые HTTP-адаптеры к локальному ядру. Они, как и `/dev/*`, доступны **только** при `ROBOport_SYNTHETIC_ACCESS_API=1`, через HTTPS localhost, и не публикуются через генерацию FastAPI OpenAPI (`include_in_schema=False`). Полный публичный API продукта по-прежнему является проектным контрактом и не объявляется реализованным либо безопасным к публикации. Метод verified_signature намеренно не реализован без криптографической проверки подписи.
 
 Проверка: одноразовая PostgreSQL 17, `pytest -q tests/integration tests/security` в CI, smoke API/web и browser E2E. Не отмечать production-ready.
