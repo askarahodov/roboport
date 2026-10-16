@@ -52,6 +52,7 @@ export function CustomerSummary({ section }: { section: Section }) {
       сумма {typeof item.total_minor==='number' ? (item.total_minor/100).toFixed(2) : '—'} {item.currency}
       <EstimateActions estimate={item} afterSuccess={()=>setRetry(x=>x+1)}/></>}
     {section==='documents' && <>Документ {item.id}, тип {item.mime}, размер {item.byte_size} байт.
-      Доступ к файлу возможен только через защищённый backend.</>}
+      <a href={'/api/v1/dev/attachments/'+encodeURIComponent(item.id)+'/content'}>
+        Открыть через защищённый сервер</a></>}
   </li>)}</ul>;
 }
