@@ -140,6 +140,16 @@ def review_idempotent(conn,token:str,target:UUID,kind:str,approved:bool,key:str)
         table="service_capability" if kind=="capability" else "part_compatibility"
         if conn.execute("SELECT 1 FROM "+table+" WHERE id=%s",(target,)).fetchone() is None:
             raise CatalogForbidden()
+        approval_table=("capability_approval" if kind=="capability"
+                        else "part_compatibility_approval")
+        fk=("capability_id" if kind=="capability" else "compatibility_id")
+        prior=conn.execute("SELECT role FROM "+approval_table+
+                           " WHERE "+fk+"=%s AND actor_id=%s",(target,actor)).fetchone()
+        if prior is None or not conn.execute("""SELECT EXISTS(
+          SELECT 1 FROM user_role WHERE user_id=%s AND role_code=%s
+            AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())
+        )""",(actor,prior[0])).fetchone()[0]:
+            raise CatalogForbidden()
         return old[1]
     result=(approve_capability(conn,token,target,approved) if kind=="capability"
             else approve_part(conn,token,target,approved))
