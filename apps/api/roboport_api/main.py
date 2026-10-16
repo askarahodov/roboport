@@ -1014,7 +1014,7 @@ def dev_customer_collection(kind: str,request: Request):
             return not_found(request)
     except ValueError:
         return not_found(request)
-    if kind not in ("robots","estimates","documents"):
+    if kind not in ("robots","tickets","estimates","documents"):
         return not_found(request)
     token=request.cookies.get("rp_session","")
     if not token:
