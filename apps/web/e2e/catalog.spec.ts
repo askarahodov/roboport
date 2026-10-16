@@ -156,3 +156,14 @@ test('фильтр каталога и 390px + Auto не вызывают реа
  expect(width).toBeLessThanOrEqual(390);
  await expect(page.getByText('Демонстрационный каталог. Реальные обращения пока не принимаются.')).toBeVisible();
 });
+
+test('canonical robots route serves live read-only models in both viewports',async({page})=>{
+ for(const width of [390,1280]){
+  await page.setViewportSize({width,height:844});
+  await page.goto('/robots');
+  await expect(page.getByRole('heading',{name:'Модели роботов'})).toBeVisible();
+  await expect(page.getByText('Демонстрационный каталог. Реальные обращения пока не принимаются.')).toBeVisible();
+  await expect(page.getByText('Пока нет опубликованных моделей.')).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+ }
+});
