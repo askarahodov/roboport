@@ -609,7 +609,7 @@ async def dev_ticket_safety_release(ticket_id: str, request: Request):
 
 
 @app.post("/api/v1/dev/estimates/{estimate_id}/decision", include_in_schema=False)
-async def dev_estimate_decision(estimate_id: str, request: Request):
+async def dev_estimate_decision(estimate_id: str, request: Request, public_decision=None):
     """Synthetic-only owner approval; durable idempotency with live authorization."""
     import os
     from urllib.parse import urlsplit
@@ -643,6 +643,13 @@ async def dev_estimate_decision(estimate_id: str, request: Request):
         },headers={"Cache-Control":"no-store"})
     try:
         payload = await request.json()
+        if public_decision is not None:
+            if (not isinstance(payload,dict)
+                    or type(payload.get("estimateVersion")) is not int
+                    or (public_decision=="APPROVED"
+                        and payload.get("approvalMethod")!="verified_account")):
+                raise ValueError()
+            payload={"expectedVersion":payload["estimateVersion"],"decision":public_decision}
         key = request.headers.get("Idempotency-Key")
         if (not isinstance(payload,dict)
                 or type(payload.get("expectedVersion")) is not int
@@ -661,6 +668,10 @@ async def dev_estimate_decision(estimate_id: str, request: Request):
             },headers={"Cache-Control":"no-store"})
         try:
             result=decide_estimate(conn,token,ident,payload["expectedVersion"],payload["decision"],key)
+            if public_decision is not None:
+                quote=conn.execute("SELECT ticket_id,total_minor FROM estimate WHERE id=%s",(ident,)).fetchone()
+                result={"id":str(ident),"ticketId":str(quote[0]),"version":result["version"],
+                        "status":result["state"],"total":f"{quote[1]//100}.{quote[1]%100:02d}"}
         except EstimateForbidden:
             return not_found(request)
         except (EstimateConflict,psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
@@ -671,7 +682,8 @@ async def dev_estimate_decision(estimate_id: str, request: Request):
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
 
 
-async def _estimate_staff_mutation(request: Request, target_id: str, operation: str):
+async def _estimate_staff_mutation(request: Request, target_id: str, operation: str,
+                                   contract=False):
     """Private localhost-only synthetic quote drafting/sending."""
     import os
     from urllib.parse import urlsplit
@@ -702,10 +714,31 @@ async def _estimate_staff_mutation(request: Request, target_id: str, operation: 
         return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
                             "requestId":request.state.request_id})
     try:
-        payload=await request.json()
+        if contract and operation=="send":
+            payload={}
+        else:
+            payload=await request.json()
         if not isinstance(payload,dict):
             raise ValueError()
-        if operation=="send" and type(payload.get("expectedVersion")) is not int:
+        if contract and operation=="create":
+            from decimal import Decimal, InvalidOperation
+            if type(payload.get("expectedTicketVersion")) is not int or payload.get("currency")!="RUB":
+                raise ValueError()
+            lines=[]
+            for item in payload.get("lines",[]):
+                if not isinstance(item,dict):
+                    raise ValueError()
+                try:
+                    price=Decimal(item["unitPrice"])
+                    quantity=Decimal(str(item["quantity"]))
+                    minor=price*quantity*100
+                except (KeyError,InvalidOperation,TypeError,ValueError):
+                    raise ValueError()
+                if not minor.is_finite() or minor!=minor.to_integral_value():
+                    raise ValueError()
+                lines.append({"description":item["description"],"amountMinor":int(minor)})
+            payload={"lines":lines,"expectedTicketVersion":payload["expectedTicketVersion"]}
+        if operation=="send" and not contract and type(payload.get("expectedVersion")) is not int:
             raise ValueError()
         if operation=="create" and not isinstance(payload.get("lines"),list):
             raise ValueError()
@@ -717,11 +750,22 @@ async def _estimate_staff_mutation(request: Request, target_id: str, operation: 
             return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
                                 "requestId":request.state.request_id})
         try:
+            if contract and operation=="send":
+                sent=conn.execute("SELECT version FROM estimate WHERE id=%s",(target,)).fetchone()
+                if sent is None:
+                    return not_found(request)
+                payload={"expectedVersion":sent[0]}
             result=staff_idempotent(
                 conn,token,target,operation,payload,request.headers.get("Idempotency-Key"),
-                lambda: create_estimate_version(conn,token,target,payload["lines"])
+                lambda: create_estimate_version(conn,token,target,payload["lines"],
+                          expected_ticket_version=payload.get("expectedTicketVersion"))
                 if operation=="create" else
                 send_estimate_version(conn,token,target,payload["expectedVersion"]))
+            if contract:
+                quote=conn.execute("SELECT ticket_id,currency,total_minor FROM estimate WHERE id=%s",(result["id"],)).fetchone()
+                result={"id":result["id"],"ticketId":str(quote[0]),"version":result["version"],
+                        "status":result["state"],"total":f"{quote[2]//100}.{quote[2]%100:02d}",
+                        "currency":quote[1].strip()}
         except EstimateForbidden:
             return not_found(request)
         except (EstimateConflict,psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
@@ -744,3 +788,23 @@ async def dev_create_estimate(ticket_id: str, request: Request):
 @app.post("/api/v1/dev/estimates/{estimate_id}/send",include_in_schema=False)
 async def dev_send_estimate(estimate_id: str, request: Request):
     return await _estimate_staff_mutation(request,estimate_id,"send")
+
+
+@app.post("/api/v1/staff/tickets/{ticketId}/estimates",include_in_schema=False)
+async def public_create_estimate(ticketId: str, request: Request):
+    return await _estimate_staff_mutation(request,ticketId,"create",contract=True)
+
+
+@app.post("/api/v1/staff/estimates/{estimateId}/send",include_in_schema=False)
+async def public_send_estimate(estimateId: str, request: Request):
+    return await _estimate_staff_mutation(request,estimateId,"send",contract=True)
+
+
+@app.post("/api/v1/customer/estimates/{estimateId}/approve",include_in_schema=False)
+async def public_approve_estimate(estimateId: str, request: Request):
+    return await dev_estimate_decision(estimateId,request,public_decision="APPROVED")
+
+
+@app.post("/api/v1/customer/estimates/{estimateId}/decline",include_in_schema=False)
+async def public_decline_estimate(estimateId: str, request: Request):
+    return await dev_estimate_decision(estimateId,request,public_decision="DECLINED")
