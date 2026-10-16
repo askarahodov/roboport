@@ -62,7 +62,8 @@ test('после сетевой ошибки каталог можно повт�
 test('личный кабинет и staff доступны только как анонимные заглушки', async ({ page }) => {
   for (const path of ['/account', '/staff']) {
     await page.goto(path);
-    await expect(page.getByRole('status')).toContainText('401 — требуется локальная авторизация');
+    if (path === '/account') await expect(page.getByRole('alert')).toContainText('403 — доступ запрещён');
+    else await expect(page.getByRole('status')).toContainText('401 — требуется локальная авторизация');
     await expect(page.locator('form')).toHaveCount(0);
   }
 });
@@ -109,6 +110,6 @@ test('приёмочные скриншоты desktop/mobile и 401-заглуш
   await page.screenshot({ path: 'test-results/roboport-home-dark.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/account');
-  await expect(page.getByRole('status')).toContainText('401 — требуется локальная авторизация');
+  await expect(page.getByRole('alert')).toContainText('403 — доступ запрещён');
   await page.screenshot({ path: 'test-results/roboport-account-mobile.png', fullPage: true });
 });
