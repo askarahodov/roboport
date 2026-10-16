@@ -43,6 +43,20 @@ SHA: `56ba8acaad577d7c2febd85fffd80773314fe685`
 - **AC-001…016, AC-018, AC-020: BLOCKED (per-AC independent QA mapping)** — наборы могут быть исполнены зелёным CI, но granular exit и фактические сценарии необходимо сверить с логами до установки индивидуальных PASS. Отдельный MinIO workflow, visual snapshot review, two-session contention и legal/security approval должны быть подтверждены отдельно.
 - **QA sign-off: BLOCKED**, рецензент не назначен; public-release gate **BLOCKED**. Это не блокирует дальнейшую разработку.
 
+## Обнаруженное расхождение между зелёным CI и логами
+
+В [MinIO run 38897787632](https://github.com/askarahodov/roboport/actions/runs/38897787632) шаг восстановления вывел `mc mirror ... Overwrite not allowed` для существующих объектов, несмотря на итоговый `success`. Поэтому **AC-012 (полное восстановление хранилища) нельзя засчитывать без исправления**. Коммит `8b0abe858eaa92d7b28a15debfe80b8e1d33b85f` добавляет `mc mirror --overwrite`; требуется повторная проверка MinIO workflow с отсутствием ошибок mirroring.
+
+Фактические итоги основного [CI 38897787671](https://github.com/askarahodov/roboport/actions/runs/38897787671), commit `f0d5e45187ac5b59eb5ea9cbf1d65fcdb35fbb11`:
+
+- Integration PostgreSQL: **80 passed, 4 skipped** (exit 0), [postgres job](https://github.com/askarahodov/roboport/actions/runs/38897787671/job/116962337146). Причины четырёх SKIP требуют отдельной проверки.
+- Bootstrap Python: **96 passed** (exit 0); API contract: **51 passed** (exit 0), [api job](https://github.com/askarahodov/roboport/actions/runs/38897787671/job/116962337336).
+- Chromium browser: **16 passed** (exit 0), [browser job](https://github.com/askarahodov/roboport/actions/runs/38897787671/job/116962336883).
+- Restore FK probe: `RESTORE INTEGRITY PASS` подтверждён в логе postgres job.
+- MinIO integration: **3 passed**, но ошибка `mc mirror` в шаге восстановления требует устранения до утверждения AC-012.
+
+Автоматический уровень AC-017/019 — **PASS на SHA f0d5e451**; прочие пункты остаются **BLOCKED на уровне полного сценарного подтверждения и независимой приёмки**, даже если соответствующий тест входил в зелёный набор.
+
 ## Exit criteria
 
 1. Для **каждого** AC записать фактический PASS/FAIL/SKIP/BLOCKED, run URL, SHA, команду, exit code, найденный дефект/ограничение.
