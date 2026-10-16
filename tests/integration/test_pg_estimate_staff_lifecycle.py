@@ -17,7 +17,7 @@ def test_staff_draft_send_owner_agreement_and_immutable_price(monkeypatch):
     now=datetime.now(timezone.utc)
     with psycopg.connect(DSN) as db:
         db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(cust,cust.hex))
-        db.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",(ticket,cust))
+        db.execute("INSERT INTO service_ticket(id,customer_id,state) VALUES(%s,%s,'DIAGNOSING')",(ticket,cust))
         for uid,role,token,csrf in zip((manager,owner),("MANAGER","CLIENT"),tokens,cs):
             db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(uid,uid.hex))
             db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",
@@ -33,10 +33,10 @@ def test_staff_draft_send_owner_agreement_and_immutable_price(monkeypatch):
                       VALUES(%s,%s,%s,'estimate.approve')""",(uuid4(),manager,ticket))
     http=TestClient(app,base_url="https://127.0.0.1")
     url=f"/api/v1/dev/tickets/{ticket}/estimates"
-    headers={"Origin":"https://127.0.0.1","X-CSRF-Token":cs[0]}
+    headers={"Origin":"https://127.0.0.1","X-CSRF-Token":cs[0],"Idempotency-Key":"create-"+ticket.hex}
     http.cookies.set("rp_session",tokens[1])
     assert http.post(url,json={"lines":[{"description":"Тест","amountMinor":100}]},
-                     headers={"Origin":"https://127.0.0.1","X-CSRF-Token":cs[1]}).status_code==404
+                     headers={"Origin":"https://127.0.0.1","X-CSRF-Token":cs[1],"Idempotency-Key":"owner-"+ticket.hex}).status_code==404
     http.cookies.clear()
     http.cookies.set("rp_session",tokens[0])
     draft=http.post(url,json={"lines":[{"description":"Работа","amountMinor":250},
@@ -47,7 +47,7 @@ def test_staff_draft_send_owner_agreement_and_immutable_price(monkeypatch):
     assert http.post(url,json={"lines":[{"description":"Ещё","amountMinor":1}]},
                      headers=headers).status_code==409
     send=http.post(f"/api/v1/dev/estimates/{eid}/send",
-                   json={"expectedVersion":1},headers=headers)
+                   json={"expectedVersion":1},headers={**headers,"Idempotency-Key":"send-"+eid})
     assert send.status_code==200,send.text
     assert send.json()["state"]=="SENT"
     assert http.post(f"/api/v1/dev/estimates/{eid}/send",
@@ -75,7 +75,7 @@ def test_price_change_forces_new_version_and_new_owner_consent(monkeypatch):
     manager_token,owner_token=new_token(),new_token()
     with psycopg.connect(DSN) as db:
         db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
-        db.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",(ticket,customer))
+        db.execute("INSERT INTO service_ticket(id,customer_id,state) VALUES(%s,%s,'DIAGNOSING')",(ticket,customer))
         for uid,role,tok in ((manager,"MANAGER",manager_token),(owner,"CLIENT",owner_token)):
             db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(uid,uid.hex))
             db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",(uuid4(),uid,role))
