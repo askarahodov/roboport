@@ -1026,3 +1026,62 @@ def dev_customer_account_tickets(request: Request,limit: int=20,offset: int=0):
             "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
     return JSONResponse(content={"items":rows,"limit":limit,"offset":offset},
                         headers={"Cache-Control":"no-store"})
+
+
+@app.get("/api/v1/dev/account/summary/{section}",include_in_schema=False)
+def dev_account_summary(section: str,request: Request):
+    """Owner-scoped read-only synthetic summary; never return object keys or prior-owner PII."""
+    import os
+    from urllib.parse import urlsplit
+    import psycopg
+    from .session_lookup import session_subject
+    if section not in ("robots","estimates","documents"):
+        return not_found(request)
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        dsn=urlsplit(raw)
+        if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+                or request.url.scheme!="https"
+                or request.url.hostname not in ("127.0.0.1","localhost")
+                or dsn.scheme not in ("postgresql","postgresql+psycopg")
+                or dsn.hostname!="127.0.0.1" or dsn.port is None):
+            return not_found(request)
+    except ValueError:
+        return not_found(request)
+    queries={
+        "robots": """SELECT DISTINCT d.id::text AS id,d.serial_number AS label
+            FROM account_customer_link l JOIN service_ticket t ON t.customer_id=l.customer_id
+            JOIN robot_device d ON d.id=t.device_id
+            WHERE l.user_id=%s AND l.revoked_at IS NULL ORDER BY id LIMIT 50""",
+        "estimates": """SELECT e.id::text AS id,e.state AS status,e.version,
+            e.total_minor,e.currency
+            FROM account_customer_link l JOIN service_ticket t ON t.customer_id=l.customer_id
+            JOIN estimate e ON e.ticket_id=t.id
+            WHERE l.user_id=%s AND l.revoked_at IS NULL
+              AND e.state IN ('SENT','APPROVED','DECLINED')
+            ORDER BY e.version DESC,e.id LIMIT 50""",
+        "documents": """SELECT a.id::text AS id,a.mime,a.byte_size
+            FROM account_customer_link l JOIN service_ticket t ON t.customer_id=l.customer_id
+            JOIN attachment a ON a.ticket_id=t.id
+            WHERE l.user_id=%s AND l.revoked_at IS NULL
+              AND a.upload_state='READY' AND a.quarantine_state='CLEAR'
+            ORDER BY a.created_at DESC,a.id LIMIT 50""",
+    }
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        actor=session_subject(conn,request.cookies.get("rp_session",""))
+        if actor is None:
+            return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        allowed=conn.execute("""SELECT EXISTS (SELECT 1 FROM user_role
+            WHERE user_id=%s AND role_code='CLIENT' AND revoked_at IS NULL
+              AND (expires_at IS NULL OR expires_at>now()))""",(actor,)).fetchone()[0]
+        if not allowed:
+            return not_found(request)
+        cursor=conn.execute(queries[section],(actor,))
+        columns=[field.name for field in cursor.description]
+        rows=[dict(zip(columns,row)) for row in cursor.fetchall()]
+        # Opaque summaries; no object_key, sha256, email, tokens, or historical ownership.
+        for row in rows:
+            if "currency" in row:
+                row["currency"]=row["currency"].strip()
+    return JSONResponse(content={"items":rows},headers={"Cache-Control":"no-store"})
