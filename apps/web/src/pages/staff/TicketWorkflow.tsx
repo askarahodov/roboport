@@ -28,6 +28,7 @@ export function TicketWorkflow({ticket,roles,onChanged}:{
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [review,setReview]=React.useState<'approve'|'reject'>('approve');
+  // Server FSM requires ticket.manage for QC_PENDING and READY_FOR_HANDOVER.
   const allowed=(intake.has(ticket.state)&&roles.includes('INTAKE'))||
     (engineering.has(ticket.state)&&roles.includes('ENGINEER'))||
     (!intake.has(ticket.state)&&!engineering.has(ticket.state)&&roles.includes('MANAGER'));
