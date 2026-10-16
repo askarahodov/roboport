@@ -854,14 +854,14 @@ def dev_catalog_exact(request: Request,brand: str="",model: str="",variant: str=
 
 
 @app.post("/api/v1/dev/catalog/capabilities/{capability_id}/review",include_in_schema=False)
-async def dev_catalog_review(capability_id: str,request: Request):
+async def dev_catalog_review(capability_id: str,request: Request,is_part: bool=False):
     import os
     from uuid import UUID
     import psycopg
     from urllib.parse import urlsplit
     from .auth_http import _origin_ok
     from .session_service import verify_csrf
-    from .catalog_approval import approve_capability,CatalogForbidden,CatalogConflict
+    from .catalog_approval import approve_capability,approve_part,CatalogForbidden,CatalogConflict
     raw=os.getenv("ROBOport_DATABASE_URL","")
     try:
         db=urlsplit(raw)
@@ -889,7 +889,8 @@ async def dev_catalog_review(capability_id: str,request: Request):
             return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
                                 "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
         try:
-            result=approve_capability(conn,token,capability,data["approved"])
+            result=(approve_part(conn,token,capability,data["approved"])
+                    if is_part else approve_capability(conn,token,capability,data["approved"]))
         except CatalogForbidden:
             return not_found(request)
         except (CatalogConflict,psycopg.errors.UniqueViolation):
@@ -897,3 +898,8 @@ async def dev_catalog_review(capability_id: str,request: Request):
             return JSONResponse(status_code=409,content={"code":"CONFLICT",
                                 "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@app.post("/api/v1/dev/catalog/parts/{part_id}/review",include_in_schema=False)
+async def dev_part_review(part_id: str,request: Request):
+    return await dev_catalog_review(part_id,request,is_part=True)
