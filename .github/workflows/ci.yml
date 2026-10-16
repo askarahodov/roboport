@@ -110,6 +110,40 @@ jobs:
           curl --fail --silent http://127.0.0.1:5173/catalog/brands | grep -q 'root'
           test "$(curl -s -o /tmp/roboport-error.json -w '%{http_code}' http://127.0.0.1:5173/api/v1/catalog/models/unknown)" = 404
           grep -q '"requestId"' /tmp/roboport-error.json
+      - name: Verify local HTTPS browser proxy reaches TLS FastAPI
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMP_TLS="$(mktemp -d)"
+          API_PID=""
+          WEB_PID=""
+          cleanup() {
+            [[ -z "$WEB_PID" ]] || kill "$WEB_PID" 2>/dev/null || true
+            [[ -z "$API_PID" ]] || kill "$API_PID" 2>/dev/null || true
+            rm -rf "$TMP_TLS"
+          }
+          trap cleanup EXIT
+          openssl req -x509 -newkey rsa:3072 -nodes -days 1 \
+            -subj /CN=localhost -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+            -keyout "$TMP_TLS/key.pem" -out "$TMP_TLS/cert.pem" >/dev/null 2>&1
+          PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app \
+            --host 127.0.0.1 --port 8000 --ssl-certfile "$TMP_TLS/cert.pem" \
+            --ssl-keyfile "$TMP_TLS/key.pem" > /tmp/roboport-https-api.log 2>&1 &
+          API_PID=$!
+          (
+            cd apps/web
+            ROBOport_DEV_TLS_CERT="$TMP_TLS/cert.pem" ROBOport_DEV_TLS_KEY="$TMP_TLS/key.pem" \
+              npm run dev -- --host 127.0.0.1 --port 5173
+          ) > /tmp/roboport-https-vite.log 2>&1 &
+          WEB_PID=$!
+          for i in $(seq 1 40); do
+            if curl -k --silent --fail https://127.0.0.1:5173/api/v1/meta | grep -q '"ROBOport"'; then
+              break
+            fi
+            sleep 1
+          done
+          curl -k --fail --silent https://127.0.0.1:5173/api/v1/meta | grep -q '"ROBOport"'
+          curl -k --fail --silent https://127.0.0.1:5173/account/login | grep -q 'root'
   browser-e2e:
     runs-on: ubuntu-latest
     steps:
