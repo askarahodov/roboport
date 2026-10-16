@@ -112,6 +112,14 @@ def upgrade():
       END $body$""")
     op.execute("""CREATE TRIGGER part_promotion_guard BEFORE UPDATE ON part_compatibility
       FOR EACH ROW EXECUTE FUNCTION guard_part_promotion()""")
+    op.execute("""CREATE TABLE catalog_review_receipt (
+      actor_id uuid NOT NULL REFERENCES app_user(id),
+      request_key text NOT NULL CHECK(length(request_key) BETWEEN 1 AND 128),
+      fingerprint text NOT NULL CHECK(length(fingerprint)=64),
+      response jsonb NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY(actor_id,request_key)
+    )""")
     op.execute("""CREATE TABLE catalog_audit (
       id uuid PRIMARY KEY,
       capability_id uuid NOT NULL REFERENCES service_capability(id),
@@ -123,7 +131,7 @@ def upgrade():
       LANGUAGE plpgsql AS $body$ BEGIN
         RAISE EXCEPTION 'catalog audit immutable';
       END $body$""")
-    for table in ('capability_approval','part_compatibility_approval','catalog_audit'):
+    for table in ('capability_approval','part_compatibility_approval','catalog_audit','catalog_review_receipt'):
         op.execute(f"""CREATE TRIGGER {table}_append_only
           BEFORE UPDATE OR DELETE ON {table}
           FOR EACH ROW EXECUTE FUNCTION prevent_catalog_audit_mutation()""")
@@ -175,6 +183,7 @@ def upgrade():
       FOR EACH ROW EXECUTE FUNCTION validate_capability_promotion()""")
 
 def downgrade():
+    op.execute("DROP TABLE catalog_review_receipt")
     op.execute("DROP TABLE catalog_audit")
     op.execute("DROP TABLE part_compatibility_approval")
     op.execute("DROP TABLE part_compatibility")
