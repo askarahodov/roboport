@@ -11,7 +11,7 @@ from test_pg_baseline import DSN
 def test_account_ticket_list_live_two_users_and_revocation(monkeypatch):
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
-    a,b,ca,cb,ta,tb,sa,sb=(uuid4() for _ in range(8))
+    a,b,ca,cb,ta,tb,sa,sb,ea,eb,aa,ab=(uuid4() for _ in range(12))
     tokens=(new_token(),new_token())
     now=datetime.now(timezone.utc)
     with psycopg.connect(DSN) as db:
@@ -24,6 +24,14 @@ def test_account_ticket_list_live_two_users_and_revocation(monkeypatch):
             db.execute("INSERT INTO service_ticket(id,customer_id) VALUES (%s,%s)",(t,cid))
         for u,cid in ((a,ca),(b,cb)):
             db.execute("INSERT INTO account_customer_link(user_id,customer_id) VALUES (%s,%s)",(u,cid))
+        for e,t in ((ea,ta),(eb,tb)):
+            db.execute("""INSERT INTO estimate(id,ticket_id,version,state,total_minor,currency)
+              VALUES(%s,%s,1,'SENT',1500,'RUB')""",(e,t))
+        for att,t,u in ((aa,ta,a),(ab,tb,b)):
+            db.execute("""INSERT INTO attachment
+              (id,ticket_id,object_key,mime,byte_size,sha256,upload_state,quarantine_state,created_by)
+              VALUES (%s,%s,%s,'application/pdf',123,%s,'READY','CLEAR',%s)""",
+              (att,t,att.hex,att.hex+att.hex,u))
         for sid,u,token in ((sa,a,tokens[0]),(sb,b,tokens[1])):
             db.execute("""INSERT INTO user_session
               (id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
@@ -41,14 +49,19 @@ def test_account_ticket_list_live_two_users_and_revocation(monkeypatch):
     first=http.get(url)
     assert first.status_code==200,first.text
     assert [x["id"] for x in first.json()["items"]]==[str(ta)]
-    for section in ("robots","estimates","documents"):
-        visible=http.get(summary+section)
-        assert visible.status_code==200 and visible.json()["items"]==[]
+    assert http.get(summary+"robots").json()["items"]==[]
+    estimates=http.get(summary+"estimates")
+    assert estimates.status_code==200 and [x["id"] for x in estimates.json()["items"]]==[str(ea)]
+    documents=http.get(summary+"documents")
+    assert documents.status_code==200 and [x["id"] for x in documents.json()["items"]]==[str(aa)]
+    assert "object_key" not in str(documents.json())
     assert all(str(tb) not in str(v) for v in first.json()["items"])
     http.cookies.clear()
     http.cookies.set("rp_session",tokens[1])
     second=http.get(url)
     assert second.status_code==200 and [x["id"] for x in second.json()["items"]]==[str(tb)]
+    assert [x["id"] for x in http.get(summary+"estimates").json()["items"]]==[str(eb)]
+    assert [x["id"] for x in http.get(summary+"documents").json()["items"]]==[str(ab)]
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(b,))
     assert http.get(url).json()["items"]==[]
