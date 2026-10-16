@@ -59,11 +59,14 @@ test('после сетевой ошибки каталог можно повт�
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('личный кабинет и staff доступны только как анонимные заглушки', async ({ page }) => {
+test('личный кабинет и staff закрыты без серверного допуска', async ({ page }) => {
+  await page.route('**/api/v1/dev/staff/access', route => route.fulfill({
+    status: 401, contentType: 'application/json', body: '{"code":"UNAUTHENTICATED"}'
+  }));
   for (const path of ['/account', '/staff']) {
     await page.goto(path);
     if (path === '/account') await expect(page.getByRole('alert')).toContainText('403 — доступ запрещён');
-    else await expect(page.getByRole('status')).toContainText('401 — требуется локальная авторизация');
+    else await expect(page.getByRole('alert')).toContainText('401 — требуется локальный вход');
     await expect(page.locator('form')).toHaveCount(0);
   }
 });
