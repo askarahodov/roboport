@@ -121,7 +121,6 @@ function Section({ id }: { id: SectionId }) {
     <h2 id={'account-' + id}>{section.label}</h2>
     <p>{section.description}</p>
     <p role="status">Данные раздела пока недоступны. Приватная информация не загружается без серверной проверки доступа.</p>
-    {id === 'documents' && <p>Файлы предоставляются только через защищённый сервер. Прямого доступа к MinIO нет.</p>}
   </section>;
 }
 
