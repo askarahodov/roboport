@@ -1,4 +1,5 @@
 import React from 'react';
+import { TicketWorkflow } from './TicketWorkflow';
 
 type Role = 'INTAKE' | 'ENGINEER' | 'STOCK' | 'MANAGER' | 'FINANCE' | 'AUDITOR';
 const sections: {label:string; roles:Role[]}[] = [
@@ -11,7 +12,7 @@ const sections: {label:string; roles:Role[]}[] = [
   {label:'Аудит',roles:['AUDITOR']},
 ];
 
-function StaffQueue() {
+function StaffQueue({roles}:{roles:Role[]}) {
   const [items,setItems]=React.useState<{id:string;state:string;version:number}[]>([]);
   const [status,setStatus]=React.useState<'loading'|'ready'|'error'|'denied'>('loading');
   const [retry,setRetry]=React.useState(0);
@@ -43,7 +44,8 @@ function StaffQueue() {
     {status==='error'&&<><p role="alert">Ошибка загрузки очереди.</p>
       <button type="button" onClick={()=>setRetry(n=>n+1)}>Повторить очередь</button></>}
     {status==='ready'&&(items.length?
-      <ul>{items.map(t=><li key={t.id}>Заявка {t.id}: {t.state}, версия {t.version}</li>)}</ul>:
+      <ul>{items.map(t=><li key={t.id}>Заявка {t.id}: {t.state}, версия {t.version}
+        <TicketWorkflow ticket={t} roles={roles} onChanged={()=>setRetry(n=>n+1)}/></li>)}</ul>:
       <p role="status">Назначенных заявок нет.</p>)}
   </section>;
 }
@@ -85,7 +87,7 @@ export function StaffPortal() {
       <h2>Доступные разделы</h2>
       <ul>{sections.filter(s=>s.roles.some(r=>roles.includes(r))).map(s=>
         <li key={s.label}>{s.label} — операции ещё не подключены</li>)}</ul>
-      {roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r))&&<StaffQueue />}
+      {roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r))&&<StaffQueue roles={roles}/>}
       <p role="status">Операции изменения заявок доступны только после отдельной проверки прав сервером.</p>
     </>}
   </section>;
