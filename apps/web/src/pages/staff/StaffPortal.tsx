@@ -11,6 +11,43 @@ const sections: {label:string; roles:Role[]}[] = [
   {label:'Аудит',roles:['AUDITOR']},
 ];
 
+function StaffQueue() {
+  const [items,setItems]=React.useState<{id:string;state:string;version:number}[]>([]);
+  const [status,setStatus]=React.useState<'loading'|'ready'|'error'|'denied'>('loading');
+  const [retry,setRetry]=React.useState(0);
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    setStatus('loading');setItems([]);
+    (async()=>{
+      try {
+        const res=await fetch('/api/v1/dev/staff/queue?limit=20&offset=0',
+          {credentials:'include',cache:'no-store',signal:controller.signal});
+        if(controller.signal.aborted)return;
+        if([401,403,404].includes(res.status)){setStatus('denied');return;}
+        if(!res.ok)throw new Error('queue error');
+        const body:unknown=await res.json();
+        if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)
+          || !body.items.every((x:unknown)=>x&&typeof x==='object'
+            && 'id' in x && typeof x.id==='string'
+            && 'state' in x && typeof x.state==='string'
+            && 'version' in x && typeof x.version==='number'))throw new Error('invalid queue');
+        if(!controller.signal.aborted){setItems(body.items);setStatus('ready');}
+      }catch{if(!controller.signal.aborted)setStatus('error');}
+    })();
+    return ()=>controller.abort();
+  },[retry]);
+  return <section aria-label="Назначенные заявки">
+    <h3>Назначенные заявки</h3>
+    {status==='loading'&&<p role="status">Загрузка очереди…</p>}
+    {status==='denied'&&<p role="alert">Доступ к очереди отозван.</p>}
+    {status==='error'&&<><p role="alert">Ошибка загрузки очереди.</p>
+      <button type="button" onClick={()=>setRetry(n=>n+1)}>Повторить очередь</button></>}
+    {status==='ready'&&(items.length?
+      <ul>{items.map(t=><li key={t.id}>Заявка {t.id}: {t.state}, версия {t.version}</li>)}</ul>:
+      <p role="status">Назначенных заявок нет.</p>)}
+  </section>;
+}
+
 export function StaffPortal() {
   const [state,setState]=React.useState<'loading'|'ready'|'login'|'forbidden'|'error'>('loading');
   const [roles,setRoles]=React.useState<Role[]>([]);
@@ -48,7 +85,8 @@ export function StaffPortal() {
       <h2>Доступные разделы</h2>
       <ul>{sections.filter(s=>s.roles.some(r=>roles.includes(r))).map(s=>
         <li key={s.label}>{s.label} — операции ещё не подключены</li>)}</ul>
-      <p role="status">Данные заявок не загружаются до отдельной серверной проверки ACL.</p>
+      {roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r))&&<StaffQueue />}
+      <p role="status">Операции изменения заявок доступны только после отдельной проверки прав сервером.</p>
     </>}
   </section>;
 }
