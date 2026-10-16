@@ -178,12 +178,16 @@ def csrf_bootstrap(request: Request):
         return _error(request,401)
     csrf=new_token()
     with psycopg.connect(dsn,autocommit=True) as conn:
-        row=conn.execute("""UPDATE user_session s SET csrf_hash=%s
-             FROM app_user u WHERE s.user_id=u.id
-             AND s.token_hash=%s AND s.revoked_at IS NULL
+        row=conn.execute("""SELECT s.id FROM user_session s
+             JOIN app_user u ON u.id=s.user_id AND u.status='ACTIVE'
+             WHERE s.token_hash=%s AND s.revoked_at IS NULL
              AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
-             AND u.status='ACTIVE' RETURNING s.id""",
-             (token_digest(csrf),token_digest(raw))).fetchone()
+             FOR UPDATE OF s""",(token_digest(raw),)).fetchone()
+        if row is not None:
+            conn.execute("""INSERT INTO user_session_csrf_rotation(session_id,csrf_hash,rotated_at)
+                VALUES(%s,%s,now()) ON CONFLICT(session_id) DO UPDATE
+                SET csrf_hash=excluded.csrf_hash,rotated_at=now()""",
+                (row[0],token_digest(csrf)))
     if row is None:
         return _error(request,401)
     return JSONResponse(content={"csrfToken":csrf},
