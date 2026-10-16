@@ -669,3 +669,76 @@ async def dev_estimate_decision(estimate_id: str, request: Request):
                 "code":"CONFLICT","requestId":request.state.request_id,
             },headers={"Cache-Control":"no-store"})
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+async def _estimate_staff_mutation(request: Request, target_id: str, operation: str):
+    """Private localhost-only synthetic quote drafting/sending."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .auth_http import _origin_ok
+    from .session_service import verify_csrf
+    from .estimate_decision import (
+        create_estimate_version,send_estimate_version,EstimateForbidden,EstimateConflict)
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    dsn=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        parsed=urlsplit(dsn)
+        if (parsed.scheme not in ("postgresql","postgresql+psycopg")
+                or parsed.hostname!="127.0.0.1" or parsed.port is None):
+            return not_found(request)
+        target=UUID(target_id)
+    except ValueError:
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                            "requestId":request.state.request_id})
+    if not _origin_ok(request):
+        return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                            "requestId":request.state.request_id})
+    try:
+        payload=await request.json()
+        if not isinstance(payload,dict):
+            raise ValueError()
+        if operation=="send" and type(payload.get("expectedVersion")) is not int:
+            raise ValueError()
+        if operation=="create" and not isinstance(payload.get("lines"),list):
+            raise ValueError()
+    except (ValueError,TypeError):
+        return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                            "requestId":request.state.request_id})
+    with psycopg.connect(dsn.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        if not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                                "requestId":request.state.request_id})
+        try:
+            result=(create_estimate_version(conn,token,target,payload["lines"])
+                    if operation=="create" else
+                    send_estimate_version(conn,token,target,payload["expectedVersion"]))
+        except EstimateForbidden:
+            return not_found(request)
+        except (EstimateConflict,psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
+            conn.rollback()
+            return JSONResponse(status_code=409,content={"code":"CONFLICT",
+                                "requestId":request.state.request_id})
+        except ValueError:
+            conn.rollback()
+            return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                                "requestId":request.state.request_id})
+    return JSONResponse(content=result,status_code=201 if operation=="create" else 200,
+                        headers={"Cache-Control":"no-store"})
+
+
+@app.post("/api/v1/dev/tickets/{ticket_id}/estimates",include_in_schema=False)
+async def dev_create_estimate(ticket_id: str, request: Request):
+    return await _estimate_staff_mutation(request,ticket_id,"create")
+
+
+@app.post("/api/v1/dev/estimates/{estimate_id}/send",include_in_schema=False)
+async def dev_send_estimate(estimate_id: str, request: Request):
+    return await _estimate_staff_mutation(request,estimate_id,"send")
