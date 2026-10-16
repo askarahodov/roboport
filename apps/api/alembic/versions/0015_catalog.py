@@ -1,0 +1,150 @@
+"""Synthetic exact catalog and two-person capability/compatibility review.
+
+Revision ID: 0015_catalog
+Revises: 0014_estimate_decision
+"""
+from alembic import op
+
+revision="0015_catalog"
+down_revision="0014_estimate_decision"
+branch_labels=None
+depends_on=None
+
+
+def upgrade():
+    op.execute("""CREATE TABLE catalog_brand (
+      id uuid PRIMARY KEY, name text NOT NULL UNIQUE CHECK(length(trim(name))>0)
+    )""")
+    op.execute("""CREATE TABLE catalog_model (
+      id uuid PRIMARY KEY,
+      brand_id uuid NOT NULL REFERENCES catalog_brand(id),
+      name text NOT NULL CHECK(length(trim(name))>0),
+      category text NOT NULL CHECK(category IN
+        ('vacuum','window_cleaner','lawn_mower','pool_cleaner','companion',
+         'quadruped','humanoid','other')),
+      UNIQUE(brand_id,name)
+    )""")
+    op.execute("""CREATE TABLE catalog_dock (
+      id uuid PRIMARY KEY,
+      dock_sku text NOT NULL,
+      region_code text NOT NULL,
+      hardware_revision text NOT NULL,
+      UNIQUE(dock_sku,region_code,hardware_revision),
+      CHECK(length(trim(dock_sku))>0 AND length(trim(region_code))>0
+        AND length(trim(hardware_revision))>0)
+    )""")
+    op.execute("""CREATE TABLE catalog_variant (
+      id uuid PRIMARY KEY,
+      model_id uuid NOT NULL REFERENCES catalog_model(id),
+      manufacturer_sku text NOT NULL,
+      region_code text NOT NULL,
+      hardware_revision text NOT NULL,
+      dock_id uuid NOT NULL REFERENCES catalog_dock(id),
+      UNIQUE(model_id,manufacturer_sku,region_code,hardware_revision,dock_id),
+      CHECK(length(trim(manufacturer_sku))>0 AND length(trim(region_code))>0
+        AND length(trim(hardware_revision))>0)
+    )""")
+    op.execute("""CREATE TABLE catalog_part (
+      id uuid PRIMARY KEY,
+      part_number text NOT NULL UNIQUE CHECK(length(trim(part_number))>0),
+      name text NOT NULL CHECK(length(trim(name))>0)
+    )""")
+    op.execute("""CREATE TABLE catalog_evidence (
+      id uuid PRIMARY KEY,
+      source_uri text NOT NULL CHECK(source_uri LIKE 'https://%' AND length(source_uri)<2048),
+      sha256 char(64) NOT NULL CHECK(sha256 ~ '^[0-9a-f]{64}$'),
+      created_by uuid NOT NULL REFERENCES app_user(id),
+      created_at timestamptz NOT NULL DEFAULT now()
+    )""")
+    op.execute("""CREATE TABLE service_capability (
+      id uuid PRIMARY KEY,
+      variant_id uuid NOT NULL REFERENCES catalog_variant(id),
+      operation_code text NOT NULL CHECK(length(trim(operation_code))>0),
+      evidence_id uuid NOT NULL REFERENCES catalog_evidence(id),
+      status text NOT NULL DEFAULT 'candidate'
+        CHECK(status IN ('candidate','approved','revoked')),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE(variant_id,operation_code)
+    )""")
+    op.execute("""CREATE TABLE catalog_capability_review (
+      id uuid PRIMARY KEY,
+      capability_id uuid NOT NULL REFERENCES service_capability(id),
+      reviewer_id uuid NOT NULL REFERENCES app_user(id),
+      role_code text NOT NULL CHECK(role_code IN ('ENGINEER','MANAGER')),
+      approved boolean NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE(capability_id,reviewer_id),
+      UNIQUE(capability_id,role_code)
+    )""")
+    op.execute("""CREATE TABLE part_compatibility (
+      id uuid PRIMARY KEY,
+      part_id uuid NOT NULL REFERENCES catalog_part(id),
+      variant_id uuid NOT NULL REFERENCES catalog_variant(id),
+      evidence_id uuid NOT NULL REFERENCES catalog_evidence(id),
+      status text NOT NULL DEFAULT 'unverified'
+        CHECK(status IN ('unverified','manufacturer_documented',
+                         'technician_tested','incompatible','revoked')),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE(part_id,variant_id)
+    )""")
+    op.execute("""CREATE TABLE catalog_compatibility_review (
+      id uuid PRIMARY KEY,
+      compatibility_id uuid NOT NULL REFERENCES part_compatibility(id),
+      reviewer_id uuid NOT NULL REFERENCES app_user(id),
+      role_code text NOT NULL CHECK(role_code IN ('ENGINEER','MANAGER')),
+      approved boolean NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE(compatibility_id,reviewer_id),
+      UNIQUE(compatibility_id,role_code)
+    )""")
+    op.execute("""CREATE FUNCTION reject_catalog_review_change() RETURNS trigger LANGUAGE plpgsql
+      AS $body$ BEGIN RAISE EXCEPTION 'catalog review append only'; END $body$""")
+    for tab in ("catalog_capability_review","catalog_compatibility_review","catalog_evidence"):
+        op.execute(f"""CREATE TRIGGER {tab}_immutable BEFORE UPDATE OR DELETE ON {tab}
+                      FOR EACH ROW EXECUTE FUNCTION reject_catalog_review_change()""")
+    op.execute("""CREATE FUNCTION guard_catalog_publish() RETURNS trigger LANGUAGE plpgsql AS $body$
+      DECLARE approvals integer;
+      BEGIN
+        IF TG_TABLE_NAME='service_capability' THEN
+          IF OLD.status='revoked' AND NEW.status IS DISTINCT FROM OLD.status THEN
+            RAISE EXCEPTION 'capability revocation terminal';
+          END IF;
+          IF (NEW.variant_id,NEW.operation_code,NEW.evidence_id) IS DISTINCT FROM
+             (OLD.variant_id,OLD.operation_code,OLD.evidence_id) THEN
+            RAISE EXCEPTION 'capability identity immutable';
+          END IF;
+          IF NEW.status='approved' AND OLD.status<>'approved' THEN
+            SELECT count(*) INTO approvals FROM catalog_capability_review
+             WHERE capability_id=OLD.id AND approved=true;
+            IF approvals<>2 THEN RAISE EXCEPTION 'two independent approvals required'; END IF;
+          END IF;
+        ELSE
+          IF OLD.status='revoked' AND NEW.status IS DISTINCT FROM OLD.status THEN
+            RAISE EXCEPTION 'compatibility revocation terminal';
+          END IF;
+          IF (NEW.part_id,NEW.variant_id,NEW.evidence_id) IS DISTINCT FROM
+             (OLD.part_id,OLD.variant_id,OLD.evidence_id) THEN
+            RAISE EXCEPTION 'compatibility identity immutable';
+          END IF;
+          IF NEW.status IN ('manufacturer_documented','technician_tested')
+             AND OLD.status NOT IN ('manufacturer_documented','technician_tested') THEN
+            SELECT count(*) INTO approvals FROM catalog_compatibility_review
+             WHERE compatibility_id=OLD.id AND approved=true;
+            IF approvals<>2 THEN RAISE EXCEPTION 'two independent approvals required'; END IF;
+          END IF;
+        END IF;
+        RETURN NEW;
+      END $body$""")
+    for tab in ("service_capability","part_compatibility"):
+        op.execute(f"""CREATE TRIGGER {tab}_guard BEFORE UPDATE ON {tab}
+                       FOR EACH ROW EXECUTE FUNCTION guard_catalog_publish()""")
+
+
+def downgrade():
+    for table in ("catalog_compatibility_review","part_compatibility",
+                  "catalog_capability_review","service_capability","catalog_evidence",
+                  "catalog_part","catalog_variant","catalog_dock",
+                  "catalog_model","catalog_brand"):
+        op.execute(f"DROP TABLE {table}")
+    op.execute("DROP FUNCTION reject_catalog_review_change()")
+    op.execute("DROP FUNCTION guard_catalog_publish()")
