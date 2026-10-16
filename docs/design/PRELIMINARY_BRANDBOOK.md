@@ -16,12 +16,15 @@
 
 | Роль | Light | Dark |
 |---|---|---|
-| canvas | `#F3F8FA` | `#071820` |
-| surface | `#FFFFFF` | `#102731` |
-| text | `#102736` | `#F3FAFC` |
-| декоративный акцент | `#008C84` | `#38D9C9` |
-| кнопка основная | `#006D67` | `#11766F` |
-| маленький акцентный текст | `#006D67` | `#38D9C9` |
+| background | `#F4FAFB` | `#101E22` |
+| surface | `#FFFFFF` | `#1B3136` |
+| foreground | `#12343B` | `#ECF9FA` |
+| accent (декоративный) | `#19BBB5` | `#19BBB5` |
+| action | `#006D67` | `#19BBB5` |
+| actionText | `#FFFFFF` | `#071820` |
+| errorText / errorSurface | `#9F1B23` / `#FFF3F2` | `#FFB4AD` / `#441B1B` |
+| safetyText / safetySurface | `#994900` / `#FFF4E3` | `#FFD3A1` / `#422900` |
+| focus | `#006D67` | `#42DACF` |
 
 Источник — `design/tokens/theme.json` и `theme.css`. Light/Dark/Auto равноправны; Auto использует настройку ОС. Изменение темы **не влияет на авторизацию**. Safety hold/QC FAIL/error обозначаются и текстом, и иконкой, не только цветом. Проверить контраст реальных сочетаний WCAG 2.2 AA, включая focus/hover/disabled.
 
@@ -43,3 +46,8 @@
 ## 7. Критерии передачи разработчикам
 
 Editable SVG, light/dark/mono, JSON/CSS tokens, базовые состояния компонентов, мобильный режим 390px, измеримый контраст, тесты оригинальной геометрии C и реальные скриншоты. **Не выполнено:** полиграфические мастер-файлы, права на имя/знак, полнота UX-сценариев, независимый WCAG и внешний запуск. Задача дизайнерского handoff — GitHub #14.
+
+
+## 8. Проверяемость developer handoff
+
+`python scripts/check_brand_tokens.py` проверяет три канонических SVG path знака C против светлой/тёмной web-версии, соответствие всех семантических ролей JSON/CSS и WCAG AA контраст пары foreground/background, foreground/surface, actionText/action, errorText/errorSurface, safetyText/safetySurface (минимум 4.5:1), видимый focus (минимум 3:1). CI запускает тот же скрипт. Основной текст и кнопки не используют декоративный accent как неподтверждённый цвет контрастного текста. Итоговые скриншоты Light/Dark/mobile — Playwright artifacts; правовая экспертиза знака остаётся за пределами DoD разработки.
