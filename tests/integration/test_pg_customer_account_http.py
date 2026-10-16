@@ -1,0 +1,53 @@
+"""Customer account HTTP access: independent real sessions A/B and revocation."""
+from datetime import datetime,timedelta,timezone
+from uuid import uuid4
+import psycopg
+from fastapi.testclient import TestClient
+from roboport_api.main import app
+from roboport_api.session_tokens import new_token,token_digest
+from test_pg_baseline import DSN
+
+
+def test_account_ticket_list_live_two_users_and_revocation(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    a,b,ca,cb,ta,tb,sa,sb=(uuid4() for _ in range(8))
+    tokens=(new_token(),new_token())
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        for uid in (a,b):
+            db.execute("INSERT INTO app_user(id,normalized_login) VALUES (%s,%s)",(uid,uid.hex))
+        for cid in (ca,cb):
+            db.execute("INSERT INTO customer(id,label) VALUES (%s,%s)",(cid,cid.hex))
+        for t,cid in ((ta,ca),(tb,cb)):
+            db.execute("INSERT INTO service_ticket(id,customer_id) VALUES (%s,%s)",(t,cid))
+        for u,cid in ((a,ca),(b,cb)):
+            db.execute("INSERT INTO account_customer_link(user_id,customer_id) VALUES (%s,%s)",(u,cid))
+        for sid,u,token in ((sa,a,tokens[0]),(sb,b,tokens[1])):
+            db.execute("""INSERT INTO user_session
+              (id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+              VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+              (sid,u,token_digest(token),token_digest(new_token()),now,
+               now+timedelta(minutes=30),now+timedelta(hours=4)))
+    http=TestClient(app,base_url="https://127.0.0.1")
+    url="/api/v1/dev/account/tickets"
+    assert http.get(url,headers={"X-User-ID":str(a),"X-Customer-ID":str(ca)}).status_code==401
+    http.cookies.set("rp_session",tokens[0])
+    first=http.get(url)
+    assert first.status_code==200,first.text
+    assert [x["id"] for x in first.json()["items"]]==[str(ta)]
+    assert all(str(tb) not in str(v) for v in first.json()["items"])
+    http.cookies.clear()
+    http.cookies.set("rp_session",tokens[1])
+    second=http.get(url)
+    assert second.status_code==200 and [x["id"] for x in second.json()["items"]]==[str(tb)]
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(b,))
+    assert http.get(url).json()["items"]==[]
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE user_session SET revoked_at=now() WHERE id=%s",(sb,))
+    assert http.get(url).status_code==401
+    assert http.get(url,headers={"X-User-ID":str(a)}).status_code==401
+    assert http.get(url+"?limit=51").status_code==422
+    monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API")
+    assert http.get(url).status_code==404
