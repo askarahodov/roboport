@@ -76,6 +76,15 @@ def test_unverified_then_reserve_replay_and_release(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT reserved_qty FROM stock_lot WHERE id=%s",(lot,)).fetchone()[0]==0
         assert db.execute("SELECT count(*) FROM stock_movement WHERE reservation_id=%s",(rid,)).fetchone()[0]==2
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE stock_reservation SET qty=2 WHERE id=%s",(rid,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE stock_reservation SET status='ACTIVE',cancelled_at=NULL WHERE id=%s",(rid,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("DELETE FROM stock_reservation WHERE id=%s",(rid,))
 
 
 def test_parallel_last_unit_two_connections():
