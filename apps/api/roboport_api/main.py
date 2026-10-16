@@ -8,6 +8,8 @@ app = FastAPI(title="ROBOport development API", version="0.1.0")
 
 from .auth_http import router as synthetic_auth_router
 app.include_router(synthetic_auth_router)
+from .oidc_http import router as oidc_router
+app.include_router(oidc_router)
 
 
 @app.middleware("http")
