@@ -127,6 +127,29 @@ def upgrade():
         op.execute(f"""CREATE TRIGGER {table}_append_only
           BEFORE UPDATE OR DELETE ON {table}
           FOR EACH ROW EXECUTE FUNCTION prevent_catalog_audit_mutation()""")
+    op.execute("""CREATE FUNCTION guard_catalog_evidence_mutation() RETURNS trigger
+      LANGUAGE plpgsql AS $body$
+      BEGIN
+        IF TG_TABLE_NAME='service_capability' THEN
+          IF ROW(NEW.model_id,NEW.capability,NEW.evidence) IS DISTINCT FROM
+             ROW(OLD.model_id,OLD.capability,OLD.evidence)
+          THEN RAISE EXCEPTION 'capability identity and evidence immutable'; END IF;
+        ELSIF TG_TABLE_NAME='part_compatibility' THEN
+          IF ROW(NEW.model_id,NEW.part_number,NEW.evidence) IS DISTINCT FROM
+             ROW(OLD.model_id,OLD.part_number,OLD.evidence)
+          THEN RAISE EXCEPTION 'part identity and evidence immutable'; END IF;
+        END IF;
+        IF OLD.status='UNSUPPORTED' AND NEW.status<>OLD.status THEN
+          RAISE EXCEPTION 'revoked compatibility cannot reactivate';
+        END IF;
+        IF OLD.status='SUPPORTED' AND NEW.status='CANDIDATE' THEN
+          RAISE EXCEPTION 'approved compatibility cannot return to candidate';
+        END IF;
+        RETURN NEW;
+      END $body$""")
+    for table in ('service_capability','part_compatibility'):
+        op.execute(f"""CREATE TRIGGER {table}_evidence_immutable BEFORE UPDATE ON {table}
+          FOR EACH ROW EXECUTE FUNCTION guard_catalog_evidence_mutation()""")
     op.execute("""CREATE FUNCTION validate_capability_promotion() RETURNS trigger
       LANGUAGE plpgsql AS $body$
       BEGIN
@@ -162,4 +185,5 @@ def downgrade():
     op.execute("DROP FUNCTION guard_capability_reviewer()")
     op.execute("DROP FUNCTION guard_part_reviewer()")
     op.execute("DROP FUNCTION guard_part_promotion()")
+    op.execute("DROP FUNCTION guard_catalog_evidence_mutation()")
     op.execute("DROP FUNCTION validate_capability_promotion()")
