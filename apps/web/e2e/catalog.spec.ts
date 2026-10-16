@@ -13,7 +13,7 @@ test('переходы по каталогу и пустые состояния 
 });
 
 test('недоступный API показывает ошибку, не фиктивные данные', async ({ page }) => {
-  await page.route('**/api/v1/catalog/brands', route => route.fulfill({
+  await page.route('**/api/v1/catalog/brands?*', route => route.fulfill({
     status: 503,
     contentType: 'application/json',
     body: JSON.stringify({ code: 'SERVICE_UNAVAILABLE' }),
@@ -44,7 +44,7 @@ test('неизвестный URL не маскируется главной ст
 
 test('после сетевой ошибки каталог можно повторно загрузить', async ({ page }) => {
   let recovered = false;
-  await page.route('**/api/v1/catalog/models', async route => {
+  await page.route('**/api/v1/catalog/models?*', async route => {
     if (!recovered) {
       await route.fulfill({ status: 503, body: '{}' });
     } else {
