@@ -45,11 +45,11 @@ def test_live_customer_session_a_b_revocation_and_no_document_object_key(monkeyp
                        (attachment,ticket,attachment.hex,'a'*64,actor))
     http=TestClient(app,base_url="https://127.0.0.1")
     assert http.get("/api/v1/dev/account/collections/robots").status_code==401
-    for token,own,other in ((token_a,(device_a,estimate_a,attachment_a),(device_b,estimate_b,attachment_b)),
-                            (token_b,(device_b,estimate_b,attachment_b),(device_a,estimate_a,attachment_a))):
+    for token,own,other in ((token_a,(device_a,ticket_a,estimate_a,attachment_a),(device_b,ticket_b,estimate_b,attachment_b)),
+                            (token_b,(device_b,ticket_b,estimate_b,attachment_b),(device_a,ticket_a,estimate_a,attachment_a))):
         http.cookies.clear()
         http.cookies.set("rp_session",token)
-        for kind,expected,foreign in zip(("robots","estimates","documents"),own,other):
+        for kind,expected,foreign in zip(("robots","tickets","estimates","documents"),own,other):
             response=http.get(f"/api/v1/dev/account/collections/{kind}")
             assert response.status_code==200,response.text
             items=response.json()["items"]
@@ -60,7 +60,7 @@ def test_live_customer_session_a_b_revocation_and_no_document_object_key(monkeyp
         db.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(a,))
     http.cookies.clear()
     http.cookies.set("rp_session",token_a)
-    for kind in ("robots","estimates","documents"):
+    for kind in ("robots","tickets","estimates","documents"):
         result=http.get(f"/api/v1/dev/account/collections/{kind}")
         assert result.status_code==200 and result.json()=={"items":[]}
     with psycopg.connect(DSN) as db:
@@ -69,6 +69,9 @@ def test_live_customer_session_a_b_revocation_and_no_document_object_key(monkeyp
     http.cookies.clear()
     http.cookies.set("rp_session",token_b)
     assert http.get("/api/v1/dev/account/collections/documents").json()["items"][0]["id"]==str(attachment_b)
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE user_role SET revoked_at=now() WHERE user_id=%s AND role_code='CLIENT'",(b,))
+    assert http.get("/api/v1/dev/account/collections/tickets").status_code==401
     assert http.get("/api/v1/dev/account/collections/unknown").status_code==404
     monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API")
     assert http.get("/api/v1/dev/account/collections/robots").status_code==404
