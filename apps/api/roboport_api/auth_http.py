@@ -259,3 +259,37 @@ def staff_queue(request: Request, limit: int = 20, offset: int = 0):
     return JSONResponse(content={"items":[{"id":str(t), "state":s, "version":v}
                                       for t,s,v in rows],"limit":limit,"offset":offset},
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/staff/audit")
+def staff_audit(request: Request, limit: int = 30):
+    """Read-only audit events limited to tickets with live auditor ACL."""
+    dsn=_dsn(request)
+    if dsn is None:
+        return _error(request,403)
+    if not 1<=limit<=50:
+        return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                            "requestId":request.state.request_id},
+                            headers={"Cache-Control":"no-store"})
+    with psycopg.connect(dsn,autocommit=True) as conn:
+        actor=session_subject(conn,request.cookies.get("rp_session",""))
+        if actor is None:
+            return _error(request,401)
+        permitted=conn.execute("""
+          SELECT EXISTS(SELECT 1 FROM user_role r WHERE r.user_id=%s
+            AND r.role_code='AUDITOR' AND r.revoked_at IS NULL
+            AND (r.expires_at IS NULL OR r.expires_at>now()))
+        """,(actor,)).fetchone()[0]
+        if not permitted:
+            return _error(request,403)
+        rows=conn.execute("""
+          SELECT e.id,e.ticket_id,e.action,e.created_at FROM audit_event e
+          WHERE EXISTS (SELECT 1 FROM acl_entry a
+            WHERE a.user_id=%s AND a.ticket_id=e.ticket_id
+              AND a.action='ticket.read' AND a.revoked_at IS NULL
+              AND (a.expires_at IS NULL OR a.expires_at>now()))
+          ORDER BY e.created_at DESC,e.id DESC LIMIT %s
+        """,(actor,limit)).fetchall()
+    return JSONResponse(content={"items":[{"id":str(i),"ticketId":str(t),
+                    "action":a,"createdAt":d.isoformat()} for i,t,a,d in rows]},
+                        headers={"Cache-Control":"no-store"})
