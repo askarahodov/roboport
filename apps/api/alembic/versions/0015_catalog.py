@@ -41,6 +41,27 @@ def upgrade():
       created_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE(capability_id,actor_id)
     )""")
+    op.execute("""CREATE FUNCTION guard_capability_reviewer() RETURNS trigger
+      LANGUAGE plpgsql AS $body$
+      BEGIN
+        IF NOT EXISTS(
+          SELECT 1 FROM app_user u JOIN user_role r ON r.user_id=u.id
+          WHERE u.id=NEW.actor_id AND u.status='ACTIVE'
+          AND r.role_code=NEW.role AND r.revoked_at IS NULL
+          AND (r.expires_at IS NULL OR r.expires_at>now())
+        ) THEN
+          RAISE EXCEPTION 'reviewer has no live role';
+        END IF;
+        IF EXISTS(
+          SELECT 1 FROM capability_approval a WHERE a.capability_id=NEW.capability_id
+            AND a.actor_id=NEW.actor_id
+        ) THEN
+          RAISE EXCEPTION 'duplicate reviewer';
+        END IF;
+        RETURN NEW;
+      END $body$""")
+    op.execute("""CREATE TRIGGER capability_reviewer_guard BEFORE INSERT ON capability_approval
+      FOR EACH ROW EXECUTE FUNCTION guard_capability_reviewer()""")
     op.execute("""CREATE TABLE catalog_audit (
       id uuid PRIMARY KEY,
       capability_id uuid NOT NULL REFERENCES service_capability(id),
@@ -68,6 +89,9 @@ def upgrade():
           ) OR NOT EXISTS(
             SELECT 1 FROM capability_approval a WHERE a.capability_id=NEW.id AND
               a.role='MANAGER' AND a.approved
+              AND a.actor_id <> (SELECT actor_id FROM capability_approval
+                  WHERE capability_id=NEW.id AND role='ENGINEER' AND approved
+                  ORDER BY created_at LIMIT 1)
           ) THEN
             RAISE EXCEPTION 'independent capability approvals required';
           END IF;
@@ -83,4 +107,5 @@ def downgrade():
     op.execute("DROP TABLE service_capability")
     op.execute("DROP TABLE catalog_model")
     op.execute("DROP FUNCTION prevent_catalog_audit_mutation()")
+    op.execute("DROP FUNCTION guard_capability_reviewer()")
     op.execute("DROP FUNCTION validate_capability_promotion()")
