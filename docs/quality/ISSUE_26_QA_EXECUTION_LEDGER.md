@@ -68,6 +68,41 @@ SHA: `56ba8acaad577d7c2febd85fffd80773314fe685`
 
 Для завершающего коммита все соответствующие workflows обязаны завершиться заново. Проверка UI визуальной доступности человеком и независимое QA-review по-прежнему не засвидетельствованы.
 
+
+## Проверенный итог полного автоматического набора на SHA 1037df95
+
+**Исполняемая ветка:** `qa/issue-26-readiness-evidence`, SHA `1037df95efd897cc8e65067eb9044f851906dada`. Все перечисленные задания — **PASS / exit 0**:
+
+| Исполнение | Доказательство | Факт |
+|---|---|---|
+| PostgreSQL 17, concurrency, HTTP/PG | [postgres job](https://github.com/askarahodov/roboport/actions/runs/38901211966/job/116973647627) | 80 passed, 4 skipped; миграции, dump/restore, FK probe — PASS |
+| Auth + API contract | [api job](https://github.com/askarahodov/roboport/actions/runs/38901211966/job/116973647492) | bootstrap 96 passed; contract 51 passed |
+| Browser Chrome | [browser job](https://github.com/askarahodov/roboport/actions/runs/38901211966/job/116973647204) | Playwright 16 passed |
+| Web type/build | [web job](https://github.com/askarahodov/roboport/actions/runs/38901211966/job/116973647434) | PASS |
+| Настоящий MinIO + PostgreSQL | [minio job](https://github.com/askarahodov/roboport/actions/runs/38901212008/job/116973647969) | storage 1 passed + attachment 3 passed; восстановление без mirroring errors, PASS |
+
+Проверенные причины пропусков (лог `pytest -ra`): `test_minio_storage.py:10` + `test_pg_minio_attachment_http.py:14,64,114` — отсутствует MinIO в стандартном PostgreSQL job. Все четыре **PASS в выделенном MinIO job**.
+
+### Итоговое отображение AC → реально исполняемый набор
+
+| AC | Фактически запущенный набор / статус автоматизации | Ограничение |
+|---|---|---|
+| 001–003 | bootstrap/contract + PG integration **PASS** | ручная оценка catalog evidence ещё не подписана |
+| 004–006 | PG integration **PASS** | ручная оценка corner cases ещё не подписана |
+| 007–011 | PG integration + auth bootstrap **PASS** | независимый security sign-off отсутствует |
+| 012 | MinIO + PG HTTP, 4 dedicated tests **PASS** | production storage compliance не проверялась |
+| 013 | Browser 16 tests **PASS** | ручное сравнение Light/Dark/390px снимков отсутствует |
+| 014 | Browser 16 tests **PASS** | WCAG/keyboard independent review отсутствует |
+| 015 | API 51 contract tests **PASS** | публичный compliance gate не проверен |
+| 016 | PG integration **PASS** | независимый replay audit отсутствует |
+| 017 | PG restore + migration + FK **PASS** | production RTO/RPO не проверялись |
+| 018 | PG integration **PASS** | crash/restart эксплуатационный сценарий требует независимой сверки |
+| 019 | 4 core CI jobs **PASS** | только на указанном SHA |
+| 020 | FSM tests в PG/contract **PASS** | operational robot safety approval отсутствует |
+
+**Важная граница:** PASS выше означает подтверждённый exit соответствующего автоматического набора, не завершённый ручной аудит индивидуального AC. Без отдельной подписи reviewer запрещено менять статус задачи на Closed или объявлять public-release ready. Задача #24 также OPEN — её код в этом PR не интегрирован.
+
+
 ## Exit criteria
 
 1. Для **каждого** AC записать фактический PASS/FAIL/SKIP/BLOCKED, run URL, SHA, команду, exit code, найденный дефект/ограничение.
