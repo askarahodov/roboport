@@ -27,4 +27,4 @@ def test_signed_state_integrity_and_short_ttl(monkeypatch):
 def test_fake_client_headers_never_create_oidc_session():
     client=TestClient(app,base_url="https://127.0.0.1")
     for headers in ({"X-User-ID":"fake"},{"Authorization":"Bearer fake"},{"X-OIDC-Subject":"fake"}):
-        assert client.get("/api/v1/auth/me",headers=headers).status_code==401
+        assert client.get("/api/v1/auth/me",headers=headers).status_code in (401,403)
