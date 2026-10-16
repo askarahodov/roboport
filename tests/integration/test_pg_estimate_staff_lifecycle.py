@@ -65,3 +65,37 @@ def test_staff_draft_send_owner_agreement_and_immutable_price(monkeypatch):
                  "Idempotency-Key":"consent-"+eid})
     assert consent.status_code==200,consent.text
     assert consent.json()["state"]=="APPROVED"
+
+
+def test_price_change_forces_new_version_and_new_owner_consent(monkeypatch):
+    from roboport_api.estimate_decision import create_estimate_version,send_estimate_version,decide_estimate,EstimateConflict
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    customer,ticket,manager,owner=(uuid4() for _ in range(4))
+    now=datetime.now(timezone.utc)
+    manager_token,owner_token=new_token(),new_token()
+    with psycopg.connect(DSN) as db:
+        db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
+        db.execute("INSERT INTO service_ticket(id,customer_id) VALUES(%s,%s)",(ticket,customer))
+        for uid,role,tok in ((manager,"MANAGER",manager_token),(owner,"CLIENT",owner_token)):
+            db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(uid,uid.hex))
+            db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",(uuid4(),uid,role))
+            db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,
+                        created_at,idle_expires_at,absolute_expires_at)
+                        VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+                       (uuid4(),uid,token_digest(tok),token_digest(new_token()),now,
+                        now+timedelta(minutes=30),now+timedelta(hours=4)))
+        db.execute("INSERT INTO account_customer_link(user_id,customer_id) VALUES(%s,%s)",(owner,customer))
+        db.execute("""INSERT INTO acl_entry(id,user_id,ticket_id,action)
+                      VALUES(%s,%s,%s,'estimate.approve')""",(uuid4(),manager,ticket))
+        old=create_estimate_version(db,manager_token,ticket,[{"description":"Работа","amountMinor":100}])
+        send_estimate_version(db,manager_token,__import__("uuid").UUID(old["id"]),1)
+        newer=create_estimate_version(db,manager_token,ticket,[{"description":"Работа","amountMinor":200}])
+        assert newer["version"]==2
+        send_estimate_version(db,manager_token,__import__("uuid").UUID(newer["id"]),2)
+        import pytest
+        with pytest.raises(EstimateConflict):
+            decide_estimate(db,owner_token,__import__("uuid").UUID(old["id"]),1,"APPROVED","old")
+        actual=decide_estimate(db,owner_token,__import__("uuid").UUID(newer["id"]),2,"APPROVED","new")
+        assert actual["version"]==2 and actual["state"]=="APPROVED"
+        assert db.execute("SELECT count(*) FROM estimate_approval WHERE estimate_id=%s",
+                          (old["id"],)).fetchone()[0]==0
