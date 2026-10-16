@@ -22,10 +22,10 @@ def inventory_fixture():
           VALUES (%s,'MODEL-X','RU','R2')""",(device,))
         db.execute("""INSERT INTO service_ticket(id,customer_id,device_id,state)
           VALUES (%s,%s,%s,'APPROVED')""",(ticket,customer,device))
-        db.execute("INSERT INTO stock_lot(id,part_number,available_qty) VALUES (%s,'TEST-PN',1)",(lot,))
+        db.execute("INSERT INTO stock_lot(id,part_number,available_qty) VALUES (%s,%s,1)",(lot,'TEST-PN-'+lot.hex))
         db.execute("""INSERT INTO part_compatibility
           (id,part_number,model_variant,region,revision,verified)
-          VALUES (%s,'TEST-PN','MODEL-X','RU','R2',false)""",(match,))
+          VALUES (%s,%s,'MODEL-X','RU','R2',false)""",(match,'TEST-PN-'+lot.hex))
         db.execute("INSERT INTO app_user(id,normalized_login) VALUES (%s,%s)",(actor,actor.hex))
         db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES (%s,%s,'STOCK')",(uuid4(),actor))
         db.execute("""INSERT INTO acl_entry(id,user_id,ticket_id,action)
@@ -66,7 +66,8 @@ def test_unverified_then_reserve_replay_and_release(monkeypatch):
         db.execute("UPDATE acl_entry SET revoked_at=now() WHERE user_id=%s",(actor,))
     assert http.post(path,json=payload,headers=headers).status_code==404
     with psycopg.connect(DSN) as db:
-        db.execute("UPDATE acl_entry SET revoked_at=NULL WHERE user_id=%s",(actor,))
+        db.execute("""INSERT INTO acl_entry(id,user_id,ticket_id,action)
+                      VALUES (%s,%s,%s,'stock.reserve')""",(uuid4(),actor,ticket))
     cancel_path=f"/api/v1/dev/inventory/reservations/{rid}/cancel"
     ch={**headers,"Idempotency-Key":"cancel-"+rid.hex}
     assert http.post(cancel_path,headers=ch).status_code==200
