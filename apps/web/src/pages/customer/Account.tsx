@@ -62,8 +62,60 @@ function Tickets() {
   </section>;
 }
 
+type CollectionKind = 'robots'|'estimates'|'documents';
+type CollectionRow = {id: string;ticketId?: string;state?: string;version?: number;totalMinor?: number};
+function CustomerCollection({kind}:{kind:CollectionKind}) {
+  const [status,setStatus] = React.useState<'loading'|'ready'|'denied'|'unavailable'>('loading');
+  const [items,setItems] = React.useState<CollectionRow[]>([]);
+  const [retry,setRetry] = React.useState(0);
+  React.useEffect(() => {
+    const controller=new AbortController();
+    async function load() {
+      setStatus('loading');
+      try {
+        const response=await fetch('/api/v1/dev/account/collections/'+kind,{
+          credentials:'include',cache:'no-store',signal:controller.signal,
+          headers:{Accept:'application/json'},
+        });
+        if (controller.signal.aborted) return;
+        if (response.status===401 || response.status===403) {
+          setItems([]);setStatus('denied');return;
+        }
+        if (!response.ok) {setItems([]);setStatus('unavailable');return;}
+        const data:unknown=await response.json();
+        if (!data || typeof data!=='object' || !('items' in data) ||
+            !Array.isArray(data.items) || !data.items.every((x:unknown)=>
+              x!==null && typeof x==='object' && 'id' in x && typeof x.id==='string')) {
+          setItems([]);setStatus('unavailable');return;
+        }
+        setItems(data.items as CollectionRow[]);
+        setStatus('ready');
+      } catch { if (!controller.signal.aborted) {setItems([]);setStatus('unavailable');} }
+    }
+    void load();
+    return () => controller.abort();
+  },[kind,retry]);
+  const label=sections.find(x=>x.id===kind)!.label;
+  return <section aria-labelledby={'account-'+kind}>
+    <h2 id={'account-'+kind}>{label}</h2>
+    {status==='loading' && <p role="status">Загрузка раздела…</p>}
+    {status==='denied' && <p role="alert">401 — доступ отозван или сессия завершена.</p>}
+    {status==='unavailable' && <><p role="alert">Раздел недоступен. Приватные данные не показаны.</p>
+      <button type="button" onClick={()=>setRetry(x=>x+1)}>Повторить загрузку</button></>}
+    {status==='ready' && (items.length===0
+      ? <p role="status">Доступных записей пока нет.</p>
+      : <ul>{items.map(row=><li key={row.id}>
+        {label}: {row.id}{row.state ? ' — '+row.state : ''}
+        {row.version !== undefined ? ', версия '+row.version : ''}
+        {row.totalMinor !== undefined ? ', сумма '+(row.totalMinor/100).toFixed(2)+' ₽' : ''}
+      </li>)}</ul>)}
+    {kind==='documents' && <p>Для получения содержимого документа требуется защищённый backend; ключи MinIO браузеру не передаются.</p>}
+  </section>;
+}
+
 function Section({ id }: { id: SectionId }) {
   if (id === 'tickets') return <Tickets />;
+  if (id === 'robots' || id === 'estimates' || id === 'documents') return <CustomerCollection kind={id} />;
   const section = sections.find(item => item.id === id)!;
   return <section aria-labelledby={'account-' + id}>
     <h2 id={'account-' + id}>{section.label}</h2>
