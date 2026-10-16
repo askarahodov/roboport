@@ -32,6 +32,7 @@ jobs:
           python-version: '3.13'
       - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
       - run: python scripts/check_python_pins.py
+      - run: python scripts/check_brand_tokens.py
       - name: Real PostgreSQL upgrade / downgrade / re-upgrade
         run: |
           python -m alembic -c apps/api/alembic.ini upgrade head
