@@ -10,6 +10,9 @@ branch_labels=None
 depends_on=None
 
 def upgrade():
+    op.execute("""ALTER TABLE estimate_approval
+      ADD COLUMN consent_method text,
+      ADD COLUMN consent_fingerprint text CHECK (consent_fingerprint IS NULL OR length(consent_fingerprint)=64)""")
     op.execute("""CREATE TABLE estimate_decision_receipt (
       actor_id uuid NOT NULL REFERENCES app_user(id) ON DELETE RESTRICT,
       estimate_id uuid NOT NULL REFERENCES estimate(id) ON DELETE RESTRICT,
@@ -36,6 +39,7 @@ def upgrade():
       FOR EACH ROW EXECUTE FUNCTION reject_estimate_receipt_mutation()""")
 
 def downgrade():
+    op.execute("ALTER TABLE estimate_approval DROP COLUMN consent_fingerprint, DROP COLUMN consent_method")
     op.execute("DROP TABLE estimate_staff_receipt")
     op.execute("DROP TABLE estimate_decision_receipt")
     op.execute("DROP FUNCTION reject_estimate_receipt_mutation()")
