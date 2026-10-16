@@ -114,6 +114,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash -n scripts/dev_account_https.sh
           TMP_TLS="$(mktemp -d)"
           API_PID=""
           WEB_PID=""
