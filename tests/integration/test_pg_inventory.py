@@ -27,7 +27,7 @@ def inventory_fixture():
                    (part,'TEST-PN-'+lot.hex))
         db.execute("""INSERT INTO catalog_model
           (id,brand,model,variant,dock,region,revision,status)
-          VALUES (%s,'SYNTH-BRAND','SYNTH-ROBOT','MODEL-X','DOCK-1','RU','R2','SUPPORTED')""",(model,))
+          VALUES (%s,%s,'SYNTH-ROBOT','MODEL-X','DOCK-1','RU','R2','SUPPORTED')""",(model,'SYNTH-BRAND-'+model.hex))
         db.execute("""INSERT INTO part_compatibility
           (id,model_id,part_number,evidence)
           VALUES (%s,%s,%s,'synthetic-evidence')""",(match,model,'TEST-PN-'+lot.hex))
@@ -52,11 +52,11 @@ def inventory_fixture():
           VALUES (%s,%s,1,'SENT',100,'RUB')""",(estimate,ticket))
         db.execute("""INSERT INTO estimate_approval(id,estimate_id,actor_id,decision)
           VALUES (%s,%s,%s,'APPROVED')""",(uuid4(),estimate,actor))
-    return ticket,lot,actor,match,part,token,csrf
+    return ticket,lot,actor,match,part,model,token,csrf
 
 
 def test_unverified_then_reserve_replay_and_release(monkeypatch):
-    ticket,lot,actor,match,part,token,csrf=inventory_fixture()
+    ticket,lot,actor,match,part,model,token,csrf=inventory_fixture()
     with psycopg.connect(DSN) as db:
         with pytest.raises(StockConflict):
             reserve(db,token,ticket,lot,1,"unverified")
@@ -110,7 +110,7 @@ def test_unverified_then_reserve_replay_and_release(monkeypatch):
 
 
 def test_parallel_last_unit_two_connections():
-    ticket,lot,actor,match,part,token,csrf=inventory_fixture()
+    ticket,lot,actor,match,part,model,token,csrf=inventory_fixture()
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE part_compatibility SET status='SUPPORTED' WHERE id=%s",(match,))
     barrier=Barrier(2)
@@ -132,7 +132,7 @@ def test_parallel_last_unit_two_connections():
 
 
 def test_public_contract_part_version_and_release_reason(monkeypatch):
-    ticket,lot,actor,match,part,token,csrf=inventory_fixture()
+    ticket,lot,actor,match,part,model,token,csrf=inventory_fixture()
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE part_compatibility SET status='SUPPORTED' WHERE id=%s",(match,))
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
