@@ -121,6 +121,7 @@ def callback(request:Request,code:str="",state:str=""):
             return _deny(request)
         response=RedirectResponse("/account",status_code=303,headers={"Cache-Control":"no-store"})
         set_session_cookie(response,issued[0])
+        response.delete_cookie(COOKIE,path='/api/v1/dev/oidc',secure=True,httponly=True,samesite='lax')
         return response
     except (OIDCRejected,KeyError,psycopg.Error,httpx.HTTPError):
         return _deny(request)
