@@ -44,6 +44,14 @@ def upgrade():
       CHECK(length(trim(manufacturer_sku))>0 AND length(trim(region_code))>0
         AND length(trim(hardware_revision))>0)
     )""")
+    op.execute("""CREATE TABLE catalog_grant (
+      id uuid PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES app_user(id),
+      model_id uuid NOT NULL REFERENCES catalog_model(id),
+      action text NOT NULL CHECK(action IN ('capability.review','compatibility.review','catalog.read')),
+      revoked_at timestamptz,
+      expires_at timestamptz
+    )""")
     op.execute("""CREATE TABLE catalog_part (
       id uuid PRIMARY KEY,
       part_number text NOT NULL UNIQUE CHECK(length(trim(part_number))>0),
@@ -81,6 +89,8 @@ def upgrade():
       part_id uuid NOT NULL REFERENCES catalog_part(id),
       variant_id uuid NOT NULL REFERENCES catalog_variant(id),
       evidence_id uuid NOT NULL REFERENCES catalog_evidence(id),
+      requested_status text NOT NULL DEFAULT 'manufacturer_documented'
+        CHECK(requested_status IN ('manufacturer_documented','technician_tested')),
       status text NOT NULL DEFAULT 'unverified'
         CHECK(status IN ('unverified','manufacturer_documented',
                          'technician_tested','incompatible','revoked')),
@@ -97,9 +107,16 @@ def upgrade():
       UNIQUE(compatibility_id,reviewer_id),
       UNIQUE(compatibility_id,role_code)
     )""")
+    op.execute("""CREATE TABLE catalog_receipt (
+      actor_id uuid NOT NULL REFERENCES app_user(id),
+      request_key text NOT NULL CHECK(length(request_key) BETWEEN 1 AND 128),
+      fingerprint text NOT NULL CHECK(length(fingerprint)=64),
+      response jsonb NOT NULL,
+      PRIMARY KEY(actor_id,request_key)
+    )""")
     op.execute("""CREATE FUNCTION reject_catalog_review_change() RETURNS trigger LANGUAGE plpgsql
       AS $body$ BEGIN RAISE EXCEPTION 'catalog review append only'; END $body$""")
-    for tab in ("catalog_capability_review","catalog_compatibility_review","catalog_evidence"):
+    for tab in ("catalog_capability_review","catalog_compatibility_review","catalog_evidence","catalog_receipt"):
         op.execute(f"""CREATE TRIGGER {tab}_immutable BEFORE UPDATE OR DELETE ON {tab}
                       FOR EACH ROW EXECUTE FUNCTION reject_catalog_review_change()""")
     op.execute("""CREATE FUNCTION guard_catalog_publish() RETURNS trigger LANGUAGE plpgsql AS $body$
@@ -122,8 +139,8 @@ def upgrade():
           IF OLD.status='revoked' AND NEW.status IS DISTINCT FROM OLD.status THEN
             RAISE EXCEPTION 'compatibility revocation terminal';
           END IF;
-          IF (NEW.part_id,NEW.variant_id,NEW.evidence_id) IS DISTINCT FROM
-             (OLD.part_id,OLD.variant_id,OLD.evidence_id) THEN
+          IF (NEW.part_id,NEW.variant_id,NEW.evidence_id,NEW.requested_status) IS DISTINCT FROM
+             (OLD.part_id,OLD.variant_id,OLD.evidence_id,OLD.requested_status) THEN
             RAISE EXCEPTION 'compatibility identity immutable';
           END IF;
           IF NEW.status IN ('manufacturer_documented','technician_tested')
@@ -141,9 +158,9 @@ def upgrade():
 
 
 def downgrade():
-    for table in ("catalog_compatibility_review","part_compatibility",
+    for table in ("catalog_receipt","catalog_compatibility_review","part_compatibility",
                   "catalog_capability_review","service_capability","catalog_evidence",
-                  "catalog_part","catalog_variant","catalog_dock",
+                  "catalog_part","catalog_grant","catalog_variant","catalog_dock",
                   "catalog_model","catalog_brand"):
         op.execute(f"DROP TABLE {table}")
     op.execute("DROP FUNCTION reject_catalog_review_change()")
