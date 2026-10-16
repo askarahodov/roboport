@@ -739,7 +739,7 @@ async def _estimate_staff_mutation(request: Request, target_id: str, operation: 
                         or not isinstance(item.get("description"),str)
                         or not item["description"].strip()
                         or not isinstance(item.get("unitPrice"),str)
-                        or re.fullmatch(r"[0-9]+(\\.[0-9]{1,2})?",item["unitPrice"]) is None):
+                        or re.fullmatch(r"[0-9]+(\.[0-9]{1,2})?",item["unitPrice"]) is None):
                     # Parts require a verified compatibility registry and cannot
                     # be quoted from untrusted P/N or client-supplied evidence.
                     raise ValueError()
