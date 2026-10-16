@@ -12,7 +12,58 @@ const sections: Array<{ id: SectionId; label: string; description: string }> = [
   { id: 'settings', label: 'Настройки и уведомления', description: 'Параметры вашего аккаунта.' },
 ];
 
+type Ticket = { id: string; state: string; version: number };
+function Tickets() {
+  const [status, setStatus] = React.useState<'loading'|'ready'|'denied'|'unavailable'>('loading');
+  const [items, setItems] = React.useState<Ticket[]>([]);
+  const [retry, setRetry] = React.useState(0);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      setStatus('loading');
+      try {
+        const response = await fetch('/api/v1/dev/tickets/keyset?limit=20', {
+          credentials: 'include', cache: 'no-store', signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+        if (controller.signal.aborted) return;
+        if (response.status === 401 || response.status === 403) {
+          setStatus('denied'); return;
+        }
+        if (!response.ok) { setStatus('unavailable'); return; }
+        const json: unknown = await response.json();
+        if (!json || typeof json !== 'object' || !('items' in json) ||
+            !Array.isArray(json.items) || !json.items.every((item: unknown) =>
+              item !== null && typeof item === 'object' &&
+              'id' in item && typeof item.id === 'string' &&
+              'state' in item && typeof item.state === 'string' &&
+              'version' in item && typeof item.version === 'number')) {
+          setStatus('unavailable'); return;
+        }
+        setItems(json.items as Ticket[]);
+        setStatus('ready');
+      } catch {
+        if (!controller.signal.aborted) setStatus('unavailable');
+      }
+    }
+    void load();
+    return () => controller.abort();
+  }, [retry]);
+  return <section aria-labelledby="account-tickets">
+    <h2 id="account-tickets">Заявки</h2>
+    {status === 'loading' && <p role="status">Загрузка заявок…</p>}
+    {status === 'denied' && <p role="alert">Сессия завершена или доступ отозван. Войдите повторно.</p>}
+    {status === 'unavailable' && <><p role="alert">Не удалось получить заявки. Данные не показаны.</p>
+      <button type="button" onClick={() => setRetry(value => value+1)}>Повторить загрузку</button></>}
+    {status === 'ready' && (items.length === 0
+      ? <p role="status">У вас пока нет доступных заявок.</p>
+      : <ul>{items.map(item =>
+          <li key={item.id}>Заявка {item.id} — {item.state}, версия {item.version}</li>)}</ul>)}
+  </section>;
+}
+
 function Section({ id }: { id: SectionId }) {
+  if (id === 'tickets') return <Tickets />;
   const section = sections.find(item => item.id === id)!;
   return <section aria-labelledby={'account-' + id}>
     <h2 id={'account-' + id}>{section.label}</h2>
