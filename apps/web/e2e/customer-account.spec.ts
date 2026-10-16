@@ -24,7 +24,7 @@ test('customer account does not accept mock identity from localStorage', async (
 test('server 403 and network errors do not expose private sections', async ({ page }) => {
   await page.route('**/api/v1/auth/me', route => route.fulfill({ status: 403, body: '{}' }));
   await page.goto('/account/documents');
-  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByRole('alert')).toContainText('доступ запрещён');
   await expect(page.getByRole('navigation', { name: 'Разделы личного кабинета' })).toHaveCount(0);
   await page.unroute('**/api/v1/auth/me');
   await page.route('**/api/v1/auth/me', route => route.fulfill({ status: 503, body: '{}' }));
