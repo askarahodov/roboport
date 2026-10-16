@@ -85,6 +85,10 @@ def upgrade():
       ON catalog_variant FOR EACH ROW EXECUTE FUNCTION guard_variant_identity()""")
     op.execute("""CREATE FUNCTION reject_catalog_identity_change() RETURNS trigger LANGUAGE plpgsql
       AS $body$ BEGIN RAISE EXCEPTION 'catalog identity immutable'; END $body$""")
+    op.execute("""CREATE TRIGGER catalog_brand_immutable BEFORE UPDATE OR DELETE
+      ON catalog_brand FOR EACH ROW EXECUTE FUNCTION reject_catalog_identity_change()""")
+    op.execute("""CREATE TRIGGER catalog_model_immutable BEFORE UPDATE OR DELETE
+      ON catalog_model FOR EACH ROW EXECUTE FUNCTION reject_catalog_identity_change()""")
     op.execute("""CREATE TRIGGER catalog_dock_immutable BEFORE UPDATE OR DELETE
       ON catalog_dock FOR EACH ROW EXECUTE FUNCTION reject_catalog_identity_change()""")
     op.execute("""CREATE TABLE catalog_part (
