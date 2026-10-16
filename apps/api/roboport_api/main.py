@@ -649,7 +649,14 @@ async def dev_estimate_decision(estimate_id: str, request: Request, public_decis
                     or (public_decision=="APPROVED"
                         and payload.get("approvalMethod")!="verified_account")):
                 raise ValueError()
-            payload={"expectedVersion":payload["estimateVersion"],"decision":public_decision}
+            if public_decision=="DECLINED":
+                reason=payload.get("reason")
+                if reason is not None and (not isinstance(reason,str) or len(reason)>1000):
+                    raise ValueError()
+            else:
+                reason=None
+            payload={"expectedVersion":payload["estimateVersion"],
+                     "decision":public_decision,"reason":reason}
         key = request.headers.get("Idempotency-Key")
         if (not isinstance(payload,dict)
                 or type(payload.get("expectedVersion")) is not int
@@ -667,7 +674,8 @@ async def dev_estimate_decision(estimate_id: str, request: Request, public_decis
                 "code":"FORBIDDEN","requestId":request.state.request_id,
             },headers={"Cache-Control":"no-store"})
         try:
-            result=decide_estimate(conn,token,ident,payload["expectedVersion"],payload["decision"],key)
+            result=decide_estimate(conn,token,ident,payload["expectedVersion"],payload["decision"],key,
+                                   reason=payload.get("reason"))
             if public_decision is not None:
                 quote=conn.execute("SELECT ticket_id,total_minor FROM estimate WHERE id=%s",(ident,)).fetchone()
                 result={"id":str(ident),"ticketId":str(quote[0]),"version":result["version"],
@@ -726,7 +734,14 @@ async def _estimate_staff_mutation(request: Request, target_id: str, operation: 
                 raise ValueError()
             lines=[]
             for item in payload.get("lines",[]):
-                if not isinstance(item,dict):
+                import re
+                if (not isinstance(item,dict) or item.get("kind") not in ("labor","logistics")
+                        or not isinstance(item.get("description"),str)
+                        or not item["description"].strip()
+                        or not isinstance(item.get("unitPrice"),str)
+                        or re.fullmatch(r"[0-9]+(\\.[0-9]{1,2})?",item["unitPrice"]) is None):
+                    # Parts require a verified compatibility registry and cannot
+                    # be quoted from untrusted P/N or client-supplied evidence.
                     raise ValueError()
                 try:
                     price=Decimal(item["unitPrice"])
@@ -734,7 +749,8 @@ async def _estimate_staff_mutation(request: Request, target_id: str, operation: 
                     minor=price*quantity*100
                 except (KeyError,InvalidOperation,TypeError,ValueError):
                     raise ValueError()
-                if not minor.is_finite() or minor!=minor.to_integral_value():
+                if (not quantity.is_finite() or quantity<=0
+                        or not minor.is_finite() or minor!=minor.to_integral_value()):
                     raise ValueError()
                 lines.append({"description":item["description"],"amountMinor":int(minor)})
             payload={"lines":lines,"expectedTicketVersion":payload["expectedTicketVersion"]}
