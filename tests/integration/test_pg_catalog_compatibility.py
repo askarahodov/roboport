@@ -141,6 +141,19 @@ def test_exact_variant_region_revision_dock_do_not_inherit_approval():
     brand,model,dock,variant,part,evidence,users,tokens,csrf=catalog_fixture()
     another_dock,variant_other=uuid4(),uuid4()
     with psycopg.connect(DSN) as db:
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO catalog_variant
+                    (id,model_id,manufacturer_sku,region_code,hardware_revision,dock_id)
+                    VALUES (%s,%s,%s,'EU','BOT-R3',%s)""",
+                    (uuid4(),model,"UNKNOWN-"+uuid4().hex,dock))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE catalog_part SET part_number=%s WHERE id=%s",
+                           ("FAKE-"+part.hex,part))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE catalog_dock SET region_code='EU' WHERE id=%s",(dock,))
         db.execute("""INSERT INTO catalog_dock(id,dock_sku,region_code,hardware_revision)
                       VALUES (%s,%s,'EU','DOCK-R2')""",(another_dock,"DOCK-"+another_dock.hex))
         db.execute("""INSERT INTO catalog_variant
