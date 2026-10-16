@@ -124,10 +124,57 @@ function Section({ id }: { id: SectionId }) {
   </section>;
 }
 
+function LocalLogin({onSuccess}:{onSuccess:(csrf:string)=>void}) {
+  const [login,setLogin] = React.useState('');
+  const [password,setPassword] = React.useState('');
+  const [status,setStatus] = React.useState('');
+  const [busy,setBusy] = React.useState(false);
+  async function submit(event:React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);setStatus('');
+    try {
+      const response=await fetch('/api/v1/auth/login',{
+        method:'POST',credentials:'include',cache:'no-store',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({login,password}),
+      });
+      if (!response.ok) {
+        setStatus(response.status===429 ? 'Слишком много попыток. Повторите позже.' :
+          response.status===403 ? 'Вход разрешён только на защищённом локальном стенде.' :
+          'Неверные учётные данные или вход сейчас недоступен.');
+        return;
+      }
+      const data:unknown=await response.json();
+      if (!data || typeof data!=='object' || !('csrfToken' in data) ||
+          typeof data.csrfToken!=='string' || data.csrfToken.length<20) {
+        setStatus('Некорректный ответ сервера. Вход не подтверждён.');
+        return;
+      }
+      onSuccess(data.csrfToken);
+    } catch {setStatus('Не удалось связаться с сервером.');}
+    finally {setPassword('');setBusy(false);}
+  }
+  return <section>
+    <h2>Локальный вход</h2>
+    <p>Доступно только для синтетических аккаунтов на защищённом локальном стенде.</p>
+    <form onSubmit={event=>void submit(event)}>
+      <label>Логин <input name="login" autoComplete="username" value={login}
+        onChange={event=>setLogin(event.target.value)} required minLength={3}/></label>
+      <label>Пароль <input name="password" type="password" autoComplete="current-password"
+        value={password} onChange={event=>setPassword(event.target.value)} required/></label>
+      <button type="submit" disabled={busy}>{busy?'Проверка…':'Войти'}</button>
+    </form>
+    {status && <p role="alert">{status}</p>}
+  </section>;
+}
+
 /** Never accept a subject from storage, request headers or local mock data. */
 export function Account() {
   const [state, setState] = React.useState<SessionState>('loading');
   const [refresh, setRefresh] = React.useState(0);
+  const [csrf, setCsrf] = React.useState<string|null>(null);
+  const [logoutError,setLogoutError]=React.useState('');
   React.useEffect(() => {
     const controller = new AbortController();
     async function inspect() {
@@ -167,14 +214,38 @@ export function Account() {
 
   if (state === 'loading') return <section aria-live="polite"><h1>Личный кабинет</h1><p role="status">Проверка серверной сессии…</p></section>;
   if (state === 'anonymous') return <section><h1>Личный кабинет</h1>
-    <p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p>
-    <Link to="/">На главную</Link></section>;
+    <Routes>
+      <Route path="login" element={<LocalLogin onSuccess={value=>{
+        setCsrf(value);setRefresh(x=>x+1);
+      }}/>} />
+      <Route path="*" element={<>
+        <p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p>
+        <Link to="/account/login">Локальный вход</Link> · <Link to="/">На главную</Link>
+      </>}/>
+    </Routes></section>;
   if (state === 'unavailable') return <section><h1>Личный кабинет</h1>
     <p role="alert">Не удалось проверить серверную сессию. Данные кабинета не показаны.</p>
     <button type="button" onClick={() => setRefresh(count => count + 1)}>Повторить проверку</button>
     </section>;
+  async function logout() {
+    if (!csrf) {setLogoutError('Для завершения сессии после обновления страницы войдите повторно.');return;}
+    setLogoutError('');
+    try {
+      const response=await fetch('/api/v1/auth/logout',{
+        method:'POST',credentials:'include',cache:'no-store',
+        headers:{'X-CSRF-Token':csrf},
+      });
+      if (!response.ok) {
+        setLogoutError('Не удалось завершить сессию. Попробуйте снова.');
+        return;
+      }
+      setCsrf(null);setState('anonymous');
+    } catch {setLogoutError('Нет связи с сервером.');}
+  }
   return <div className="account-shell">
     <h1>Личный кабинет</h1>
+    <button type="button" onClick={()=>void logout()}>Выйти</button>
+    {logoutError && <p role="alert">{logoutError}</p>}
     <p>Доступ подтверждён сервером. Разделы показывают данные только после отдельной проверки прав.</p>
     <nav className="account-nav" aria-label="Разделы личного кабинета">
       {sections.map(item => <NavLink key={item.id}
@@ -182,6 +253,7 @@ export function Account() {
     </nav>
     <Routes>
       <Route index element={<Navigate to="overview" replace />} />
+      <Route path="login" element={<Navigate to="/account/overview" replace />} />
       {sections.map(item => <Route key={item.id} path={item.id} element={<Section id={item.id} />} />)}
       <Route path="*" element={<section><h2>Раздел не найден</h2><Link to="/account/overview">К обзору</Link></section>} />
     </Routes>
