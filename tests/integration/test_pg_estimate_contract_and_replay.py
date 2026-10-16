@@ -112,3 +112,37 @@ def test_decision_key_shared_across_two_estimates_of_same_account():
         with pytest.raises(EstimateConflict):
             decide_estimate(db,token,q2,1,"APPROVED","same-actor-key")
         assert db.execute("SELECT count(*) FROM estimate_approval WHERE estimate_id=%s",(q2,)).fetchone()[0]==0
+
+
+def test_public_decline_reason_fingerprint_and_replay(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    customer,ticket,estimate,owner=(uuid4() for _ in range(4))
+    token,csrf=new_token(),new_token()
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        db.execute("INSERT INTO customer(id,label) VALUES(%s,%s)",(customer,customer.hex))
+        db.execute("INSERT INTO service_ticket(id,customer_id,state) VALUES(%s,%s,'AWAITING_APPROVAL')",(ticket,customer))
+        db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(owner,owner.hex))
+        db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,'CLIENT')",(uuid4(),owner))
+        db.execute("INSERT INTO account_customer_link(user_id,customer_id) VALUES(%s,%s)",(owner,customer))
+        db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,
+          created_at,idle_expires_at,absolute_expires_at)
+          VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+          (uuid4(),owner,token_digest(token),token_digest(csrf),now,
+           now+timedelta(minutes=30),now+timedelta(hours=4)))
+        db.execute("""INSERT INTO estimate(id,ticket_id,version,state,total_minor,currency)
+                      VALUES(%s,%s,1,'SENT',300,'RUB')""",(estimate,ticket))
+    http=TestClient(app,base_url="https://127.0.0.1")
+    http.cookies.set("rp_session",token)
+    headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf,
+             "Idempotency-Key":"decline-"+estimate.hex}
+    path=f"/api/v1/customer/estimates/{estimate}/decline"
+    payload={"estimateVersion":1,"reason":"Price too high"}
+    result=http.post(path,json=payload,headers=headers)
+    assert result.status_code==200,result.text
+    assert result.json()["status"]=="DECLINED"
+    assert http.post(path,json=payload,headers=headers).json()==result.json()
+    assert http.post(path,json={**payload,"reason":"Other reason"},headers=headers).status_code==409
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM estimate_approval WHERE estimate_id=%s",(estimate,)).fetchone()[0]==1
