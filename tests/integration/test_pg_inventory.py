@@ -13,7 +13,7 @@ from test_pg_baseline import DSN
 
 
 def inventory_fixture():
-    customer,device,ticket,lot,actor,match,part,estimate=(uuid4() for _ in range(8))
+    customer,device,ticket,lot,actor,match,part,estimate,model,engineer,manager=(uuid4() for _ in range(11))
     token,csrf=new_token(),new_token()
     now=datetime.now(timezone.utc)
     with psycopg.connect(DSN) as db:
@@ -25,9 +25,20 @@ def inventory_fixture():
         db.execute("INSERT INTO stock_lot(id,part_number,available_qty) VALUES (%s,%s,1)",(lot,'TEST-PN-'+lot.hex))
         db.execute("INSERT INTO inventory_part(id,part_number) VALUES (%s,%s)",
                    (part,'TEST-PN-'+lot.hex))
+        db.execute("""INSERT INTO catalog_model
+          (id,brand,model,variant,dock,region,revision,status)
+          VALUES (%s,'SYNTH-BRAND','SYNTH-ROBOT','MODEL-X','DOCK-1','RU','R2','SUPPORTED')""",(model,))
         db.execute("""INSERT INTO part_compatibility
-          (id,part_id,model_variant,region,revision,verified)
-          VALUES (%s,%s,'MODEL-X','RU','R2',false)""",(match,part))
+          (id,model_id,part_number,evidence)
+          VALUES (%s,%s,%s,'synthetic-evidence')""",(match,model,'TEST-PN-'+lot.hex))
+        for reviewer,role in ((engineer,'ENGINEER'),(manager,'MANAGER')):
+            db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(reviewer,reviewer.hex))
+            db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",
+                       (uuid4(),reviewer,role))
+        for reviewer,role in ((engineer,'ENGINEER'),(manager,'MANAGER')):
+            db.execute("""INSERT INTO part_compatibility_approval
+              (id,compatibility_id,actor_id,role,approved) VALUES(%s,%s,%s,%s,true)""",
+                       (uuid4(),match,reviewer,role))
         db.execute("INSERT INTO app_user(id,normalized_login) VALUES (%s,%s)",(actor,actor.hex))
         db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES (%s,%s,'STOCK')",(uuid4(),actor))
         db.execute("""INSERT INTO acl_entry(id,user_id,ticket_id,action)
@@ -50,11 +61,12 @@ def test_unverified_then_reserve_replay_and_release(monkeypatch):
         with pytest.raises(StockConflict):
             reserve(db,token,ticket,lot,1,"unverified")
         assert db.execute("SELECT reserved_qty FROM stock_lot WHERE id=%s",(lot,)).fetchone()[0]==0
-        db.execute("UPDATE part_compatibility SET verified=true,revision='R3' WHERE id=%s",(match,))
+        db.execute("UPDATE catalog_model SET revision='R3' WHERE id=%s",(model,))
         with pytest.raises(StockConflict):
             reserve(db,token,ticket,lot,1,"wrong-revision")
         assert db.execute("SELECT reserved_qty FROM stock_lot WHERE id=%s",(lot,)).fetchone()[0]==0
-        db.execute("UPDATE part_compatibility SET revision='R2' WHERE id=%s",(match,))
+        db.execute("UPDATE catalog_model SET revision='R2' WHERE id=%s",(model,))
+        db.execute("UPDATE part_compatibility SET status='SUPPORTED' WHERE id=%s",(match,))
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
     http=TestClient(app,base_url="https://127.0.0.1")
@@ -100,7 +112,7 @@ def test_unverified_then_reserve_replay_and_release(monkeypatch):
 def test_parallel_last_unit_two_connections():
     ticket,lot,actor,match,part,token,csrf=inventory_fixture()
     with psycopg.connect(DSN) as db:
-        db.execute("UPDATE part_compatibility SET verified=true WHERE id=%s",(match,))
+        db.execute("UPDATE part_compatibility SET status='SUPPORTED' WHERE id=%s",(match,))
     barrier=Barrier(2)
     def attempt(i):
         try:
@@ -122,7 +134,7 @@ def test_parallel_last_unit_two_connections():
 def test_public_contract_part_version_and_release_reason(monkeypatch):
     ticket,lot,actor,match,part,token,csrf=inventory_fixture()
     with psycopg.connect(DSN) as db:
-        db.execute("UPDATE part_compatibility SET verified=true WHERE id=%s",(match,))
+        db.execute("UPDATE part_compatibility SET status='SUPPORTED' WHERE id=%s",(match,))
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
     http=TestClient(app,base_url="https://127.0.0.1")
