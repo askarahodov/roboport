@@ -175,7 +175,7 @@ def upgrade():
         RETURN NEW;
       END $body$""")
     for tab in ("service_capability","part_compatibility"):
-        op.execute(f"""CREATE TRIGGER {tab}_guard BEFORE UPDATE ON {tab}
+        op.execute(f"""CREATE TRIGGER {tab}_guard BEFORE INSERT OR UPDATE ON {tab}
                        FOR EACH ROW EXECUTE FUNCTION guard_catalog_publish()""")
 
 
