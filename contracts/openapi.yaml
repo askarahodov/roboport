@@ -1432,6 +1432,12 @@ paths:
       summary: Бренды
       operationId: listBrands
       responses:
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '200':
           description: Успешно
           content:
