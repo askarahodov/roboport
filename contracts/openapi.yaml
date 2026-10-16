@@ -1,7 +1,7 @@
 openapi: 3.1.2
 info:
   title: ROBOport — API contract (draft, synthetic only)
-  version: 0.15.0-draft
+  version: 0.16.0-draft
   description: Проектный контракт. Нет серверной реализации, не собирать реальные клиентские данные. Методы и статусы
     подлежат независимому ревью. Маркеры x-roboport-roles/guards — проектная документация; безопасность требует реализации.
     Статус-токен передаётся только в заголовке. Полноценный защищённый клиентский кабинет — обязательная часть MVP; API
@@ -521,7 +521,6 @@ components:
       required:
       - status
       - evidenceId
-      - reviewerUserId
       properties:
         status:
           type: string

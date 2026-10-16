@@ -50,19 +50,71 @@ def meta():
     return {"service": "ROBOport", "environment": "development"}
 
 
+def _catalog_dev_dsn(request: Request):
+    import os
+    from urllib.parse import urlsplit
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return None
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        u=urlsplit(raw)
+        if u.scheme not in ("postgresql","postgresql+psycopg") or u.hostname!="127.0.0.1" or u.port is None:
+            return None
+    except ValueError:
+        return None
+    return raw.replace("postgresql+psycopg://","postgresql://",1)
+
+
 @app.get("/api/v1/catalog/brands")
-def brands():
-    return {"items": []}
+def brands(request: Request):
+    dsn=_catalog_dev_dsn(request)
+    if dsn is None:
+        return {"items":[]}
+    import psycopg
+    from .catalog import list_brands
+    with psycopg.connect(dsn) as conn:
+        return list_brands(conn)
 
 
 @app.get("/api/v1/catalog/models")
-def models():
-    return {"items": []}
+def models(request: Request, limit: str = "20", cursor: str | None = None):
+    dsn=_catalog_dev_dsn(request)
+    if dsn is None:
+        return {"items":[]}
+    import psycopg
+    from uuid import UUID
+    from .catalog import list_models
+    try:
+        count=int(limit)
+        if not 1<=count<=50 or str(count)!=limit:
+            raise ValueError()
+        after=UUID(cursor) if cursor is not None else None
+    except (ValueError,TypeError):
+        return JSONResponse(status_code=422,content={
+          "code":"INVALID_INPUT","message":"Некорректный параметр","requestId":request.state.request_id},
+          headers={"Cache-Control":"no-store"})
+    with psycopg.connect(dsn) as conn:
+        return list_models(conn,limit=count,cursor=after)
 
 
 @app.get("/api/v1/catalog/models/{modelId}")
 def model(modelId: str, request: Request):
-    return not_found(request)
+    dsn=_catalog_dev_dsn(request)
+    if dsn is None:
+        return not_found(request)
+    import psycopg
+    from uuid import UUID
+    from .catalog import get_model
+    try:
+        identity=UUID(modelId)
+    except ValueError:
+        return JSONResponse(status_code=422,content={
+          "code":"INVALID_INPUT","message":"Некорректный идентификатор","requestId":request.state.request_id},
+          headers={"Cache-Control":"no-store"})
+    with psycopg.connect(dsn) as conn:
+        result=get_model(conn,identity)
+    return result if result is not None else not_found(request)
 
 
 @app.get("/api/v1/dev/tickets/keyset", include_in_schema=False)
@@ -824,3 +876,75 @@ async def public_approve_estimate(estimateId: str, request: Request):
 @app.post("/api/v1/customer/estimates/{estimateId}/decline",include_in_schema=False)
 async def public_decline_estimate(estimateId: str, request: Request):
     return await dev_estimate_decision(estimateId,request,public_decision="DECLINED")
+
+
+async def _catalog_staff_http(request: Request, variant_id: str, operation: str,
+                              part_id: str | None = None, operation_code: str | None = None):
+    import psycopg
+    from uuid import UUID
+    from .auth_http import _origin_ok
+    from .session_service import verify_csrf
+    from .catalog import (review_capability,review_part_compatibility,
+                          CatalogForbidden,CatalogConflict)
+    dsn=_catalog_dev_dsn(request)
+    if dsn is None or request.url.scheme!="https":
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","message":"Требуется вход",
+            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    if not _origin_ok(request):
+        return JSONResponse(status_code=403,content={
+            "code":"FORBIDDEN","message":"Действие запрещено",
+            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    try:
+        body=await request.json()
+        if not isinstance(body,dict) or body.get("reviewerUserId") is not None:
+            raise ValueError()
+        key=request.headers.get("Idempotency-Key")
+        if not isinstance(key,str) or not 1<=len(key)<=128 or not key.isascii() or not key.isprintable():
+            raise ValueError()
+        evidence=UUID(body["evidenceId"])
+        if operation=="capability":
+            variant=UUID(variant_id)
+            if body.get("status")!="approved" or not operation_code:
+                raise ValueError()
+        else:
+            part=UUID(part_id)
+            variant=UUID(body["modelVariantId"])
+            status=body["status"]
+            if status not in ("manufacturer_documented","technician_tested"):
+                raise ValueError()
+    except (ValueError,KeyError,TypeError):
+        return JSONResponse(status_code=422,content={
+            "code":"INVALID_INPUT","message":"Некорректный запрос",
+            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    with psycopg.connect(dsn) as conn:
+        if not verify_csrf(conn,token,request.headers.get("X-CSRF-Token","")):
+            return JSONResponse(status_code=403,content={
+                "code":"FORBIDDEN","message":"Действие запрещено",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        try:
+            result=(review_capability(conn,token,variant,operation_code,evidence,True,key)
+                    if operation=="capability" else
+                    review_part_compatibility(conn,token,part,variant,evidence,status,True,key))
+        except CatalogForbidden:
+            return not_found(request)
+        except (CatalogConflict,psycopg.errors.UniqueViolation,psycopg.errors.RaiseException):
+            conn.rollback()
+            return JSONResponse(status_code=409,content={
+                "code":"CONFLICT","message":"Конфликт состояния",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@app.patch("/api/v1/staff/variants/{variantId}/capabilities/{operationId}",
+           include_in_schema=False)
+async def contract_capability_review(variantId: str,operationId: str,request: Request):
+    return await _catalog_staff_http(request,variantId,"capability",operation_code=operationId)
+
+
+@app.post("/api/v1/staff/parts/{partId}/compatibilities",include_in_schema=False)
+async def contract_part_compatibility(partId: str,request: Request):
+    return await _catalog_staff_http(request,"","compatibility",part_id=partId)
