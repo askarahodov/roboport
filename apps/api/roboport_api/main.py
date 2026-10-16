@@ -824,3 +824,76 @@ async def public_approve_estimate(estimateId: str, request: Request):
 @app.post("/api/v1/customer/estimates/{estimateId}/decline",include_in_schema=False)
 async def public_decline_estimate(estimateId: str, request: Request):
     return await dev_estimate_decision(estimateId,request,public_decision="DECLINED")
+
+
+@app.get("/api/v1/dev/catalog/models/exact",include_in_schema=False)
+def dev_catalog_exact(request: Request,brand: str="",model: str="",variant: str="",
+                      dock: str="",region: str="",revision: str=""):
+    """Synthetic exact catalog lookup, no fuzzy compatibility inference."""
+    import os
+    import psycopg
+    from urllib.parse import urlsplit
+    from .catalog_approval import lookup_model
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        db=urlsplit(raw)
+        if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https" or request.url.hostname not in ("127.0.0.1","localhost")
+            or db.hostname!="127.0.0.1" or db.port is None
+            or db.scheme not in ("postgresql","postgresql+psycopg")):
+            return not_found(request)
+        with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+            result=lookup_model(conn,brand=brand,model=model,variant=variant,
+                                dock=dock,region=region,revision=revision)
+    except ValueError:
+        return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    if result is None:
+        return not_found(request)
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@app.post("/api/v1/dev/catalog/capabilities/{capability_id}/review",include_in_schema=False)
+async def dev_catalog_review(capability_id: str,request: Request):
+    import os
+    from uuid import UUID
+    import psycopg
+    from urllib.parse import urlsplit
+    from .auth_http import _origin_ok
+    from .session_service import verify_csrf
+    from .catalog_approval import approve_capability,CatalogForbidden,CatalogConflict
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        db=urlsplit(raw)
+        if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https" or request.url.hostname not in ("127.0.0.1","localhost")
+            or db.hostname!="127.0.0.1" or db.port is None
+            or db.scheme not in ("postgresql","postgresql+psycopg")):
+            return not_found(request)
+        capability=UUID(capability_id)
+        data=await request.json()
+        if not isinstance(data,dict) or type(data.get("approved")) is not bool:
+            raise ValueError()
+    except (ValueError,TypeError,AttributeError):
+        return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    if not _origin_ok(request):
+        return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        if not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        try:
+            result=approve_capability(conn,token,capability,data["approved"])
+        except CatalogForbidden:
+            return not_found(request)
+        except (CatalogConflict,psycopg.errors.UniqueViolation):
+            conn.rollback()
+            return JSONResponse(status_code=409,content={"code":"CONFLICT",
+                                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
