@@ -52,6 +52,19 @@ def upgrade():
       revoked_at timestamptz,
       expires_at timestamptz
     )""")
+    op.execute("""CREATE FUNCTION guard_catalog_grant() RETURNS trigger LANGUAGE plpgsql AS $body$
+      BEGIN
+        IF (NEW.id,NEW.user_id,NEW.model_id,NEW.action,NEW.expires_at) IS DISTINCT FROM
+           (OLD.id,OLD.user_id,OLD.model_id,OLD.action,OLD.expires_at) THEN
+          RAISE EXCEPTION 'catalog grant identity immutable';
+        END IF;
+        IF OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at THEN
+          RAISE EXCEPTION 'catalog grant revocation irreversible';
+        END IF;
+        RETURN NEW;
+      END $body$""")
+    op.execute("""CREATE TRIGGER catalog_grant_guard BEFORE UPDATE ON catalog_grant
+      FOR EACH ROW EXECUTE FUNCTION guard_catalog_grant()""")
     op.execute("""CREATE TABLE catalog_part (
       id uuid PRIMARY KEY,
       part_number text NOT NULL UNIQUE CHECK(length(trim(part_number))>0),
@@ -122,6 +135,15 @@ def upgrade():
     op.execute("""CREATE FUNCTION guard_catalog_publish() RETURNS trigger LANGUAGE plpgsql AS $body$
       DECLARE approvals integer;
       BEGIN
+        IF TG_OP='INSERT' THEN
+          IF TG_TABLE_NAME='service_capability' AND NEW.status<>'candidate' THEN
+            RAISE EXCEPTION 'new capability must be candidate';
+          END IF;
+          IF TG_TABLE_NAME='part_compatibility' AND NEW.status<>'unverified' THEN
+            RAISE EXCEPTION 'new compatibility must be unverified';
+          END IF;
+          RETURN NEW;
+        END IF;
         IF TG_TABLE_NAME='service_capability' THEN
           IF OLD.status='revoked' AND NEW.status IS DISTINCT FROM OLD.status THEN
             RAISE EXCEPTION 'capability revocation terminal';
@@ -165,3 +187,4 @@ def downgrade():
         op.execute(f"DROP TABLE {table}")
     op.execute("DROP FUNCTION reject_catalog_review_change()")
     op.execute("DROP FUNCTION guard_catalog_publish()")
+    op.execute("DROP FUNCTION guard_catalog_grant()")
