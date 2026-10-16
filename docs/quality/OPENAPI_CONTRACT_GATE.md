@@ -1,6 +1,6 @@
 # Независимая проверка OpenAPI — задача #15
 
-**Версионный контракт:** `contracts/openapi.yaml`, версия `0.14.0-draft`, OpenAPI 3.1.2. Зафиксированные 46 идентификаторов операций находятся в `contracts/operation_ids.json`.
+**Версионный контракт:** `contracts/openapi.yaml`, версия `0.15.0-draft`, OpenAPI 3.1.2. Зафиксированные 46 идентификаторов операций находятся в `contracts/operation_ids.json`.
 
 ## Команды проверки
 
