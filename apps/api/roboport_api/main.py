@@ -861,7 +861,7 @@ async def dev_catalog_review(capability_id: str,request: Request,is_part: bool=F
     from urllib.parse import urlsplit
     from .auth_http import _origin_ok
     from .session_service import verify_csrf
-    from .catalog_approval import approve_capability,approve_part,CatalogForbidden,CatalogConflict
+    from .catalog_approval import review_idempotent,CatalogForbidden,CatalogConflict
     raw=os.getenv("ROBOport_DATABASE_URL","")
     try:
         db=urlsplit(raw)
@@ -889,10 +889,15 @@ async def dev_catalog_review(capability_id: str,request: Request,is_part: bool=F
             return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
                                 "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
         try:
-            result=(approve_part(conn,token,capability,data["approved"])
-                    if is_part else approve_capability(conn,token,capability,data["approved"]))
+            result=review_idempotent(conn,token,capability,
+                 "part" if is_part else "capability",data["approved"],
+                 request.headers.get("Idempotency-Key"))
         except CatalogForbidden:
             return not_found(request)
+        except ValueError:
+            conn.rollback()
+            return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
         except (CatalogConflict,psycopg.errors.UniqueViolation):
             conn.rollback()
             return JSONResponse(status_code=409,content={"code":"CONFLICT",
