@@ -52,8 +52,15 @@ jobs:
         run: |
           set -euo pipefail
           docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
-          curl --fail --retry 10 --retry-connrefused --retry-delay 2 --cacert infra/dev/tls/local.crt \
-            https://localhost:9443/realms/roboport-demo/.well-known/openid-configuration >/dev/null
+          READY=0
+          for attempt in $(seq 1 90); do
+            if curl -fsS --cacert infra/dev/tls/local.crt \
+              https://localhost:9443/realms/roboport-demo/.well-known/openid-configuration >/dev/null 2>&1; then
+              READY=1; break
+            fi
+            sleep 2
+          done
+          test "$READY" = 1
           export ROBOport_DATABASE_URL=postgresql+psycopg://roboport:synthetic-ci-db-pass-12345678@127.0.0.1:5432/roboport
           PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000 >/tmp/roboport-local-api.log 2>&1 &
           API_PID=$!
