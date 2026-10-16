@@ -137,14 +137,23 @@ jobs:
               npm run dev -- --host 127.0.0.1 --port 5173
           ) > /tmp/roboport-https-vite.log 2>&1 &
           WEB_PID=$!
+          ready=0
           for i in $(seq 1 40); do
-            if curl -k --silent --fail https://127.0.0.1:5173/api/v1/meta | grep -q '"ROBOport"'; then
+            if curl -kfsS --max-time 2 https://127.0.0.1:5173/api/v1/meta 2>/dev/null | grep -q '"ROBOport"'; then
+              ready=1
               break
             fi
             sleep 1
           done
-          curl -k --fail --silent https://127.0.0.1:5173/api/v1/meta | grep -q '"ROBOport"'
-          curl -k --fail --silent https://127.0.0.1:5173/account/login | grep -q 'root'
+          if [ "$ready" != 1 ]; then
+            echo "::error::HTTPS proxy smoke test failed"
+            echo "API direct:"; curl -kiv --max-time 4 https://127.0.0.1:8000/api/v1/meta || true
+            echo "Vite proxy:"; curl -kiv --max-time 4 https://127.0.0.1:5173/api/v1/meta || true
+            echo "API log:"; tail -60 /tmp/roboport-https-api.log || true
+            echo "Vite log:"; tail -60 /tmp/roboport-https-vite.log || true
+            exit 1
+          fi
+          curl -kfsS --max-time 4 https://127.0.0.1:5173/account/login | grep -q 'root'
   browser-e2e:
     runs-on: ubuntu-latest
     steps:
