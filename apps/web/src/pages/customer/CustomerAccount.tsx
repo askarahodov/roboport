@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { CustomerTickets } from './CustomerTickets';
 import { CustomerSummary } from './CustomerSummary';
+import { CustomerSettings } from './CustomerSettings';
 
 type Session = { subjectId: string };
 type State = 'loading' | 'authorized' | 'unauthorized' | 'forbidden' | 'error';
@@ -104,7 +105,8 @@ export function CustomerAccount() {
       pathname === '/account/robots' ? <CustomerSummary section="robots" /> :
       pathname === '/account/estimates' ? <CustomerSummary section="estimates" /> :
       pathname === '/account/documents' ? <CustomerSummary section="documents" /> :
-      <p>Настройки и уведомления будут доступны после отдельной проверки серверных разрешений. Изменений учётной записи без CSRF нет.</p>}
+      pathname === '/account/settings' ? <CustomerSettings /> :
+      <p>События кабинета загружаются только после проверки серверных прав.</p>}
     <p className="account-hint">Настоящие документы доступны только через защищённый backend. Прямого подключения браузера к хранилищу нет.</p>
     <button type="button" onClick={() => setAttempt(value => value + 1)}>Проверить доступ снова</button>
     <button type="button" disabled={loggingOut} onClick={() => void logout()}>
