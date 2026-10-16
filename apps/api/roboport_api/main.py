@@ -78,18 +78,24 @@ def brands(request: Request):
 
 
 @app.get("/api/v1/catalog/models")
-def models(request: Request, limit: int = 20, cursor: str | None = None):
+def models(request: Request, limit: str = "20", cursor: str | None = None):
     dsn=_catalog_dev_dsn(request)
     if dsn is None:
         return {"items":[]}
     import psycopg
+    from uuid import UUID
     from .catalog import list_models
-    if limit<1 or limit>50 or cursor is not None:
+    try:
+        count=int(limit)
+        if not 1<=count<=50 or str(count)!=limit:
+            raise ValueError()
+        after=UUID(cursor) if cursor is not None else None
+    except (ValueError,TypeError):
         return JSONResponse(status_code=422,content={
           "code":"INVALID_INPUT","message":"Некорректный параметр","requestId":request.state.request_id},
           headers={"Cache-Control":"no-store"})
     with psycopg.connect(dsn) as conn:
-        return list_models(conn,limit=limit)
+        return list_models(conn,limit=count,cursor=after)
 
 
 @app.get("/api/v1/catalog/models/{modelId}")
