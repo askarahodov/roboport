@@ -57,6 +57,17 @@ SHA: `56ba8acaad577d7c2febd85fffd80773314fe685`
 
 Автоматический уровень AC-017/019 — **PASS на SHA f0d5e451**; прочие пункты остаются **BLOCKED на уровне полного сценарного подтверждения и независимой приёмки**, даже если соответствующий тест входил в зелёный набор.
 
+## Закрытие четырёх SKIP — независимые среды
+
+Все четыре `SKIP` в PostgreSQL job относятся к MinIO-only тестам, которые целенаправленно исключены без переменной `ROBOport_MINIO_ENDPOINT=http://127.0.0.1:9000`:
+
+1. `tests/integration/test_minio_storage.py` — 1 тест.
+2. `tests/integration/test_pg_minio_attachment_http.py` — 3 теста.
+
+Это не пропущенная функциональность: выделенный [MinIO run #38899744367](https://github.com/askarahodov/roboport/actions/runs/38899744367), commit `8b0abe858eaa92d7b28a15debfe80b8e1d33b85f`, исполнил **1 passed + 3 passed** на реальном MinIO + PostgreSQL. Исправленное восстановление объектов `mc mirror --overwrite` завершено без сообщений `Overwrite not allowed`. Основной [CI run #38899744465](https://github.com/askarahodov/roboport/actions/runs/38899744465) исполнил другие integration tests. Поэтому суммарный test coverage нельзя оценивать только по PostgreSQL job. Четыре SKIP разрешены доказательством альтернативного workflow.
+
+Для завершающего коммита все соответствующие workflows обязаны завершиться заново. Проверка UI визуальной доступности человеком и независимое QA-review по-прежнему не засвидетельствованы.
+
 ## Exit criteria
 
 1. Для **каждого** AC записать фактический PASS/FAIL/SKIP/BLOCKED, run URL, SHA, команду, exit code, найденный дефект/ограничение.
