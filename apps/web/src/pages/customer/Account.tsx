@@ -22,7 +22,7 @@ function Tickets() {
     async function load() {
       setStatus('loading');
       try {
-        const response = await fetch('/api/v1/dev/tickets/keyset?limit=20', {
+        const response = await fetch('/api/v1/dev/account/collections/tickets', {
           credentials: 'include', cache: 'no-store', signal: controller.signal,
           headers: { Accept: 'application/json' },
         });
@@ -257,7 +257,7 @@ export function Account() {
         setCsrf(value);setRefresh(x=>x+1);
       }}/>} />
       <Route path="*" element={<>
-        <p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p>
+        <p role="status">401 — требуется локальная авторизация. Войдите, чтобы продолжить.</p>
         <Link to="/account/login">Локальный вход</Link> · <Link to="/">На главную</Link>
       </>}/>
     </Routes></section>;
