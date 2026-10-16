@@ -139,6 +139,7 @@ function CustomerCollection({kind,csrf}:{kind:CollectionKind;csrf:string|null}) 
         {label}: {row.id}{row.state ? ' — '+row.state : ''}
         {row.version !== undefined ? ', версия '+row.version : ''}
         {row.totalMinor !== undefined ? ', сумма '+(row.totalMinor/100).toFixed(2)+' ₽' : ''}
+        {kind==='documents' && <div><a href={'/api/v1/dev/attachments/'+encodeURIComponent(row.id)+'/content'}>Открыть через защищённый сервер</a></div>}
         {kind==='estimates' && row.state==='SENT' && <div>
           {csrf ? <>
             <button disabled={deciding} onClick={()=>void decide(row,'approve')}>Согласовать</button>
@@ -151,7 +152,49 @@ function CustomerCollection({kind,csrf}:{kind:CollectionKind;csrf:string|null}) 
   </section>;
 }
 
+function Overview() {
+  const [status,setStatus]=React.useState<'loading'|'ready'|'denied'|'unavailable'>('loading');
+  const [counts,setCounts]=React.useState<Record<string,number>>({});
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    async function load() {
+      try {
+        const all=await Promise.all((['robots','tickets','estimates','documents'] as const).map(
+          async kind=>{
+            const response=await fetch('/api/v1/dev/account/collections/'+kind,{
+              credentials:'include',cache:'no-store',signal:controller.signal,
+            });
+            if (response.status===401 || response.status===403) throw new Error('denied');
+            if (!response.ok) throw new Error('unavailable');
+            const data:unknown=await response.json();
+            if (!data || typeof data!=='object' || !('items' in data) || !Array.isArray(data.items))
+              throw new Error('unavailable');
+            return [kind,data.items.length] as const;
+          }
+        ));
+        if (!controller.signal.aborted) {setCounts(Object.fromEntries(all));setStatus('ready');}
+      } catch(error) {
+        if (!controller.signal.aborted) {
+          setCounts({});setStatus(error instanceof Error && error.message==='denied'?'denied':'unavailable');
+        }
+      }
+    }
+    void load();
+    return ()=>controller.abort();
+  },[]);
+  return <section aria-labelledby="account-overview">
+    <h2 id="account-overview">Обзор</h2>
+    {status==='loading' && <p role="status">Загрузка сводки…</p>}
+    {status==='denied' && <p role="alert">Сессия завершена или доступ отозван.</p>}
+    {status==='unavailable' && <p role="alert">Сводка сейчас недоступна. Данные не показаны.</p>}
+    {status==='ready' && <ul>{sections.filter(x=>x.id in counts).map(
+      x=><li key={x.id}>{x.label}: {counts[x.id]}</li>
+    )}</ul>}
+  </section>;
+}
+
 function Section({ id, csrf }: { id: SectionId; csrf:string|null }) {
+  if (id === 'overview') return <Overview />;
   if (id === 'tickets') return <Tickets />;
   if (id === 'robots' || id === 'estimates' || id === 'documents') return <CustomerCollection kind={id} csrf={csrf} />;
   const section = sections.find(item => item.id === id)!;
