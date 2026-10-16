@@ -52,3 +52,27 @@ def test_cookie_scheme_change_rejected():
     broken["components"]["securitySchemes"]["localSession"]["name"]="wrong_session"
     with pytest.raises(AssertionError,match="Opaque cookie"):
         check_contract(broken,MANIFEST)
+
+
+def test_new_head_operation_rejected_even_if_oas_valid():
+    broken=deepcopy(SPEC)
+    broken["paths"]["/api/v1/catalog/brands"]["head"]={
+        "operationId":"undocumentedHead","responses":{"204":{"description":"Empty"}}
+    }
+    with pytest.raises(AssertionError,match="operationId"):
+        check_contract(broken,MANIFEST)
+
+
+def test_error_required_fields_change_rejected():
+    broken=deepcopy(SPEC)
+    broken["components"]["schemas"]["Error"]["required"].remove("requestId")
+    with pytest.raises(AssertionError,match="Canonical Error"):
+        check_contract(broken,MANIFEST)
+
+
+def test_noncanonical_429_response_rejected():
+    broken=deepcopy(SPEC)
+    entry=broken["paths"]["/api/v1/auth/login"]["post"]["responses"]["429"]
+    entry["content"]["application/json"]["schema"]={"type":"object"}
+    with pytest.raises(AssertionError,match="canonical Error"):
+        check_contract(broken,MANIFEST)
