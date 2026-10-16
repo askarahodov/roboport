@@ -64,10 +64,13 @@ function Tickets() {
 
 type CollectionKind = 'robots'|'estimates'|'documents';
 type CollectionRow = {id: string;ticketId?: string;state?: string;version?: number;totalMinor?: number};
-function CustomerCollection({kind}:{kind:CollectionKind}) {
+function CustomerCollection({kind,csrf}:{kind:CollectionKind;csrf:string|null}) {
   const [status,setStatus] = React.useState<'loading'|'ready'|'denied'|'unavailable'>('loading');
   const [items,setItems] = React.useState<CollectionRow[]>([]);
   const [retry,setRetry] = React.useState(0);
+  const [decisionMessage,setDecisionMessage] = React.useState('');
+  const [deciding,setDeciding] = React.useState(false);
+  const keys=React.useRef<Record<string,string>>({});
   React.useEffect(() => {
     const controller=new AbortController();
     async function load() {
@@ -95,6 +98,34 @@ function CustomerCollection({kind}:{kind:CollectionKind}) {
     void load();
     return () => controller.abort();
   },[kind,retry]);
+  async function decide(row:CollectionRow,decision:'approve'|'decline') {
+    if (!csrf || typeof row.version!=='number' || deciding || row.state!=='SENT') return;
+    const slot=row.id+':'+row.version+':'+decision;
+    keys.current[slot] ??= crypto.randomUUID();
+    setDecisionMessage('');setDeciding(true);
+    try {
+      const response=await fetch('/api/v1/customer/estimates/'+row.id+'/'+decision,{
+        method:'POST',credentials:'include',cache:'no-store',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,
+                 'Idempotency-Key':keys.current[slot]},
+        body:JSON.stringify({estimateVersion:row.version,
+          ...(decision==='approve' ? {approvalMethod:'verified_account'} : {})}),
+      });
+      if (response.status===409) {
+        setDecisionMessage('Версия сметы устарела. Обновите список перед решением.');
+        setRetry(x=>x+1);
+      } else if (response.status===401 || response.status===403 || response.status===404) {
+        setItems([]);setStatus('denied');
+        setDecisionMessage('Доступ к смете отозван или сессия завершена.');
+      } else if (!response.ok) {
+        setDecisionMessage('Решение не сохранено. Повторите запрос.');
+      } else {
+        setDecisionMessage('Решение зарегистрировано сервером.');
+        setRetry(x=>x+1);
+      }
+    } catch {setDecisionMessage('Нет связи с сервером.');}
+    finally {setDeciding(false);}
+  }
   const label=sections.find(x=>x.id===kind)!.label;
   return <section aria-labelledby={'account-'+kind}>
     <h2 id={'account-'+kind}>{label}</h2>
@@ -108,14 +139,21 @@ function CustomerCollection({kind}:{kind:CollectionKind}) {
         {label}: {row.id}{row.state ? ' — '+row.state : ''}
         {row.version !== undefined ? ', версия '+row.version : ''}
         {row.totalMinor !== undefined ? ', сумма '+(row.totalMinor/100).toFixed(2)+' ₽' : ''}
+        {kind==='estimates' && row.state==='SENT' && <div>
+          {csrf ? <>
+            <button disabled={deciding} onClick={()=>void decide(row,'approve')}>Согласовать</button>
+            <button disabled={deciding} onClick={()=>void decide(row,'decline')}>Отклонить</button>
+          </> : <p>Для решения по смете требуется повторный локальный вход.</p>}
+        </div>}
       </li>)}</ul>)}
+    {decisionMessage && <p role="alert">{decisionMessage}</p>}
     {kind==='documents' && <p>Для получения содержимого документа требуется защищённый backend. Прямого доступа к MinIO нет.</p>}
   </section>;
 }
 
-function Section({ id }: { id: SectionId }) {
+function Section({ id, csrf }: { id: SectionId; csrf:string|null }) {
   if (id === 'tickets') return <Tickets />;
-  if (id === 'robots' || id === 'estimates' || id === 'documents') return <CustomerCollection kind={id} />;
+  if (id === 'robots' || id === 'estimates' || id === 'documents') return <CustomerCollection kind={id} csrf={csrf} />;
   const section = sections.find(item => item.id === id)!;
   return <section aria-labelledby={'account-' + id}>
     <h2 id={'account-' + id}>{section.label}</h2>
@@ -254,7 +292,7 @@ export function Account() {
     <Routes>
       <Route index element={<Navigate to="overview" replace />} />
       <Route path="login" element={<Navigate to="/account/overview" replace />} />
-      {sections.map(item => <Route key={item.id} path={item.id} element={<Section id={item.id} />} />)}
+      {sections.map(item => <Route key={item.id} path={item.id} element={<Section id={item.id} csrf={csrf} />} />)}
       <Route path="*" element={<section><h2>Раздел не найден</h2><Link to="/account/overview">К обзору</Link></section>} />
     </Routes>
   </div>;
