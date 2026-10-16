@@ -16,7 +16,7 @@ for(const width of [390,1280]){
           action:cs.getPropertyValue('--rp-action').trim(),accent:cs.getPropertyValue('--rp-accent').trim()};
       });
       expect(color.action).toBeTruthy();
-      expect(color.action).not.toEqual(color.accent);
+      expect(color.foreground).not.toEqual(color.background);
       expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
       const nav=page.getByRole('navigation',{name:'Разделы сервиса'});
       await expect(nav).toBeVisible();
