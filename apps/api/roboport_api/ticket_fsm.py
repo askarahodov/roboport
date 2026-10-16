@@ -64,6 +64,7 @@ def _safety_role(conn: psycopg.Connection, actor: UUID, ticket: UUID) -> str | N
     """Resolve live, explicitly assigned expert privilege; ADMIN is not implicit."""
     row=conn.execute(
         """SELECT r.role_code FROM user_role r
+           JOIN app_user u ON u.id=r.user_id AND u.status='ACTIVE'
            JOIN acl_entry a ON a.user_id=r.user_id AND a.ticket_id=%s
              AND a.revoked_at IS NULL AND (a.expires_at IS NULL OR a.expires_at>now())
            WHERE r.user_id=%s AND r.role_code IN ('ENGINEER','MANAGER')
@@ -71,7 +72,7 @@ def _safety_role(conn: psycopg.Connection, actor: UUID, ticket: UUID) -> str | N
              AND (r.expires_at IS NULL OR r.expires_at>now())
              AND ((r.role_code='ENGINEER' AND a.action='ticket.diagnose')
                OR (r.role_code='MANAGER' AND a.action='ticket.manage'))
-           ORDER BY r.role_code LIMIT 1""",(ticket,actor),
+           ORDER BY CASE WHEN r.role_code='MANAGER' THEN 0 ELSE 1 END LIMIT 1""",(ticket,actor),
     ).fetchone()
     return row[0] if row else None
 
@@ -112,6 +113,7 @@ def release_safety_hold(conn: psycopg.Connection, token: str,
         raise TransitionConflict("manager authorization required")
     reviews=conn.execute(
         """SELECT r.actor_id,r.role_code FROM ticket_safety_review r
+           JOIN app_user u ON u.id=r.actor_id AND u.status='ACTIVE'
            JOIN user_role ur ON ur.user_id=r.actor_id AND ur.role_code=r.role_code
              AND ur.revoked_at IS NULL AND (ur.expires_at IS NULL OR ur.expires_at>now())
            JOIN acl_entry a ON a.user_id=r.actor_id AND a.ticket_id=r.ticket_id
