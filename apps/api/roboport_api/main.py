@@ -1085,3 +1085,67 @@ def dev_account_summary(section: str,request: Request):
             if "currency" in row:
                 row["currency"]=row["currency"].strip()
     return JSONResponse(content={"items":rows},headers={"Cache-Control":"no-store"})
+
+
+async def _customer_notification_preferences(request: Request, write: bool):
+    """Current-client in-app preference; never dispatch external messages."""
+    import os
+    from uuid import uuid4
+    import psycopg
+    from .auth_http import _dsn,_origin_ok
+    from .session_lookup import session_subject
+    from .session_service import verify_csrf
+    dsn=_dsn(request)
+    if dsn is None or os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1":
+        return not_found(request)
+    desired=None
+    if write:
+        if not _origin_ok(request):
+            return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                    "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        try:
+            data=await request.json()
+            if not isinstance(data,dict) or type(data.get("inAppEnabled")) is not bool:
+                raise ValueError()
+            desired=data["inAppEnabled"]
+        except (ValueError,TypeError):
+            return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    token=request.cookies.get("rp_session","")
+    with psycopg.connect(dsn) as conn:
+        actor=session_subject(conn,token)
+        if actor is None:
+            return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        allowed=conn.execute("""SELECT EXISTS(
+          SELECT 1 FROM user_role WHERE user_id=%s AND role_code='CLIENT'
+            AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())
+        )""",(actor,)).fetchone()[0]
+        if not allowed:
+            return not_found(request)
+        if write and not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        row=conn.execute("""SELECT in_app_enabled FROM customer_notification_preference
+          WHERE user_id=%s FOR UPDATE""",(actor,)).fetchone()
+        before=row[0] if row is not None else True
+        if write and before!=desired:
+            conn.execute("""INSERT INTO customer_notification_preference
+                (user_id,in_app_enabled,updated_at) VALUES(%s,%s,now())
+                ON CONFLICT(user_id) DO UPDATE SET in_app_enabled=excluded.in_app_enabled,
+                updated_at=now()""",(actor,desired))
+            conn.execute("""INSERT INTO customer_preference_audit(id,user_id,in_app_enabled)
+                VALUES(%s,%s,%s)""",(uuid4(),actor,desired))
+        result=desired if write else before
+    return JSONResponse(content={"inAppEnabled":result},
+                        headers={"Cache-Control":"no-store"})
+
+
+@app.get("/api/v1/dev/account/preferences",include_in_schema=False)
+async def dev_customer_preferences(request: Request):
+    return await _customer_notification_preferences(request,False)
+
+
+@app.post("/api/v1/dev/account/preferences",include_in_schema=False)
+async def dev_update_customer_preferences(request: Request):
+    return await _customer_notification_preferences(request,True)
