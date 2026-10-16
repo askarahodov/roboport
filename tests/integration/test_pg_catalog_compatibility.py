@@ -82,6 +82,17 @@ def test_catalog_public_reads_and_two_person_capability(monkeypatch):
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
                 db.execute("UPDATE service_capability SET status='approved' WHERE id=%s",(cap,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO service_capability
+                  (id,variant_id,operation_code,evidence_id,status)
+                  VALUES (%s,%s,'fabricated',%s,'approved')""",(uuid4(),variant,evidence))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO part_compatibility
+                  (id,part_id,variant_id,evidence_id,status)
+                  VALUES (%s,%s,%s,%s,'manufacturer_documented')""",
+                           (uuid4(),part,variant,evidence))
     http.cookies.clear()
     http.cookies.set("rp_session",tokens[1])
     second=http.patch(path,json=payload,headers=header(1,"cap-manager-"+variant.hex))
@@ -120,6 +131,9 @@ def test_part_compatibility_evidence_independent_roles_and_revoke(monkeypatch):
         assert db.execute("SELECT count(*) FROM catalog_compatibility_review WHERE compatibility_id=%s",
                           (cid,)).fetchone()[0]==2
         db.execute("UPDATE catalog_grant SET revoked_at=now() WHERE user_id=%s",(users[1],))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE catalog_grant SET revoked_at=NULL WHERE user_id=%s",(users[1],))
     assert http.post(route,json=body,headers=headers(1,"comp-manager-"+part.hex)).status_code==404
 
 
