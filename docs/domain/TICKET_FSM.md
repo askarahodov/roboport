@@ -4,7 +4,7 @@
 
 `DRAFT`, `SUBMITTED`, `TRIAGE`, `AWAITING_DELIVERY`, `RECEIVED`, `DIAGNOSING`, `SAFETY_HOLD`, `ESTIMATE_DRAFT`, `AWAITING_APPROVAL`, `APPROVED`, `DECLINED`, `AWAITING_PARTS`, `REPAIRING`, `QC_PENDING`, `QC_FAILED`, `READY_FOR_HANDOVER`, `COMPLETED`, `CANCELLED`, `UNREPAIRABLE`, `WARRANTY_ROUTE`.
 
-20 имён теперь закреплены в OpenAPI `Ticket.state` и автоматически сверяются с документом. Статическая разрешённая карта переходов — `docs/domain/TICKET_TRANSITIONS.json`; она намеренно закрыта по умолчанию для исключительных/опасных случаев и НЕ является работающим серверным FSM. SQL CHECK и транзакционные guards ещё предстоит реализовать.
+20 имён теперь закреплены в OpenAPI `Ticket.state` и автоматически сверяются с документом. Статическая разрешённая карта переходов — `docs/domain/TICKET_TRANSITIONS.json`; она закрыта по умолчанию для исключительных/опасных случаев. Исполняемый серверный FSM реализован в `apps/api/roboport_api/ticket_fsm.py`, а PostgreSQL guards, события, аудит и ограничения проверяются `tests/integration/test_pg_ticket_fsm.py`. Публичную/производственную готовность это не означает.
 
 ## Переходы и запреты
 
