@@ -680,7 +680,7 @@ async def _estimate_staff_mutation(request: Request, target_id: str, operation: 
     from .auth_http import _origin_ok
     from .session_service import verify_csrf
     from .estimate_decision import (
-        create_estimate_version,send_estimate_version,EstimateForbidden,EstimateConflict)
+        create_estimate_version,send_estimate_version,staff_idempotent,EstimateForbidden,EstimateConflict)
     if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
             or request.url.scheme!="https"
             or request.url.hostname not in ("127.0.0.1","localhost")):
@@ -717,9 +717,11 @@ async def _estimate_staff_mutation(request: Request, target_id: str, operation: 
             return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
                                 "requestId":request.state.request_id})
         try:
-            result=(create_estimate_version(conn,token,target,payload["lines"])
-                    if operation=="create" else
-                    send_estimate_version(conn,token,target,payload["expectedVersion"]))
+            result=staff_idempotent(
+                conn,token,target,operation,payload,request.headers.get("Idempotency-Key"),
+                lambda: create_estimate_version(conn,token,target,payload["lines"])
+                if operation=="create" else
+                send_estimate_version(conn,token,target,payload["expectedVersion"]))
         except EstimateForbidden:
             return not_found(request)
         except (EstimateConflict,psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
