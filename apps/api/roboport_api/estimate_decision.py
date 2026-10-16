@@ -83,9 +83,14 @@ def decide_estimate(conn, token: str, estimate_id: UUID, expected_version: int,
     if latest != expected_version:
         raise EstimateConflict("stale estimate")
     _advance_ticket(conn,ticket_id,actor,"AWAITING_APPROVAL",decision)
+    evidence=hashlib.sha256(json.dumps(
+        {"actor":str(actor),"estimateId":str(estimate_id),
+         "estimateVersion":expected_version,"decision":decision},
+        sort_keys=True,separators=(",",":")).encode()).hexdigest()
     conn.execute(
-        """INSERT INTO estimate_approval(id,estimate_id,actor_id,decision)
-           VALUES (%s,%s,%s,%s)""", (uuid4(),estimate_id,actor,decision),
+        """INSERT INTO estimate_approval(id,estimate_id,actor_id,decision,consent_method,consent_fingerprint)
+           VALUES (%s,%s,%s,%s,'verified_account',%s)""",
+        (uuid4(),estimate_id,actor,decision,evidence),
     )
     response = {"id":str(estimate_id),"version":expected_version,"state":decision}
     conn.execute(
