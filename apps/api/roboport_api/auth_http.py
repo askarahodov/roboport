@@ -160,3 +160,31 @@ async def change_password(request: Request):
     response=JSONResponse(content={"changed":True},headers={"Cache-Control":"no-store"})
     clear_session_cookie(response)
     return response
+
+
+@router.post("/api/v1/auth/csrf")
+def csrf_bootstrap(request: Request):
+    """Same-origin cookie-authenticated CSRF rotation for SPA after reload.
+
+    The only effect is replacing the old CSRF verifier; there is no business mutation.
+    No cross-origin caller can read the replacement token.
+    """
+    from .session_tokens import new_token,token_digest
+    dsn=_dsn(request)
+    if dsn is None or not _origin_ok(request):
+        return _error(request,403)
+    raw=request.cookies.get("rp_session","")
+    if not isinstance(raw,str) or len(raw)!=43:
+        return _error(request,401)
+    csrf=new_token()
+    with psycopg.connect(dsn,autocommit=True) as conn:
+        row=conn.execute("""UPDATE user_session s SET csrf_hash=%s
+             FROM app_user u WHERE s.user_id=u.id
+             AND s.token_hash=%s AND s.revoked_at IS NULL
+             AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
+             AND u.status='ACTIVE' RETURNING s.id""",
+             (token_digest(csrf),token_digest(raw))).fetchone()
+    if row is None:
+        return _error(request,401)
+    return JSONResponse(content={"csrfToken":csrf},
+        headers={"Cache-Control":"no-store"})
