@@ -41,6 +41,11 @@ def test_catalog_exact_variant_dock_region_revision_and_two_reviewers():
         with pytest.raises(CatalogConflict):
             approve_capability(db,tokens[0],cap,True)
         db.execute("UPDATE catalog_model SET status='SUPPORTED' WHERE id=%s",(model,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO capability_approval
+                   (id,capability_id,actor_id,role,approved)
+                   VALUES(%s,%s,%s,'MANAGER',true)""",(uuid4(),cap,engineer))
         assert approve_capability(db,tokens[0],cap,True)["status"]=="CANDIDATE"
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
