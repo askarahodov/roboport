@@ -59,7 +59,7 @@ test('light dark auto и клавиатурная навигация прива�
   await expect(robots).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/account\/robots$/);
-  await expect(page.getByRole('status')).toContainText('Данные раздела пока недоступны');
+  await expect(page.getByRole('alert')).toContainText('Раздел недоступен. Приватные данные не показаны.');
 });
 
 test('раздел заявок загружает только серверный ответ; 401 и 404 не показывают чужие данные', async ({ page }) => {
