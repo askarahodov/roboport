@@ -1,0 +1,52 @@
+{
+  "realm": "roboport-demo",
+  "enabled": true,
+  "displayName": "ROBOport Synthetic OIDC",
+  "clients": [
+    {
+      "clientId": "roboport-dev",
+      "name": "ROBOport OIDC CI",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://127.0.0.1:8444/api/v1/dev/oidc/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "username": "synthetic-a",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "synthetic-password-a",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "username": "synthetic-b",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "synthetic-password-b",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}
