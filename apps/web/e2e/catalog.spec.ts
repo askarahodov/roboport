@@ -116,3 +116,43 @@ test('приёмочные скриншоты desktop/mobile и 401-заглуш
   await expect(page.getByRole('alert')).toContainText('403 — доступ запрещён');
   await page.screenshot({ path: 'test-results/roboport-account-mobile.png', fullPage: true });
 });
+
+
+test('синтетические модели: фильтр, cursor, карточка и 404', async ({page})=>{
+ const requests:string[]=[];
+ await page.route('**/api/v1/catalog/models?*',async route=>{
+  const u=new URL(route.request().url()); requests.push(u.search);
+  const next=u.searchParams.get('cursor');
+  await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(next?
+    {items:[{id:'demo-2',name:'Синтетическая модель 2',supportStatus:'candidate'}]}:
+    {items:[{id:'demo-1',name:'Синтетическая модель 1',supportStatus:'candidate'}],nextCursor:'next-demo'})});
+ });
+ await page.route('**/api/v1/catalog/models/demo-1',r=>r.fulfill({status:200,contentType:'application/json',
+  body:JSON.stringify({id:'demo-1',name:'Синтетическая модель 1',category:'vacuum',supportStatus:'candidate'})}));
+ await page.route('**/api/v1/catalog/models/missing',r=>r.fulfill({status:404,contentType:'application/json',
+  body:JSON.stringify({code:'NOT_FOUND',message:'Нет модели',requestId:'00000000-0000-0000-0000-000000000001'})}));
+ await page.goto('/catalog/models');
+ await expect(page.getByText('Поддержка не подтверждена')).toBeVisible();
+ await page.getByRole('button',{name:'Далее'}).click();
+ await expect(page.getByText('Синтетическая модель 2')).toBeVisible();
+ await page.getByRole('button',{name:'Назад'}).click();
+ await page.getByRole('link',{name:'Синтетическая модель 1'}).click();
+ await expect(page.getByRole('heading',{name:'Синтетическая модель 1'})).toBeVisible();
+ await expect(page.getByText('Статус поддержки: Не подтверждён')).toBeVisible();
+ await page.goto('/catalog/models/missing');
+ await expect(page.getByRole('alert')).toContainText('404');
+ expect(requests.some(q=>q.includes('cursor=next-demo'))).toBe(true);
+});
+
+test('фильтр каталога и 390px + Auto не вызывают реальный intake',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ await page.route('**/api/v1/catalog/models?*',r=>r.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}));
+ await page.goto('/catalog/models');
+ await page.getByRole('textbox',{name:'Фильтр бренда'}).fill('demo-brand');
+ await expect(page).toHaveURL(/brandId=demo-brand/);
+ await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('auto');
+ await expect(page.getByText('Пока нет опубликованных моделей.')).toBeVisible();
+ const width=await page.evaluate(()=>document.documentElement.scrollWidth);
+ expect(width).toBeLessThanOrEqual(390);
+ await expect(page.getByText('Демонстрационный каталог. Реальные обращения пока не принимаются.')).toBeVisible();
+});
