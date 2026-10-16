@@ -50,7 +50,7 @@ def test_estimate_decision_http_replay_revocation_and_stale(monkeypatch):
     assert http.post(path,json=payload,headers={**headers,"X-CSRF-Token":csrf[1]}).status_code==404
     http.cookies.clear()
     http.cookies.set("rp_session",tokens[0])
-    assert http.post(path,json=payload,headers={"Origin":"https://127.0.0.1"}).status_code==403
+    assert http.post(path,json=payload,headers={"Origin":"https://127.0.0.1","Idempotency-Key":"estimate-"+quote.hex}).status_code==403
     assert http.post(path,json=payload,headers={k:v for k,v in headers.items() if k!="Idempotency-Key"}).status_code==422
     assert http.post(f"/api/v1/dev/estimates/{old_quote}/decision",
                      json={"expectedVersion":1,"decision":"APPROVED"},
