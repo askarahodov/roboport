@@ -39,7 +39,7 @@ jobs:
           python -m alembic -c apps/api/alembic.ini downgrade base
           python -m alembic -c apps/api/alembic.ini upgrade head
       - name: PostgreSQL integrity integration tests
-        run: python -m pytest -q tests/integration
+        run: python -m pytest -q -ra tests/integration
       - name: Synthetic PostgreSQL pg_dump / pg_restore roundtrip
         shell: bash
         run: |
@@ -57,6 +57,14 @@ jobs:
           RESTORED_REV="$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -At -c "SELECT version_num FROM alembic_version")"
           test "$RESTORED_REV" = 0018_customer_preferences
           docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -v ON_ERROR_STOP=1 -c "INSERT INTO audit_event(id,action) VALUES('22222222-2222-4222-8222-222222222222','restore-ok')"
+          # Validate restored relational integrity, not just an isolated marker.
+          docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -v ON_ERROR_STOP=1 -c "INSERT INTO service_ticket(id,customer_id) VALUES('33333333-3333-4333-8333-333333333333','11111111-1111-4111-8111-111111111111')"
+          test "$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -At -c "SELECT count(*) FROM service_ticket WHERE customer_id='11111111-1111-4111-8111-111111111111'")" = 1
+          if docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -v ON_ERROR_STOP=1 -c "INSERT INTO service_ticket(id,customer_id) VALUES('44444444-4444-4444-8444-444444444444','99999999-9999-4999-8999-999999999999')"; then
+            echo 'RESTORE INTEGRITY FAILURE: foreign key accepted missing customer' >&2
+            exit 1
+          fi
+          echo 'RESTORE INTEGRITY PASS: existing customer works, missing customer rejected'
   api:
     runs-on: ubuntu-latest
     steps:
@@ -68,8 +76,8 @@ jobs:
       - run: python scripts/check_python_pins.py
       - run: python -m pip install openapi-spec-validator==0.7.2
       - run: python -m pip check
-      - run: PYTHONPATH=apps/api python -m pytest -q tests/bootstrap
-      - run: PYTHONPATH=apps/api python -m pytest -q tests/contract
+      - run: PYTHONPATH=apps/api python -m pytest -q -ra tests/bootstrap
+      - run: PYTHONPATH=apps/api python -m pytest -q -ra tests/contract
       - run: python scripts/check_contract.py
       - run: python -m openapi_spec_validator contracts/openapi.yaml
   web:
