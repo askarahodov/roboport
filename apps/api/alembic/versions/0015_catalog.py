@@ -65,11 +65,37 @@ def upgrade():
       END $body$""")
     op.execute("""CREATE TRIGGER catalog_grant_guard BEFORE UPDATE ON catalog_grant
       FOR EACH ROW EXECUTE FUNCTION guard_catalog_grant()""")
+    op.execute("""CREATE FUNCTION guard_variant_identity() RETURNS trigger LANGUAGE plpgsql AS $body$
+      DECLARE dock_region text;
+      BEGIN
+        IF TG_OP='DELETE' THEN RAISE EXCEPTION 'variant identity deletion forbidden'; END IF;
+        IF TG_OP='UPDATE' AND ROW(NEW.id,NEW.model_id,NEW.manufacturer_sku,
+              NEW.region_code,NEW.hardware_revision,NEW.dock_id) IS DISTINCT FROM
+             ROW(OLD.id,OLD.model_id,OLD.manufacturer_sku,
+              OLD.region_code,OLD.hardware_revision,OLD.dock_id) THEN
+          RAISE EXCEPTION 'variant identity immutable';
+        END IF;
+        SELECT region_code INTO dock_region FROM catalog_dock WHERE id=NEW.dock_id;
+        IF dock_region IS DISTINCT FROM NEW.region_code THEN
+          RAISE EXCEPTION 'variant and dock region mismatch';
+        END IF;
+        RETURN NEW;
+      END $body$""")
+    op.execute("""CREATE TRIGGER catalog_variant_guard BEFORE INSERT OR UPDATE OR DELETE
+      ON catalog_variant FOR EACH ROW EXECUTE FUNCTION guard_variant_identity()""")
+    op.execute("""CREATE FUNCTION reject_catalog_identity_change() RETURNS trigger LANGUAGE plpgsql
+      AS $body$ BEGIN RAISE EXCEPTION 'catalog identity immutable'; END $body$""")
+    for tab in ('catalog_dock','catalog_part'):
+        if tab == 'catalog_dock':
+            op.execute("""CREATE TRIGGER catalog_dock_immutable BEFORE UPDATE OR DELETE
+              ON catalog_dock FOR EACH ROW EXECUTE FUNCTION reject_catalog_identity_change()""")
     op.execute("""CREATE TABLE catalog_part (
       id uuid PRIMARY KEY,
       part_number text NOT NULL UNIQUE CHECK(length(trim(part_number))>0),
       name text NOT NULL CHECK(length(trim(name))>0)
     )""")
+    op.execute("""CREATE TRIGGER catalog_part_immutable BEFORE UPDATE OR DELETE
+      ON catalog_part FOR EACH ROW EXECUTE FUNCTION reject_catalog_identity_change()""")
     op.execute("""CREATE TABLE catalog_evidence (
       id uuid PRIMARY KEY,
       source_uri text NOT NULL CHECK(source_uri LIKE 'https://%' AND length(source_uri)<2048),
@@ -188,3 +214,5 @@ def downgrade():
     op.execute("DROP FUNCTION reject_catalog_review_change()")
     op.execute("DROP FUNCTION guard_catalog_publish()")
     op.execute("DROP FUNCTION guard_catalog_grant()")
+    op.execute("DROP FUNCTION guard_variant_identity()")
+    op.execute("DROP FUNCTION reject_catalog_identity_change()")
