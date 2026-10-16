@@ -216,3 +216,46 @@ def staff_access(request: Request):
         return _error(request,403)
     return JSONResponse(content={"roles":[role for (role,) in rows]},
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/staff/queue")
+def staff_queue(request: Request, limit: int = 20, offset: int = 0):
+    """Minimal assigned ticket queue; no customer PII, deny unless live ACL."""
+    dsn = _dsn(request)
+    if dsn is None:
+        return _error(request, 403)
+    if not 1 <= limit <= 50 or not 0 <= offset <= 10000:
+        return JSONResponse(status_code=422, content={"code":"INVALID_INPUT",
+                            "requestId":request.state.request_id},
+                            headers={"Cache-Control":"no-store"})
+    token = request.cookies.get("rp_session", "")
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        actor = session_subject(conn, token)
+        if actor is None:
+            return _error(request, 401)
+        allowed = conn.execute("""
+            SELECT EXISTS(SELECT 1 FROM user_role r
+              WHERE r.user_id=%s AND r.role_code IN ('INTAKE','ENGINEER','MANAGER')
+              AND r.revoked_at IS NULL
+              AND (r.expires_at IS NULL OR r.expires_at>now()))
+        """, (actor,)).fetchone()[0]
+        if not allowed:
+            return _error(request, 403)
+        rows = conn.execute("""
+            SELECT t.id,t.state,t.version FROM service_ticket t
+            WHERE EXISTS (
+              SELECT 1 FROM acl_entry a
+              JOIN user_role r ON r.user_id=a.user_id
+              WHERE a.user_id=%s AND a.ticket_id=t.id
+                AND a.action='ticket.read'
+                AND a.revoked_at IS NULL
+                AND (a.expires_at IS NULL OR a.expires_at>now())
+                AND r.revoked_at IS NULL
+                AND (r.expires_at IS NULL OR r.expires_at>now())
+                AND r.role_code IN ('INTAKE','ENGINEER','MANAGER')
+            )
+            ORDER BY t.created_at DESC,t.id DESC LIMIT %s OFFSET %s
+        """, (actor,limit,offset)).fetchall()
+    return JSONResponse(content={"items":[{"id":str(t), "state":s, "version":v}
+                                      for t,s,v in rows],"limit":limit,"offset":offset},
+                        headers={"Cache-Control":"no-store"})
