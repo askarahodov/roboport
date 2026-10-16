@@ -109,7 +109,7 @@ function CustomerCollection({kind}:{kind:CollectionKind}) {
         {row.version !== undefined ? ', версия '+row.version : ''}
         {row.totalMinor !== undefined ? ', сумма '+(row.totalMinor/100).toFixed(2)+' ₽' : ''}
       </li>)}</ul>)}
-    {kind==='documents' && <p>Для получения содержимого документа требуется защищённый backend; ключи MinIO браузеру не передаются.</p>}
+    {kind==='documents' && <p>Для получения содержимого документа требуется защищённый backend. Прямого доступа к MinIO нет.</p>}
   </section>;
 }
 
