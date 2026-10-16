@@ -192,3 +192,27 @@ def csrf_bootstrap(request: Request):
         return _error(request,401)
     return JSONResponse(content={"csrfToken":csrf},
         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/staff/access")
+def staff_access(request: Request):
+    """Only active scoped staff roles; no customer identity or PII in response."""
+    dsn=_dsn(request)
+    if dsn is None:
+        return _error(request,403)
+    with psycopg.connect(dsn,autocommit=True) as conn:
+        actor=session_subject(conn,request.cookies.get("rp_session",""))
+        if actor is None:
+            return _error(request,401)
+        rows=conn.execute("""
+            SELECT DISTINCT role_code FROM user_role
+            WHERE user_id=%s AND role_code IN
+              ('INTAKE','ENGINEER','STOCK','MANAGER','FINANCE','AUDITOR')
+              AND revoked_at IS NULL
+              AND (expires_at IS NULL OR expires_at>now())
+            ORDER BY role_code
+        """,(actor,)).fetchall()
+    if not rows:
+        return _error(request,403)
+    return JSONResponse(content={"roles":[role for (role,) in rows]},
+                        headers={"Cache-Control":"no-store"})
