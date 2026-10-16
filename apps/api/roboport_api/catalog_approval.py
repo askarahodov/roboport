@@ -66,3 +66,44 @@ def approve_capability(conn,token:str,capability_id:UUID,approve:bool):
     else:
         status="CANDIDATE"
     return {"id":str(capability_id),"status":status}
+
+
+def approve_part(conn,token:str,part_id:UUID,approved:bool):
+    """An exact part/model pair needs independent staff decisions."""
+    if not isinstance(part_id,UUID) or type(approved) is not bool:
+        raise ValueError("invalid part review")
+    actor=session_subject(conn,token)
+    if actor is None:
+        raise CatalogForbidden()
+    row=conn.execute("""SELECT p.status,m.status
+        FROM part_compatibility p JOIN catalog_model m ON m.id=p.model_id
+        WHERE p.id=%s AND p.revoked_at IS NULL FOR UPDATE OF p""",(part_id,)).fetchone()
+    if row is None:
+        raise CatalogForbidden()
+    if row[0]!="CANDIDATE" or row[1]!="SUPPORTED":
+        raise CatalogConflict("part/model not eligible")
+    roles=conn.execute("""SELECT role_code FROM user_role WHERE user_id=%s
+       AND role_code IN ('ENGINEER','MANAGER') AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at>now())""",(actor,)).fetchall()
+    role=("ENGINEER" if any(x[0]=="ENGINEER" for x in roles) else
+          "MANAGER" if any(x[0]=="MANAGER" for x in roles) else None)
+    if role is None:
+        raise CatalogForbidden()
+    if conn.execute("""SELECT 1 FROM part_compatibility_approval
+        WHERE compatibility_id=%s AND actor_id=%s""",(part_id,actor)).fetchone():
+        raise CatalogConflict("duplicate part reviewer")
+    conn.execute("""INSERT INTO part_compatibility_approval
+      (id,compatibility_id,actor_id,role,approved) VALUES(%s,%s,%s,%s,%s)""",
+      (uuid4(),part_id,actor,role,approved))
+    # Part audits remain linked to the exact compatibility record through the ledger.
+    flags=conn.execute("""SELECT
+      EXISTS(SELECT 1 FROM part_compatibility_approval WHERE compatibility_id=%s
+        AND role='ENGINEER' AND approved),
+      EXISTS(SELECT 1 FROM part_compatibility_approval WHERE compatibility_id=%s
+        AND role='MANAGER' AND approved),
+      EXISTS(SELECT 1 FROM part_compatibility_approval WHERE compatibility_id=%s
+        AND NOT approved)""",(part_id,part_id,part_id)).fetchone()
+    status=("UNSUPPORTED" if flags[2] else "SUPPORTED" if flags[0] and flags[1] else "CANDIDATE")
+    if status!="CANDIDATE":
+        conn.execute("UPDATE part_compatibility SET status=%s WHERE id=%s",(status,part_id))
+    return {"id":str(part_id),"status":status}
