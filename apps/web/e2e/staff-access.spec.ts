@@ -36,3 +36,29 @@ test('staff portal fails closed on malformed permissions', async ({page}) => {
   await expect(page.getByRole('alert')).toContainText('Не удалось проверить права');
   await expect(page.getByText('Доступные разделы')).toHaveCount(0);
 });
+
+
+test('assigned staff queue renders only backend scoped tickets',async ({page})=>{
+  await page.route('**/api/v1/dev/staff/access',route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify({roles:['INTAKE']})
+  }));
+  await page.route('**/api/v1/dev/staff/queue?*',route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[{id:'00000000-0000-0000-0000-000000000001',state:'TRIAGE',version:2}]})
+  }));
+  await page.goto('/staff');
+  await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('TRIAGE');
+  await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('версия 2');
+});
+
+test('queue request forbidden after role revocation hides ticket data',async ({page})=>{
+  await page.route('**/api/v1/dev/staff/access',route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify({roles:['ENGINEER']})
+  }));
+  await page.route('**/api/v1/dev/staff/queue?*',route=>route.fulfill({
+    status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'
+  }));
+  await page.goto('/staff');
+  await expect(page.getByRole('alert')).toContainText('Доступ к очереди отозван');
+  await expect(page.getByRole('region',{name:'Назначенные заявки'}).getByRole('listitem')).toHaveCount(0);
+});
