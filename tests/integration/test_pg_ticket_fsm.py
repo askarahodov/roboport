@@ -191,6 +191,16 @@ def test_independent_safety_expert_release_and_revoke():
         with pytest.raises(TransitionConflict):
             release_safety_hold(db,tokens[1],ticket,1)
         assert record_safety_review(db,tokens[1],ticket,1,True)=="MANAGER"
+        # Disabled reviewers cannot authorize release even after approval.
+        db.execute("UPDATE app_user SET status='DISABLED' WHERE id=%s",(users[0],))
+        with pytest.raises(TransitionConflict):
+            release_safety_hold(db,tokens[1],ticket,1)
+        db.execute("UPDATE app_user SET status='ACTIVE' WHERE id=%s",(users[0],))
+        # Manager privilege takes precedence over an additional engineer grant.
+        db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,'ENGINEER')",
+                   (uuid4(),users[1]))
+        db.execute("INSERT INTO acl_entry(id,user_id,ticket_id,action) VALUES(%s,%s,%s,'ticket.diagnose')",
+                   (uuid4(),users[1],ticket))
         assert release_safety_hold(db,tokens[1],ticket,1)["version"]==2
         assert db.execute("SELECT state,version FROM service_ticket WHERE id=%s",
                           (ticket,)).fetchone()==("DIAGNOSING",2)
