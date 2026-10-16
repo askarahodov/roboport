@@ -19,6 +19,34 @@ export function CustomerAccount() {
   const [state, setState] = React.useState<State>('loading');
   const [attempt, setAttempt] = React.useState(0);
   const [session, setSession] = React.useState<Session | null>(null);
+  const [logoutError,setLogoutError] = React.useState<string|null>(null);
+  const [loggingOut,setLoggingOut] = React.useState(false);
+  async function logout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setLogoutError(null);
+    try {
+      const csrfResponse=await fetch('/api/v1/auth/csrf',{
+        method:'POST',credentials:'include',cache:'no-store',
+      });
+      if (!csrfResponse.ok) throw new Error('CSRF unavailable');
+      const csrfData:unknown=await csrfResponse.json();
+      if (!csrfData || typeof csrfData!=='object' ||
+        !('csrfToken' in csrfData) || typeof csrfData.csrfToken!=='string') {
+        throw new Error('Invalid CSRF');
+      }
+      const res=await fetch('/api/v1/auth/logout',{
+        method:'POST',credentials:'include',cache:'no-store',
+        headers:{'X-CSRF-Token':csrfData.csrfToken},
+      });
+      if (!res.ok) throw new Error('Logout failed');
+      setSession(null);
+      setState('unauthorized');
+    } catch {
+      setLogoutError('Не удалось завершить сессию. Повторите попытку.');
+    } finally { setLoggingOut(false); }
+  }
+
   React.useEffect(() => {
     const controller = new AbortController();
     setState('loading');
@@ -79,6 +107,9 @@ export function CustomerAccount() {
       <p>Настройки и уведомления будут доступны после отдельной проверки серверных разрешений. Изменений учётной записи без CSRF нет.</p>}
     <p className="account-hint">Настоящие документы доступны только через защищённый backend. Прямого подключения браузера к хранилищу нет.</p>
     <button type="button" onClick={() => setAttempt(value => value + 1)}>Проверить доступ снова</button>
+    <button type="button" disabled={loggingOut} onClick={() => void logout()}>
+      {loggingOut ? 'Выход…' : 'Выйти'}</button>
+    {logoutError && <p role="alert">{logoutError}</p>}
     <span className="sr-only">Авторизованный субъект: {session?.subjectId}</span>
   </section>;
 }
