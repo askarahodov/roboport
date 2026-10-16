@@ -150,14 +150,22 @@ def list_brands(conn):
     return {"items":[{"id":str(uid),"name":name} for uid,name in rows]}
 
 
-def list_models(conn):
+def list_models(conn,limit=20,cursor=None):
+    if type(limit) is not int or not 1<=limit<=50 or (
+            cursor is not None and not isinstance(cursor,UUID)):
+        raise ValueError("invalid catalog cursor")
     rows=conn.execute("""SELECT m.id,m.brand_id,m.name,m.category,
        EXISTS (SELECT 1 FROM catalog_variant v JOIN service_capability s
          ON s.variant_id=v.id AND s.status='approved' WHERE v.model_id=m.id)
-       FROM catalog_model m ORDER BY m.name,m.id""").fetchall()
-    return {"items":[{"id":str(uid),"brandId":str(brand),"name":name,
+       FROM catalog_model m WHERE (%s::uuid IS NULL OR m.id>%s::uuid)
+       ORDER BY m.id LIMIT %s""",(cursor,cursor,limit+1)).fetchall()
+    page=rows[:limit]
+    result={"items":[{"id":str(uid),"brandId":str(brand),"name":name,
            "category":category,"supportStatus":"supported" if enabled else "candidate"}
-           for uid,brand,name,category,enabled in rows]}
+           for uid,brand,name,category,enabled in page]}
+    if len(rows)>limit:
+        result["nextCursor"]=str(page[-1][0])
+    return result
 
 
 def get_model(conn,model:UUID):
