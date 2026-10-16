@@ -13,7 +13,7 @@ from test_pg_baseline import DSN
 
 
 def inventory_fixture():
-    customer,device,ticket,lot,actor,match=(uuid4() for _ in range(6))
+    customer,device,ticket,lot,actor,match,part,estimate=(uuid4() for _ in range(8))
     token,csrf=new_token(),new_token()
     now=datetime.now(timezone.utc)
     with psycopg.connect(DSN) as db:
@@ -23,9 +23,11 @@ def inventory_fixture():
         db.execute("""INSERT INTO service_ticket(id,customer_id,device_id,state)
           VALUES (%s,%s,%s,'APPROVED')""",(ticket,customer,device))
         db.execute("INSERT INTO stock_lot(id,part_number,available_qty) VALUES (%s,%s,1)",(lot,'TEST-PN-'+lot.hex))
+        db.execute("INSERT INTO inventory_part(id,part_number) VALUES (%s,%s)",
+                   (part,'TEST-PN-'+lot.hex))
         db.execute("""INSERT INTO part_compatibility
-          (id,part_number,model_variant,region,revision,verified)
-          VALUES (%s,%s,'MODEL-X','RU','R2',false)""",(match,'TEST-PN-'+lot.hex))
+          (id,part_id,model_variant,region,revision,verified)
+          VALUES (%s,%s,'MODEL-X','RU','R2',false)""",(match,part))
         db.execute("INSERT INTO app_user(id,normalized_login) VALUES (%s,%s)",(actor,actor.hex))
         db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES (%s,%s,'STOCK')",(uuid4(),actor))
         db.execute("""INSERT INTO acl_entry(id,user_id,ticket_id,action)
@@ -35,6 +37,10 @@ def inventory_fixture():
           VALUES (%s,%s,%s,%s,%s,%s,%s)""",
           (uuid4(),actor,token_digest(token),token_digest(csrf),now,
            now+timedelta(minutes=30),now+timedelta(hours=4)))
+        db.execute("""INSERT INTO estimate(id,ticket_id,version,state,total_minor,currency)
+          VALUES (%s,%s,1,'SENT',100,'RUB')""",(estimate,ticket))
+        db.execute("""INSERT INTO estimate_approval(id,estimate_id,actor_id,decision)
+          VALUES (%s,%s,%s,'APPROVED')""",(uuid4(),estimate,actor))
     return ticket,lot,actor,match,token,csrf
 
 
