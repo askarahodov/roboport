@@ -1,0 +1,28 @@
+/* ROBOport canonical semantic colors; generated to match theme.json. */
+/* Use --rp-accent only decoratively; text/button contrast uses --rp-action. */
+.app {
+  --rp-background:#f4fafb;
+  --rp-foreground:#12343b;
+  --rp-surface:#ffffff;
+  --rp-accent:#19bbb5;
+  --rp-action:#006d67;
+  --rp-action-text:#ffffff;
+  --rp-error-text:#9f1b23;
+  --rp-error-surface:#fff3f2;
+  --rp-safety-text:#994900;
+  --rp-safety-surface:#fff4e3;
+  --rp-focus:#006d67;
+}
+.app.dark {
+  --rp-background:#101e22;
+  --rp-foreground:#ecf9fa;
+  --rp-surface:#1b3136;
+  --rp-accent:#19bbb5;
+  --rp-action:#19bbb5;
+  --rp-action-text:#071820;
+  --rp-error-text:#ffb4ad;
+  --rp-error-surface:#441b1b;
+  --rp-safety-text:#ffd3a1;
+  --rp-safety-surface:#422900;
+  --rp-focus:#42dacf;
+}
