@@ -82,7 +82,7 @@ def test_rejected_capability_remains_unsupported():
 def test_catalog_http_exact_and_live_review(monkeypatch):
     from fastapi.testclient import TestClient
     from roboport_api.main import app
-    model,cap,engineer,manager=(uuid4() for _ in range(4))
+    model,cap,engineer,manager,part=(uuid4() for _ in range(5))
     tokens=(new_token(),new_token())
     csrf=(new_token(),new_token())
     now=datetime.now(timezone.utc)
@@ -92,6 +92,8 @@ def test_catalog_http_exact_and_live_review(monkeypatch):
          VALUES (%s,'Brand2','Robot2','V1','DOCK1','RU','R1','SUPPORTED')""",(model,))
         db.execute("""INSERT INTO service_capability(id,model_id,capability,evidence)
           VALUES (%s,%s,'REPAIR','synthetic evidence')""",(cap,model))
+        db.execute("""INSERT INTO part_compatibility(id,model_id,part_number,evidence)
+          VALUES (%s,%s,'HTTP-TEST-PN','synthetic evidence ref')""",(part,model))
         for actor,role,tok,secret in zip((engineer,manager),("ENGINEER","MANAGER"),tokens,csrf):
             db.execute("INSERT INTO app_user(id,normalized_login) VALUES (%s,%s)",(actor,actor.hex))
             db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES (%s,%s,%s)",(uuid4(),actor,role))
@@ -118,6 +120,13 @@ def test_catalog_http_exact_and_live_review(monkeypatch):
     http.cookies.set("rp_session",tokens[1])
     second=http.post(route,json={"approved":True},headers={**headers,"X-CSRF-Token":csrf[1]})
     assert second.status_code==200 and second.json()["status"]=="SUPPORTED",second.text
+    part_url=f"/api/v1/dev/catalog/parts/{part}/review"
+    assert http.post(part_url,json={"approved":True},
+                     headers={**headers,"X-CSRF-Token":csrf[1]}).status_code==200
+    http.cookies.clear()
+    http.cookies.set("rp_session",tokens[0])
+    part_result=http.post(part_url,json={"approved":True},headers=headers)
+    assert part_result.status_code==200 and part_result.json()["status"]=="SUPPORTED",part_result.text
 
 
 def test_part_compatibility_cannot_be_supported_without_independent_evidence():
