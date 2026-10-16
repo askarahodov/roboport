@@ -27,7 +27,7 @@ def test_active_device_owner_unique_and_history_immutable():
             with db.transaction():
                 db.execute("UPDATE device_ownership SET customer_id=%s WHERE id=%s",
                            (customer_b,owner_a))
-        db.execute("UPDATE device_ownership SET ended_at=now() WHERE id=%s",(owner_a,))
+        db.execute("UPDATE device_ownership SET ended_at=clock_timestamp() WHERE id=%s",(owner_a,))
         db.execute("""INSERT INTO device_ownership(id,device_id,customer_id)
                       VALUES (%s,%s,%s)""",(owner_b,device,customer_b))
         assert db.execute("""SELECT customer_id FROM device_ownership
