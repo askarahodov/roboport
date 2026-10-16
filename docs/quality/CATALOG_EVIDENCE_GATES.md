@@ -6,11 +6,12 @@
 `brand + model + variant + dock + region + revision` — все поля обязательны. Сравнение строгое, не по похожему имени. Неизвестный ключ возвращает 404, некорректные входные данные — 422. Новые `catalog_model` и `service_capability` по умолчанию `CANDIDATE`.
 
 ## Независимый допуск
-`service_capability` содержит ссылку на доказательство. Для перехода `SUPPORTED` необходимы две положительные записи append-only: действующий `ENGINEER` и действующий `MANAGER` от разных акторов. Вторая роль того же пользователя не считается независимой. Отрицательное решение переводит объект в `UNSUPPORTED`. Все действия оставляют `catalog_audit`. SQL триггеры не позволяют публикацию без требуемых записей.
+`service_capability` содержит ссылку на доказательство. Для перехода `SUPPORTED` у сервиса и у каждой отдельной `part_compatibility` необходимы две положительные записи append-only: действующий `ENGINEER` и действующий `MANAGER` от разных акторов. Вторая роль того же пользователя не считается независимой. Отрицательное решение переводит объект в `UNSUPPORTED`. Все действия оставляют `catalog_audit`. SQL триггеры не позволяют публикацию без требуемых записей, запрещают подменять сохранённое evidence и повторно активировать `UNSUPPORTED`.
 
 ## Локальный HTTP
 - `GET /api/v1/dev/catalog/models/exact` — чтение точного ключа, только в синтетическом localhost HTTPS режиме.
 - `POST /api/v1/dev/catalog/capabilities/{id}/review` — сессия, Origin, CSRF, серверная live-role проверка.
+- `POST /api/v1/dev/catalog/parts/{id}/review` — отдельная двойная проверка доказательства допуска детали.
 
 ## Тестирование
 Real PostgreSQL 17, Alembic upgrade/downgrade/restore; `pytest -q tests/integration tests/security`, контрактные проверки из CI. PG negative tests проверяют отсутствие публикации без подтверждений, forged роль reviewer, уникальность и append-only, отказ и HTTP access boundary.
