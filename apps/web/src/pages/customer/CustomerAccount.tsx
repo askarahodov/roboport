@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { CustomerTickets } from './CustomerTickets';
 import { CustomerSummary } from './CustomerSummary';
+import { CustomerOverview } from './CustomerOverview';
 import { CustomerSettings } from './CustomerSettings';
 
 type Session = { subjectId: string };
@@ -106,7 +107,7 @@ export function CustomerAccount() {
       pathname === '/account/estimates' ? <CustomerSummary section="estimates" /> :
       pathname === '/account/documents' ? <CustomerSummary section="documents" /> :
       pathname === '/account/settings' ? <CustomerSettings /> :
-      <p>События кабинета загружаются только после проверки серверных прав.</p>}
+      <CustomerOverview />}
     <p className="account-hint">Настоящие документы доступны только через защищённый backend. Прямого подключения браузера к хранилищу нет.</p>
     <button type="button" onClick={() => setAttempt(value => value + 1)}>Проверить доступ снова</button>
     <button type="button" disabled={loggingOut} onClick={() => void logout()}>
