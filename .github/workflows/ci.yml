@@ -54,7 +54,7 @@ jobs:
           test "$ORIGINAL" = 1
           test "$RESTORED" = "$ORIGINAL"
           RESTORED_REV="$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -At -c "SELECT version_num FROM alembic_version")"
-          test "$RESTORED_REV" = 0010_estimate_acl
+          test "$RESTORED_REV" = 0013_ticket_idempotency
           docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -v ON_ERROR_STOP=1 -c "INSERT INTO audit_event(id,action) VALUES('22222222-2222-4222-8222-222222222222','restore-ok')"
   api:
     runs-on: ubuntu-latest
