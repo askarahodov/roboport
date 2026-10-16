@@ -97,3 +97,26 @@ test('six private views render after auth API success, responsive and keyboard a
   await expect(button).toBeFocused();
   await page.screenshot({path:'test-results/account-authenticated-mobile.png',fullPage:true});
 });
+
+
+test('overview: private resources are fail-closed and retry replaces errors with real data',async({page})=>{
+ await page.route('**/api/v1/auth/me',r=>r.fulfill({status:200,contentType:'application/json',
+  body:'{"subjectId":"00000000-0000-4000-8000-000000000001"}'}));
+ let retry=false;
+ await page.route('**/api/v1/dev/account/summary/*',r=>{
+  const section=r.request().url().split('/').pop();
+  return r.fulfill({status:section==='documents'&&!retry?403:200,contentType:'application/json',
+   body:section==='documents'&&!retry?'{}':JSON.stringify({items:section==='robots'?[{id:'synthetic-robot'}]:[]})});
+ });
+ await page.route('**/api/v1/dev/account/tickets?*',r=>r.fulfill({status:200,contentType:'application/json',
+  body:JSON.stringify({items:[{id:'synthetic-ticket'}],limit:20,offset:0})}));
+ await page.goto('/account');
+ const overview=page.getByRole('region',{name:'Обзор клиентского кабинета'});
+ await expect(overview.getByText('записей на странице: 1')).toHaveCount(2);
+ await expect(overview.getByText('доступ отозван')).toBeVisible();
+ retry=true;
+ await overview.getByRole('button',{name:'Обновить обзор'}).click();
+ await expect(overview.getByText('доступ отозван')).toHaveCount(0);
+ await expect(overview.getByText('нет доступных записей')).toHaveCount(2);
+ await expect(page.getByText('Реальные обращения пока не принимаются.')).toHaveCount(0);
+});
