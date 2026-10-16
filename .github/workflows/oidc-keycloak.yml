@@ -1,0 +1,123 @@
+name: ROBOport live Keycloak OIDC CI
+on:
+  push:
+    paths:
+      - 'apps/api/roboport_api/oidc*.py'
+      - 'apps/api/alembic/versions/0019_oidc_identity.py'
+      - 'apps/web/e2e/keycloak-live.mjs'
+      - 'tests/fixtures/keycloak-realm.json'
+      - 'tests/integration/seed_oidc_keycloak.py'
+      - '.github/workflows/oidc-keycloak.yml'
+  pull_request:
+    paths:
+      - 'apps/api/roboport_api/oidc*.py'
+      - 'apps/api/alembic/versions/0019_oidc_identity.py'
+      - 'apps/web/e2e/keycloak-live.mjs'
+      - 'tests/fixtures/keycloak-realm.json'
+      - 'tests/integration/seed_oidc_keycloak.py'
+      - '.github/workflows/oidc-keycloak.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  keycloak-pkce-abac:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: roboport
+          POSTGRES_PASSWORD: roboport
+          POSTGRES_DB: roboport
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U roboport -d roboport"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PYTHONPATH: apps/api:tests/integration
+      ROBOport_DATABASE_URL: postgresql+psycopg://roboport:roboport@127.0.0.1:5432/roboport
+      ROBOport_OIDC_ENABLED: '1'
+      ROBOport_SYNTHETIC_AUTH_API: '1'
+      ROBOport_SYNTHETIC_ACCESS_API: '1'
+      ROBOport_OIDC_ISSUER: https://localhost:9443/realms/roboport-demo
+      ROBOport_OIDC_AUTHORIZE: https://localhost:9443/realms/roboport-demo/protocol/openid-connect/auth
+      ROBOport_OIDC_TOKEN: https://localhost:9443/realms/roboport-demo/protocol/openid-connect/token
+      ROBOport_OIDC_JWKS: https://localhost:9443/realms/roboport-demo/protocol/openid-connect/certs
+      ROBOport_OIDC_CLIENT: roboport-dev
+      ROBOport_OIDC_REDIRECT: https://127.0.0.1:8444/api/v1/dev/oidc/callback
+      ROBOport_OIDC_STATE_KEY: synthetic-ci-only-key-that-must-not-be-used-outside-automation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+      - name: Create synthetic disposable PostgreSQL schema and A/B identities
+        run: |
+          python -m alembic -c apps/api/alembic.ini upgrade head
+          python tests/integration/seed_oidc_keycloak.py
+      - name: Generate temporary local HTTPS certificate for Keycloak and FastAPI
+        run: |
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 1 \
+            -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+          chmod 644 tls.crt
+      - name: Start isolated real Keycloak with imported synthetic realm
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach --name roboport-keycloak --publish 127.0.0.1:9443:8443 \
+            --mount type=bind,src="${PWD}/tls.crt",dst=/opt/keycloak/conf/tls.crt,readonly \
+            --mount type=bind,src="${PWD}/tls.key",dst=/opt/keycloak/conf/tls.key,readonly \
+            --mount type=bind,src="${PWD}/tests/fixtures/keycloak-realm.json",dst=/opt/keycloak/data/import/roboport-demo-realm.json,readonly \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=devadmin -e KC_BOOTSTRAP_ADMIN_PASSWORD=synthetic-only-admin \
+            quay.io/keycloak/keycloak:26.3.3 start-dev --import-realm --https-port=8443 \
+              --hostname=https://localhost:9443 \
+              --https-certificate-file=/opt/keycloak/conf/tls.crt \
+              --https-certificate-key-file=/opt/keycloak/conf/tls.key
+          for i in $(seq 1 100); do
+            if curl --silent --fail --cacert tls.crt \
+              https://localhost:9443/realms/roboport-demo/.well-known/openid-configuration >/dev/null; then
+              echo "Keycloak HTTPS realm ready"; break
+            fi
+            if ! docker ps --format '{{.Names}}' | grep -qx roboport-keycloak; then
+              docker logs roboport-keycloak; exit 1
+            fi
+            sleep 3
+          done
+          curl --fail --cacert tls.crt \
+            https://localhost:9443/realms/roboport-demo/.well-known/openid-configuration >/dev/null
+      - name: Install browser and run genuine Code + PKCE A/B login
+        working-directory: apps/web
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Verify Keycloak browser login, immutable account binding, BOLA and revoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SSL_CERT_FILE="${PWD}/tls.crt"
+          PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app \
+            --host 127.0.0.1 --port 8444 --ssl-certfile tls.crt --ssl-keyfile tls.key \
+            > /tmp/roboport-oidc-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if curl --silent --fail --cacert tls.crt https://127.0.0.1:8444/health/live >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --cacert tls.crt https://127.0.0.1:8444/health/live
+          node apps/web/e2e/keycloak-live.mjs
+      - name: Debug only on failure
+        if: failure()
+        run: |
+          docker logs roboport-keycloak --tail=100 || true
+          tail -100 /tmp/roboport-oidc-api.log || true
