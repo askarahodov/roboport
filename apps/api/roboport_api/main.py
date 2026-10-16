@@ -908,3 +908,90 @@ async def dev_catalog_review(capability_id: str,request: Request,is_part: bool=F
 @app.post("/api/v1/dev/catalog/parts/{part_id}/review",include_in_schema=False)
 async def dev_part_review(part_id: str,request: Request):
     return await dev_catalog_review(part_id,request,is_part=True)
+
+async def _inventory_http(request: Request, operation: str, reservation_id: str = "",
+                          contract: bool = False):
+    """Синтетический склад: HTTPS loopback, session, Origin, CSRF, live grants."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .auth_http import _origin_ok
+    from .session_service import verify_csrf
+    from .inventory import reserve, cancel, StockForbidden, StockConflict
+    dsn=os.getenv("ROBOport_DATABASE_URL","")
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https" or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    try:
+        parsed=urlsplit(dsn)
+        if parsed.scheme not in ("postgresql","postgresql+psycopg") or parsed.hostname!="127.0.0.1" or parsed.port is None:
+            return not_found(request)
+        payload=await request.json() if operation=="reserve" or contract else {}
+        key=request.headers.get("Idempotency-Key")
+        if not isinstance(key,str) or not 1<=len(key)<=128 or not key.isascii() or not key.isprintable():
+            raise ValueError()
+        if operation=="reserve":
+            if type(payload.get("quantity")) is not int:
+                raise ValueError()
+            ticket,lot=UUID(payload["ticketId"]),UUID(payload["lotId"])
+            part_id=UUID(payload["partId"]) if contract else None
+            ticket_version=payload["expectedTicketVersion"] if contract else None
+            if contract and (type(ticket_version) is not int or ticket_version<1):
+                raise ValueError()
+        else:
+            rid=UUID(reservation_id)
+            reason=payload.get("reason") if contract else None
+            if contract and (not isinstance(reason,str) or len(reason.strip())<3 or len(reason)>1000):
+                raise ValueError()
+    except (ValueError,TypeError,KeyError,AttributeError):
+        return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    if not _origin_ok(request):
+        return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    with psycopg.connect(dsn.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        if not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        try:
+            result=(reserve(conn,token,ticket,lot,payload["quantity"],key,
+                            part_id=part_id,expected_ticket_version=ticket_version)
+                    if operation=="reserve" else cancel(conn,token,rid,key,reason=reason))
+            if contract:
+                result={"id":result["id"],"status":result["status"]}
+        except StockForbidden:
+            return not_found(request)
+        except (StockConflict,psycopg.errors.CheckViolation):
+            conn.rollback()
+            return JSONResponse(status_code=409,content={"code":"CONFLICT",
+                                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        except ValueError:
+            conn.rollback()
+            return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@app.post("/api/v1/dev/inventory/reservations",include_in_schema=False)
+async def dev_inventory_reserve(request: Request):
+    return await _inventory_http(request,"reserve")
+
+
+@app.post("/api/v1/dev/inventory/reservations/{reservation_id}/cancel",include_in_schema=False)
+async def dev_inventory_cancel(reservation_id: str,request: Request):
+    return await _inventory_http(request,"cancel",reservation_id)
+
+
+@app.post("/api/v1/staff/stock/reservations",include_in_schema=False)
+async def contract_inventory_reserve(request: Request):
+    return await _inventory_http(request,"reserve",contract=True)
+
+
+@app.post("/api/v1/staff/stock/reservations/{reservationId}/release",include_in_schema=False)
+async def contract_inventory_release(reservationId: str,request: Request):
+    return await _inventory_http(request,"cancel",reservationId,contract=True)
