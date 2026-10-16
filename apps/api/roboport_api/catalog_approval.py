@@ -107,3 +107,43 @@ def approve_part(conn,token:str,part_id:UUID,approved:bool):
     if status!="CANDIDATE":
         conn.execute("UPDATE part_compatibility SET status=%s WHERE id=%s",(status,part_id))
     return {"id":str(part_id),"status":status}
+
+
+def review_idempotent(conn,token:str,target:UUID,kind:str,approved:bool,key:str):
+    """Successful reviewer replay in one PostgreSQL transaction, live roles rechecked."""
+    import hashlib,json
+    if (not isinstance(target,UUID) or kind not in ('capability','part')
+            or type(approved) is not bool or not isinstance(key,str)
+            or not 1<=len(key)<=128 or not key.isascii() or not key.isprintable()):
+        raise ValueError("invalid review or idempotency key")
+    actor=session_subject(conn,token)
+    if actor is None:
+        raise CatalogForbidden()
+    # Cross-resource identical keys serialize and conflict by actor, not object.
+    conn.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE",(actor,))
+    # Replay does not grant permissions after a role has been revoked.
+    live=conn.execute("""SELECT EXISTS(SELECT 1 FROM user_role r
+       WHERE r.user_id=%s AND r.role_code IN ('ENGINEER','MANAGER')
+        AND r.revoked_at IS NULL AND (r.expires_at IS NULL OR r.expires_at>now()))""",
+       (actor,)).fetchone()[0]
+    if not live:
+        raise CatalogForbidden()
+    fingerprint=hashlib.sha256(json.dumps(
+        {"kind":kind,"target":str(target),"approved":approved},
+        sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    old=conn.execute("""SELECT fingerprint,response FROM catalog_review_receipt
+      WHERE actor_id=%s AND request_key=%s""",(actor,key)).fetchone()
+    if old:
+        if old[0]!=fingerprint:
+            raise CatalogConflict("idempotency key mismatch")
+        # Re-evaluate resource visibility on replay, not only the session.
+        table="service_capability" if kind=="capability" else "part_compatibility"
+        if conn.execute("SELECT 1 FROM "+table+" WHERE id=%s",(target,)).fetchone() is None:
+            raise CatalogForbidden()
+        return old[1]
+    result=(approve_capability(conn,token,target,approved) if kind=="capability"
+            else approve_part(conn,token,target,approved))
+    conn.execute("""INSERT INTO catalog_review_receipt(actor_id,request_key,fingerprint,response)
+                    VALUES(%s,%s,%s,%s::jsonb)""",
+                 (actor,key,fingerprint,json.dumps(result)))
+    return result
