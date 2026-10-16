@@ -14,6 +14,19 @@ class EstimateForbidden(Exception):
     pass
 
 
+def _advance_ticket(conn, ticket, actor, source, destination, expected_version=None):
+    row=conn.execute("SELECT state,version FROM service_ticket WHERE id=%s FOR UPDATE",(ticket,)).fetchone()
+    if (row is None or row[0]!=source
+            or (expected_version is not None and row[1]!=expected_version)):
+        raise EstimateConflict("ticket FSM/version conflict")
+    conn.execute("UPDATE service_ticket SET state=%s,version=version+1 WHERE id=%s",(destination,ticket))
+    conn.execute("""INSERT INTO ticket_state_event
+       (id,ticket_id,from_state,to_state,expected_version,actor_id)
+       VALUES (%s,%s,%s,%s,%s,%s)""",(uuid4(),ticket,source,destination,row[1],actor))
+    conn.execute("INSERT INTO audit_event(id,ticket_id,action) VALUES (%s,%s,%s)",
+                 (uuid4(),ticket,"estimate."+destination.lower()))
+
+
 def decide_estimate(conn, token: str, estimate_id: UUID, expected_version: int,
                     decision: str, key: str) -> dict:
     if (not isinstance(estimate_id, UUID) or type(expected_version) is not int
@@ -69,8 +82,7 @@ def decide_estimate(conn, token: str, estimate_id: UUID, expected_version: int,
     ).fetchone()[0]
     if latest != expected_version:
         raise EstimateConflict("stale estimate")
-    conn.execute("UPDATE service_ticket SET state=%s,version=version+1 WHERE id=%s",
-                 (decision,ticket_id))
+    _advance_ticket(conn,ticket_id,actor,"AWAITING_APPROVAL",decision)
     conn.execute(
         """INSERT INTO estimate_approval(id,estimate_id,actor_id,decision)
            VALUES (%s,%s,%s,%s)""", (uuid4(),estimate_id,actor,decision),
@@ -86,7 +98,8 @@ def decide_estimate(conn, token: str, estimate_id: UUID, expected_version: int,
 
 
 def create_estimate_version(conn, token: str, ticket_id: UUID,
-                            lines: list[dict], currency: str = "RUB") -> dict:
+                            lines: list[dict], currency: str = "RUB",
+                            expected_ticket_version=None) -> dict:
     """Manager creates a new DRAFT version; price is computed in minor units."""
     from .authorization import authorize_estimate
     if (not isinstance(ticket_id, UUID) or not isinstance(lines,list)
@@ -104,7 +117,8 @@ def create_estimate_version(conn, token: str, ticket_id: UUID,
     if actor is None:
         raise EstimateForbidden()
     locked=conn.execute("SELECT state,version FROM service_ticket WHERE id=%s FOR UPDATE",(ticket_id,)).fetchone()
-    if locked is None or locked[0] not in ("DIAGNOSING","ESTIMATE_DRAFT","AWAITING_APPROVAL"):
+    if (locked is None or locked[0] not in ("DIAGNOSING","ESTIMATE_DRAFT","AWAITING_APPROVAL")
+            or (expected_ticket_version is not None and locked[1]!=expected_ticket_version)):
         raise EstimateConflict("ticket not eligible for estimate")
     manager=conn.execute("""SELECT EXISTS(
        SELECT 1 FROM user_role r
@@ -124,7 +138,7 @@ def create_estimate_version(conn, token: str, ticket_id: UUID,
         raise EstimateConflict("finish existing draft first")
     version=1 if last is None else last[0]+1
     if locked[0]=="DIAGNOSING":
-        conn.execute("UPDATE service_ticket SET state='ESTIMATE_DRAFT',version=version+1 WHERE id=%s",(ticket_id,))
+        _advance_ticket(conn,ticket_id,actor,locked[0],"ESTIMATE_DRAFT")
     elif locked[0]=="AWAITING_APPROVAL":
         conn.execute("UPDATE service_ticket SET state='ESTIMATE_DRAFT',version=version+1 WHERE id=%s",(ticket_id,))
     eid=uuid4()
@@ -170,7 +184,7 @@ def send_estimate_version(conn, token: str, eid: UUID, expected_version: int) ->
     if latest!=expected_version:
         raise EstimateConflict("stale version")
     conn.execute("UPDATE estimate SET state='SENT' WHERE id=%s",(eid,))
-    conn.execute("UPDATE service_ticket SET state='AWAITING_APPROVAL',version=version+1 WHERE id=%s",(ticket,))
+    _advance_ticket(conn,ticket,actor,"ESTIMATE_DRAFT","AWAITING_APPROVAL")
     return {"id":str(eid),"version":expected_version,"state":"SENT","totalMinor":row[2]}
 
 
