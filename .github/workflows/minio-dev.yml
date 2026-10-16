@@ -5,6 +5,9 @@ on:
     paths:
       - "infra/dev/**"
       - ".github/workflows/minio-dev.yml"
+      - "docs/quality/ISSUE_26_QA_EXECUTION_LEDGER.md"
+      - "tests/integration/test_minio_storage.py"
+      - "tests/integration/test_pg_minio_attachment_http.py"
   workflow_dispatch:
 
 permissions:
