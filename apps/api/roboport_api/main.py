@@ -606,3 +606,221 @@ async def dev_ticket_safety_review(ticket_id: str, request: Request):
 @app.post("/api/v1/dev/tickets/{ticket_id}/safety-release", include_in_schema=False)
 async def dev_ticket_safety_release(ticket_id: str, request: Request):
     return await _safety_mutation(request,ticket_id,"release")
+
+
+@app.post("/api/v1/dev/estimates/{estimate_id}/decision", include_in_schema=False)
+async def dev_estimate_decision(estimate_id: str, request: Request, public_decision=None):
+    """Synthetic-only owner approval; durable idempotency with live authorization."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .auth_http import _origin_ok
+    from .session_service import verify_csrf
+    from .estimate_decision import decide_estimate, EstimateConflict, EstimateForbidden
+
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1"
+            or request.url.scheme != "https"
+            or request.url.hostname not in ("127.0.0.1", "localhost")):
+        return not_found(request)
+    dsn = os.getenv("ROBOport_DATABASE_URL", "")
+    try:
+        parsed = urlsplit(dsn)
+        if (parsed.scheme not in ("postgresql", "postgresql+psycopg")
+                or parsed.hostname != "127.0.0.1" or parsed.port is None):
+            return not_found(request)
+        ident = UUID(estimate_id)
+    except ValueError:
+        return not_found(request)
+    token = request.cookies.get("rp_session", "")
+    if not token:
+        return JSONResponse(status_code=401,content={
+            "code":"UNAUTHENTICATED","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    if not _origin_ok(request):
+        return JSONResponse(status_code=403,content={
+            "code":"FORBIDDEN","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    try:
+        payload = await request.json()
+        if public_decision is not None:
+            if (not isinstance(payload,dict)
+                    or type(payload.get("estimateVersion")) is not int
+                    or (public_decision=="APPROVED"
+                        and payload.get("approvalMethod")!="verified_account")):
+                raise ValueError()
+            if public_decision=="DECLINED":
+                reason=payload.get("reason")
+                if reason is not None and (not isinstance(reason,str) or len(reason)>1000):
+                    raise ValueError()
+            else:
+                reason=None
+            payload={"expectedVersion":payload["estimateVersion"],
+                     "decision":public_decision,"reason":reason}
+        key = request.headers.get("Idempotency-Key")
+        if (not isinstance(payload,dict)
+                or type(payload.get("expectedVersion")) is not int
+                or payload.get("decision") not in ("APPROVED","DECLINED")
+                or not isinstance(key,str) or not 1 <= len(key) <= 128
+                or not key.isascii() or not key.isprintable()):
+            raise ValueError()
+    except (ValueError,TypeError):
+        return JSONResponse(status_code=422,content={
+            "code":"INVALID_INPUT","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
+    with psycopg.connect(dsn.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        if not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={
+                "code":"FORBIDDEN","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+        try:
+            result=decide_estimate(conn,token,ident,payload["expectedVersion"],payload["decision"],key,
+                                   reason=payload.get("reason"))
+            if public_decision is not None:
+                quote=conn.execute("SELECT ticket_id,total_minor FROM estimate WHERE id=%s",(ident,)).fetchone()
+                result={"id":str(ident),"ticketId":str(quote[0]),"version":result["version"],
+                        "status":result["state"],"total":f"{quote[1]//100}.{quote[1]%100:02d}"}
+        except EstimateForbidden:
+            return not_found(request)
+        except (EstimateConflict,psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
+            conn.rollback()
+            return JSONResponse(status_code=409,content={
+                "code":"CONFLICT","requestId":request.state.request_id,
+            },headers={"Cache-Control":"no-store"})
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+async def _estimate_staff_mutation(request: Request, target_id: str, operation: str,
+                                   contract=False):
+    """Private localhost-only synthetic quote drafting/sending."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .auth_http import _origin_ok
+    from .session_service import verify_csrf
+    from .estimate_decision import (
+        create_estimate_version,send_estimate_version,staff_idempotent,EstimateForbidden,EstimateConflict)
+    if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https"
+            or request.url.hostname not in ("127.0.0.1","localhost")):
+        return not_found(request)
+    dsn=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        parsed=urlsplit(dsn)
+        if (parsed.scheme not in ("postgresql","postgresql+psycopg")
+                or parsed.hostname!="127.0.0.1" or parsed.port is None):
+            return not_found(request)
+        target=UUID(target_id)
+    except ValueError:
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                            "requestId":request.state.request_id})
+    if not _origin_ok(request):
+        return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                            "requestId":request.state.request_id})
+    try:
+        if contract and operation=="send":
+            payload={}
+        else:
+            payload=await request.json()
+        if not isinstance(payload,dict):
+            raise ValueError()
+        if contract and operation=="create":
+            from decimal import Decimal, InvalidOperation
+            if type(payload.get("expectedTicketVersion")) is not int or payload.get("currency")!="RUB":
+                raise ValueError()
+            lines=[]
+            for item in payload.get("lines",[]):
+                import re
+                if (not isinstance(item,dict) or item.get("kind") not in ("labor","logistics")
+                        or not isinstance(item.get("description"),str)
+                        or not item["description"].strip()
+                        or not isinstance(item.get("unitPrice"),str)
+                        or re.fullmatch(r"[0-9]+(\.[0-9]{1,2})?",item["unitPrice"]) is None):
+                    # Parts require a verified compatibility registry and cannot
+                    # be quoted from untrusted P/N or client-supplied evidence.
+                    raise ValueError()
+                try:
+                    price=Decimal(item["unitPrice"])
+                    quantity=Decimal(str(item["quantity"]))
+                    minor=price*quantity*100
+                except (KeyError,InvalidOperation,TypeError,ValueError):
+                    raise ValueError()
+                if (not quantity.is_finite() or quantity<=0
+                        or not minor.is_finite() or minor!=minor.to_integral_value()):
+                    raise ValueError()
+                lines.append({"description":item["description"],"amountMinor":int(minor)})
+            payload={"lines":lines,"expectedTicketVersion":payload["expectedTicketVersion"]}
+        if operation=="send" and not contract and type(payload.get("expectedVersion")) is not int:
+            raise ValueError()
+        if operation=="create" and not isinstance(payload.get("lines"),list):
+            raise ValueError()
+    except (ValueError,TypeError):
+        return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                            "requestId":request.state.request_id})
+    with psycopg.connect(dsn.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        if not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                                "requestId":request.state.request_id})
+        try:
+            if contract and operation=="send":
+                sent=conn.execute("SELECT version FROM estimate WHERE id=%s",(target,)).fetchone()
+                if sent is None:
+                    return not_found(request)
+                payload={"expectedVersion":sent[0]}
+            result=staff_idempotent(
+                conn,token,target,operation,payload,request.headers.get("Idempotency-Key"),
+                lambda: create_estimate_version(conn,token,target,payload["lines"],
+                          expected_ticket_version=payload.get("expectedTicketVersion"))
+                if operation=="create" else
+                send_estimate_version(conn,token,target,payload["expectedVersion"]))
+            if contract:
+                quote=conn.execute("SELECT ticket_id,currency,total_minor FROM estimate WHERE id=%s",(result["id"],)).fetchone()
+                result={"id":result["id"],"ticketId":str(quote[0]),"version":result["version"],
+                        "status":result["state"],"total":f"{quote[2]//100}.{quote[2]%100:02d}",
+                        "currency":quote[1].strip()}
+        except EstimateForbidden:
+            return not_found(request)
+        except (EstimateConflict,psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
+            conn.rollback()
+            return JSONResponse(status_code=409,content={"code":"CONFLICT",
+                                "requestId":request.state.request_id})
+        except ValueError:
+            conn.rollback()
+            return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                                "requestId":request.state.request_id})
+    return JSONResponse(content=result,status_code=201 if operation=="create" else 200,
+                        headers={"Cache-Control":"no-store"})
+
+
+@app.post("/api/v1/dev/tickets/{ticket_id}/estimates",include_in_schema=False)
+async def dev_create_estimate(ticket_id: str, request: Request):
+    return await _estimate_staff_mutation(request,ticket_id,"create")
+
+
+@app.post("/api/v1/dev/estimates/{estimate_id}/send",include_in_schema=False)
+async def dev_send_estimate(estimate_id: str, request: Request):
+    return await _estimate_staff_mutation(request,estimate_id,"send")
+
+
+@app.post("/api/v1/staff/tickets/{ticketId}/estimates",include_in_schema=False)
+async def public_create_estimate(ticketId: str, request: Request):
+    return await _estimate_staff_mutation(request,ticketId,"create",contract=True)
+
+
+@app.post("/api/v1/staff/estimates/{estimateId}/send",include_in_schema=False)
+async def public_send_estimate(estimateId: str, request: Request):
+    return await _estimate_staff_mutation(request,estimateId,"send",contract=True)
+
+
+@app.post("/api/v1/customer/estimates/{estimateId}/approve",include_in_schema=False)
+async def public_approve_estimate(estimateId: str, request: Request):
+    return await dev_estimate_decision(estimateId,request,public_decision="APPROVED")
+
+
+@app.post("/api/v1/customer/estimates/{estimateId}/decline",include_in_schema=False)
+async def public_decline_estimate(estimateId: str, request: Request):
+    return await dev_estimate_decision(estimateId,request,public_decision="DECLINED")

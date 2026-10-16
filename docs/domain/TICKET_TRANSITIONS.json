@@ -26,6 +26,7 @@
       "AWAITING_APPROVAL"
     ],
     "AWAITING_APPROVAL": [
+      "ESTIMATE_DRAFT",
       "APPROVED",
       "DECLINED"
     ],
