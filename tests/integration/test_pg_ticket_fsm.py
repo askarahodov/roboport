@@ -252,7 +252,14 @@ def test_http_safety_review_requires_two_independent_staff():
         client.cookies.clear()
         client.cookies.set("rp_session",tokens[0])
         eng_headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[0],"Idempotency-Key":"review-eng-"+ticket.hex}
-        assert client.post(review,json={**payload,"approved":True},headers=eng_headers).status_code==200
+        first_review=client.post(review,json={**payload,"approved":True},headers=eng_headers)
+        assert first_review.status_code==200
+        repeated_review=client.post(review,json={**payload,"approved":True},headers=eng_headers)
+        assert repeated_review.status_code==200 and repeated_review.json()==first_review.json()
+        assert client.post(review,json={**payload,"approved":False},headers=eng_headers).status_code==409
+        with psycopg.connect(DSN) as db:
+            assert db.execute("SELECT count(*) FROM ticket_safety_review WHERE ticket_id=%s AND actor_id=%s",
+                              (ticket,users[0])).fetchone()[0]==1
         client.cookies.clear()
         client.cookies.set("rp_session",tokens[1])
         ok=client.post(release,json=payload,headers=headers)
