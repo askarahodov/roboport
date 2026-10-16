@@ -50,29 +50,44 @@ def _receipt(conn, actor, key, intent, execute):
     return result
 
 
-def reserve(conn, token, ticket:UUID, lot:UUID, qty:int, key:str):
+def reserve(conn, token, ticket:UUID, lot:UUID, qty:int, key:str,
+            part_id:UUID|None=None, expected_ticket_version:int|None=None):
     if (not isinstance(ticket,UUID) or not isinstance(lot,UUID)
-            or type(qty) is not int or qty<=0):
+            or type(qty) is not int or qty<=0
+            or (part_id is not None and not isinstance(part_id,UUID))
+            or (expected_ticket_version is not None and
+                (type(expected_ticket_version) is not int or expected_ticket_version<1))):
         raise ValueError("invalid reserve")
     actor=_staff(conn,token,ticket)
     def effect():
-        identity=conn.execute("""SELECT d.model_variant,d.region,d.revision,t.state
+        identity=conn.execute("""SELECT d.model_variant,d.region,d.revision,t.state,t.version
           FROM service_ticket t LEFT JOIN robot_device d ON d.id=t.device_id
           WHERE t.id=%s FOR UPDATE OF t""",(ticket,)).fetchone()
-        if identity is None or any(x is None for x in identity[:3]) or identity[3] not in (
-                'APPROVED','AWAITING_PARTS','REPAIRING'):
+        if (identity is None or any(x is None for x in identity[:3])
+            or identity[3] not in ('APPROVED','AWAITING_PARTS','REPAIRING')
+            or (expected_ticket_version is not None and identity[4]!=expected_ticket_version)):
             raise StockConflict("ticket/device not eligible")
         row=conn.execute("SELECT part_number,available_qty,reserved_qty FROM stock_lot WHERE id=%s FOR UPDATE",
                          (lot,)).fetchone()
         if row is None:
             raise StockConflict("lot unavailable")
         part,available,reserved=row
-        compatible=conn.execute("""SELECT id FROM part_compatibility
-          WHERE part_number=%s AND model_variant=%s AND region=%s AND revision=%s
-            AND verified=true AND revoked_at IS NULL""",
+        compatible=conn.execute("""SELECT c.id,p.id FROM part_compatibility c
+          JOIN inventory_part p ON p.id=c.part_id
+          WHERE p.part_number=%s AND c.model_variant=%s AND c.region=%s AND c.revision=%s
+            AND c.verified=true AND c.revoked_at IS NULL""",
             (part,*identity[:3])).fetchone()
+        if compatible is not None and part_id is not None and part_id!=compatible[1]:
+            raise StockConflict("wrong part identity")
         if compatible is None:
             raise StockConflict("unverified compatibility")
+        accepted=conn.execute("""SELECT EXISTS(
+          SELECT 1 FROM estimate e JOIN estimate_approval a ON a.estimate_id=e.id
+          WHERE e.ticket_id=%s AND e.state='APPROVED' AND a.decision='APPROVED'
+          AND e.version=(SELECT MAX(version) FROM estimate WHERE ticket_id=%s)
+        )""",(ticket,ticket)).fetchone()[0]
+        if not accepted:
+            raise StockConflict("approved estimate required")
         if available-reserved<qty:
             raise StockConflict("insufficient inventory")
         reservation=uuid4()
@@ -88,11 +103,14 @@ def reserve(conn, token, ticket:UUID, lot:UUID, qty:int, key:str):
                      (uuid4(),ticket))
         return {"id":str(reservation),"status":"ACTIVE","quantity":qty}
     return _receipt(conn,actor,key,{"operation":"reserve","ticket":str(ticket),
-                                    "lot":str(lot),"quantity":qty},effect)
+                                    "lot":str(lot),"quantity":qty,
+                                    "partId":str(part_id) if part_id else None,
+                                    "expectedTicketVersion":expected_ticket_version},effect)
 
 
-def cancel(conn, token, reservation:UUID, key:str):
-    if not isinstance(reservation,UUID):
+def cancel(conn, token, reservation:UUID, key:str, reason:str|None=None):
+    if (not isinstance(reservation,UUID) or
+            (reason is not None and (not isinstance(reason,str) or len(reason.strip())<3 or len(reason)>1000))):
         raise ValueError("invalid reservation")
     ref=conn.execute("SELECT ticket_id FROM stock_reservation WHERE id=%s",(reservation,)).fetchone()
     if ref is None:
@@ -119,4 +137,5 @@ def cancel(conn, token, reservation:UUID, key:str):
         conn.execute("INSERT INTO audit_event(id,ticket_id,action) VALUES (%s,%s,'stock.cancel')",
                      (uuid4(),ticket))
         return {"id":str(reservation),"status":"CANCELLED"}
-    return _receipt(conn,actor,key,{"operation":"cancel","reservation":str(reservation)},effect)
+    return _receipt(conn,actor,key,{"operation":"cancel","reservation":str(reservation),
+                                    "reason":reason},effect)
