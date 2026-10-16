@@ -87,3 +87,21 @@ PostgreSQL + S3 необходимо обеспечивать отдельно. 
 объекты без записи `attachment` старше часа из bucket документов. Quarantine
 не обрабатывается ей, чтобы не нарушить forensic evidence. Нельзя вызывать
 эту функцию из пользовательского HTTP.
+
+
+## Одноразовая PostgreSQL 17 для Alembic (#11)
+
+Это локальный стенд **только для синтетических данных**. Порт БД доступен лишь на `127.0.0.1:55432`; данные размещаются в tmpfs, поэтому исчезнут при уничтожении контейнера. Не подключать production-клиентов.
+
+```bash
+docker compose -f infra/dev/compose.postgres.yml up -d --wait
+export ROBOport_DATABASE_URL='postgresql+psycopg://roboport:roboport-synthetic-only@127.0.0.1:55432/roboport'
+python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+python -m alembic -c apps/api/alembic.ini upgrade head
+PYTHONPATH=apps/api python -m pytest -q tests/integration
+python -m alembic -c apps/api/alembic.ini downgrade base
+python -m alembic -c apps/api/alembic.ini upgrade head
+docker compose -f infra/dev/compose.postgres.yml down -v
+```
+
+На GitHub Actions используется отдельный сервис PostgreSQL 17; там дополнительно выполняются реальный `pg_dump -Fc`, `pg_restore --exit-on-error`, проверка `alembic_version` и append-only событий на восстановленной БД. Исходники `db/legacy_drafts/*.sql` никогда не запускаются. Никаких реальных пользовательских данных в примерах.
