@@ -56,6 +56,16 @@ def test_live_customer_session_a_b_revocation_and_no_document_object_key(monkeyp
             assert [row["id"] for row in items]==[str(expected)]
             assert str(foreign) not in response.text
             assert "object_key" not in response.text and "sha256" not in response.text
+    # Directly guessing another customer's ticket and attachment UUID
+    # must be denied before attempting any storage provider access.
+    http.cookies.clear()
+    http.cookies.set("rp_session",token_a)
+    assert http.get(f"/api/v1/dev/tickets/{ticket_b}").status_code==404
+    assert http.get(f"/api/v1/dev/attachments/{attachment_b}/content").status_code==404
+    http.cookies.clear()
+    http.cookies.set("rp_session",token_b)
+    assert http.get(f"/api/v1/dev/tickets/{ticket_a}").status_code==404
+    assert http.get(f"/api/v1/dev/attachments/{attachment_a}/content").status_code==404
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(a,))
     http.cookies.clear()
