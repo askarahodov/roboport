@@ -112,21 +112,32 @@ def test_catalog_http_exact_and_live_review(monkeypatch):
     route=f"/api/v1/dev/catalog/capabilities/{cap}/review"
     assert http.post(route,json={"approved":True}).status_code==401
     http.cookies.set("rp_session",tokens[0])
-    headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[0]}
+    headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf[0],
+             "Idempotency-Key":"capability-"+cap.hex}
     assert http.post(route,json={"approved":True},headers={**headers,"X-CSRF-Token":"invalid"}).status_code==403
     first=http.post(route,json={"approved":True},headers=headers)
     assert first.status_code==200 and first.json()["status"]=="CANDIDATE",first.text
+    assert http.post(route,json={"approved":True},headers=headers).json()==first.json()
+    assert http.post(route,json={"approved":False},headers=headers).status_code==409
     http.cookies.clear()
     http.cookies.set("rp_session",tokens[1])
     second=http.post(route,json={"approved":True},headers={**headers,"X-CSRF-Token":csrf[1]})
     assert second.status_code==200 and second.json()["status"]=="SUPPORTED",second.text
     part_url=f"/api/v1/dev/catalog/parts/{part}/review"
     assert http.post(part_url,json={"approved":True},
-                     headers={**headers,"X-CSRF-Token":csrf[1]}).status_code==200
+                     headers={**headers,"X-CSRF-Token":csrf[1],
+                              "Idempotency-Key":"part-"+part.hex}).status_code==200
     http.cookies.clear()
     http.cookies.set("rp_session",tokens[0])
-    part_result=http.post(part_url,json={"approved":True},headers=headers)
+    part_result=http.post(part_url,json={"approved":True},
+                          headers={**headers,"Idempotency-Key":"part-"+part.hex})
     assert part_result.status_code==200 and part_result.json()["status"]=="SUPPORTED",part_result.text
+    assert http.post(part_url,json={"approved":True},
+                     headers={**headers,"Idempotency-Key":"part-"+part.hex}).json()==part_result.json()
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE user_role SET revoked_at=now() WHERE user_id=%s",(engineer,))
+    assert http.post(part_url,json={"approved":True},
+                     headers={**headers,"Idempotency-Key":"part-"+part.hex}).status_code==404
 
 
 def test_part_compatibility_cannot_be_supported_without_independent_evidence():
