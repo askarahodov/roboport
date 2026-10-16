@@ -8,7 +8,7 @@ const routes = [
 test('all customer routes fail closed without a server session', async ({ page }) => {
   for (const path of routes) {
     await page.goto(path);
-    await expect(page.getByRole('status')).toContainText('401 — требуется локальная авторизация');
+    await expect(page.getByRole('alert')).toContainText('403 — доступ запрещён');
     await expect(page.getByText('Сессия подтверждена')).toHaveCount(0);
   }
 });
@@ -17,7 +17,7 @@ test('customer account does not accept mock identity from localStorage', async (
   await page.goto('/');
   await page.evaluate(() => localStorage.setItem('subjectId', 'fake-client-b'));
   await page.goto('/account/tickets');
-  await expect(page.getByRole('status')).toContainText('401');
+  await expect(page.getByRole('alert')).toContainText('403');
   await expect(page.getByRole('navigation', { name: 'Разделы личного кабинета' })).toHaveCount(0);
 });
 
@@ -37,7 +37,7 @@ test('mobile + light/dark/auto navigation and keyboard focus', async ({ page }) 
   await page.goto('/account');
   for (const theme of ['light', 'dark', 'auto']) {
     await page.getByRole('combobox', { name: 'Тема оформления' }).selectOption(theme);
-    await expect(page.getByRole('status')).toContainText('401');
+    await expect(page.getByRole('alert')).toContainText('403');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   }
   const link = page.getByRole('navigation', { name: 'Разделы сервиса' }).getByRole('link', { name: 'Личный кабинет' });
