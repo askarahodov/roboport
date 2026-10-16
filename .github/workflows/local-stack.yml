@@ -1,0 +1,80 @@
+name: ROBOport local stack smoke
+on:
+  push:
+    paths:
+      - 'infra/dev/compose.local.yml'
+      - 'infra/dev/bootstrap-local.sh'
+      - 'infra/dev/local.env.example'
+      - 'infra/dev/LOCAL_STACK.md'
+      - 'tests/fixtures/keycloak-realm.json'
+      - '.github/workflows/local-stack.yml'
+  pull_request:
+    paths:
+      - 'infra/dev/compose.local.yml'
+      - 'infra/dev/bootstrap-local.sh'
+      - 'infra/dev/local.env.example'
+      - 'infra/dev/LOCAL_STACK.md'
+      - '.github/workflows/local-stack.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+      - name: Validate local shell bootstrap
+        run: bash -n infra/dev/bootstrap-local.sh
+      - name: Generate disposable local secrets
+        run: |
+          umask 077
+          {
+            echo 'ROBO_DEV_DB_PASSWORD=synthetic-ci-db-pass-12345678'
+            echo 'MINIO_ROOT_USER=roboport-ci-admin'
+            echo 'MINIO_ROOT_PASSWORD=synthetic-ci-minio-pass-12345678'
+            echo 'ROBO_DEV_KC_ADMIN=ciadmin'
+            echo 'ROBO_DEV_KC_PASSWORD=synthetic-ci-keycloak-pass-12345678'
+            echo 'ROBOport_SEED_CLIENT_A_PASSWORD=synthetic-ci-alpha-password-1234'
+            echo 'ROBOport_SEED_CLIENT_B_PASSWORD=synthetic-ci-beta-password-1234'
+            echo 'ROBOport_SEED_ADMIN_PASSWORD=synthetic-ci-staff-password-1234'
+          } > infra/dev/.env.local
+      - name: Validate Compose and bootstrap real infrastructure
+        run: |
+          docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml config -q
+          bash infra/dev/bootstrap-local.sh
+      - name: Live PostgreSQL and Keycloak health, API smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
+          READY=0
+          for attempt in $(seq 1 90); do
+            if curl -fsS --cacert infra/dev/tls/local.crt \
+              https://localhost:9443/realms/roboport-demo/.well-known/openid-configuration >/dev/null 2>&1; then
+              READY=1; break
+            fi
+            sleep 2
+          done
+          test "$READY" = 1
+          export ROBOport_DATABASE_URL=postgresql+psycopg://roboport:synthetic-ci-db-pass-12345678@127.0.0.1:5432/roboport
+          PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000 >/tmp/roboport-local-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health/live | grep -q alive; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/api/v1/catalog/brands | grep -q '"items"'
+      - name: Infrastructure logs on failure
+        if: failure()
+        run: |
+          docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml logs --tail=100 || true
+          tail -100 /tmp/roboport-local-api.log || true
+      - name: Destroy disposable CI volumes
+        if: always()
+        run: docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml down -v --remove-orphans || true
