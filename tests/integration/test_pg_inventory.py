@@ -41,11 +41,11 @@ def inventory_fixture():
           VALUES (%s,%s,1,'SENT',100,'RUB')""",(estimate,ticket))
         db.execute("""INSERT INTO estimate_approval(id,estimate_id,actor_id,decision)
           VALUES (%s,%s,%s,'APPROVED')""",(uuid4(),estimate,actor))
-    return ticket,lot,actor,match,token,csrf
+    return ticket,lot,actor,match,part,token,csrf
 
 
 def test_unverified_then_reserve_replay_and_release(monkeypatch):
-    ticket,lot,actor,match,token,csrf=inventory_fixture()
+    ticket,lot,actor,match,part,token,csrf=inventory_fixture()
     with psycopg.connect(DSN) as db:
         with pytest.raises(StockConflict):
             reserve(db,token,ticket,lot,1,"unverified")
@@ -98,7 +98,7 @@ def test_unverified_then_reserve_replay_and_release(monkeypatch):
 
 
 def test_parallel_last_unit_two_connections():
-    ticket,lot,actor,match,token,csrf=inventory_fixture()
+    ticket,lot,actor,match,part,token,csrf=inventory_fixture()
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE part_compatibility SET verified=true WHERE id=%s",(match,))
     barrier=Barrier(2)
@@ -117,3 +117,37 @@ def test_parallel_last_unit_two_connections():
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT reserved_qty FROM stock_lot WHERE id=%s",(lot,)).fetchone()[0]==1
         assert db.execute("SELECT count(*) FROM stock_movement WHERE lot_id=%s",(lot,)).fetchone()[0]==1
+
+
+def test_public_contract_part_version_and_release_reason(monkeypatch):
+    ticket,lot,actor,match,part,token,csrf=inventory_fixture()
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE part_compatibility SET verified=true WHERE id=%s",(match,))
+    monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    http.cookies.set("rp_session",token)
+    headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf,
+             "Idempotency-Key":"public-"+ticket.hex}
+    path="/api/v1/staff/stock/reservations"
+    payload={"ticketId":str(ticket),"lotId":str(lot),"partId":str(part),
+             "quantity":1,"expectedTicketVersion":1}
+    assert http.post(path,json={**payload,"expectedTicketVersion":2},headers=headers).status_code==409
+    assert http.post(path,json={**payload,"partId":str(uuid4())},headers=headers).status_code==409
+    ok=http.post(path,json=payload,headers=headers)
+    assert ok.status_code==200,ok.text
+    assert set(ok.json())=={"id","status"}
+    assert http.post(path,json=payload,headers=headers).json()==ok.json()
+    rid=ok.json()["id"]
+    cancel_url=f"/api/v1/staff/stock/reservations/{rid}/release"
+    ch={**headers,"Idempotency-Key":"release-"+rid}
+    missing=http.post(cancel_url,json={},headers=ch)
+    assert missing.status_code==422,missing.text
+    released=http.post(cancel_url,json={"reason":"Client cancelled"},headers=ch)
+    assert released.status_code==200,released.text
+    assert released.json()=={"id":rid,"status":"CANCELLED"}
+    assert http.post(cancel_url,json={"reason":"Client cancelled"},headers=ch).json()==released.json()
+    assert http.post(cancel_url,json={"reason":"Other reason"},headers=ch).status_code==409
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT reserved_qty FROM stock_lot WHERE id=%s",(lot,)).fetchone()[0]==0
+        assert db.execute("SELECT count(*) FROM stock_movement WHERE lot_id=%s",(lot,)).fetchone()[0]==2
