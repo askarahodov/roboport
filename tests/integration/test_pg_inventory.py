@@ -44,7 +44,11 @@ def test_unverified_then_reserve_replay_and_release(monkeypatch):
         with pytest.raises(StockConflict):
             reserve(db,token,ticket,lot,1,"unverified")
         assert db.execute("SELECT reserved_qty FROM stock_lot WHERE id=%s",(lot,)).fetchone()[0]==0
-        db.execute("UPDATE part_compatibility SET verified=true WHERE id=%s",(match,))
+        db.execute("UPDATE part_compatibility SET verified=true,revision='R3' WHERE id=%s",(match,))
+        with pytest.raises(StockConflict):
+            reserve(db,token,ticket,lot,1,"wrong-revision")
+        assert db.execute("SELECT reserved_qty FROM stock_lot WHERE id=%s",(lot,)).fetchone()[0]==0
+        db.execute("UPDATE part_compatibility SET revision='R2' WHERE id=%s",(match,))
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
     http=TestClient(app,base_url="https://127.0.0.1")
