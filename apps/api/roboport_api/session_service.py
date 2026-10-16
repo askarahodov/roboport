@@ -47,9 +47,10 @@ def verify_csrf(conn: psycopg.Connection, raw_token: str, csrf: str) -> bool:
         return False
     row = conn.execute(
         """SELECT 1 FROM user_session s JOIN app_user u ON u.id=s.user_id
-           WHERE s.token_hash=%s AND s.csrf_hash=%s AND s.revoked_at IS NULL
-           AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
-           AND u.status='ACTIVE'""",
+           LEFT JOIN user_session_csrf_rotation r ON r.session_id=s.id
+           WHERE s.token_hash=%s AND COALESCE(r.csrf_hash,s.csrf_hash)=%s
+           AND s.revoked_at IS NULL AND s.idle_expires_at>now()
+           AND s.absolute_expires_at>now() AND u.status='ACTIVE'""",
         (token_digest(raw_token),token_digest(csrf)),
     ).fetchone()
     return row is not None
