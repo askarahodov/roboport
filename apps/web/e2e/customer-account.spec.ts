@@ -57,3 +57,43 @@ test('local login sends only same-origin credentials and never stores password',
   expect(stored).not.toContain('synthetic-a');
   await expect(page.getByRole('heading', { name: 'Вход в личный кабинет' })).toBeVisible();
 });
+
+
+test('six private views render after auth API success, responsive and keyboard accessible', async ({ page }) => {
+  // UI contract only; live PostgreSQL A/B authorization is covered separately in tests/integration.
+  await page.route('**/api/v1/auth/me', route => route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({subjectId:'00000000-0000-4000-8000-000000000001'}),
+  }));
+  await page.route('**/api/v1/dev/account/tickets**', route => route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[],limit:20,offset:0}),
+  }));
+  await page.route('**/api/v1/dev/account/summary/*', route => route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify({items:[]}),
+  }));
+  await page.route('**/api/v1/dev/account/preferences', route => route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify({inAppEnabled:true}),
+  }));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account');
+  const nav=page.getByRole('navigation',{name:'Разделы личного кабинета'});
+  await expect(nav).toBeVisible();
+  for (const [path,title] of [
+    ['/account','Обзор'],['/account/robots','Роботы'],
+    ['/account/tickets','Заявки'],['/account/estimates','Сметы'],
+    ['/account/documents','Документы'],['/account/settings','Настройки и уведомления'],
+  ]) {
+    await page.goto(path);
+    await expect(page.getByRole('heading',{name:title})).toBeVisible();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  }
+  for (const theme of ['light','dark','auto']) {
+    await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme);
+    await expect(nav).toBeVisible();
+  }
+  const button=page.getByRole('button',{name:'Выйти'});
+  await button.focus();
+  await expect(button).toBeFocused();
+  await page.screenshot({path:'test-results/account-authenticated-mobile.png',fullPage:true});
+});
