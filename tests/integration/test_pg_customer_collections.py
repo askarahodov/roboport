@@ -72,3 +72,44 @@ def test_live_customer_session_a_b_revocation_and_no_document_object_key(monkeyp
     assert http.get("/api/v1/dev/account/collections/unknown").status_code==404
     monkeypatch.delenv("ROBOport_SYNTHETIC_ACCESS_API")
     assert http.get("/api/v1/dev/account/collections/robots").status_code==404
+
+
+def test_two_http_logins_use_distinct_server_sessions_and_object_scopes(monkeypatch):
+    from roboport_api.passwords import hash_password
+    monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    user_a,user_b,customer_a,customer_b,ticket_a,ticket_b=(uuid4() for _ in range(6))
+    password="Synthetic-Only-Passphrase-12345!"
+    with psycopg.connect(DSN) as db:
+        for user,customer,ticket in ((user_a,customer_a,ticket_a),(user_b,customer_b,ticket_b)):
+            db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(user,user.hex))
+            db.execute("""INSERT INTO local_credential(user_id,password_hash,must_change_password)
+              VALUES (%s,%s,false)""",(user,hash_password(password)))
+            db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES (%s,%s,'CLIENT')",
+                       (uuid4(),user))
+            db.execute("INSERT INTO customer(id,label) VALUES (%s,%s)",(customer,customer.hex))
+            db.execute("INSERT INTO account_customer_link(user_id,customer_id) VALUES(%s,%s)",(user,customer))
+            db.execute("INSERT INTO service_ticket(id,customer_id) VALUES (%s,%s)",(ticket,customer))
+    clients=[]
+    origin={"Origin":"https://127.0.0.1"}
+    for user,own,foreign in ((user_a,ticket_a,ticket_b),(user_b,ticket_b,ticket_a)):
+        client=TestClient(app,base_url="https://127.0.0.1")
+        login=client.post("/api/v1/auth/login",
+                          json={"login":user.hex,"password":password},headers=origin)
+        assert login.status_code==200,login.text
+        cookie=login.headers.get("set-cookie","")
+        assert "HttpOnly" in cookie and "Secure" in cookie and "SameSite=lax" in cookie.lower().replace("samesite=lax","SameSite=lax")
+        assert client.get("/api/v1/auth/me").json()["subjectId"]==str(user)
+        page=client.get("/api/v1/dev/tickets/keyset")
+        assert [x["id"] for x in page.json()["items"]]==[str(own)]
+        assert str(foreign) not in page.text
+        clients.append((client,login.json()["csrfToken"]))
+    first,csrf=clients[0]
+    bad=first.post("/api/v1/auth/logout",headers=origin)
+    assert bad.status_code==403
+    good=first.post("/api/v1/auth/logout",headers={**origin,"X-CSRF-Token":csrf})
+    assert good.status_code==200
+    assert first.get("/api/v1/auth/me").status_code==401
+    assert first.get("/api/v1/dev/tickets/keyset").status_code==401
+    assert clients[1][0].get("/api/v1/dev/tickets/keyset").status_code==200
