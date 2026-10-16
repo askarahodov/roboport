@@ -152,3 +152,27 @@ test('в случае stale версии UI не подтверждает сме
   await expect(page.getByText('Для решения по смете требуется повторный локальный вход.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Согласовать'})).toHaveCount(0);
 });
+
+
+test('обзор считает только серверные коллекции, документы доступны лишь через backend',async ({page})=>{
+  await page.route('**/api/v1/auth/me',route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:'{"subjectId":"11111111-1111-4111-8111-111111111111"}',
+  }));
+  for (const kind of ['robots','tickets','estimates','documents']) {
+    await page.route('**/api/v1/dev/account/collections/'+kind,route=>route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({items:kind==='documents'?
+        [{id:'22222222-2222-4222-8222-222222222222',state:'READY'}]:
+        [{id:'33333333-3333-4333-8333-333333333333'}]}),
+    }));
+  }
+  await page.goto('/account/overview');
+  await expect(page.getByText('Документы: 1')).toBeVisible();
+  await page.getByRole('navigation',{name:'Разделы личного кабинета'})
+    .getByRole('link',{name:'Документы'}).click();
+  const link=page.getByRole('link',{name:'Открыть через защищённый сервер'});
+  await expect(link).toHaveAttribute('href',
+    '/api/v1/dev/attachments/22222222-2222-4222-8222-222222222222/content');
+  expect(await page.locator('a[href*="minio"]').count()).toBe(0);
+});
