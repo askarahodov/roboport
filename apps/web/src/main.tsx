@@ -6,6 +6,7 @@ import './style.css';
 import { CustomerAccount } from './pages/customer/CustomerAccount';
 import { CustomerLogin } from './pages/customer/CustomerLogin';
 import { StaffPortal } from './pages/staff/StaffPortal';
+import { PublicCatalog, PublicModelDetails } from './pages/public/PublicCatalog';
 
 type Brands = paths['/api/v1/catalog/brands']['get']['responses']['200']['content']['application/json'];
 type Models = paths['/api/v1/catalog/models']['get']['responses']['200']['content']['application/json'];
@@ -89,8 +90,9 @@ function App() {
       <Route path="/" element={<section><h1>Сервис обслуживания роботов</h1>
         <p>Синтетический стенд разработки. Приём реальных заявок пока закрыт.</p>
         <p>Изучите <Link to="/catalog/brands">бренды</Link> и <Link to="/catalog/models">модели</Link> роботов.</p></section>} />
-      <Route path="/catalog/brands" element={<Catalog kind="brands" />} />
-      <Route path="/catalog/models" element={<Catalog kind="models" />} />
+      <Route path="/catalog/brands" element={<PublicCatalog kind="brands" />} />
+      <Route path="/catalog/models" element={<PublicCatalog kind="models" />} />
+      <Route path="/catalog/models/:modelId" element={<PublicModelDetails />} />
       <Route path="/account/login" element={<CustomerLogin />} />
       <Route path="/account/*" element={<CustomerAccount />} />
       <Route path="/staff/*" element={<StaffPortal />} />
