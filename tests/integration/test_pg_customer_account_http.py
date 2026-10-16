@@ -17,6 +17,7 @@ def test_account_ticket_list_live_two_users_and_revocation(monkeypatch):
     with psycopg.connect(DSN) as db:
         for uid in (a,b):
             db.execute("INSERT INTO app_user(id,normalized_login) VALUES (%s,%s)",(uid,uid.hex))
+            db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES (%s,%s,'CLIENT')",(uuid4(),uid))
         for cid in (ca,cb):
             db.execute("INSERT INTO customer(id,label) VALUES (%s,%s)",(cid,cid.hex))
         for t,cid in ((ta,ca),(tb,cb)):
@@ -31,11 +32,18 @@ def test_account_ticket_list_live_two_users_and_revocation(monkeypatch):
                now+timedelta(minutes=30),now+timedelta(hours=4)))
     http=TestClient(app,base_url="https://127.0.0.1")
     url="/api/v1/dev/account/tickets"
+    summary="/api/v1/dev/account/summary/"
+    assert http.get(summary+"robots").status_code==401
+    assert http.get(summary+"estimates").status_code==401
+    assert http.get(summary+"documents").status_code==401
     assert http.get(url,headers={"X-User-ID":str(a),"X-Customer-ID":str(ca)}).status_code==401
     http.cookies.set("rp_session",tokens[0])
     first=http.get(url)
     assert first.status_code==200,first.text
     assert [x["id"] for x in first.json()["items"]]==[str(ta)]
+    for section in ("robots","estimates","documents"):
+        visible=http.get(summary+section)
+        assert visible.status_code==200 and visible.json()["items"]==[]
     assert all(str(tb) not in str(v) for v in first.json()["items"])
     http.cookies.clear()
     http.cookies.set("rp_session",tokens[1])
@@ -44,6 +52,8 @@ def test_account_ticket_list_live_two_users_and_revocation(monkeypatch):
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",(b,))
     assert http.get(url).json()["items"]==[]
+    for section in ("robots","estimates","documents"):
+        assert http.get(summary+section).json()["items"]==[]
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE user_session SET revoked_at=now() WHERE id=%s",(sb,))
     assert http.get(url).status_code==401
