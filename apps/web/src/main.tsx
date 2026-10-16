@@ -90,6 +90,7 @@ function App() {
       <Route path="/" element={<section><h1>Сервис обслуживания роботов</h1>
         <p>Синтетический стенд разработки. Приём реальных заявок пока закрыт.</p>
         <p>Изучите <Link to="/catalog/brands">бренды</Link> и <Link to="/catalog/models">модели</Link> роботов.</p></section>} />
+      <Route path="/robots" element={<PublicCatalog kind="models" />} />
       <Route path="/catalog/brands" element={<PublicCatalog kind="brands" />} />
       <Route path="/catalog/models" element={<PublicCatalog kind="models" />} />
       <Route path="/catalog/models/:modelId" element={<PublicModelDetails />} />
