@@ -17,16 +17,20 @@ def upgrade():
     op.execute("""ALTER TABLE acl_entry ADD CONSTRAINT acl_entry_action_check CHECK
       (action IN ('ticket.read','ticket.diagnose','ticket.intake','ticket.manage',
                   'estimate.read','estimate.approve','stock.reserve'))""")
+    op.execute("""CREATE TABLE inventory_part (
+      id uuid PRIMARY KEY,
+      part_number text NOT NULL UNIQUE CHECK(length(trim(part_number))>0)
+    )""")
     op.execute("""CREATE TABLE part_compatibility (
       id uuid PRIMARY KEY,
-      part_number text NOT NULL,
+      part_id uuid NOT NULL REFERENCES inventory_part(id) ON DELETE RESTRICT,
       model_variant text NOT NULL,
       region text NOT NULL,
       revision text NOT NULL,
       verified boolean NOT NULL DEFAULT false,
       revoked_at timestamptz,
-      UNIQUE(part_number,model_variant,region,revision),
-      CHECK (length(trim(part_number))>0 AND length(trim(model_variant))>0
+      UNIQUE(part_id,model_variant,region,revision),
+      CHECK (length(trim(model_variant))>0
         AND length(trim(region))>0 AND length(trim(revision))>0)
     )""")
     op.execute("""CREATE TABLE stock_reservation (
@@ -100,4 +104,5 @@ def downgrade():
     op.execute("DROP FUNCTION guard_reservation_update()")
     op.execute("DROP FUNCTION reject_reservation_delete()")
     op.execute("DROP TABLE part_compatibility")
+    op.execute("DROP TABLE inventory_part")
     op.execute("DROP FUNCTION reject_inventory_ledger_change()")
