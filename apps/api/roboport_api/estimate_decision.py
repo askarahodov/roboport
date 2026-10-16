@@ -28,12 +28,14 @@ def _advance_ticket(conn, ticket, actor, source, destination, expected_version=N
 
 
 def decide_estimate(conn, token: str, estimate_id: UUID, expected_version: int,
-                    decision: str, key: str) -> dict:
+                    decision: str, key: str, reason: str | None = None) -> dict:
     if (not isinstance(estimate_id, UUID) or type(expected_version) is not int
             or expected_version < 1 or decision not in ("APPROVED", "DECLINED")
             or not isinstance(key, str) or not 1 <= len(key) <= 128
             or not key.isascii() or not key.isprintable()):
         raise ValueError("invalid estimate decision")
+    if reason is not None and (not isinstance(reason,str) or len(reason)>1000):
+        raise ValueError("invalid decline reason")
     actor = session_subject(conn, token)
     if actor is None:
         raise EstimateForbidden()
@@ -58,7 +60,7 @@ def decide_estimate(conn, token: str, estimate_id: UUID, expected_version: int,
     if not eligible:
         raise EstimateForbidden()
     canonical = json.dumps({"estimateId":str(estimate_id),"expectedVersion":expected_version,
-                            "decision":decision}, sort_keys=True, separators=(",",":"))
+                            "decision":decision,"reason":reason}, sort_keys=True, separators=(",",":"))
     fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
     stored = conn.execute(
         """SELECT fingerprint, response FROM estimate_decision_receipt
@@ -145,7 +147,7 @@ def create_estimate_version(conn, token: str, ticket_id: UUID,
     if locked[0]=="DIAGNOSING":
         _advance_ticket(conn,ticket_id,actor,locked[0],"ESTIMATE_DRAFT")
     elif locked[0]=="AWAITING_APPROVAL":
-        conn.execute("UPDATE service_ticket SET state='ESTIMATE_DRAFT',version=version+1 WHERE id=%s",(ticket_id,))
+        _advance_ticket(conn,ticket_id,actor,locked[0],"ESTIMATE_DRAFT")
     eid=uuid4()
     total=sum(amounts)
     conn.execute("""INSERT INTO estimate(id,ticket_id,version,state,total_minor,currency)
