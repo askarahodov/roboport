@@ -9,7 +9,7 @@ Development uses disposable PostgreSQL 17. No production DB or real customer dat
 | Estimate SENT immutability | `tests/integration/test_pg_estimate_stock.py` |
 | Active role / ticket ACL **partial indexes** (non-unique) | `tests/integration/test_pg_schema_integrity.py` |
 | Exact catalog variant uniqueness and capability FK | `tests/integration/test_pg_schema_integrity.py` |
-| Concurrent stock reserve | `tests/integration/test_pg_inventory_concurrency.py` (verify file exists during QA) |
+| Concurrent stock reserve | `tests/integration/test_pg_inventory.py` |
 | Competing quote versions and ticket operations | `tests/integration/test_pg_cross_operation_race.py` |
 | Session and account access after revoke | `tests/integration/test_pg_customer_account_http.py` |
 | Real pg_dump/pg_restore plus positive/negative restored FK probe | `.github/workflows/ci.yml`: Synthetic PostgreSQL pg_dump / pg_restore roundtrip |
