@@ -99,3 +99,7 @@ def test_price_change_forces_new_version_and_new_owner_consent(monkeypatch):
         assert actual["version"]==2 and actual["state"]=="APPROVED"
         assert db.execute("SELECT count(*) FROM estimate_approval WHERE estimate_id=%s",
                           (old["id"],)).fetchone()[0]==0
+        assert db.execute("SELECT count(*) FROM ticket_state_event WHERE ticket_id=%s",(ticket,)).fetchone()[0]==5
+        assert db.execute("""SELECT count(*) FROM ticket_state_event
+                             WHERE ticket_id=%s AND from_state='AWAITING_APPROVAL'
+                               AND to_state='ESTIMATE_DRAFT'""",(ticket,)).fetchone()[0]==1
