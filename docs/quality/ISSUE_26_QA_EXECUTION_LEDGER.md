@@ -31,6 +31,18 @@
 | AC-019 | CI: postgres, api, web, browser-e2e job status for exact SHA | BLOCKED |
 | AC-020 | `tests/contract/test_ticket_transition_graph.py` + independent real safety review | BLOCKED |
 
+
+## Фактически выполненный CI — 2026-10-16
+
+SHA: `56ba8acaad577d7c2febd85fffd80773314fe685`
+
+- [Run 38892930412](https://github.com/askarahodov/roboport/actions/runs/38892930412) — `success`; задания [postgres](https://github.com/askarahodov/roboport/actions/runs/38892930412/job/116946532340), [api](https://github.com/askarahodov/roboport/actions/runs/38892930412/job/116946532639), [web](https://github.com/askarahodov/roboport/actions/runs/38892930412/job/116946532768), [browser-e2e](https://github.com/askarahodov/roboport/actions/runs/38892930412/job/116946532699) — все `success` (exit 0).
+- [Run 38892911739](https://github.com/askarahodov/roboport/actions/runs/38892911739) — `success`, тот же SHA.
+- **AC-017: PASS (автоматический PG backup/restore gate)** — реальный `postgres:17`, миграции upgrade→downgrade→upgrade, `pg_dump -Fc`, `pg_restore --exit-on-error`, контроль marker/revision, чтение восстановленной записи и отрицательный тест FK. Доказательство: PostgreSQL job выше. *Не означает подтверждения производственного RTO/RPO.*
+- **AC-019: PASS (CI jobs)** — api + postgres + web + browser-e2e завершены статусом `success` для указанного SHA. Доказательство: run и четыре job URL выше.
+- **AC-001…016, AC-018, AC-020: BLOCKED (per-AC independent QA mapping)** — наборы могут быть исполнены зелёным CI, но granular exit и фактические сценарии необходимо сверить с логами до установки индивидуальных PASS. Отдельный MinIO workflow, visual snapshot review, two-session contention и legal/security approval должны быть подтверждены отдельно.
+- **QA sign-off: BLOCKED**, рецензент не назначен; public-release gate **BLOCKED**. Это не блокирует дальнейшую разработку.
+
 ## Exit criteria
 
 1. Для **каждого** AC записать фактический PASS/FAIL/SKIP/BLOCKED, run URL, SHA, команду, exit code, найденный дефект/ограничение.
