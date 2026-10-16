@@ -17,7 +17,15 @@ def upgrade():
       fingerprint text NOT NULL CHECK(length(fingerprint)=64),
       response jsonb NOT NULL,
       created_at timestamptz NOT NULL DEFAULT now(),
-      PRIMARY KEY(actor_id,estimate_id,request_key)
+      PRIMARY KEY(actor_id,request_key)
+    )""")
+    op.execute("""CREATE TABLE estimate_staff_receipt (
+      actor_id uuid NOT NULL REFERENCES app_user(id),
+      request_key text NOT NULL,
+      operation text NOT NULL,
+      fingerprint text NOT NULL,
+      response jsonb NOT NULL,
+      PRIMARY KEY(actor_id,request_key)
     )""")
     op.execute("""CREATE FUNCTION reject_estimate_receipt_mutation() RETURNS trigger
       LANGUAGE plpgsql AS $body$ BEGIN
@@ -28,5 +36,6 @@ def upgrade():
       FOR EACH ROW EXECUTE FUNCTION reject_estimate_receipt_mutation()""")
 
 def downgrade():
+    op.execute("DROP TABLE estimate_staff_receipt")
     op.execute("DROP TABLE estimate_decision_receipt")
     op.execute("DROP FUNCTION reject_estimate_receipt_mutation()")
