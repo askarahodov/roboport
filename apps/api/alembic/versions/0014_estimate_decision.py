@@ -37,6 +37,9 @@ def upgrade():
     op.execute("""CREATE TRIGGER estimate_receipt_immutable
       BEFORE UPDATE OR DELETE ON estimate_decision_receipt
       FOR EACH ROW EXECUTE FUNCTION reject_estimate_receipt_mutation()""")
+    op.execute("""CREATE TRIGGER estimate_staff_receipt_immutable
+      BEFORE UPDATE OR DELETE ON estimate_staff_receipt
+      FOR EACH ROW EXECUTE FUNCTION reject_estimate_receipt_mutation()""")
 
 def downgrade():
     op.execute("ALTER TABLE estimate_approval DROP COLUMN consent_fingerprint, DROP COLUMN consent_method")
