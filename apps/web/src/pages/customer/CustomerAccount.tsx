@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { CustomerTickets } from './CustomerTickets';
+import { CustomerSummary } from './CustomerSummary';
 
 type Session = { subjectId: string };
 type State = 'loading' | 'authorized' | 'unauthorized' | 'forbidden' | 'error';
@@ -71,7 +72,11 @@ export function CustomerAccount() {
     </nav>
     <h2>{selected.title}</h2>
     <p role="status">Сессия подтверждена. Раздел доступен только через серверную авторизацию.</p>
-    {pathname === '/account/tickets' ? <CustomerTickets /> : <p>Данные раздела пока не опубликованы: отображение роботов, смет и документов требует серверной проверки владения каждым объектом.</p>}
+    {pathname === '/account/tickets' ? <CustomerTickets /> :
+      pathname === '/account/robots' ? <CustomerSummary section="robots" /> :
+      pathname === '/account/estimates' ? <CustomerSummary section="estimates" /> :
+      pathname === '/account/documents' ? <CustomerSummary section="documents" /> :
+      <p>Настройки и уведомления будут доступны после отдельной проверки серверных разрешений. Изменений учётной записи без CSRF нет.</p>}
     <p className="account-hint">Настоящие документы доступны только через защищённый backend. Прямого подключения браузера к хранилищу нет.</p>
     <button type="button" onClick={() => setAttempt(value => value + 1)}>Проверить доступ снова</button>
     <span className="sr-only">Авторизованный субъект: {session?.subjectId}</span>
