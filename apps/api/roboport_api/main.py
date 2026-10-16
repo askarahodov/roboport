@@ -14,9 +14,10 @@ app.include_router(synthetic_auth_router)
 async def request_id_middleware(request: Request, call_next):
     # Идентификатор создаётся сервером; клиентский X-Request-ID не доверенный.
     request.state.request_id = str(uuid4())
-    # Dev tickets carry private session cookies. Reject insecure/non-loopback transport
-    # before any handler can validate a token or connect to PostgreSQL.
-    if request.url.path.startswith("/api/v1/dev/tickets"):
+    # All synthetic dev endpoints must fail before DB/storage access on unsafe transports.
+    # Apply to the exact /dev root and slash-delimited descendants, not lookalike paths.
+    path = request.url.path
+    if path == "/api/v1/dev" or path.startswith("/api/v1/dev/"):
         if (request.url.scheme != "https"
                 or request.url.hostname not in ("127.0.0.1", "localhost")):
             return not_found(request)
