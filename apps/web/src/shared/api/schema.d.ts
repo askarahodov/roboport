@@ -916,7 +916,7 @@ export interface components {
         };
         Transition: {
             /** @enum {string} */
-            targetState: "SUBMITTED" | "TRIAGE" | "AWAITING_DELIVERY" | "RECEIVED" | "DIAGNOSTICS" | "ESTIMATE_PENDING" | "AWAITING_APPROVAL" | "APPROVED" | "WAITING_PARTS" | "IN_REPAIR" | "QC" | "READY_FOR_RETURN" | "COMPLETED" | "SAFETY_HOLD" | "WARRANTY_ROUTE" | "DECLINED" | "UNREPAIRABLE" | "QC_FAILED" | "CANCELLED";
+            targetState: "SUBMITTED" | "TRIAGE" | "AWAITING_DELIVERY" | "RECEIVED" | "DIAGNOSING" | "SAFETY_HOLD" | "ESTIMATE_DRAFT" | "AWAITING_APPROVAL" | "APPROVED" | "DECLINED" | "AWAITING_PARTS" | "REPAIRING" | "QC_PENDING" | "QC_FAILED" | "READY_FOR_HANDOVER" | "COMPLETED" | "CANCELLED" | "UNREPAIRABLE" | "WARRANTY_ROUTE";
             expectedVersion: number;
             reason: string;
         };
