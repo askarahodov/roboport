@@ -1,0 +1,62 @@
+# Disposable local infrastructure. Applications run on the host to preserve
+# the existing fail-closed 127.0.0.1 and HTTPS guards.
+name: roboport-local
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: roboport
+      POSTGRES_PASSWORD: ${ROBO_DEV_DB_PASSWORD:?Set ROBO_DEV_DB_PASSWORD}
+      POSTGRES_DB: roboport
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roboport -d roboport"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: "no"
+  minio:
+    image: tobi312/minio@sha256:e2226dea4b9aef896db02f7396102d48eb58cd339d930332e3d8bdac80012a78
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: "no"
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    command:
+      - start-dev
+      - --import-realm
+      - --https-port=8443
+      - --hostname=https://localhost:9443
+      - --https-certificate-file=/opt/keycloak/conf/local.crt
+      - --https-certificate-key-file=/opt/keycloak/conf/local.key
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${ROBO_DEV_KC_ADMIN:?Set ROBO_DEV_KC_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${ROBO_DEV_KC_PASSWORD:?Set ROBO_DEV_KC_PASSWORD}
+    ports:
+      - "127.0.0.1:9443:8443"
+    volumes:
+      - ../../tests/fixtures/keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro
+      - ./tls/local.crt:/opt/keycloak/conf/local.crt:ro
+      - ./tls/local.key:/opt/keycloak/conf/local.key:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+volumes:
+  postgres_data:
+  minio_data:
