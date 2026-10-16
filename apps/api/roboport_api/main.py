@@ -995,3 +995,34 @@ async def contract_inventory_reserve(request: Request):
 @app.post("/api/v1/staff/stock/reservations/{reservationId}/release",include_in_schema=False)
 async def contract_inventory_release(reservationId: str,request: Request):
     return await _inventory_http(request,"cancel",reservationId,contract=True)
+
+
+@app.get("/api/v1/dev/account/collections/{kind}",include_in_schema=False)
+def dev_customer_collection(kind: str,request: Request):
+    """Loopback-only, session-scoped customer read: never accepts subject IDs."""
+    import os
+    from urllib.parse import urlsplit
+    import psycopg
+    from .customer_collections import owned_collection
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        url=urlsplit(raw)
+        if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https" or request.url.hostname not in ("127.0.0.1","localhost")
+            or url.scheme not in ("postgresql","postgresql+psycopg")
+            or url.hostname!="127.0.0.1" or url.port is None):
+            return not_found(request)
+    except ValueError:
+        return not_found(request)
+    if kind not in ("robots","estimates","documents"):
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                        "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        items=owned_collection(conn,token,kind)
+    if items is None:
+        return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    return JSONResponse(content={"items":items},headers={"Cache-Control":"no-store"})
