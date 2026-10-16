@@ -995,3 +995,157 @@ async def contract_inventory_reserve(request: Request):
 @app.post("/api/v1/staff/stock/reservations/{reservationId}/release",include_in_schema=False)
 async def contract_inventory_release(reservationId: str,request: Request):
     return await _inventory_http(request,"cancel",reservationId,contract=True)
+
+
+@app.get("/api/v1/dev/account/tickets",include_in_schema=False)
+def dev_customer_account_tickets(request: Request,limit: int=20,offset: int=0):
+    """Account read is session-scoped; no client-supplied identity or customer ID."""
+    import os
+    from urllib.parse import urlsplit
+    import psycopg
+    from .ticket_read import owned_ticket_list
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        dsn=urlsplit(raw)
+        if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https"
+            or request.url.hostname not in ("localhost","127.0.0.1")
+            or dsn.scheme not in ("postgresql","postgresql+psycopg")
+            or dsn.hostname!="127.0.0.1" or dsn.port is None):
+            return not_found(request)
+    except ValueError:
+        return not_found(request)
+    if type(limit) is not int or not 1<=limit<=50 or type(offset) is not int or not 0<=offset<=10000:
+        return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        rows=owned_ticket_list(conn,request.cookies.get("rp_session",""),
+                               limit=limit,offset=offset)
+    if rows is None:
+        return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+            "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    return JSONResponse(content={"items":rows,"limit":limit,"offset":offset},
+                        headers={"Cache-Control":"no-store"})
+
+
+@app.get("/api/v1/dev/account/summary/{section}",include_in_schema=False)
+def dev_account_summary(section: str,request: Request):
+    """Owner-scoped read-only synthetic summary; never return object keys or prior-owner PII."""
+    import os
+    from urllib.parse import urlsplit
+    import psycopg
+    from .session_lookup import session_subject
+    if section not in ("robots","estimates","documents"):
+        return not_found(request)
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        dsn=urlsplit(raw)
+        if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+                or request.url.scheme!="https"
+                or request.url.hostname not in ("127.0.0.1","localhost")
+                or dsn.scheme not in ("postgresql","postgresql+psycopg")
+                or dsn.hostname!="127.0.0.1" or dsn.port is None):
+            return not_found(request)
+    except ValueError:
+        return not_found(request)
+    queries={
+        "robots": """SELECT DISTINCT d.id::text AS id,d.serial_number AS label
+            FROM account_customer_link l JOIN service_ticket t ON t.customer_id=l.customer_id
+            JOIN robot_device d ON d.id=t.device_id
+            WHERE l.user_id=%s AND l.revoked_at IS NULL ORDER BY id LIMIT 50""",
+        "estimates": """SELECT e.id::text AS id,e.state AS status,e.version,
+            e.total_minor,e.currency
+            FROM account_customer_link l JOIN service_ticket t ON t.customer_id=l.customer_id
+            JOIN estimate e ON e.ticket_id=t.id
+            WHERE l.user_id=%s AND l.revoked_at IS NULL
+              AND e.state IN ('SENT','APPROVED','DECLINED')
+            ORDER BY e.version DESC,e.id LIMIT 50""",
+        "documents": """SELECT a.id::text AS id,a.mime,a.byte_size
+            FROM account_customer_link l JOIN service_ticket t ON t.customer_id=l.customer_id
+            JOIN attachment a ON a.ticket_id=t.id
+            WHERE l.user_id=%s AND l.revoked_at IS NULL
+              AND a.upload_state='READY' AND a.quarantine_state='CLEAR'
+            ORDER BY a.created_at DESC,a.id LIMIT 50""",
+    }
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        actor=session_subject(conn,request.cookies.get("rp_session",""))
+        if actor is None:
+            return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        allowed=conn.execute("""SELECT EXISTS (SELECT 1 FROM user_role
+            WHERE user_id=%s AND role_code='CLIENT' AND revoked_at IS NULL
+              AND (expires_at IS NULL OR expires_at>now()))""",(actor,)).fetchone()[0]
+        if not allowed:
+            return not_found(request)
+        cursor=conn.execute(queries[section],(actor,))
+        columns=[field.name for field in cursor.description]
+        rows=[dict(zip(columns,row)) for row in cursor.fetchall()]
+        # Opaque summaries; no object_key, sha256, email, tokens, or historical ownership.
+        for row in rows:
+            if "currency" in row:
+                row["currency"]=row["currency"].strip()
+    return JSONResponse(content={"items":rows},headers={"Cache-Control":"no-store"})
+
+
+async def _customer_notification_preferences(request: Request, write: bool):
+    """Current-client in-app preference; never dispatch external messages."""
+    import os
+    from uuid import uuid4
+    import psycopg
+    from .auth_http import _dsn,_origin_ok
+    from .session_lookup import session_subject
+    from .session_service import verify_csrf
+    dsn=_dsn(request)
+    if dsn is None or os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1":
+        return not_found(request)
+    desired=None
+    if write:
+        if not _origin_ok(request):
+            return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                    "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        try:
+            data=await request.json()
+            if not isinstance(data,dict) or type(data.get("inAppEnabled")) is not bool:
+                raise ValueError()
+            desired=data["inAppEnabled"]
+        except (ValueError,TypeError):
+            return JSONResponse(status_code=422,content={"code":"INVALID_INPUT",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    token=request.cookies.get("rp_session","")
+    with psycopg.connect(dsn) as conn:
+        actor=session_subject(conn,token)
+        if actor is None:
+            return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        allowed=conn.execute("""SELECT EXISTS(
+          SELECT 1 FROM user_role WHERE user_id=%s AND role_code='CLIENT'
+            AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())
+        )""",(actor,)).fetchone()[0]
+        if not allowed:
+            return not_found(request)
+        if write and not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
+            return JSONResponse(status_code=403,content={"code":"FORBIDDEN",
+                "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+        row=conn.execute("""SELECT in_app_enabled FROM customer_notification_preference
+          WHERE user_id=%s FOR UPDATE""",(actor,)).fetchone()
+        before=row[0] if row is not None else True
+        if write and before!=desired:
+            conn.execute("""INSERT INTO customer_notification_preference
+                (user_id,in_app_enabled,updated_at) VALUES(%s,%s,now())
+                ON CONFLICT(user_id) DO UPDATE SET in_app_enabled=excluded.in_app_enabled,
+                updated_at=now()""",(actor,desired))
+            conn.execute("""INSERT INTO customer_preference_audit(id,user_id,in_app_enabled)
+                VALUES(%s,%s,%s)""",(uuid4(),actor,desired))
+        result=desired if write else before
+    return JSONResponse(content={"inAppEnabled":result},
+                        headers={"Cache-Control":"no-store"})
+
+
+@app.get("/api/v1/dev/account/preferences",include_in_schema=False)
+async def dev_customer_preferences(request: Request):
+    return await _customer_notification_preferences(request,False)
+
+
+@app.post("/api/v1/dev/account/preferences",include_in_schema=False)
+async def dev_update_customer_preferences(request: Request):
+    return await _customer_notification_preferences(request,True)
