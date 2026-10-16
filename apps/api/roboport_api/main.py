@@ -473,6 +473,7 @@ async def dev_ticket_transition(ticket_id: str, request: Request):
     from .auth_http import _origin_ok
     from .session_service import verify_csrf
     from .ticket_fsm import transition_ticket, TransitionConflict
+    from .ticket_idempotency import execute_ticket_mutation
 
     if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1"
             or request.url.scheme != "https"
@@ -506,14 +507,22 @@ async def dev_ticket_transition(ticket_id: str, request: Request):
         return JSONResponse(status_code=422,content={
             "code":"INVALID_INPUT","requestId":request.state.request_id,
         },headers={"Cache-Control":"no-store"})
+    idem=request.headers.get("Idempotency-Key")
+    if idem is not None and (not 1 <= len(idem) <= 128 or not idem.isascii() or not idem.isprintable()):
+        return JSONResponse(status_code=422,content={
+            "code":"INVALID_INPUT","requestId":request.state.request_id,
+        },headers={"Cache-Control":"no-store"})
     with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
         if not verify_csrf(conn,token,request.headers.get("x-csrf-token","")):
             return JSONResponse(status_code=403,content={
                 "code":"FORBIDDEN","requestId":request.state.request_id,
             },headers={"Cache-Control":"no-store"})
         try:
-            result=transition_ticket(conn,token,ticket,
-                                     payload["toState"],payload["expectedVersion"])
+            result=execute_ticket_mutation(
+                conn,token,ticket,"transition",payload,
+                request.headers.get("Idempotency-Key"),
+                lambda: transition_ticket(conn,token,ticket,
+                                          payload["toState"],payload["expectedVersion"]))
         except TransitionConflict:
             return JSONResponse(status_code=409,content={
                 "code":"CONFLICT","requestId":request.state.request_id,
@@ -531,6 +540,7 @@ async def _safety_mutation(request: Request, ticket_id: str, operation: str):
     from .auth_http import _origin_ok
     from .session_service import verify_csrf
     from .ticket_fsm import record_safety_review, release_safety_hold, TransitionConflict
+    from .ticket_idempotency import execute_ticket_mutation
 
     if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API") != "1"
             or request.url.scheme != "https"
@@ -570,12 +580,15 @@ async def _safety_mutation(request: Request, ticket_id: str, operation: str):
                 "code":"FORBIDDEN","requestId":request.state.request_id,
             },headers={"Cache-Control":"no-store"})
         try:
-            if operation=="review":
-                reviewer_role=record_safety_review(
-                    conn,token,ticket,payload["expectedVersion"],payload["approved"])
-                result={"recorded":True,"role":reviewer_role}
-            else:
-                result=release_safety_hold(conn,token,ticket,payload["expectedVersion"])
+            def effect():
+                if operation=="review":
+                    reviewer_role=record_safety_review(
+                        conn,token,ticket,payload["expectedVersion"],payload["approved"])
+                    return {"recorded":True,"role":reviewer_role}
+                return release_safety_hold(conn,token,ticket,payload["expectedVersion"])
+            result=execute_ticket_mutation(
+                conn,token,ticket,operation,payload,
+                request.headers.get("Idempotency-Key"),effect)
         except (TransitionConflict,psycopg.errors.UniqueViolation):
             conn.rollback()
             return JSONResponse(status_code=409,content={
