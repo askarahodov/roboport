@@ -2,6 +2,18 @@ import { CustomerSettings } from './CustomerSettings';
 import * as React from 'react';
 import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom';
 
+async function currentCsrf():Promise<string> {
+  const response=await fetch('/api/v1/auth/csrf',{
+    method:'POST',credentials:'include',cache:'no-store',
+  });
+  if (!response.ok) throw new Error('CSRF unavailable');
+  const body:unknown=await response.json();
+  if (!body || typeof body!=='object' || !('csrfToken' in body)
+    || typeof body.csrfToken!=='string' || body.csrfToken.length!==43)
+    throw new Error('CSRF invalid');
+  return body.csrfToken;
+}
+
 type SessionState = 'loading' | 'authenticated' | 'anonymous' | 'unavailable';
 type SectionId = 'overview' | 'robots' | 'tickets' | 'estimates' | 'documents' | 'settings';
 const sections: Array<{ id: SectionId; label: string; description: string }> = [
@@ -100,14 +112,15 @@ function CustomerCollection({kind,csrf}:{kind:CollectionKind;csrf:string|null}) 
     return () => controller.abort();
   },[kind,retry]);
   async function decide(row:CollectionRow,decision:'approve'|'decline') {
-    if (!csrf || typeof row.version!=='number' || deciding || row.state!=='SENT') return;
+    if (typeof row.version!=='number' || deciding || row.state!=='SENT') return;
     const slot=row.id+':'+row.version+':'+decision;
     keys.current[slot] ??= crypto.randomUUID();
     setDecisionMessage('');setDeciding(true);
     try {
+      const freshCsrf=await currentCsrf();
       const response=await fetch('/api/v1/customer/estimates/'+row.id+'/'+decision,{
         method:'POST',credentials:'include',cache:'no-store',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,
+        headers:{'Content-Type':'application/json','X-CSRF-Token':freshCsrf,
                  'Idempotency-Key':keys.current[slot]},
         body:JSON.stringify({estimateVersion:row.version,
           ...(decision==='approve' ? {approvalMethod:'verified_account'} : {})}),
@@ -142,10 +155,10 @@ function CustomerCollection({kind,csrf}:{kind:CollectionKind;csrf:string|null}) 
         {row.totalMinor !== undefined ? ', сумма '+(row.totalMinor/100).toFixed(2)+' ₽' : ''}
         {kind==='documents' && <div><a href={'/api/v1/dev/attachments/'+encodeURIComponent(row.id)+'/content'}>Открыть через защищённый сервер</a></div>}
         {kind==='estimates' && row.state==='SENT' && <div>
-          {csrf ? <>
+          <>
             <button disabled={deciding} onClick={()=>void decide(row,'approve')}>Согласовать</button>
             <button disabled={deciding} onClick={()=>void decide(row,'decline')}>Отклонить</button>
-          </> : <p>Для решения по смете требуется повторный локальный вход.</p>}
+          </>
         </div>}
       </li>)}</ul>)}
     {decisionMessage && <p role="alert">{decisionMessage}</p>}
@@ -311,12 +324,12 @@ export function Account() {
     <button type="button" onClick={() => setRefresh(count => count + 1)}>Повторить проверку</button>
     </section>;
   async function logout() {
-    if (!csrf) {setLogoutError('Для завершения сессии после обновления страницы войдите повторно.');return;}
     setLogoutError('');
     try {
+      const freshCsrf=await currentCsrf();
       const response=await fetch('/api/v1/auth/logout',{
         method:'POST',credentials:'include',cache:'no-store',
-        headers:{'X-CSRF-Token':csrf},
+        headers:{'X-CSRF-Token':freshCsrf},
       });
       if (!response.ok) {
         setLogoutError('Не удалось завершить сессию. Попробуйте снова.');
