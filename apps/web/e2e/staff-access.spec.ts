@@ -62,3 +62,69 @@ test('queue request forbidden after role revocation hides ticket data',async ({p
   await expect(page.getByRole('alert')).toContainText('Доступ к очереди отозван');
   await expect(page.getByRole('region',{name:'Назначенные заявки'}).getByRole('listitem')).toHaveCount(0);
 });
+
+
+test('intake transition submits exact version with CSRF and refreshed queue',async ({page})=>{
+  let state='AWAITING_DELIVERY',version=3;
+  let posted=false;
+  await page.route('**/api/v1/dev/staff/access',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"roles":["INTAKE"]}'
+  }));
+  await page.route('**/api/v1/dev/staff/queue?*',route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[{id:'00000000-0000-0000-0000-000000000001',state,version}]})
+  }));
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'
+  }));
+  await page.route('**/api/v1/dev/tickets/*/transition',async route=>{
+    const req=route.request();
+    expect(req.method()).toBe('POST');
+    expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+    expect(req.headers()['idempotency-key']).toBeTruthy();
+    expect(req.postDataJSON()).toEqual({toState:'RECEIVED',expectedVersion:3});
+    posted=true;state='RECEIVED';version=4;
+    await route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({id:'00000000-0000-0000-0000-000000000001',state,version})});
+  });
+  await page.goto('/staff');
+  await page.getByRole('button',{name:'Принять устройство'}).click();
+  await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('RECEIVED');
+  expect(posted).toBe(true);
+});
+
+test('safety hold does not show repair or handover actions',async ({page})=>{
+  await page.route('**/api/v1/dev/staff/access',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"roles":["ENGINEER"]}'
+  }));
+  await page.route('**/api/v1/dev/staff/queue?*',route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[{id:'00000000-0000-0000-0000-000000000001',
+      state:'SAFETY_HOLD',version:2}]})
+  }));
+  await page.goto('/staff');
+  await expect(page.getByRole('alert')).toContainText('Safety hold');
+  await expect(page.getByRole('button',{name:'Выдать устройство'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Вернуть в ремонт'})).toHaveCount(0);
+});
+
+test('QC failed cannot expose handover and stale transition returns 409',async ({page})=>{
+  await page.route('**/api/v1/dev/staff/access',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"roles":["ENGINEER"]}'
+  }));
+  await page.route('**/api/v1/dev/staff/queue?*',route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[{id:'00000000-0000-0000-0000-000000000001',
+      state:'QC_FAILED',version:4}]})
+  }));
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'
+  }));
+  await page.route('**/api/v1/dev/tickets/*/transition',route=>route.fulfill({
+    status:409,contentType:'application/json',body:'{"code":"CONFLICT"}'
+  }));
+  await page.goto('/staff');
+  await expect(page.getByRole('button',{name:'Выдать устройство'})).toHaveCount(0);
+  await page.getByRole('button',{name:'Вернуть в ремонт'}).click();
+  await expect(page.getByRole('status').filter({hasText:'409'})).toBeVisible();
+});
