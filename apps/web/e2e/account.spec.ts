@@ -61,3 +61,25 @@ test('light dark auto и клавиатурная навигация прива�
   await expect(page).toHaveURL(/\/account\/robots$/);
   await expect(page.getByRole('status')).toContainText('Данные раздела пока недоступны');
 });
+
+test('раздел заявок загружает только серверный ответ; 401 и 404 не показывают чужие данные', async ({ page }) => {
+  await page.route('**/api/v1/auth/me', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: '{"subjectId":"11111111-1111-4111-8111-111111111111"}',
+  }));
+  await page.route('**/api/v1/dev/tickets/keyset?limit=20', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ items: [
+      { id: '22222222-2222-4222-8222-222222222222', state: 'APPROVED', version: 4 },
+    ], nextCursor: null }),
+  }));
+  await page.goto('/account/tickets');
+  await expect(page.getByText(/Заявка 22222222-2222-4222-8222-222222222222/)).toBeVisible();
+  await page.unroute('**/api/v1/dev/tickets/keyset?limit=20');
+  await page.route('**/api/v1/dev/tickets/keyset?limit=20', route => route.fulfill({
+    status: 401, contentType: 'application/json', body: '{"code":"UNAUTHENTICATED"}',
+  }));
+  await page.reload();
+  await expect(page.getByRole('alert')).toContainText('доступ отозван');
+  await expect(page.getByText(/Заявка 22222222-2222-4222-8222-222222222222/)).toHaveCount(0);
+});
