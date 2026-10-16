@@ -255,5 +255,8 @@ def test_http_safety_review_requires_two_independent_staff():
         assert client.post(review,json={**payload,"approved":True},headers=eng_headers).status_code==200
         client.cookies.clear()
         client.cookies.set("rp_session",tokens[1])
-        assert client.post(release,json=payload,headers=headers).status_code==200
-        assert client.post(release,json=payload,headers=headers).status_code==409
+        ok=client.post(release,json=payload,headers=headers)
+        assert ok.status_code==200
+        replay=client.post(release,json=payload,headers=headers)
+        assert replay.status_code==200 and replay.json()==ok.json()
+        assert client.post(release,json={"expectedVersion":2},headers=headers).status_code==409
