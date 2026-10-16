@@ -44,3 +44,16 @@ test('mobile + light/dark/auto navigation and keyboard focus', async ({ page }) 
   await link.focus();
   await expect(link).toBeFocused();
 });
+
+
+test('local login sends only same-origin credentials and never stores password', async ({ page }) => {
+  await page.goto('/account/login');
+  await page.getByRole('textbox', { name: 'Логин' }).fill('synthetic-a');
+  await page.getByLabel('Пароль').fill('synthetic-secret');
+  await page.getByRole('button', { name: 'Войти' }).click();
+  await expect(page.getByRole('alert')).toContainText('защищённом локальном HTTPS');
+  const stored=await page.evaluate(() => Object.values(localStorage).join('|'));
+  expect(stored).not.toContain('synthetic-secret');
+  expect(stored).not.toContain('synthetic-a');
+  await expect(page.getByRole('heading', { name: 'Вход в личный кабинет' })).toBeVisible();
+});
