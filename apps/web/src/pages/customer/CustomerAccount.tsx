@@ -55,8 +55,8 @@ export function CustomerAccount() {
   if (!selected) return <section><h1>Раздел не найден</h1><Link to="/account">В кабинет</Link></section>;
   if (state === 'loading') return <section><h1>Личный кабинет</h1><p role="status">Проверка серверной сессии…</p></section>;
   if (state === 'unauthorized') return <section><h1>Личный кабинет</h1>
-    <p role="status">401 — требуется локальная авторизация. Вход пока не реализован.</p>
-    <Link to="/">На главную</Link></section>;
+    <p role="status">401 — требуется локальная авторизация.</p>
+    <Link to="/account/login">Войти</Link> <Link to="/">На главную</Link></section>;
   if (state === 'forbidden') return <section><h1>Доступ ограничен</h1>
     <p role="alert">403 — доступ запрещён или отозван. Обратитесь к администратору.</p>
     <Link to="/">На главную</Link></section>;
