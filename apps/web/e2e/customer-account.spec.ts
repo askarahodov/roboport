@@ -196,3 +196,29 @@ test('Keycloak entry is visible and points to same-origin guarded OIDC start',as
  await entry.click();
  await expect(page).toHaveURL(/\/api\/v1\/dev\/oidc\/start$/);
 });
+
+
+test('ticket timeline is owner-scoped and fails closed after revoked ownership',async({page})=>{
+ await page.route('**/api/v1/auth/me',r=>r.fulfill({status:200,contentType:'application/json',body:'{"subjectId":"synthetic-a"}'}));
+ await page.route('**/api/v1/dev/account/tickets?*',r=>r.fulfill({status:200,contentType:'application/json',
+  body:JSON.stringify({items:[{id:'synthetic-ticket-a',state:'DIAGNOSING',version:2}]})}));
+ let revoked=false;
+ await page.route('**/api/v1/dev/account/tickets/synthetic-ticket-a/timeline',r=>r.fulfill({
+   status:revoked?404:200,contentType:'application/json',body:revoked?'{}':
+   JSON.stringify({items:[{fromState:'DRAFT',toState:'SUBMITTED',at:'2026-10-26T08:00:00Z',version:2}]})}));
+ await page.goto('/account/tickets');
+ await page.getByRole('button',{name:'История этапов'}).click();
+ await expect(page.getByLabel('История этапов заявки').getByText('SUBMITTED')).toBeVisible();
+ await page.getByRole('button',{name:'Скрыть историю'}).click();
+ revoked=true;
+ await page.getByRole('button',{name:'История этапов'}).click();
+ await expect(page.getByText('История недоступна: права изменились.')).toBeVisible();
+ await expect(page.getByText('SUBMITTED')).toHaveCount(0);
+});
+test('new customer has safe empty accounts, no guessed resources',async({page})=>{
+ await page.route('**/api/v1/auth/me',r=>r.fulfill({status:200,contentType:'application/json',body:'{"subjectId":"synthetic-new"}'}));
+ await page.route('**/api/v1/dev/account/tickets?*',r=>r.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}));
+ await page.goto('/account/tickets');
+ await expect(page.getByText('У вас пока нет доступных заявок.')).toBeVisible();
+ await expect(page.getByRole('button',{name:'История этапов'})).toHaveCount(0);
+});
