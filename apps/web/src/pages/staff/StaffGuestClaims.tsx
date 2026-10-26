@@ -13,7 +13,7 @@ async function post(url:string,body?:object){
  if(!result.ok)throw Error('action');
  return await result.json() as Record<string,string>;
 }
-export function StaffGuestClaims({roles}:{roles:string[]}){
+export function StaffGuestClaims({roles,active=true}:{roles:string[];active?:boolean}){
  const [queue,setQueue]=React.useState<Pending[]>([]);
  const [phase,setPhase]=React.useState<'loading'|'ready'|'denied'|'error'>('loading');
  const [refresh,setRefresh]=React.useState(0);
@@ -24,7 +24,7 @@ export function StaffGuestClaims({roles}:{roles:string[]}){
  const [busy,setBusy]=React.useState(false);
  const [error,setError]=React.useState(false);
  React.useEffect(()=>{
-  if(!roles.includes('INTAKE'))return;
+  if(!active||!roles.includes('INTAKE'))return;
   const ctrl=new AbortController();
   setPhase('loading');setQueue([]);
   void (async()=>{try{
@@ -36,7 +36,7 @@ export function StaffGuestClaims({roles}:{roles:string[]}){
     if(!ctrl.signal.aborted){setQueue(body.items);setPhase('ready');}
   }catch{if(!ctrl.signal.aborted)setPhase('error');}})();
   return()=>ctrl.abort();
- },[roles.includes('INTAKE'),refresh]);
+ },[roles.includes('INTAKE'),active,refresh]);
  async function issue(id:string){
    setBusy(true);setError(false);setProofInfo(null);
    try{
@@ -48,7 +48,7 @@ export function StaffGuestClaims({roles}:{roles:string[]}){
    }catch{setError(true);}finally{setBusy(false);}
  }
  React.useEffect(()=>{
-  if(!roles.includes('MANAGER'))return;
+  if(!active||!roles.includes('MANAGER'))return;
   const ctrl=new AbortController();
   void (async()=>{try{
     const r=await fetch('/api/v1/dev/guest-claims/review-queue',
@@ -60,7 +60,7 @@ export function StaffGuestClaims({roles}:{roles:string[]}){
     }
   }catch{ /* no claims shown if unavailable */ }})();
   return()=>ctrl.abort();
- },[roles.includes('MANAGER'),refresh]);
+ },[roles.includes('MANAGER'),active,refresh]);
  async function selectForReview(id:string){
   setBusy(true);setError(false);
   try{
