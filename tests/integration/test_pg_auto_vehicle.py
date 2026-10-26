@@ -16,7 +16,7 @@ def test_vehicle_vin_is_optional_normalized_and_unique():
             "INSERT INTO auto_vehicle(id,make,model,model_year) VALUES(%s,'TestMake','Sedan',2026)",
             (uuid4(),),
         )
-        vin = "WVWZZZ1JZXW000001"
+        vin = "TEST0000000000001"
         db.execute(
             "INSERT INTO auto_vehicle(id,vin,make,model) VALUES(%s,%s,'TestMake','Van')",
             (uuid4(), vin),
@@ -27,7 +27,7 @@ def test_vehicle_vin_is_optional_normalized_and_unique():
                     "INSERT INTO auto_vehicle(id,vin,make,model) VALUES(%s,%s,'TestMake','Van')",
                     (uuid4(), vin),
                 )
-        for invalid in ("short", "WVWZZZ1JZXW00000I", "wvwzzz1jzxw000001"):
+        for invalid in ("short", "TEST000000000000I", "test0000000000001"):
             with pytest.raises(psycopg.errors.CheckViolation):
                 with db.transaction():
                     db.execute(
@@ -72,6 +72,18 @@ def test_customer_vehicle_links_require_valid_owners_and_allow_revocation():
                     "INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id) VALUES(%s,%s,%s)",
                     (uuid4(), uuid4(), another_customer),
                 )
+        # A newly inserted association is only a pending claim, never
+        # sufficient authorization for reading a service record.
+        assert db.execute(
+            "SELECT verified_at, verified_by FROM auto_vehicle_customer_link WHERE id=%s",
+            (first_link,),
+        ).fetchone() == (None, None)
+        with pytest.raises(psycopg.errors.CheckViolation):
+            with db.transaction():
+                db.execute(
+                    "UPDATE auto_vehicle_customer_link SET verified_at=now() WHERE id=%s",
+                    (first_link,),
+                )
         db.execute(
             "UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
             (first_link,),
@@ -80,7 +92,7 @@ def test_customer_vehicle_links_require_valid_owners_and_allow_revocation():
             "INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id) VALUES(%s,%s,%s)",
             (uuid4(), vehicle, customer),
         )
-        # An additional verified customer link can coexist; it does NOT grant
+        # An additional pending customer link can coexist; it does NOT grant
         # access to previously created service_ticket documents.
         db.execute(
             "INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id) VALUES(%s,%s,%s)",
