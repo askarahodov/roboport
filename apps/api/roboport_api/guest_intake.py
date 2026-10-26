@@ -11,6 +11,8 @@ def create_guest_request(conn:psycopg.Connection,request_key:str,origin_key:str)
         or not isinstance(origin_key,str) or len(origin_key)<3):
         raise ValueError("invalid idempotency")
     digest=hashlib.sha256((origin_key+":"+request_key).encode()).hexdigest()
+    # Serialize simultaneous retries of the same key without locking unrelated requests.
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(digest,))
     existing=conn.execute("SELECT id FROM guest_intake_request WHERE request_key_hash=%s",(digest,)).fetchone()
     if existing:
         return str(existing[0]),"PENDING_REVIEW"
