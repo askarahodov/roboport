@@ -134,5 +134,35 @@ def test_anonymous_guest_intake_has_no_ticket_access_and_staff_only_assignment(m
     assert assigned.status_code==200,assigned.text
     ticket=assigned.json()["ticketId"]
     assert http.post(f"{url}/{receipt}/assign",headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf}).status_code==403
-    assert http.post(f"/api/v1/dev/guest-claims/tickets/{ticket}/issue",
-       headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf}).status_code==200
+    issued=http.post(f"/api/v1/dev/guest-claims/tickets/{ticket}/issue",
+       headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf})
+    assert issued.status_code==200,issued.text
+    claim=issued.json()["claimId"]
+    proof=issued.json()["proof"]
+    c,m=uuid4(),uuid4()
+    client_token,manager_token,client_csrf,manager_csrf=(new_token() for _ in range(4))
+    with psycopg.connect(DSN) as db:
+        for uid,role,raw,secret in ((c,"CLIENT",client_token,client_csrf),
+                                     (m,"MANAGER",manager_token,manager_csrf)):
+            db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(uid,uid.hex))
+            db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,%s)",(uuid4(),uid,role))
+            db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,
+               created_at,idle_expires_at,absolute_expires_at) VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+               (uuid4(),uid,token_digest(raw),token_digest(secret),now,
+                now+timedelta(minutes=30),now+timedelta(hours=4)))
+    http.cookies.clear();http.cookies.set("rp_session",client_token)
+    accepted=http.post(f"/api/v1/dev/guest-claims/{claim}/redeem",
+      headers={"Origin":"https://127.0.0.1","X-CSRF-Token":client_csrf},json={"proof":proof})
+    assert accepted.status_code==200 and accepted.json()["status"]=="PENDING_REVIEW"
+    assert http.get("/api/v1/dev/account/tickets").json()["items"]==[]
+    http.cookies.clear();http.cookies.set("rp_session",manager_token)
+    assigned_review=http.post(f"/api/v1/dev/guest-claims/{claim}/assign-review",
+       headers={"Origin":"https://127.0.0.1","X-CSRF-Token":manager_csrf})
+    assert assigned_review.status_code==200,assigned_review.text
+    decision=http.post(f"/api/v1/dev/guest-claims/{claim}/review",
+      headers={"Origin":"https://127.0.0.1","X-CSRF-Token":manager_csrf},json={"approve":True})
+    assert decision.status_code==200,decision.text
+    assert decision.json()["status"]=="VERIFIED"
+    http.cookies.clear();http.cookies.set("rp_session",client_token)
+    assert [x["id"] for x in http.get("/api/v1/dev/account/tickets").json()["items"]]==[str(ticket)]
+
