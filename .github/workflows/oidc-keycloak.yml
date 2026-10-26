@@ -5,6 +5,7 @@ on:
       - 'apps/api/roboport_api/oidc*.py'
       - 'apps/api/alembic/versions/0019_oidc_identity.py'
       - 'apps/web/e2e/keycloak-live.mjs'
+      - 'apps/web/vite.config.ts'
       - 'tests/fixtures/keycloak-realm.json'
       - 'tests/integration/seed_oidc_keycloak.py'
       - '.github/workflows/oidc-keycloak.yml'
@@ -70,6 +71,11 @@ jobs:
           openssl req -x509 -newkey rsa:2048 -nodes -keyout tls.key -out tls.crt -days 1 \
             -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
           chmod 644 tls.crt tls.key  # disposable CI-only key; container runs as non-root
+      - name: Prepare Vite local TLS
+        run: |
+          mkdir -p infra/dev/tls
+          cp tls.crt infra/dev/tls/local.crt
+          cp tls.key infra/dev/tls/local.key
       - name: Start isolated real Keycloak with imported synthetic realm
         shell: bash
         run: |
@@ -106,18 +112,27 @@ jobs:
           set -euo pipefail
           export SSL_CERT_FILE="${PWD}/tls.crt"
           PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app \
-            --host 127.0.0.1 --port 8444 --ssl-certfile tls.crt --ssl-keyfile tls.key \
+            --host 127.0.0.1 --port 8445 --ssl-certfile tls.crt --ssl-keyfile tls.key \
             > /tmp/roboport-oidc-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 40); do
-            if curl --silent --fail --cacert tls.crt https://127.0.0.1:8444/health/live >/dev/null; then break; fi
+            if curl --silent --fail --cacert tls.crt https://127.0.0.1:8445/health/live >/dev/null; then break; fi
             sleep 1
           done
           curl --fail --cacert tls.crt https://127.0.0.1:8444/health/live
+          ROBO_DEV_HTTPS=1 npm --prefix apps/web run dev > /tmp/roboport-oidc-web.log 2>&1 &
+          WEB_PID=$!
+          trap 'kill "$API_PID" "$WEB_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if curl --silent --fail --cacert tls.crt https://127.0.0.1:8444/api/v1/catalog/brands >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --cacert tls.crt https://127.0.0.1:8444/api/v1/catalog/brands >/dev/null
           node apps/web/e2e/keycloak-live.mjs
       - name: Debug only on failure
         if: failure()
         run: |
           docker logs roboport-keycloak --tail=100 || true
           tail -100 /tmp/roboport-oidc-api.log || true
+          tail -100 /tmp/roboport-oidc-web.log || true
