@@ -120,7 +120,7 @@ jobs:
             if curl --silent --fail --cacert tls.crt https://127.0.0.1:8445/health/live >/dev/null; then break; fi
             sleep 1
           done
-          curl --fail --cacert tls.crt https://127.0.0.1:8444/health/live
+          curl --fail --cacert tls.crt https://127.0.0.1:8445/health/live
           ROBO_DEV_HTTPS=1 npm --prefix apps/web run dev > /tmp/roboport-oidc-web.log 2>&1 &
           WEB_PID=$!
           trap 'kill "$API_PID" "$WEB_PID" 2>/dev/null || true' EXIT
