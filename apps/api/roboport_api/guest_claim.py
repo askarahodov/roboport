@@ -100,3 +100,25 @@ def review_claim(conn:psycopg.Connection,manager_token:str,claim:UUID,approve:bo
     conn.execute("""INSERT INTO guest_claim_audit(id,claim_id,actor_id,action)
          VALUES(%s,%s,%s,%s)""",(uuid4(),claim,manager,status))
     return status
+
+def assign_review(conn:psycopg.Connection,manager_token:str,claim:UUID)->UUID:
+    """Explicit MANAGER action claims a proof-verified ticket for review."""
+    manager=_staff(conn,manager_token,"MANAGER")
+    row=conn.execute("""SELECT ticket_id,requested_user_id,proof_verified_at,status
+      FROM guest_ticket_claim WHERE id=%s FOR UPDATE""",(claim,)).fetchone()
+    if row is None or row[3]!='PENDING_REVIEW' or row[2] is None or row[1] is None:
+        raise ClaimRejected("unavailable")
+    if manager==row[1]:
+        raise ClaimRejected("independent reviewer required")
+    # Exactly one assigned, live review manager; subsequent attempts cannot
+    # silently shift review ownership.
+    existing=conn.execute("""SELECT user_id FROM acl_entry WHERE ticket_id=%s
+        AND action='ticket.manage' AND revoked_at IS NULL
+        AND (expires_at IS NULL OR expires_at>now()) FOR UPDATE""",(row[0],)).fetchall()
+    if existing:
+        if any(r[0]==manager for r in existing):
+            return row[0]
+        raise ClaimRejected("review already assigned")
+    conn.execute("""INSERT INTO acl_entry(id,user_id,ticket_id,action)
+       VALUES(%s,%s,%s,'ticket.manage')""",(uuid4(),manager,row[0]))
+    return row[0]
