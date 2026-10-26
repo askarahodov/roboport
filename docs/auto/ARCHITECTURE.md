@@ -3,7 +3,7 @@
 > **Статус: planned / partly current.** В main уже существует только SQL-основа автомобильной сущности (`auto_vehicle`, `auto_vehicle_customer_link` в миграции 0021). Запись на ремонт, auto API, workflow заказ-наряда, OEM и мобильное приложение пока запланированы. Текущее состояние сверять с [аудитом документации](DOCUMENTATION_AUDIT.md).
 
 ## Current
-React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0021; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
+React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0023; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
 
 ## Decision
 Модульный монолит и Strangler Pattern. Существующие таблицы и API не переименовывать и не удалять до регрессионного доказательства; автомобильные контексты добавлять отдельными модулями и миграциями. Основание: ADR-001.md.
