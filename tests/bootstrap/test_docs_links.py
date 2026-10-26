@@ -55,3 +55,21 @@ def test_directory_traversal_is_rejected(tmp_path):
     errors = checker.check_links(tmp_path)
     assert len(errors) == 1
     assert "выход за пределы" in errors[0]
+
+
+def test_docsify_sidebar_absolute_routes_use_docs_root(tmp_path):
+    docs = tmp_path / "docs"
+    guides = docs / "guides"
+    guides.mkdir(parents=True)
+    (docs / "README.md").write_text("# Главная\\n", encoding="utf-8")
+    (guides / "client.md").write_text("# Клиент\\n", encoding="utf-8")
+    (docs / "_sidebar.md").write_text(
+        "- [Главная](/)\\n- [Клиент](/guides/client.md)\\n", encoding="utf-8",
+    )
+    assert checker.check_links(tmp_path) == []
+    (docs / "_sidebar.md").write_text(
+        "- [Нет страницы](/guides/missing.md)\\n", encoding="utf-8",
+    )
+    problems = checker.check_links(tmp_path)
+    assert len(problems) == 1
+    assert "docs/guides/missing.md" in problems[0]
