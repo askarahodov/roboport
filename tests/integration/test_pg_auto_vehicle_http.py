@@ -18,6 +18,10 @@ def _seed():
     ca, cb = uuid4(), uuid4()
     va, vb, pending = uuid4(), uuid4(), uuid4()
     tokens = new_token(), new_token()
+    # UUID hex содержит только 0-9/A-F и обеспечивает уникальные синтетические VIN
+    # между всеми тестами общего PostgreSQL CI.
+    vin_a = "TEST" + uuid4().hex[:13].upper()
+    vin_b = "TEST" + uuid4().hex[:13].upper()
     now = datetime.now(timezone.utc)
     with psycopg.connect(DSN) as conn:
         for user in (a, b, reviewer):
@@ -46,8 +50,8 @@ def _seed():
                 (user, customer),
             )
         for vehicle, model, vin in (
-            (va, "Sedan", "TEST0000000000001"),
-            (vb, "SUV", "TEST0000000000002"),
+            (va, "Sedan", vin_a),
+            (vb, "SUV", vin_b),
             (pending, "Hidden", None),
         ):
             conn.execute(
@@ -66,14 +70,14 @@ def _seed():
                VALUES(%s,%s,%s)""",
             (uuid4(), pending, ca),
         )
-    return a, b, ca, cb, va, vb, pending, tokens
+    return a, b, ca, cb, va, vb, pending, tokens, vin_a
 
 
 def test_auto_vehicle_only_verified_client_records(monkeypatch):
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
     monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
-    a, b, ca, cb, va, vb, pending, (token_a, token_b) = _seed()
+    a, b, ca, cb, va, vb, pending, (token_a, token_b), vin_a = _seed()
     endpoint = "/api/v1/dev/auto/vehicles"
     client = TestClient(app, base_url="https://127.0.0.1")
 
@@ -85,7 +89,7 @@ def test_auto_vehicle_only_verified_client_records(monkeypatch):
     assert listing.status_code == 200
     assert {item["id"] for item in listing.json()["items"]} == {str(va)}
     assert listing.headers["cache-control"] == "no-store"
-    assert listing.json()["items"][0]["vinLast4"] == "0001"
+    assert listing.json()["items"][0]["vinLast4"] == vin_a[-4:]
     assert "vin" not in listing.json()["items"][0]
     assert client.get(endpoint + "/" + str(va)).status_code == 200
     assert client.get(endpoint + "/" + str(vb)).status_code == 404
