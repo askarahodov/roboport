@@ -86,6 +86,19 @@ def test_claim_expired_proof_never_binds(monkeypatch):
             (claim,ticket,customer,"0"*64))
         assert db.execute("SELECT status FROM guest_ticket_claim WHERE id=%s",(claim,)).fetchone()[0]=="PENDING_REVIEW"
         assert not db.execute("SELECT 1 FROM account_customer_link WHERE customer_id=%s",(customer,)).fetchone()
+        db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(user,user.hex))
+        db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,'CLIENT')",(uuid4(),user))
+        token=new_token()
+        now=datetime.now(timezone.utc)
+        db.execute("""INSERT INTO user_session(id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+              VALUES(%s,%s,%s,%s,%s,%s,%s)""",(uuid4(),user,token_digest(token),token_digest(new_token()),
+              now,now+timedelta(minutes=30),now+timedelta(hours=4)))
+        from roboport_api.guest_claim import redeem_proof,ClaimRejected
+        import pytest
+        with pytest.raises(ClaimRejected,match="expired"):
+            redeem_proof(db,token,claim,"synthetic-proof-with-sufficient-length")
+        assert not db.execute("SELECT 1 FROM account_customer_link WHERE customer_id=%s",(customer,)).fetchone()
+
 
 
 def test_anonymous_guest_intake_has_no_ticket_access_and_staff_only_assignment(monkeypatch):
