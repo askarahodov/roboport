@@ -107,3 +107,18 @@ def guest_intake_assign(intake_id:str,request:Request):
         try: ticket=assign_intake(conn,request.cookies.get("rp_session",""),ident)
         except IntakeLimited:return _err(request,403,"FORBIDDEN")
     return JSONResponse(content={"ticketId":str(ticket)},headers={"Cache-Control":"no-store"})
+
+@router.get("/api/v1/dev/guest-intake/queue")
+def guest_intake_queue(request:Request):
+    dsn=_dsn(request)
+    if dsn is None:return _err(request,404,"NOT_FOUND")
+    with psycopg.connect(dsn) as conn:
+        subject=session_subject(conn,request.cookies.get("rp_session",""))
+        if subject is None:return _err(request,401,"UNAUTHENTICATED")
+        role=conn.execute("""SELECT 1 FROM user_role WHERE user_id=%s AND role_code='INTAKE'
+            AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())""",(subject,)).fetchone()
+        if not role:return _err(request,403,"FORBIDDEN")
+        rows=conn.execute("""SELECT id,created_at FROM guest_intake_request
+             WHERE status='PENDING_REVIEW' ORDER BY created_at ASC LIMIT 20""").fetchall()
+    return JSONResponse(content={"items":[{"id":str(x[0]),"createdAt":x[1].isoformat()} for x in rows]},
+       headers={"Cache-Control":"no-store"})
