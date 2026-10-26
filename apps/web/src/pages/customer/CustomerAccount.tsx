@@ -1,4 +1,5 @@
 import React from 'react';
+import { PageShell, Tabs, Card, Skeleton } from '../../ui';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { CustomerTickets } from './CustomerTickets';
 import { CustomerSummary } from './CustomerSummary';
@@ -96,25 +97,22 @@ export function CustomerAccount() {
     <p role="alert">Не удалось проверить серверную сессию. Личные данные не загружены.</p>
     <button type="button" onClick={() => setAttempt(value => value + 1)}>Повторить проверку</button></section>;
 
-  return <section className="customer-account">
+  return <PageShell className="customer-account">
     <h1>Личный кабинет</h1>
-    <nav aria-label="Разделы личного кабинета">
-      {sections.map(section => <NavLink key={section.path} end={'end' in section && section.end}
-        to={section.path}>{section.title}</NavLink>)}
-    </nav>
+    <Tabs label="Разделы личного кабинета" items={sections.map(section => ({to:section.path,label:section.title,end:'end' in section && section.end}))} />
     <h2>{selected.title}</h2>
     <p role="status">Сессия подтверждена. Раздел доступен только через серверную авторизацию.</p>
-    {pathname === '/account/tickets' ? <CustomerTickets /> :
+    <Card>{pathname === '/account/tickets' ? <CustomerTickets /> :
       pathname === '/account/robots' ? <CustomerSummary section="robots" /> :
       pathname === '/account/estimates' ? <CustomerSummary section="estimates" /> :
       pathname === '/account/documents' ? <CustomerSummary section="documents" /> :
       pathname === '/account/settings' ? <CustomerSettings /> :
-      <CustomerOverview />}
+      <CustomerOverview />}</Card>
     <p className="account-hint">Настоящие документы доступны только через защищённый backend. Прямого подключения браузера к хранилищу нет.</p>
     <button type="button" onClick={() => setAttempt(value => value + 1)}>Проверить доступ снова</button>
     <button type="button" disabled={loggingOut} onClick={() => void logout()}>
       {loggingOut ? 'Выход…' : 'Выйти'}</button>
     {logoutError && <p role="alert">{logoutError}</p>}
     <span className="sr-only">Авторизованный субъект: {session?.subjectId}</span>
-  </section>;
+  </PageShell>;
 }
