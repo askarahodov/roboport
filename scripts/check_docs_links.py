@@ -102,7 +102,14 @@ def check_links(root: Path, sources: list[Path] | None = None) -> list[str]:
                 continue
             target_path = unquote(url.path)
             if target_path.startswith("/"):
-                target = root / target_path.lstrip("/")
+                # Docsify читает /docs/_sidebar.md из собственного корня /docs/.
+                # Абсолютный sidebar-route /guides/client.md — НЕ /guides в репозитории.
+                if source == root / "docs" / "_sidebar.md":
+                    target = root / "docs" / target_path.lstrip("/")
+                    if target_path == "/":
+                        target = root / "docs" / "README.md"
+                else:
+                    target = root / target_path.lstrip("/")
             elif not target_path:
                 target = source
             else:
