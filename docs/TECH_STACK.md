@@ -1,41 +1,32 @@
-# Технологический стек ROBOport — базовое решение для разработки
+# Технологический стек — текущее dev-состояние ROBOport и переход к Airmatik
 
-**Статус:** принятый инженерный baseline для первых спринтов, не свидетельство проверки каждого компонента. Обновить после реального install/build/test и зафиксировать конкретные версии в lockfiles.
+**Состояние: current для инфраструктурных компонентов, legacy для робототехнической бизнес-логики, planned для автомобильных функций.** Дата сверки: 26.10.2026. См. [аудит](auto/DOCUMENTATION_AUDIT.md).
 
-| Уровень | Выбрано | Для чего | Когда внедрять | Текущая проверка |
-|---|---|---|---|---|
-| API | **Python 3.13, FastAPI, Pydantic 2** | HTTP + схемы + проверка данных | Сразу | Bootstrap/TestClient на синтетике |
-| Доступ к данным | **PostgreSQL 17**, SQLAlchemy 2, psycopg 3, Alembic | ACID, связи, брони и аудит | После CI, до бизнес-мутаций | База ещё не запускалась |
-| Web | **Node.js 24, React 19, TypeScript 5, Vite 8** | Сайт, личный кабинет и CRM | Сразу после lockfile/CI | Каркас без подтверждённого CI build |
-| Маршруты/данные web | React Router, TanStack Query | Навигация и запросы | Когда появятся screens/API | Ещё не зафиксированы lockfile |
-| Учётные записи и вход | **Локальные аккаунты PostgreSQL**, Argon2id, opaque server sessions, HttpOnly cookie, CSRF | Вход/выход, отзыв сессий | #13 после БД | Выбрано, ещё не реализовано |
-| Права | **RBAC + ACL + проверка отношения/состояния объекта** | Права на конкретные заявки, акты и операции | #27 | Выбрано, ещё не реализовано |
-| Контракты | **OpenAPI 3.1**, JSON Schema | Единый язык API/backend/web | Уже, при каждой API-изменении | Структурная проверка, не независимый валидатор |
-| Тестирование | pytest, httpx/TestClient, Playwright; ruff, mypy, ESLint, tsc | Проверяемость | Сразу, последовательно | Локальные bootstrap тесты; CI ожидает |
-| Документы и фото | Метаданные в PostgreSQL + **адаптер FileStorage** | Фото диагностики, акты, гарантийные PDF | Отдельный этап Documents | Хранилище ещё не требуется первому срезу |
-| Хранение файлов в dev | **MinIO** (совместимый S3 API), приватные buckets | Синтетические фото, PDF и акты | #28 (стенд), #25 (адаптер) | Выбрано, ещё не поднято |
-| Фоновые задачи | Transactional outbox + Python worker | Доставка сообщений, retries | С появлением заявок/смет | Не реализовано |
-| Dev инфраструктура | Docker Compose; PostgreSQL 17 + MinIO при необходимости файлов | Изолированные одноразовые тесты | #11, #28 | В текущей среде ещё не запускалось |
-| CI | GitHub Actions | pytest/build/lint/security gates | **Первый checkpoint** | Запусков для PR не подтверждено |
-| Дизайн | SVG C Industrial Lab + бирюзовая A, Light/Dark/Auto | Единый UI | Уже есть прототип и токены | Для dev, не для публикации |
+| Уровень | Технологии / источник | Подтверждённое состояние |
+|---|---|---|
+| Backend | Python 3.13, FastAPI 0.143.1, Pydantic 2.14.1; `apps/api/requirements-dev.txt` | HTTP API и тесты текущего robot domain |
+| PostgreSQL | PostgreSQL 17, psycopg 3, Alembic 1.16.5; `apps/api/alembic/versions/` | Исполняемая история 0001–0021; интеграционные тесты на одноразовой БД |
+| Web | Node.js 24, React 19.2, TypeScript 5.9, **Vite 7.1.12**; `apps/web/package.json` | Client/staff/public web для существующего домена; npm lockfile и build в CI |
+| Маршруты Web | react-router-dom 7.9.4 | Есть, TanStack Query **не** указан в зависимостях и не считается внедрённым |
+| Auth | Local accounts, Argon2id, opaque cookie sessions, OIDC/Keycloak для dev | Backend handlers + тесты, в том числе signed JWKS, PKCE; production ещё не одобрен |
+| Доступ | RBAC, ACL/ownership checks | Тестовые проверки на уровне объектов; перенос в auto домен ещё планируется |
+| API контракт | OpenAPI 3.1, генератор openapi-typescript 7.10.1 | Контракт и tests; факт наличия схемы не доказывает готовность конкретного endpoint |
+| Тесты | pytest, httpx, Playwright 1.56.1, tsc, GitHub Actions | CI postgres/api/web/browser-e2e проходил для PR #120 и #126 |
+| Файлы | S3-compatible MinIO в приватном dev контуре | Адаптер и интеграционные тесты для synthetic files; production storage не согласован |
+| Задачи | PostgreSQL transactional outbox + Python worker | Имеются в текущем robot domain, не подключены к будущему auto order |
+| Инфраструктура | `infra/dev/compose.local.yml` и `infra/dev/LOCAL_STACK.md` | Compose инфраструктура PG/MinIO/Keycloak; Web/API стартуют на host с dev security guards |
+| Дизайн | существующая палитра Industrial C | Legacy; новый бренд Airmatik требует подтверждения прав и стиля по #110 |
 
-## Почему именно так
+## Сохранённые архитектурные решения
 
-**Один модульный монолит** проще для ИИ-агентов на старте, даёт атомарные операции по заявкам/сметам/складу и сохраняет чёткие модули. Без Kafka, Kubernetes, отдельного GraphQL и набора микросервисов, пока реальная задача не потребует другого. Public SEO для SPA пересмотреть отдельным ADR до выхода сайта в интернет.
+Модульный монолит, FastAPI, PostgreSQL и React; сложные операции — внутри ACID транзакций. Микросервисы, Kafka, Redis, Kubernetes/Helm не добавлять без потребности и ADR. Автомобильный домен развивается отдельно по [ADR-AUTO-001](auto/ADR-001.md), не через глобальное переименование таблиц.
 
-**Версии:** указывать major/minor платформы в архитектуре, но конкретные зависимости фиксировать `package-lock.json` и Python lock/constraints после проверки сборки. Использовать поддерживаемый minor релиз PostgreSQL 17 и security patches. Node 24 входит в заявленный диапазон Vite 8, но все плагины проверять реальным build.
+## Управление версиями и зависимости
 
-## Что намеренно отложено
+Источники точных версий — `apps/web/package-lock.json`, `apps/web/package.json`, `apps/api/requirements-dev.txt` и `apps/api/constraints-py313.txt`. Python прямые зависимости зафиксированы, но хеши всех транзитивных пакетов пока не являются полным воспроизводимым lock. Изменения стека только через ADR с миграцией и тестами.
 
-- **MinIO выбран для разработки**: локальный dev-стенд #28, адаптер `FileStorage` в #25, приватные buckets. Для read-only каталога #12 MinIO не нужен; AWS не требуется. Без Docker не заявлять тесты MinIO выполненными.
-- **Внешний Keycloak/OIDC**: отложен на будущий ADR, начальные login и сессии локальные (#13); политика RBAC+ACL создаётся отдельно (#27).
-- **Kubernetes/RKE2/Helm**: это вопрос будущего развертывания, не часть первой локальной разработки.
-- **Redis/Kafka**: не добавлять для очередей и кэша по умолчанию; PostgreSQL outbox достаточно как первая архитектурная гипотеза.
-- **Платежи, OCR/AI диагностика, SMS, онлайн-заявка с PII**: вне первичного тестового среза.
-- **Юридические и коммерческие вопросы**: не мешают synthetic development, но обязательны до внешнего продукта.
+## Что ещё не является готовым функционалом
 
-## Правила изменения стека
+Auto Vehicle только на уровне аддитивной базы данных (#112); полноценная запись, посты, автомобильные наряды, OEM-каталоги и мобильное приложение — planned (#111–#118). Реальные ПДн/платежи/внешнее использование отключены до release gates.
 
-Изменения FastAPI→NestJS, React/Vite→Next.js, PostgreSQL→другая СУБД, локальной авторизации→OIDC или MinIO→другой файловый backend требуют отдельного ADR с последствиями, миграцией и доказуемыми тестами. Агент не выбирает новую технологию «потому что удобнее» без такой процедуры.
-
-Связанные документы: `docs/architecture/ADR.md`, `docs/operations/DEV_ENVIRONMENT.md`.
+См. [архитектуру авто](auto/ARCHITECTURE.md), [окружение](operations/DEV_ENVIRONMENT.md), [правила актуальности](DOCUMENTATION_POLICY.md).
