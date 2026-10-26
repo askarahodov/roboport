@@ -23,9 +23,9 @@ test('staff portal shows only explicitly granted roles', async ({page}) => {
     status:200,contentType:'application/json',body:JSON.stringify({roles:['STOCK']})
   }));
   await page.goto('/staff');
-  await expect(page.getByText(/Склад — операции ещё не подключены/)).toBeVisible();
-  await expect(page.getByText(/Диагностика — операции ещё не подключены/)).toHaveCount(0);
-  await expect(page.getByText(/Приёмка — операции ещё не подключены/)).toHaveCount(0);
+  await expect(page.getByRole('navigation',{name:'Навигация CRM'}).getByRole('button',{name:/Склад/})).toBeVisible();
+  await expect(page.getByRole('navigation',{name:'Навигация CRM'}).getByRole('button',{name:/Диагностика/})).toHaveCount(0);
+  await expect(page.getByRole('navigation',{name:'Навигация CRM'}).getByRole('button',{name:/Приёмка/})).toHaveCount(0);
 });
 
 test('staff portal fails closed on malformed permissions', async ({page}) => {
@@ -48,7 +48,7 @@ test('assigned staff queue renders only backend scoped tickets',async ({page})=>
   }));
   await page.goto('/staff');
   await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('TRIAGE');
-  await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('версия 2');
+  await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('Версия 2');
 });
 
 test('queue request forbidden after role revocation hides ticket data',async ({page})=>{
@@ -163,8 +163,36 @@ test('mobile dark staff page is keyboard reachable without horizontal overflow',
   }));
   await page.goto('/staff');
   await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
-  await expect(page.locator('main')).toHaveClass(/dark/);
+  await expect(page.locator('main').first()).toHaveClass(/dark/);
   await page.getByRole('button',{name:'Зарезервировать'}).focus();
   await expect(page.getByRole('button',{name:'Зарезервировать'})).toBeFocused();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('CRM filters only backend assigned tickets and role navigation stays isolated',async({page})=>{
+ await page.route('**/api/v1/dev/staff/access',r=>r.fulfill({status:200,contentType:'application/json',body:'{"roles":["ENGINEER"]}'}));
+ await page.route('**/api/v1/dev/staff/queue?*',r=>r.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:[
+  {id:'aaaa1111-0000-0000-0000-000000000001',state:'DIAGNOSING',version:2},
+  {id:'bbbb2222-0000-0000-0000-000000000002',state:'QC_FAILED',version:4}
+ ]})}));
+ await page.goto('/staff');
+ const queue=page.getByRole('region',{name:'Назначенные заявки'});
+ await expect(queue.getByRole('listitem')).toHaveCount(2);
+ await page.getByRole('textbox',{name:'Поиск по номеру'}).fill('bbbb2222');
+ await expect(queue.getByRole('listitem')).toHaveCount(1);
+ await expect(queue).toContainText('QC_FAILED');
+ await page.getByRole('textbox',{name:'Поиск по номеру'}).fill('');
+ await page.getByRole('combobox',{name:'Статус'}).selectOption('DIAGNOSING');
+ await expect(queue.getByRole('listitem')).toHaveCount(1);
+ await expect(page.getByRole('navigation',{name:'Навигация CRM'}).getByRole('button',{name:/Склад/})).toHaveCount(0);
+ await page.getByRole('navigation',{name:'Навигация CRM'}).getByRole('button',{name:/Диагностика/}).click();
+ await expect(queue).toBeVisible();
+});
+test('CRM remains within 390px viewport in dark theme with role-specific navigation',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ await page.route('**/api/v1/dev/staff/access',r=>r.fulfill({status:200,contentType:'application/json',body:'{"roles":["STOCK"]}'}));
+ await page.goto('/staff');
+ await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
+ await expect(page.getByRole('region',{name:'Операции склада'})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
