@@ -48,6 +48,15 @@ test('все пользовательские разделы существую�
   }
 });
 
+test('относительные ссылки внутри вложенного руководства ведут к существующей странице', async ({ page }) => {
+  await page.goto('/docs/#/guides/client');
+  await expect(page.locator('.markdown-section h1')).toContainText('Клиент автосервиса');
+  await page.locator('.markdown-section a', { hasText: 'Описание QA-сценария' }).click();
+  await expect(page.locator('.markdown-section h1')).toContainText(
+    'Привязка автомобиля к клиенту',
+  );
+});
+
 test('на мобильной ширине открывается меню и отображается широкое содержимое', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/docs/');
