@@ -40,7 +40,7 @@ export function PublicCatalog({kind}:{kind:'brands'|'models'}){
   {status==='error'&&<><p role="alert">Каталог сейчас недоступен. Попробуйте повторить запрос.</p><button type="button" onClick={()=>setAttempt(x=>x+1)}>Повторить запрос</button></>}
   {status==='ready'&&(items.length?<ul className="catalog-grid">{items.map(item=><li key={item.id}>{kind==='models'?<Link to={'/catalog/models/'+encodeURIComponent(item.id)}>{item.name}</Link>:item.name}{item.supportStatus&&<span> — {item.supportStatus==='supported'?'Поддержка заявлена в демонстрационных данных':'Поддержка не подтверждена'}</span>}</li>)}</ul>:<EmptyState title={'Пока нет опубликованных '+(kind==='brands'?'брендов':'моделей')} />)}
   {status==='ready'&&<nav aria-label="Страницы каталога">{stack.length>0&&<button type="button" onClick={back}>Назад</button>}{next&&<button type="button" onClick={()=>advance(next)}>Далее</button>}</nav>}
- </section>;
+ </PageShell>;
 }
 export function PublicModelDetails(){
  const {modelId}=useParams();const [state,setState]=React.useState<'loading'|'found'|'missing'|'error'>('loading');
