@@ -1,16 +1,27 @@
 import { defineConfig } from 'vite';
+import { readFileSync } from 'node:fs';
 
-// Только локальный dev: браузер обращается к /api/v1/* через тот же origin.
-// Бэкенд должен слушать 127.0.0.1:8000; CORS и внешняя публикация не нужны.
+// HTTPS dev origin is explicit opt-in; backend remains bound to host loopback.
+const secureLocal = process.env.ROBO_DEV_HTTPS === '1';
+const ssl = secureLocal ? {
+  key: readFileSync('../../infra/dev/tls/local.key'),
+  cert: readFileSync('../../infra/dev/tls/local.crt'),
+} : undefined;
+
 export default defineConfig({
   server: {
     host: '127.0.0.1',
     strictPort: true,
-    port: 5173,
+    port: secureLocal ? 8444 : 5173,
+    https: ssl,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: secureLocal ? 'https://127.0.0.1:8445' : 'http://127.0.0.1:8000',
+        // Preserve browser-facing authority for OIDC redirect, CSRF Origin and
+        // Secure cookies. Only the local self-signed backend is allowed.
         changeOrigin: false,
+        secure: !secureLocal,
+        xfwd: false,
       },
     },
   },
