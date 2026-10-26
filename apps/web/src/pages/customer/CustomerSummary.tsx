@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert, EmptyState, Skeleton, Button } from '../../ui';
 import { EstimateActions } from './EstimateActions';
 
 type Section = 'robots' | 'estimates' | 'documents';
@@ -41,12 +42,12 @@ export function CustomerSummary({ section }: { section: Section }) {
     void load();
     return () => controller.abort();
   },[section,retry]);
-  if (status==='loading') return <p role="status">Загрузка ваших {labels[section]}…</p>;
-  if (status==='denied') return <p role="alert">Доступ запрещён или серверная сессия отозвана.</p>;
+  if (status==='loading') return <Skeleton label={"Загрузка ваших "+labels[section]+"…"} />;
+  if (status==='denied') return <Alert>Доступ запрещён или серверная сессия отозвана.</Alert>;
   if (status==='error') return <div><p role="alert">Не удалось загрузить раздел.</p>
     <button type="button" onClick={() => setRetry(x => x+1)}>Повторить загрузку</button></div>;
-  if (items.length===0) return <p role="status">Доступных {labels[section]} пока нет.</p>;
-  return <ul>{items.map(item => <li key={item.id}>
+  if (items.length===0) return <EmptyState title={"Доступных "+labels[section]+" пока нет."} description="Здесь появятся записи после подтверждения доступа." />;
+  return <ul className="account-records">{items.map(item => <li className="account-record" key={item.id}>
     {section==='robots' && <>Робот {item.label || item.id}</>}
     {section==='estimates' && <>Смета {item.id}, версия {item.version}, статус {item.status},
       сумма {typeof item.total_minor==='number' ? (item.total_minor/100).toFixed(2) : '—'} {item.currency}
