@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 import psycopg
 from pydantic import BaseModel,Field,ValidationError
 from .auth_http import _mutation_ok, _origin_ok
-from .guest_claim import issue_proof,redeem_proof,review_claim,ClaimRejected
+from .guest_claim import issue_proof,redeem_proof,review_claim,assign_review,ClaimRejected
 from .guest_intake import create_guest_request,assign_intake,IntakeLimited
 from .session_lookup import session_subject
 
@@ -122,3 +122,32 @@ def guest_intake_queue(request:Request):
              WHERE status='PENDING_REVIEW' ORDER BY created_at ASC LIMIT 20""").fetchall()
     return JSONResponse(content={"items":[{"id":str(x[0]),"createdAt":x[1].isoformat()} for x in rows]},
        headers={"Cache-Control":"no-store"})
+
+@router.get("/api/v1/dev/guest-claims/review-queue")
+def guest_review_queue(request:Request):
+    dsn=_dsn(request)
+    if dsn is None:return _err(request,404,"NOT_FOUND")
+    with psycopg.connect(dsn) as conn:
+        actor=session_subject(conn,request.cookies.get("rp_session",""))
+        if actor is None:return _err(request,401,"UNAUTHENTICATED")
+        valid=conn.execute("""SELECT 1 FROM user_role WHERE user_id=%s
+           AND role_code='MANAGER' AND revoked_at IS NULL
+           AND (expires_at IS NULL OR expires_at>now())""",(actor,)).fetchone()
+        if not valid:return _err(request,403,"FORBIDDEN")
+        rows=conn.execute("""SELECT id FROM guest_ticket_claim
+           WHERE status='PENDING_REVIEW' AND proof_verified_at IS NOT NULL
+           ORDER BY created_at ASC LIMIT 20""").fetchall()
+    return JSONResponse(content={"items":[{"id":str(x[0])} for x in rows]},
+        headers={"Cache-Control":"no-store"})
+
+@router.post("/api/v1/dev/guest-claims/{claim_id}/assign-review")
+def guest_assign_review(claim_id:str,request:Request):
+    dsn=_dsn(request)
+    if dsn is None:return _err(request,404,"NOT_FOUND")
+    try: claim=UUID(claim_id)
+    except ValueError:return _err(request,404,"NOT_FOUND")
+    with psycopg.connect(dsn) as conn:
+        if not _mutation_ok(request,conn):return _err(request,403,"FORBIDDEN")
+        try: assign_review(conn,request.cookies.get("rp_session",""),claim)
+        except ClaimRejected:return _err(request,403,"FORBIDDEN")
+    return JSONResponse(content={"assigned":True},headers={"Cache-Control":"no-store"})
