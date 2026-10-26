@@ -28,3 +28,9 @@ VIN nullable, нормализованный uppercase 17 символов из 
 
 ## Rollback
 Аддитивные миграции вверх/вниз проверяются только на disposable PG17. Деструктивный downgrade production невозможен без сохранения данных, backup/restore и согласованного окна. Старые таблицы пока остаются на месте.
+
+## Первый read-only dev API автомобилей (#112)
+
+После отдельного среза для тестирования введены два **приватных синтетических** endpoint: `GET /api/v1/dev/auto/vehicles` и `GET /api/v1/dev/auto/vehicles/{vehicle_id}`. Они не входят в публичный OpenAPI и не считаются готовым клиентским функционалом. Для запуска требуется `ROBOport_SYNTHETIC_AUTO_API=1`, активный синтетический auth `ROBOport_SYNTHETIC_AUTH_API=1`, локальный PostgreSQL и HTTPS loopback. Ответы `Cache-Control: no-store` и только последние четыре символа VIN.
+
+Операции доступны клиенту только при активной cookie-сессии, роли CLIENT, подтверждённой (`verified_at` и `verified_by`) и неотозванной связи автомобиля и существующей `account_customer_link`. Само знание VIN или новый pending link доступа не даёт. Проверка роли, сессии и связи выполняется в одном SQL запросе: A/B изоляция, отзыв связи/роли/сессии подтверждаются интеграционными тестами. Автомобильный write API, staff review, OpenAPI/SDK и пользовательский интерфейс **planned** и остаются в #112.
