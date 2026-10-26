@@ -222,3 +222,40 @@ test('new customer has safe empty accounts, no guessed resources',async({page})=
  await expect(page.getByText('У вас пока нет доступных заявок.')).toBeVisible();
  await expect(page.getByRole('button',{name:'История этапов'})).toHaveCount(0);
 });
+
+
+test('synthetic guest request remains pending and exposes no private ticket data',async({page})=>{
+ let attempts=0;
+ await page.route('**/api/v1/dev/guest-intake',async route=>{
+  attempts++;
+  expect(route.request().headers()['idempotency-key']).toBeTruthy();
+  expect(route.request().postDataJSON()).toEqual({});
+  await route.fulfill({status:202,contentType:'application/json',
+   body:'{"requestId":"synthetic-receipt","status":"PENDING_REVIEW"}'});
+ });
+ await page.goto('/request-demo');
+ await expect(page.getByText('Приём реальных обращений закрыт.')).toBeVisible();
+ await page.getByRole('button',{name:'Создать тестовую заявку'}).click();
+ await expect(page.getByText('pending_review')).toBeVisible();
+ await expect(page.getByText('synthetic-receipt')).toBeVisible();
+ await expect(page.getByText('Доступ к истории, сметам и документам не предоставлен.')).toBeVisible();
+ expect(attempts).toBe(1);
+ await page.getByRole('link',{name:'У меня есть доказательство для подтверждения'}).click();
+ await expect(page).toHaveURL(/\/account\/claim$/);
+ await expect(page.getByRole('heading',{name:'Подтверждение тестовой заявки'})).toBeVisible();
+});
+test('proof redemption waits for independent approval and never grants automatic access',async({page})=>{
+ await page.route('**/api/v1/auth/csrf',route=>route.fulfill({status:200,contentType:'application/json',
+  body:'{"csrfToken":"synthetic-csrf"}'}));
+ await page.route('**/api/v1/dev/guest-claims/*/redeem',route=>{
+  expect(route.request().headers()['x-csrf-token']).toBe('synthetic-csrf');
+  return route.fulfill({status:200,contentType:'application/json',
+   body:'{"status":"PENDING_REVIEW"}'});
+ });
+ await page.goto('/account/claim');
+ await page.getByLabel('Идентификатор подтверждения').fill('synthetic-claim');
+ await page.getByLabel('Код подтверждения').fill('synthetic-proofffffffffffffffffffffff');
+ await page.getByRole('button',{name:'Подтвердить'}).click();
+ await expect(page.getByText(/Доказательство принято. Статус pending_review/)).toBeVisible();
+ await expect(page.getByText(/доступ появится только после независимого решения сотрудника/)).toBeVisible();
+});
