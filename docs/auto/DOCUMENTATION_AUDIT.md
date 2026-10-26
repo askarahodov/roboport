@@ -16,7 +16,7 @@
 | Local sessions, Keycloak/OIDC, RBAC/ACL | current для синтетических тестов; не production approval | `apps/api/roboport_api/auth_http.py`, `authorization.py`, `oidc.py`, интеграционные тесты |
 | MinIO, приватные вложения | dev integration current, но не внешний S3 production | `infra/dev/compose.local.yml`, `storage.py`, `tests/integration/test_minio_storage.py` |
 | Сметы, остатки и outbox | current в robot domain, не в auto заказ-наряде | `estimate_decision.py`, `inventory.py`, `notification_outbox.py` |
-| Автомобили и VIN | текущая **только схема** `auto_vehicle`, `auto_vehicle_customer_link`; REST/UX ещё planned | `apps/api/alembic/versions/0021_auto_vehicle.py`, `tests/integration/test_pg_auto_vehicle.py`; #112 |
+| Автомобили и VIN | схема `auto_vehicle`, `auto_vehicle_customer_link` и **read-only dev-HTTP** `/api/v1/dev/auto/vehicles` (только synthetic); публичный REST/UX ещё planned | `apps/api/alembic/versions/0021_auto_vehicle.py`, `tests/integration/test_pg_auto_vehicle.py`; #112 |
 | Запись, рабочие посты, автомобильные наряды | planned | #113, #114 |
 | OEM-каталоги 2026, поставщики, коммерческие лицензии | planned, исследование без ключей | #111, #115, `docs/auto/PARTS_CATALOG.md` |
 | Клиентский автомобильный кабинет, мобильное приложение | planned | #117, #118 |
