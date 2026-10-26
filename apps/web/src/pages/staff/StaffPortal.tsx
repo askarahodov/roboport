@@ -109,7 +109,7 @@ export function StaffPortal() {
         {selected==='Сметы'&&roles.some(r=>['FINANCE','MANAGER'].includes(r))&&<StaffEstimates />}
         {selected==='Склад'&&roles.includes('STOCK')&&<StaffStock />}
         {selected==='Аудит'&&roles.includes('AUDITOR')&&<StaffAudit />}
-        {roles.some(r=>r==='INTAKE'||r==='MANAGER')&&<div hidden={!((selected==='Приёмка'&&roles.includes('INTAKE'))||(selected==='Очередь'&&roles.includes('MANAGER')))}><StaffGuestClaims roles={roles}/></div>}
+        {roles.some(r=>r==='INTAKE'||r==='MANAGER')&&<div hidden={!((selected==='Приёмка'&&roles.includes('INTAKE'))||(selected==='Очередь'&&roles.includes('MANAGER')))}><StaffGuestClaims roles={roles} active={(selected==='Приёмка'&&roles.includes('INTAKE'))||(selected==='Очередь'&&roles.includes('MANAGER'))}/></div>}
       </div>
     </div>}
   </section>;
