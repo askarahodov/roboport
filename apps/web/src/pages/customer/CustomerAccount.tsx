@@ -89,6 +89,8 @@ export function CustomerAccount() {
     <Link to="/account/login">Войти</Link> <Link to="/">На главную</Link></section>;
   if (state === 'forbidden') return <section><h1>Доступ ограничен</h1>
     <p role="alert">403 — доступ запрещён или отозван. Обратитесь к администратору.</p>
+    <div className="auth-recovery"><Link to="/account/login">Войти под другой учётной запись</Link><button type="button" onClick={() => setAttempt(n => n + 1)}>Повторить проверку</button></div>
+    <p className="auth-help">Авторизация и разрешение на просмотр кабинета — разные проверки. Если доступ отозван, повторный вход не восстановит права автоматически.</p>
     <Link to="/">На главную</Link></section>;
   if (state === 'error') return <section><h1>Не удалось открыть кабинет</h1>
     <p role="alert">Не удалось проверить серверную сессию. Личные данные не загружены.</p>
