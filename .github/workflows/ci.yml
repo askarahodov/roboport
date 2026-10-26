@@ -79,6 +79,8 @@ jobs:
       - run: PYTHONPATH=apps/api python -m pytest -q -ra tests/bootstrap
       - run: PYTHONPATH=apps/api python -m pytest -q -ra tests/contract
       - run: python scripts/check_contract.py
+      - name: Validate Markdown local links and heading anchors
+        run: python scripts/check_docs_links.py
       - run: python -m openapi_spec_validator contracts/openapi.yaml
   web:
     runs-on: ubuntu-latest
