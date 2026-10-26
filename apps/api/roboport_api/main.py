@@ -14,6 +14,8 @@ from .guest_claim_http import router as guest_claim_router
 app.include_router(guest_claim_router)
 from .auto_vehicle_http import router as auto_vehicle_router
 app.include_router(auto_vehicle_router)
+from .auto_vehicle_claim_http import router as auto_vehicle_claim_router
+app.include_router(auto_vehicle_claim_router)
 
 
 @app.middleware("http")
