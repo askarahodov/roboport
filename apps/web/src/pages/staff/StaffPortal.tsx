@@ -3,6 +3,8 @@ import { TicketWorkflow } from './TicketWorkflow';
 import { StaffEstimates, StaffStock } from './StaffOperations';
 import { StaffAudit } from './StaffAudit';
 import { StaffGuestClaims } from './StaffGuestClaims';
+import { PageShell, Card, Alert, Skeleton, EmptyState, Badge, Button } from '../../ui';
+import './staff.css';
 
 type Role = 'INTAKE' | 'ENGINEER' | 'STOCK' | 'MANAGER' | 'FINANCE' | 'AUDITOR';
 const sections: {label:string; roles:Role[]}[] = [
@@ -19,6 +21,9 @@ function StaffQueue({roles}:{roles:Role[]}) {
   const [items,setItems]=React.useState<{id:string;state:string;version:number}[]>([]);
   const [status,setStatus]=React.useState<'loading'|'ready'|'error'|'denied'>('loading');
   const [retry,setRetry]=React.useState(0);
+  const [query,setQuery]=React.useState('');
+  const [filter,setFilter]=React.useState('ALL');
+  const [sort,setSort]=React.useState<'state'|'version'>('state');
   React.useEffect(()=>{
     const controller=new AbortController();
     setStatus('loading');setItems([]);
@@ -40,16 +45,20 @@ function StaffQueue({roles}:{roles:Role[]}) {
     })();
     return ()=>controller.abort();
   },[retry]);
-  return <section aria-label="Назначенные заявки">
+  const states=Array.from(new Set(items.map(t=>t.state))).sort();
+  const visible=items.filter(t=>(filter==='ALL'||t.state===filter) &&
+    (!query.trim()||t.id.toLowerCase().includes(query.trim().toLowerCase())))
+    .sort((a,b)=>sort==='state'?a.state.localeCompare(b.state):b.version-a.version);
+  return <section className="crm-section" aria-label="Назначенные заявки">
     <h3>Назначенные заявки</h3>
-    {status==='loading'&&<p role="status">Загрузка очереди…</p>}
-    {status==='denied'&&<p role="alert">Доступ к очереди отозван.</p>}
-    {status==='error'&&<><p role="alert">Ошибка загрузки очереди.</p>
+    {status==='loading'&&<Skeleton label="Загрузка очереди…" />}
+    {status==='denied'&&<Alert>Доступ к очереди отозван.</Alert>}
+    {status==='error'&&<><Alert>Ошибка загрузки очереди.</Alert>
       <button type="button" onClick={()=>setRetry(n=>n+1)}>Повторить очередь</button></>}
-    {status==='ready'&&(items.length?
-      <ul>{items.map(t=><li key={t.id}>Заявка {t.id}: {t.state}, версия {t.version}
-        <TicketWorkflow ticket={t} roles={roles} onChanged={()=>setRetry(n=>n+1)}/></li>)}</ul>:
-      <p role="status">Назначенных заявок нет.</p>)}
+    {status==='ready'&&<div className="crm-filters"><label>Поиск по номеру <input placeholder="UUID заявки" value={query} onChange={e=>setQuery(e.target.value)} /></label><label>Статус <select value={filter} onChange={e=>setFilter(e.target.value)}><option value="ALL">Все статусы</option>{states.map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>Сортировка <select value={sort} onChange={e=>setSort(e.target.value as 'state'|'version')}><option value="state">По статусу</option><option value="version">По версии</option></select></label></div>}
+    {status==='ready'&&(visible.length?
+      <ul className="crm-ticket-grid">{visible.map(t=><li className="crm-ticket" key={t.id}><div className="crm-ticket-head"><div><span className="crm-ticket-label">ЗАЯВКА</span><h4 title={t.id}>{t.id.slice(0,8)}…</h4></div><Badge tone={t.state==='SAFETY_HOLD'||t.state==='QC_FAILED'?'error':'neutral'}>{t.state}</Badge></div><p>Версия {t.version} · серверное назначение</p><TicketWorkflow ticket={t} roles={roles} onChanged={()=>setRetry(n=>n+1)}/></li>)}</ul>:
+      <EmptyState title={items.length?"По фильтру заявок нет.":"Назначенных заявок нет."} description="Отображаются только заявки, разрешённые сервером." />)}
   </section>;
 }
 
@@ -78,24 +87,30 @@ export function StaffPortal() {
     })();
     return ()=>controller.abort();
   },[attempt]);
-  return <section aria-live="polite">
-    <h1>Портал сотрудников</h1>
-    <p>Только синтетический стенд. Реальная приёмка и выдача отключены.</p>
-    {state==='loading' && <p role="status">Проверка прав сотрудника…</p>}
-    {state==='login' && <p role="alert">401 — требуется локальный вход.</p>}
-    {state==='forbidden' && <p role="alert">403 — раздел недоступен: нет подтверждённых прав.</p>}
-    {state==='error' && <div><p role="alert">Не удалось проверить права на сервере.</p>
-      <button type="button" onClick={()=>setAttempt(a=>a+1)}>Повторить</button></div>}
-    {state==='ready' && <>
-      <h2>Доступные разделы</h2>
-      <ul>{sections.filter(s=>s.roles.some(r=>roles.includes(r))).map(s=>
-        <li key={s.label}>{s.label} — операции ещё не подключены</li>)}</ul>
-      {roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r))&&<StaffQueue roles={roles}/>}
-      {roles.some(r=>['FINANCE','MANAGER'].includes(r))&&<StaffEstimates />}
-      {roles.includes('STOCK')&&<StaffStock />}
-      {roles.some(r=>r==='INTAKE'||r==='MANAGER')&&<StaffGuestClaims roles={roles}/>}
-      {roles.includes('AUDITOR')&&<StaffAudit />}
-      <p role="status">Сервер проверяет ACL отдельно для каждой операции.</p>
-    </>}
-  </section>;
+  const allowed=sections.filter(x=>x.roles.some(role=>roles.includes(role)));
+  const [active,setActive]=React.useState('Очередь');
+  const selected=allowed.some(x=>x.label===active)?active:allowed[0]?.label;
+  const hasQueue=roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r));
+  return <PageShell className="crm-workspace">
+    <div className="crm-heading"><div><span className="ui-eyebrow">ROBOport / SERVICE OPERATIONS</span><h1>Рабочее пространство</h1><p>Обслуживание роботов · синтетический стенд, реальные операции отключены</p></div><Badge tone="warning">DEV / TEST</Badge></div>
+    {state==='loading'&&<Skeleton label="Проверка прав сотрудника…" />}
+    {state==='login'&&<Alert>401 — требуется локальный вход. <a href="/account/login">Перейти ко входу</a></Alert>}
+    {state==='forbidden'&&<Alert>403 — раздел недоступен: нет подтверждённых прав.</Alert>}
+    {state==='error'&&<div><Alert>Не удалось проверить права на сервере.</Alert><Button onClick={()=>setAttempt(a=>a+1)}>Повторить</Button></div>}
+    {state==='ready'&&<div className="crm-layout">
+      <aside className="crm-rail" aria-label="Разделы CRM"><div className="crm-rail-brand">ROBO<span>port</span><small>STAFF CONSOLE</small></div><h2>Доступные разделы</h2>
+        <nav aria-label="Навигация CRM" className="crm-menu">{allowed.map(section=><button type="button" key={section.label} aria-current={selected===section.label?'page':undefined} onClick={()=>setActive(section.label)}>{section.label}<span aria-hidden="true">↗</span></button>)}</nav>
+        <p className="crm-security">Права и доступ к каждой заявке проверяются сервером.</p>
+      </aside>
+      <div className="crm-main">
+        <Card className="crm-summary"><div><span className="ui-eyebrow">РАБОЧАЯ ПАНЕЛЬ</span><h2>{selected}</h2><p>Доступ: {roles.join(' · ')}</p></div><Badge tone="success">ACL active</Badge></Card>
+        {hasQueue&&['Очередь','Приёмка','Диагностика','QC и выдача'].includes(selected||'')&&<StaffQueue roles={roles}/>}
+        {selected==='Сметы'&&roles.some(r=>['FINANCE','MANAGER'].includes(r))&&<StaffEstimates />}
+        {selected==='Склад'&&roles.includes('STOCK')&&<StaffStock />}
+        {selected==='Аудит'&&roles.includes('AUDITOR')&&<StaffAudit />}
+        {selected==='Приёмка'&&roles.includes('INTAKE')&&<StaffGuestClaims roles={roles}/>}
+        {selected==='Очередь'&&roles.includes('MANAGER')&&<StaffGuestClaims roles={roles}/>}
+      </div>
+    </div>}
+  </PageShell>;
 }
