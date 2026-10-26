@@ -196,3 +196,40 @@ test('CRM remains within 390px viewport in dark theme with role-specific navigat
  await expect(page.getByRole('region',{name:'Операции склада'})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+test('CRM labels are Russian and guest proof survives switching sections',async({page})=>{
+ await page.route('**/api/v1/dev/staff/access',r=>r.fulfill({status:200,contentType:'application/json',body:'{"roles":["INTAKE"]}'}));
+ await page.route('**/api/v1/dev/staff/queue?*',r=>r.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}));
+ await page.route('**/api/v1/dev/guest-intake/queue',r=>r.fulfill({status:200,contentType:'application/json',body:'{"items":[{"id":"guest-1","createdAt":"2026-10-26T10:00:00Z"}]}'}));
+ await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}'}));
+ await page.route('**/api/v1/dev/guest-intake/guest-1/assign',r=>r.fulfill({status:200,contentType:'application/json',body:'{"ticketId":"ticket-1"}'}));
+ await page.route('**/api/v1/dev/guest-claims/tickets/ticket-1/issue',r=>r.fulfill({status:200,contentType:'application/json',body:'{"claimId":"claim-1","proof":"SYNTHETIC-PROOF"}'}));
+ await page.goto('/staff');
+ await expect(page.getByText('КАБИНЕТ СОТРУДНИКА')).toBeVisible();
+ await expect(page.getByText('Доступ подтверждён')).toBeVisible();
+ await page.getByRole('navigation',{name:'Навигация CRM'}).getByRole('button',{name:/Приёмка/}).click();
+ await page.getByRole('button',{name:'Назначить и выдать код'}).click();
+ await page.getByRole('navigation',{name:'Навигация CRM'}).getByRole('button',{name:/Очередь/}).click();
+ await page.getByRole('navigation',{name:'Навигация CRM'}).getByRole('button',{name:/Приёмка/}).click();
+ await expect(page.getByText('SYNTHETIC-PROOF')).toBeVisible();
+ await page.getByRole('button',{name:'Скрыть код'}).click();
+ await expect(page.getByText('SYNTHETIC-PROOF')).toHaveCount(0);
+});
+
+test('guest intake queue refreshes on return without remounting claim state',async({page})=>{
+ let arrivals=0;
+ await page.route('**/api/v1/dev/staff/access',r=>r.fulfill({status:200,contentType:'application/json',body:'{"roles":["INTAKE"]}'}));
+ await page.route('**/api/v1/dev/staff/queue?*',r=>r.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}));
+ await page.route('**/api/v1/dev/guest-intake/queue',r=>{
+   arrivals++;
+   return r.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:arrivals>1?[{id:'guest-new',createdAt:'2026-10-26T10:00:00Z'}]:[]})});
+ });
+ await page.goto('/staff');
+ const nav=page.getByRole('navigation',{name:'Навигация CRM'});
+ await nav.getByRole('button',{name:/Приёмка/}).click();
+ await expect(page.getByText('Ожидающих заявок нет.')).toBeVisible();
+ await nav.getByRole('button',{name:/Очередь/}).click();
+ await nav.getByRole('button',{name:/Приёмка/}).click();
+ await expect(page.getByText('Демо-заявка guest-ne')).toBeVisible();
+ expect(arrivals).toBeGreaterThanOrEqual(2);
+});

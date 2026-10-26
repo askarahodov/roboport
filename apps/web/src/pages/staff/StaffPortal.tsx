@@ -46,7 +46,8 @@ function StaffQueue({roles}:{roles:Role[]}) {
     return ()=>controller.abort();
   },[retry]);
   const states=Array.from(new Set(items.map(t=>t.state))).sort();
-  const visible=items.filter(t=>(filter==='ALL'||t.state===filter) &&
+  const effectiveFilter=filter==='ALL'||states.includes(filter)?filter:'ALL';
+  const visible=items.filter(t=>(effectiveFilter==='ALL'||t.state===effectiveFilter) &&
     (!query.trim()||t.id.toLowerCase().includes(query.trim().toLowerCase())))
     .sort((a,b)=>sort==='state'?a.state.localeCompare(b.state):b.version-a.version);
   return <section className="crm-section" aria-label="Назначенные заявки">
@@ -55,7 +56,7 @@ function StaffQueue({roles}:{roles:Role[]}) {
     {status==='denied'&&<Alert>Доступ к очереди отозван.</Alert>}
     {status==='error'&&<><Alert>Ошибка загрузки очереди.</Alert>
       <button type="button" onClick={()=>setRetry(n=>n+1)}>Повторить очередь</button></>}
-    {status==='ready'&&<div className="crm-filters"><label>Поиск по номеру <input placeholder="UUID заявки" value={query} onChange={e=>setQuery(e.target.value)} /></label><label>Статус <select value={filter} onChange={e=>setFilter(e.target.value)}><option value="ALL">Все статусы</option>{states.map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>Сортировка <select value={sort} onChange={e=>setSort(e.target.value as 'state'|'version')}><option value="state">По статусу</option><option value="version">По версии</option></select></label></div>}
+    {status==='ready'&&<div className="crm-filters"><label>Поиск по номеру <input placeholder="UUID заявки" value={query} onChange={e=>setQuery(e.target.value)} /></label><label>Статус <select value={effectiveFilter} onChange={e=>setFilter(e.target.value)}><option value="ALL">Все статусы</option>{states.map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>Сортировка <select value={sort} onChange={e=>setSort(e.target.value as 'state'|'version')}><option value="state">По статусу</option><option value="version">По версии</option></select></label></div>}
     {status==='ready'&&(visible.length?
       <ul className="crm-ticket-grid">{visible.map(t=><li className="crm-ticket" key={t.id}><div className="crm-ticket-head"><div><span className="crm-ticket-label">ЗАЯВКА</span><h4 title={t.id}>{t.id.slice(0,8)}…</h4></div><Badge tone={t.state==='SAFETY_HOLD'||t.state==='QC_FAILED'?'error':'neutral'}>{t.state}</Badge></div><p>Версия {t.version} · серверное назначение</p><TicketWorkflow ticket={t} roles={roles} onChanged={()=>setRetry(n=>n+1)}/></li>)}</ul>:
       <EmptyState title={items.length?"По фильтру заявок нет.":"Назначенных заявок нет."} description="Отображаются только заявки, разрешённые сервером." />)}
@@ -92,24 +93,23 @@ export function StaffPortal() {
   const selected=allowed.some(x=>x.label===active)?active:allowed[0]?.label;
   const hasQueue=roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r));
   return <section className="ui-page crm-workspace">
-    <div className="crm-heading"><div><span className="ui-eyebrow">ROBOport / SERVICE OPERATIONS</span><h1>Рабочее пространство</h1><p>Обслуживание роботов · синтетический стенд, реальные операции отключены</p></div><Badge tone="warning">DEV / TEST</Badge></div>
+    <div className="crm-heading"><div><span className="ui-eyebrow">ROBOport / СЕРВИСНОЕ ОБСЛУЖИВАНИЕ</span><h1>Рабочее пространство</h1><p>Обслуживание роботов · синтетический стенд, реальные операции отключены</p></div><Badge tone="warning">DEV / TEST</Badge></div>
     {state==='loading'&&<Skeleton label="Проверка прав сотрудника…" />}
     {state==='login'&&<Alert>401 — требуется локальный вход. <a href="/account/login">Перейти ко входу</a></Alert>}
     {state==='forbidden'&&<Alert>403 — раздел недоступен: нет подтверждённых прав.</Alert>}
     {state==='error'&&<div><Alert>Не удалось проверить права на сервере.</Alert><Button onClick={()=>setAttempt(a=>a+1)}>Повторить</Button></div>}
     {state==='ready'&&<div className="crm-layout">
-      <aside className="crm-rail" aria-label="Разделы CRM"><div className="crm-rail-brand">ROBO<span>port</span><small>STAFF CONSOLE</small></div><h2>Доступные разделы</h2>
+      <aside className="crm-rail" aria-label="Разделы CRM"><div className="crm-rail-brand">ROBO<span>port</span><small>КАБИНЕТ СОТРУДНИКА</small></div><h2>Доступные разделы</h2>
         <nav aria-label="Навигация CRM" className="crm-menu">{allowed.map(section=><button type="button" key={section.label} aria-current={selected===section.label?'page':undefined} onClick={()=>setActive(section.label)}>{section.label}<span aria-hidden="true">↗</span></button>)}</nav>
         <p className="crm-security">Права и доступ к каждой заявке проверяются сервером.</p>
       </aside>
       <div className="crm-main">
-        <Card className="crm-summary"><div><span className="ui-eyebrow">РАБОЧАЯ ПАНЕЛЬ</span><h2>{selected}</h2><p>Доступ: {roles.join(' · ')}</p></div><Badge tone="success">ACL active</Badge></Card>
+        <Card className="crm-summary"><div><span className="ui-eyebrow">РАБОЧАЯ ПАНЕЛЬ</span><h2>{selected}</h2><p>Доступ: {roles.join(' · ')}</p></div><Badge tone="success">Доступ подтверждён</Badge></Card>
         {hasQueue&&['Очередь','Приёмка','Диагностика','QC и выдача'].includes(selected||'')&&<StaffQueue roles={roles}/>}
         {selected==='Сметы'&&roles.some(r=>['FINANCE','MANAGER'].includes(r))&&<StaffEstimates />}
         {selected==='Склад'&&roles.includes('STOCK')&&<StaffStock />}
         {selected==='Аудит'&&roles.includes('AUDITOR')&&<StaffAudit />}
-        {selected==='Приёмка'&&roles.includes('INTAKE')&&<StaffGuestClaims roles={roles}/>}
-        {selected==='Очередь'&&roles.includes('MANAGER')&&<StaffGuestClaims roles={roles}/>}
+        {roles.some(r=>r==='INTAKE'||r==='MANAGER')&&<div hidden={!((selected==='Приёмка'&&roles.includes('INTAKE'))||(selected==='Очередь'&&roles.includes('MANAGER')))}><StaffGuestClaims roles={roles} active={(selected==='Приёмка'&&roles.includes('INTAKE'))||(selected==='Очередь'&&roles.includes('MANAGER'))}/></div>}
       </div>
     </div>}
   </section>;
