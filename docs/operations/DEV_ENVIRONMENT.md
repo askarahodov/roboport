@@ -1,33 +1,56 @@
-# Окружение разработки
+# Окружение разработки ROBOport / Airmatik
+
+**Статус:** current для синтетического robot-domain dev стенда; авто-функции пока строятся по этапам. Раздел не даёт разрешения на production. Дата сверки: 26.10.2026.
 
 ## Требования
 
-Linux/macOS/Windows+WSL2; Python 3.13; Node.js 24; npm, Git. Для этапов #11/#13 необходим **одноразовый PostgreSQL 17**; для файлов #28 — локальный приватный **MinIO** через Docker Compose. Не использовать рабочую БД или чужую инфраструктуру.
+Docker Engine + Compose v2, Python 3.13, Node.js 24, npm и Git. Для полноценного dev требуется одноразовый PostgreSQL 17 и приватный MinIO, при OIDC — Keycloak 26.3.3. Синтетический локальный стенд описан в [LOCAL_STACK.md](../../infra/dev/LOCAL_STACK.md).
 
-## Backend
+## Быстрые проверки (Linux/macOS с shell)
 
 ```bash
-python -m pip install -r apps/api/requirements-dev.txt
-PYTHONPATH=apps/api python -m pytest -q tests/bootstrap
+python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
+PYTHONPATH=apps/api python -m pytest -q tests/bootstrap tests/contract
 python scripts/check_contract.py
-PYTHONPATH=apps/api uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000
-```
-
-`/health/live` должен отвечать 200, `/health/ready` намеренно возвращает 503 без обязательной БД/служб. Это не ошибка разработки, а fail-closed поведение.
-
-## Frontend
-
-```bash
 cd apps/web
 npm ci
 npm run typecheck
 npm run build
 ```
 
-Пока `package-lock.json` не создан и не проверен в CI, `npm ci` заблокирован — задача #10. Не указывать build как PASS без действительного запуска.
+Эти команды проверяют код/контракты, но PG интеграционные тесты требуют отдельного подготовленного стенда.
 
-## Секреты, логи и тесты
+## Запуск инфраструктуры dev
 
-`.env.example` содержит заглушки. Нельзя копировать реальные токены в публичную ветку. Запуск только на `localhost` до отдельных решений. Интеграционные тесты локальных учётных записей/ACL и PostgreSQL проводить в изолированном контуре. Для файлов #28 запустить приватный MinIO только на `127.0.0.1`, креды взять из игнорируемого `.env.local`, buckets без публичного доступа. Не считать MinIO поднятым, пока `docker compose` и S3 tests реально не выполнялись. Внешний Keycloak/OIDC отложен.
+Создать приватный `infra/dev/.env.local` на основе `infra/dev/local.env.example`, заменить все `CHANGE_TO_...` уникальными локальными значениями. Затем:
 
-Подробная модель входа и файлов: [`LOCAL_AUTH_AND_MINIO.md`](../security/LOCAL_AUTH_AND_MINIO.md).
+```bash
+bash infra/dev/bootstrap-local.sh
+docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
+```
+
+Bootstrap запускает Compose инфраструктуру PostgreSQL/MinIO/Keycloak, применяет Alembic и подготавливает синтетические аккаунты. Web/API **не** контейнеризованы вместе с этим dev-стендом: они запускаются на host и используют локальные ограничения безопасности. Для корректного единого HTTPS origin использовать [LOCAL_STACK.md](../../infra/dev/LOCAL_STACK.md), команду `bash infra/dev/start-https.sh` и соответствующие сертификаты только в отдельном тестовом профиле браузера.
+
+## Запуск API без БД (ограниченный public smoke)
+
+```bash
+PYTHONPATH=apps/api uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000
+```
+
+`/health/live` возвращает 200, `/health/ready` без служб может намеренно возвращать 503. Не обходить проверку HTTPS/loopback и не публиковать этот dev стенд.
+
+## Windows
+
+В Git Bash/WSL2 можно следовать shell-инструкциям выше. При запрещённом PowerShell и наличии только **CMD** для работы с Compose допустима команда:
+
+```cmd
+docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
+```
+
+Но `bootstrap-local.sh` и `start-https.sh` **не запускаются нативным CMD**. Поэтому простую команду `docker compose up` нельзя выдавать за полный рабочий локальный API/WEB+Keycloak/OIDC; воспроизводимый CMD-only bootstrap ещё необходимо реализовать и проверить по #122/#119. Не обещать успешный native Windows запуск без прогона.
+
+## Тесты и безопасные операции
+
+`apps/web/package-lock.json` присутствует, `npm ci` проверяется CI. Внешние OIDC, локальные сессии, PostgreSQL и MinIO **уже тестируются** на синтетике, но не означают production-readiness. Скрипты миграций нельзя применять к действующей базе без backup/rollback. `docker compose ... down -v` **удаляет данные dev volumes**. Не использовать реальные VIN, телефоны, клиентские обращения или секреты в Git и screenshots.
+
+Подробности: [модель безопасности](../security/LOCAL_AUTH_AND_MINIO.md), [документационный аудит](../auto/DOCUMENTATION_AUDIT.md).
