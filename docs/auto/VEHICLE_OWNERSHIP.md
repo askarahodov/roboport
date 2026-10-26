@@ -55,3 +55,7 @@ python -m alembic -c apps/api/alembic.ini upgrade head
 Нужен **изолированный PostgreSQL 17**, миграции до `0022_auto_vehicle_claim`, `ROBOport_DATABASE_URL` и синтетические fixtures. CI выполняет downgrade/base/upgrade и `pg_dump/pg_restore`; не выполнять downgrade на реальной БД.
 
 Документы/роль должны синхронизироваться с API и тестами в том же PR согласно [политике](../DOCUMENTATION_POLICY.md).
+
+## Усиление DB-инвариантов назначений — 0023_auto_staff_guard
+
+Аддитивная миграция `0023_auto_staff_guard` запрещает менять actor, vehicle и role уже созданного `auto_vehicle_staff_assignment`, отменять отзыв `revoked_at` и удалять строку назначения. Это необходимо потому, что объектная проверка `_role_scoped` зависит от точной и действующей записи назначения. После отзыва новая выдача доступа оформляется **отдельной** записью, старые доказательства отзыва сохраняются. PostgreSQL тест: `tests/integration/test_pg_auto_staff_guard.py`.
