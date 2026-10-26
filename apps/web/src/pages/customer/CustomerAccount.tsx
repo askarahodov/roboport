@@ -99,9 +99,9 @@ export function CustomerAccount() {
 
   return <PageShell className="customer-account">
     <h1>Личный кабинет</h1>
-    <Tabs label="Разделы личного кабинета" items={sections.map(section => ({to:section.path,label:section.title,end:'end' in section && section.end}))} />
+    <div className="account-layout"><aside className="account-sidebar"><p className="ui-eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><Tabs label="Разделы личного кабинета" items={sections.map(section => ({to:section.path,label:section.title,end:'end' in section && section.end}))} /></aside><div className="account-content">
     <h2>{selected.title}</h2>
-    <p role="status">Сессия подтверждена. Раздел доступен только через серверную авторизацию.</p>
+    <p className="account-subtitle">Здесь собраны ваши роботы, обращения, сметы и документы.</p>
     <Card>{pathname === '/account/tickets' ? <CustomerTickets /> :
       pathname === '/account/robots' ? <CustomerSummary section="robots" /> :
       pathname === '/account/estimates' ? <CustomerSummary section="estimates" /> :
@@ -113,6 +113,6 @@ export function CustomerAccount() {
     <button type="button" disabled={loggingOut} onClick={() => void logout()}>
       {loggingOut ? 'Выход…' : 'Выйти'}</button>
     {logoutError && <p role="alert">{logoutError}</p>}
-    <span className="sr-only">Авторизованный субъект: {session?.subjectId}</span>
+    <span className="sr-only">Авторизованный субъект: {session?.subjectId}</span></div></div>
   </PageShell>;
 }
