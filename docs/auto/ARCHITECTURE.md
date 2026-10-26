@@ -8,7 +8,7 @@ React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0
 
 ## Контексты
 - Organization/ServiceLocation: филиал, часы, смены, посты, доступ сотрудника.
-- Customer/Vehicle: auto_vehicle + customer link; связь машины с клиентом не передаёт старые наряды.
+- Customer/Vehicle: auto_vehicle + pending customer link. Доступ к автомобилю допускается только по явно проверенной, неотозванной связи; verified_at и verified_by требуют полномочного staff-review в будущем API. Связь машины с клиентом не передаёт старые наряды.
 - Scheduling: Appointment, WorkBay, исключение пересечений при конкурентной записи.
 - WorkOrder: автомобильная приёмка, Inspection, Labor, Estimate, QC.
 - Parts: OEM/aftermarket провайдер, применяемость, склад, резерв, закупки.
