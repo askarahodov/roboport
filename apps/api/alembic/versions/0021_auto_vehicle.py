@@ -1,10 +1,10 @@
-"""Additive automotive vehicle foundation on synthetic PostgreSQL 17.
+"""Аддитивная автомобильная модель на синтетическом PostgreSQL 17.
 
 Revision ID: 0021_auto_vehicle
 Revises: 0020_guest_proof
 
-No existing robot or ticket data is rewritten. Access to a linked vehicle never
-implicitly grants access to historic service tickets.
+Исторические данные роботов и заявок не изменяются. Связь с автомобилем
+сама по себе не предоставляет доступ к старым заказам.
 """
 from alembic import op
 
@@ -56,6 +56,6 @@ def upgrade():
 
 
 def downgrade():
-    # Only allowed on disposable dev databases unless loss of data is approved.
+    # Без отдельного разрешения на потерю данных откат допускается только в dev.
     op.execute("DROP TABLE auto_vehicle_customer_link")
     op.execute("DROP TABLE auto_vehicle")
