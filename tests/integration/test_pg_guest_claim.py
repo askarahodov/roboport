@@ -86,3 +86,40 @@ def test_claim_expired_proof_never_binds(monkeypatch):
             (claim,ticket,customer,"0"*64))
         assert db.execute("SELECT status FROM guest_ticket_claim WHERE id=%s",(claim,)).fetchone()[0]=="PENDING_REVIEW"
         assert not db.execute("SELECT 1 FROM account_customer_link WHERE customer_id=%s",(customer,)).fetchone()
+
+
+def test_anonymous_guest_intake_has_no_ticket_access_and_staff_only_assignment(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    url="/api/v1/dev/guest-intake"
+    origin={"Origin":"https://127.0.0.1","Idempotency-Key":"synthetic-guest-"+uuid4().hex}
+    assert http.post(url,json={},headers={"Idempotency-Key":origin["Idempotency-Key"]}).status_code==403
+    assert http.post(url,json={"userId":str(uuid4())},headers=origin).status_code==422
+    new=http.post(url,json={},headers=origin)
+    assert new.status_code==202,new.text
+    assert new.json()["status"]=="PENDING_REVIEW"
+    receipt=new.json()["requestId"]
+    assert "ticketId" not in new.text and "customerId" not in new.text
+    replay=http.post(url,json={},headers=origin)
+    assert replay.status_code==202 and replay.json()["requestId"]==receipt
+    assert http.get("/api/v1/dev/account/tickets").status_code==401
+    assert http.post(f"{url}/{receipt}/assign",headers=origin).status_code==403
+    with psycopg.connect(DSN) as db:
+        staff,token,csrf=uuid4(),new_token(),new_token()
+        db.execute("INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",(staff,staff.hex))
+        db.execute("INSERT INTO user_role(id,user_id,role_code) VALUES(%s,%s,'INTAKE')",(uuid4(),staff))
+        now=datetime.now(timezone.utc)
+        db.execute("""INSERT INTO user_session
+          (id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+          VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+          (uuid4(),staff,token_digest(token),token_digest(csrf),now,
+           now+timedelta(minutes=30),now+timedelta(hours=4)))
+    http.cookies.set("rp_session",token)
+    assigned=http.post(f"{url}/{receipt}/assign",headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf})
+    assert assigned.status_code==200,assigned.text
+    ticket=assigned.json()["ticketId"]
+    assert http.post(f"{url}/{receipt}/assign",headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf}).status_code==403
+    assert http.post(f"/api/v1/dev/guest-claims/tickets/{ticket}/issue",
+       headers={"Origin":"https://127.0.0.1","X-CSRF-Token":csrf}).status_code==200
