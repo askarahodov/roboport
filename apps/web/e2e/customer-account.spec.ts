@@ -161,3 +161,26 @@ test('documents fail closed when revoked, no object key or direct storage links'
  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
  await expect(link).toHaveCount(0);
 });
+
+test('account forbidden state provides safe path to login without private resources',async({page})=>{
+ await page.route('**/api/v1/auth/me',r=>r.fulfill({status:403,contentType:'application/json',body:'{}'}));
+ await page.goto('/account');
+ await expect(page.getByRole('alert')).toContainText('403');
+ const recovery=page.getByRole('link',{name:'Войти под другой учётной запись'});
+ await expect(recovery).toBeVisible();
+ await expect(page.getByRole('navigation',{name:'Разделы личного кабинета'})).toHaveCount(0);
+ await recovery.click();
+ await expect(page).toHaveURL(/\/account\/login$/);
+ await expect(page.getByRole('heading',{name:'Вход в личный кабинет'})).toBeVisible();
+});
+
+test('login is discoverable directly in global navigation on desktop and mobile',async({page})=>{
+ for(const width of [390,1440]){
+  await page.setViewportSize({width,height:844});
+  await page.goto('/');
+  const link=page.getByRole('navigation',{name:'Разделы сервиса'}).getByRole('link',{name:'Войти'});
+  await expect(link).toBeVisible();
+  await link.click();
+  await expect(page).toHaveURL(/\/account\/login$/);
+ }
+});
