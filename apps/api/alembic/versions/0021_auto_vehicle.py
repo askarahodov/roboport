@@ -34,7 +34,12 @@ def upgrade():
         vehicle_id uuid NOT NULL REFERENCES auto_vehicle(id) ON DELETE RESTRICT,
         customer_id uuid NOT NULL REFERENCES customer(id) ON DELETE RESTRICT,
         linked_at timestamptz NOT NULL DEFAULT now(),
+        verified_at timestamptz,
+        verified_by uuid REFERENCES app_user(id) ON DELETE RESTRICT,
         revoked_at timestamptz,
+        CHECK (verified_at IS NULL OR verified_at >= linked_at),
+        CHECK ((verified_at IS NULL AND verified_by IS NULL)
+            OR (verified_at IS NOT NULL AND verified_by IS NOT NULL)),
         CHECK (revoked_at IS NULL OR revoked_at >= linked_at)
       )
     """)
@@ -46,7 +51,7 @@ def upgrade():
     op.execute("""
       CREATE INDEX ix_auto_vehicle_customer_active
       ON auto_vehicle_customer_link(customer_id, vehicle_id)
-      WHERE revoked_at IS NULL
+      WHERE revoked_at IS NULL AND verified_at IS NOT NULL
     """)
 
 
