@@ -999,6 +999,37 @@ async def contract_inventory_release(reservationId: str,request: Request):
     return await _inventory_http(request,"cancel",reservationId,contract=True)
 
 
+@app.get("/api/v1/dev/account/tickets/{ticket_id}/timeline",include_in_schema=False)
+def dev_customer_ticket_timeline(ticket_id: str,request: Request):
+    """Dev-only history. The live session and ownership are checked by the same SQL query."""
+    import os
+    from urllib.parse import urlsplit
+    from uuid import UUID
+    import psycopg
+    from .customer_timeline import owned_ticket_timeline
+    raw=os.getenv("ROBOport_DATABASE_URL","")
+    try:
+        dsn=urlsplit(raw)
+        ticket=UUID(ticket_id)
+        if (os.getenv("ROBOport_SYNTHETIC_ACCESS_API")!="1"
+            or request.url.scheme!="https"
+            or request.url.hostname not in ("localhost","127.0.0.1")
+            or dsn.scheme not in ("postgresql","postgresql+psycopg")
+            or dsn.hostname!="127.0.0.1" or dsn.port is None):
+            return not_found(request)
+    except ValueError:
+        return not_found(request)
+    token=request.cookies.get("rp_session","")
+    if not token:
+        return JSONResponse(status_code=401,content={"code":"UNAUTHENTICATED",
+             "requestId":request.state.request_id},headers={"Cache-Control":"no-store"})
+    with psycopg.connect(raw.replace("postgresql+psycopg://","postgresql://",1)) as conn:
+        events=owned_ticket_timeline(conn,token,ticket)
+    if events is None:
+        return not_found(request)
+    return JSONResponse(content={"items":events},headers={"Cache-Control":"no-store"})
+
+
 @app.get("/api/v1/dev/account/tickets",include_in_schema=False)
 def dev_customer_account_tickets(request: Request,limit: int=20,offset: int=0):
     """Account read is session-scoped; no client-supplied identity or customer ID."""
