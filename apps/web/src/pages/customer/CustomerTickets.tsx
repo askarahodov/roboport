@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert, EmptyState, Skeleton, Badge } from '../../ui';
 
 type Ticket = { id: string; state: string; version: number };
 
@@ -41,11 +42,11 @@ export function CustomerTickets() {
     return () => controller.abort();
   }, [reload]);
 
-  if (status === 'loading') return <p role="status">Загрузка ваших заявок…</p>;
-  if (status === 'denied') return <p role="alert">Доступ к заявкам закрыт или сессия истекла. Повторно войдите в кабинет.</p>;
+  if (status === 'loading') return <Skeleton label="Загрузка ваших заявок…" />;
+  if (status === 'denied') return <Alert>Доступ к заявкам закрыт или сессия истекла. Повторно войдите в кабинет.</Alert>;
   if (status === 'error') return <div><p role="alert">Не удалось загрузить заявки.</p>
     <button type="button" onClick={() => setReload(n => n+1)}>Повторить загрузку</button></div>;
   return items.length > 0
-    ? <ul>{items.map(ticket => <li key={ticket.id}>Заявка {ticket.id}, статус: {ticket.state}, версия {ticket.version}</li>)}</ul>
-    : <p role="status">У вас пока нет доступных заявок.</p>;
+    ? <ul className="account-records">{items.map(ticket => <li className="account-record" key={ticket.id}><span>Заявка <span className="account-record-id" title={ticket.id}>{ticket.id.slice(0,8)}</span></span><Badge>{ticket.state}</Badge><span>Версия {ticket.version}</span></li>)}</ul>
+    : <EmptyState title="У вас пока нет доступных заявок." description="Когда появятся обращения, их статус будет виден здесь." />;
 }

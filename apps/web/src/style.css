@@ -105,3 +105,10 @@ body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,
 .account-hint{font-size:.86rem;opacity:.75}
 @media(max-width:860px){.account-layout{grid-template-columns:minmax(0,1fr);gap:1rem}.account-sidebar{position:static;padding:.65rem}.account-sidebar .ui-eyebrow{display:none}.account-sidebar .ui-tabs{flex-direction:row;overflow-x:auto;flex-wrap:nowrap}.account-sidebar .ui-tabs a{width:auto;white-space:nowrap}}
 @media(max-width:540px){.customer-account.ui-page{width:calc(100% - 2rem)}.account-stats{grid-template-columns:1fr}.account-stat{min-height:105px}}
+
+.account-records{display:grid;gap:.85rem;list-style:none;padding:0;margin:1.4rem 0}
+.account-record{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1.2rem;background:var(--rp-background);border:1px solid color-mix(in srgb,var(--rp-foreground) 14%,transparent);border-radius:.85rem;overflow-wrap:anywhere;min-width:0}
+.account-record>a{color:var(--rp-action);font-weight:700}
+.account-record-id{font-family:ui-monospace,monospace;opacity:.75}
+.account-record .ui-badge{margin-left:auto}
+@media(max-width:540px){.account-record{align-items:flex-start;flex-direction:column}.account-record .ui-badge{margin-left:0}}
