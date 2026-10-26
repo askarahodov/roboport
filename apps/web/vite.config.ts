@@ -1,5 +1,8 @@
 import { defineConfig } from 'vite';
+// Vite runs this config under Node; the browser TS project intentionally omits @types/node.
+// @ts-expect-error Node builtin types are not part of the browser-only tsconfig
 import { readFileSync } from 'node:fs';
+declare const process: { env: Record<string, string | undefined> };
 
 // HTTPS dev origin is explicit opt-in; backend remains bound to host loopback.
 const secureLocal = process.env.ROBO_DEV_HTTPS === '1';
