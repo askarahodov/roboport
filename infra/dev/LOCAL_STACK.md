@@ -26,3 +26,17 @@ Docker Engine + Compose v2, Python 3.13 (venv), Node.js 24, npm, OpenSSL; дос
 ### Очистка
 
 `docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml down` остановит службы. `down -v` **уничтожит** синтетическую PostgreSQL и MinIO информацию. TLS-файлы и `.env.local` удаляются вручную. Никогда не выполнять `down -v` для ценного окружения.
+
+## Локальный единый HTTPS origin
+
+После `bash infra/dev/bootstrap-local.sh` добавьте **собственный** `ROBO_DEV_OIDC_STATE_KEY` (минимум 32 случайных символа) в исключённый из Git `infra/dev/.env.local`. Установите Python-зависимости в активном venv, Node 24 и npm.
+
+Запуск: `bash infra/dev/start-https.sh`. Откройте **https://127.0.0.1:8444/** и доверьте временный сертификат только в локальном браузерном профиле. Не вводите реальные данные и не устанавливайте этот CA в глобальные доверенные корни системы.
+
+Браузер использует один origin `https://127.0.0.1:8444`. Vite проксирует `/api` к loopback HTTPS FastAPI на 8445 с сохранением исходного Host/Origin. Сессии остаются HttpOnly + Secure, все backend ACL и CSRF проверки действуют. Keycloak остаётся отдельно на `https://localhost:9443`. Для OIDC тестового пользователя его `(issuer, sub)` нужно сначала привязать к локальному `app_user` в `oidc_identity`: автоматическое создание прав специально запрещено.
+
+Для синтетических локальных учётных записей используется `/account/login`; для Keycloak — `/api/v1/dev/oidc/start`. Сохраняйте эти два способа различными: прежние E2E доказывают Keycloak Code+PKCE, а локальный запуск требует отдельной сквозной ручной проверки из #76.
+
+API проверка: `curl --cacert infra/dev/tls/local.crt https://127.0.0.1:8444/health/live` не подходит: `/health` не проксируется через Vite. Используйте `curl --cacert infra/dev/tls/local.crt https://127.0.0.1:8445/health/live`. Проверка same-origin: `curl --cacert infra/dev/tls/local.crt https://127.0.0.1:8444/api/v1/catalog/brands`.
+
+**Важно:** Vite — dev-only server, не production reverse proxy. Самоподписанный TLS и отключенная проверка сертификата в локальном proxy никогда не переносятся в production. Привязка к 127.0.0.1 обязательна.
