@@ -10,6 +10,8 @@ from .auth_http import router as synthetic_auth_router
 app.include_router(synthetic_auth_router)
 from .oidc_http import router as oidc_router
 app.include_router(oidc_router)
+from .guest_claim_http import router as guest_claim_router
+app.include_router(guest_claim_router)
 
 
 @app.middleware("http")
