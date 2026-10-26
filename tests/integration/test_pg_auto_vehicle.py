@@ -1,6 +1,6 @@
-"""Automotive foundation: negative integrity tests against disposable PostgreSQL 17.
+"""Проверки целостности автомобильной модели на одноразовом PostgreSQL 17.
 
-No real VIN, customer or plate data is used.
+Реальные VIN, клиентские данные и госномера не используются.
 """
 from uuid import uuid4
 
@@ -72,8 +72,8 @@ def test_customer_vehicle_links_require_valid_owners_and_allow_revocation():
                     "INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id) VALUES(%s,%s,%s)",
                     (uuid4(), uuid4(), another_customer),
                 )
-        # A newly inserted association is only a pending claim, never
-        # sufficient authorization for reading a service record.
+        # Новая связь — только неподтверждённая заявка на привязку.
+        # Самостоятельно она не даёт права читать сервисную историю.
         assert db.execute(
             "SELECT verified_at, verified_by FROM auto_vehicle_customer_link WHERE id=%s",
             (first_link,),
@@ -92,8 +92,8 @@ def test_customer_vehicle_links_require_valid_owners_and_allow_revocation():
             "INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id) VALUES(%s,%s,%s)",
             (uuid4(), vehicle, customer),
         )
-        # An additional pending customer link can coexist; it does NOT grant
-        # access to previously created service_ticket documents.
+        # Связи с несколькими клиентами могут сосуществовать, но не дают
+        # автоматически доступ к прежним документам service_ticket.
         db.execute(
             "INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id) VALUES(%s,%s,%s)",
             (uuid4(), vehicle, another_customer),
