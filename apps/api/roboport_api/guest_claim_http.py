@@ -8,6 +8,7 @@ import psycopg
 from pydantic import BaseModel,Field,ValidationError
 from .auth_http import _mutation_ok, _origin_ok
 from .guest_claim import issue_proof,redeem_proof,review_claim,ClaimRejected
+from .guest_intake import create_guest_request,assign_intake,IntakeLimited
 from .session_lookup import session_subject
 
 router=APIRouter(include_in_schema=False)
@@ -74,3 +75,35 @@ async def review(claim_id:str,request:Request):
         try: outcome=review_claim(conn,request.cookies.get("rp_session",""),claim,payload.approve)
         except ClaimRejected:return _err(request,403,"FORBIDDEN")
     return JSONResponse(content={"status":outcome},headers={"Cache-Control":"no-store"})
+
+@router.post("/api/v1/dev/guest-intake")
+async def guest_intake(request:Request):
+    """No auth and no information returned about ticket/customer. Local synthetic only."""
+    dsn=_dsn(request)
+    if dsn is None:return _err(request,404,"NOT_FOUND")
+    if not _origin_ok(request):return _err(request,403,"FORBIDDEN")
+    # No PII, device/customer ID, or other client data accepted.
+    try:
+        raw=await request.json()
+        if raw!={}:raise ValueError("only empty payload is accepted")
+        key=request.headers.get("idempotency-key","")
+        if not 16<=len(key)<=128:raise ValueError("invalid idempotency key")
+    except (ValueError,TypeError):return _err(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as conn:
+        try: receipt,state=create_guest_request(conn,key,"127.0.0.1:synthetic")
+        except IntakeLimited:return _err(request,429,"RATE_LIMITED")
+        except psycopg.errors.UniqueViolation:return _err(request,409,"VERSION_CONFLICT")
+    return JSONResponse(status_code=202,content={"requestId":receipt,"status":state},
+        headers={"Cache-Control":"no-store"})
+
+@router.post("/api/v1/dev/guest-intake/{intake_id}/assign")
+def guest_intake_assign(intake_id:str,request:Request):
+    dsn=_dsn(request)
+    if dsn is None:return _err(request,404,"NOT_FOUND")
+    try: ident=UUID(intake_id)
+    except ValueError:return _err(request,404,"NOT_FOUND")
+    with psycopg.connect(dsn) as conn:
+        if not _mutation_ok(request,conn):return _err(request,403,"FORBIDDEN")
+        try: ticket=assign_intake(conn,request.cookies.get("rp_session",""),ident)
+        except IntakeLimited:return _err(request,403,"FORBIDDEN")
+    return JSONResponse(content={"ticketId":str(ticket)},headers={"Cache-Control":"no-store"})
