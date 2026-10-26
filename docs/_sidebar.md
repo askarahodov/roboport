@@ -1,0 +1,26 @@
+- **Главная**
+  - [Обзор и статусы](/)
+  - [Карта всей документации](INDEX.md)
+- **Пользователям (планируется)**
+  - [Клиент](guides/client.md)
+  - [Мобильное приложение](guides/mobile.md)
+- **Сотрудникам (планируется)**
+  - [Администратор](guides/administrator.md)
+  - [Мастер-приёмщик](guides/intake.md)
+  - [Механик и диагност](guides/mechanic.md)
+  - [Кладовщик и закупщик](guides/warehouse.md)
+  - [Руководитель](guides/manager.md)
+  - [Бухгалтер и кассир](guides/finance.md)
+- **Реализовано в dev**
+  - [Связь клиента с автомобилем](auto/VEHICLE_OWNERSHIP.md)
+  - [Аудит актуальности](auto/DOCUMENTATION_AUDIT.md)
+- **Разработчикам**
+  - [Продукт и функции](auto/PRODUCT.md)
+  - [Архитектура и безопасность](auto/ARCHITECTURE.md)
+  - [Функциональная матрица](auto/FUNCTIONAL_MATRIX.md)
+  - [Каталоги запчастей](auto/PARTS_CATALOG.md)
+  - [Технологии](TECH_STACK.md)
+  - [Локальная разработка](operations/DEV_ENVIRONMENT.md)
+  - [HTTP API](api/API_IMPLEMENTATION.md)
+  - [Политика документации](DOCUMENTATION_POLICY.md)
+  - [Стандарт Issue](implementation/ISSUE_STANDARD.md)
