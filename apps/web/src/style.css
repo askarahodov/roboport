@@ -112,3 +112,9 @@ body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,
 .account-record-id{font-family:ui-monospace,monospace;opacity:.75}
 .account-record .ui-badge{margin-left:auto}
 @media(max-width:540px){.account-record{align-items:flex-start;flex-direction:column}.account-record .ui-badge{margin-left:0}}
+
+.account-timeline{flex-basis:100%;width:100%;margin-top:.35rem}
+.account-timeline>button{background:var(--rp-surface);color:var(--rp-foreground);border:1px solid color-mix(in srgb,var(--rp-foreground) 23%,transparent);min-height:42px}
+.account-timeline-panel{margin-top:.8rem;padding:1rem;border-radius:.8rem;border:1px solid color-mix(in srgb,var(--rp-foreground) 15%,transparent)}
+.account-timeline-panel ol{display:grid;gap:.7rem;padding-left:1.5rem}
+.account-timeline-panel li{line-height:1.6;overflow-wrap:anywhere}
