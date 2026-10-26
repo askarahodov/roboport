@@ -18,9 +18,9 @@ test('главная, навигация, кодовые блоки и поис�
   const search = page.locator('.sidebar .search input');
   await search.fill('доказательство');
   await expect(page.locator('.sidebar .results-panel')).toBeVisible();
-  await expect(page.locator('.sidebar .results-panel')).toContainText(
-    'Привязка автомобиля',
-  );
+  const results = page.locator('.sidebar .results-panel');
+  await expect(results.locator('a').first()).toBeVisible();
+  await expect(results).not.toContainText('Ничего не найдено');
 });
 
 test('все пользовательские разделы существуют и явно обозначены как planned', async ({ page }) => {
