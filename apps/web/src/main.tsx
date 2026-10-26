@@ -88,9 +88,41 @@ function App() {
       <label>Тема <select aria-label="Тема оформления" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="auto">Авто</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
     </header>
     <Routes>
-      <Route path="/" element={<section><h1>Сервис обслуживания роботов</h1>
-        <p>Синтетический стенд разработки. Приём реальных заявок пока закрыт.</p>
-        <p>Изучите <Link to="/catalog/brands">бренды</Link> и <Link to="/catalog/models">модели</Link> роботов.</p></section>} />
+      <Route path="/" element={<div className="landing">
+        <section className="hero" aria-labelledby="hero-title">
+          <div className="hero-content">
+            <span className="eyebrow"><span className="status-dot" /> ROBOport · независимый сервис робототехники</span>
+            <h1 id="hero-title">Сервис обслуживания <span>роботов</span></h1>
+            <p className="hero-lead">Диагностика, ремонт, обслуживание и модернизация домашних и человекоподобных роботов — в едином сервисном пространстве.</p>
+            <div className="hero-actions">
+              <Link className="btn btn-primary" to="/catalog/models">Смотреть модели <span aria-hidden="true">↗</span></Link>
+              <Link className="btn btn-secondary" to="/account/login">Войти в кабинет</Link>
+            </div>
+            <p className="hero-note">Синтетический стенд разработки. Приём реальных заявок пока закрыт.</p>
+          </div>
+          <div className="hero-visual" aria-hidden="true">
+            <div className="orbital orbital-one" /><div className="orbital orbital-two" />
+            <div className="hero-mark">R<span>·</span></div>
+            <div className="hero-visual-label">ROBOTICS / SERVICE / FUTURE</div>
+          </div>
+        </section>
+        <section className="landing-section" aria-labelledby="services-title">
+          <div className="section-intro"><span className="eyebrow">НАПРАВЛЕНИЯ СЕРВИСА</span><h2 id="services-title">Полный цикл заботы о роботе</h2>
+          <p>От первой проверки до сопровождения после обслуживания.</p></div>
+          <div className="service-grid">
+            <article className="service-card"><span className="service-number">01 / АНАЛИЗ</span><div className="service-icon">◇</div><h3>Диагностика</h3><p>Структурированный поиск неисправностей и оценка технического состояния.</p></article>
+            <article className="service-card"><span className="service-number">02 / ВОССТАНОВЛЕНИЕ</span><div className="service-icon">⌘</div><h3>Ремонт</h3><p>Сервисные работы с контролем этапов и согласованием сметы.</p></article>
+            <article className="service-card"><span className="service-number">03 / ПОДДЕРЖКА</span><div className="service-icon">◎</div><h3>Обслуживание</h3><p>Профилактика, проверка узлов и ведение истории сервисных работ.</p></article>
+            <article className="service-card"><span className="service-number">04 / РАЗВИТИЕ</span><div className="service-icon">↗</div><h3>Модернизация</h3><p>Оценка совместимости комплектующих и возможностей обновления.</p></article>
+          </div>
+        </section>
+        <section className="landing-cta" aria-labelledby="discover-title">
+          <div><span className="eyebrow">ИССЛЕДУЙТЕ КАТАЛОГ</span><h2 id="discover-title">Роботы разные. Сервис — системный.</h2>
+          <p>Познакомьтесь с доступными разделами каталога. Данные выводятся из API.</p></div>
+          <div className="hero-actions"><Link className="btn btn-secondary" to="/catalog/brands">Бренды</Link><Link className="btn btn-primary" to="/catalog/models">Модели роботов</Link></div>
+        </section>
+        <footer className="site-footer"><strong>ROBOport</strong><span>Сервисная платформа робототехники · Демонстрационный контур</span></footer>
+      </div>} />
       <Route path="/robots" element={<PublicCatalog kind="models" />} />
       <Route path="/catalog/brands" element={<PublicCatalog kind="brands" />} />
       <Route path="/catalog/models" element={<PublicCatalog kind="models" />} />

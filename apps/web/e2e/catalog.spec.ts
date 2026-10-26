@@ -167,3 +167,18 @@ test('canonical robots route serves live read-only models in both viewports',asy
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
  }
 });
+
+
+test('landing shows full service offering and actionable login/catalog in desktop and mobile',async({page})=>{
+ for(const width of [390,1440]){
+  await page.setViewportSize({width,height:844});
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Сервис обслуживания роботов'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Полный цикл заботы о роботе'})).toBeVisible();
+  for(const name of ['Диагностика','Ремонт','Обслуживание','Модернизация']){
+   await expect(page.getByRole('heading',{name})).toBeVisible();
+  }
+  await expect(page.getByRole('link',{name:'Войти в кабинет'})).toHaveAttribute('href','/account/login');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+ }
+});
