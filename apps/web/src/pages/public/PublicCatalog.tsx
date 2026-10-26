@@ -1,4 +1,5 @@
 import React from 'react';
+import { PageShell, EmptyState, Skeleton } from '../../ui';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 type Item={id:string;name:string;brandId?:string;category?:string;supportStatus?:string};
@@ -31,15 +32,15 @@ export function PublicCatalog({kind}:{kind:'brands'|'models'}){
  },[kind,cursor,brand,attempt]);
  function advance(nextCursor:string){setStack(old=>[...old,cursor]);setParams(p=>{const q=new URLSearchParams(p);q.set('cursor',nextCursor);return q;});}
  function back(){const prior=stack[stack.length-1]||'';setStack(old=>old.slice(0,-1));setParams(p=>{const q=new URLSearchParams(p);if(prior)q.set('cursor',prior);else q.delete('cursor');return q;});}
- return <section aria-live="polite">
+ return <PageShell>
   <h1>{kind==='brands'?'Бренды роботов':'Модели роботов'}</h1>
   <p>Демонстрационный каталог. Реальные обращения пока не принимаются.</p>
   {kind==='models'&&<form onSubmit={e=>e.preventDefault()}><label>Фильтр по идентификатору бренда <input aria-label="Фильтр бренда" value={brand} onChange={e=>{const val=e.target.value;setStack([]);setParams(p=>{const q=new URLSearchParams(p);q.delete('cursor');if(val)q.set('brandId',val);else q.delete('brandId');return q;});}} /></label></form>}
-  {status==='loading'&&<p role="status">Загрузка каталога…</p>}
+  {status==='loading'&&<Skeleton label="Загрузка каталога…" />}
   {status==='error'&&<><p role="alert">Каталог сейчас недоступен. Попробуйте повторить запрос.</p><button type="button" onClick={()=>setAttempt(x=>x+1)}>Повторить запрос</button></>}
-  {status==='ready'&&(items.length?<ul>{items.map(item=><li key={item.id}>{kind==='models'?<Link to={'/catalog/models/'+encodeURIComponent(item.id)}>{item.name}</Link>:item.name}{item.supportStatus&&<span> — {item.supportStatus==='supported'?'Поддержка заявлена в демонстрационных данных':'Поддержка не подтверждена'}</span>}</li>)}</ul>:<p>Пока нет опубликованных {kind==='brands'?'брендов':'моделей'}.</p>)}
+  {status==='ready'&&(items.length?<ul className="catalog-grid">{items.map(item=><li key={item.id}>{kind==='models'?<Link to={'/catalog/models/'+encodeURIComponent(item.id)}>{item.name}</Link>:item.name}{item.supportStatus&&<span> — {item.supportStatus==='supported'?'Поддержка заявлена в демонстрационных данных':'Поддержка не подтверждена'}</span>}</li>)}</ul>:<EmptyState title={'Пока нет опубликованных '+(kind==='brands'?'брендов':'моделей')+'.'} />)}
   {status==='ready'&&<nav aria-label="Страницы каталога">{stack.length>0&&<button type="button" onClick={back}>Назад</button>}{next&&<button type="button" onClick={()=>advance(next)}>Далее</button>}</nav>}
- </section>;
+ </PageShell>;
 }
 export function PublicModelDetails(){
  const {modelId}=useParams();const [state,setState]=React.useState<'loading'|'found'|'missing'|'error'>('loading');

@@ -1,4 +1,5 @@
 import React from 'react';
+import { PageShell, Card } from '../../ui';
 import { Link, useNavigate } from 'react-router-dom';
 
 export function CustomerLogin() {
@@ -30,7 +31,7 @@ export function CustomerLogin() {
     } catch { setError('Сервер авторизации недоступен.'); }
     finally { setBusy(false); }
   }
-  return <section><h1>Вход в личный кабинет</h1>
+  return <PageShell><Card><h1>Вход в личный кабинет</h1>
     <p>Только для синтетических локальных учётных записей. Саморегистрация отключена.</p>
     <div className="login-methods" aria-label="Способы входа">
       <a className="btn btn-primary" href="/api/v1/dev/oidc/start">Войти через Keycloak</a>
@@ -46,5 +47,5 @@ export function CustomerLogin() {
     </form>
     {error && <p role="alert">{error}</p>}
     <p><Link to="/account">Назад</Link></p>
-  </section>;
+  </Card></PageShell>;
 }
