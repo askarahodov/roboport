@@ -65,5 +65,5 @@ export function StaffStock(){
     <FormField label="UUID резерва" id="stock-reservation"><input id="stock-reservation" value={reservation} onChange={e=>setReservation(e.target.value)}/></FormField>
     <StaffForm title="Отмена резерва" button="Отменить резерв" run={()=>post(
       '/api/v1/dev/inventory/reservations/'+encodeURIComponent(reservation)+'/cancel',{})}/>
-  </section>;
+  </Card></section>;
 }
