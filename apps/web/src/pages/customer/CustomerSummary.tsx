@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, EmptyState, Skeleton, Button } from '../../ui';
+import { Alert, EmptyState, Skeleton } from '../../ui';
 import { EstimateActions } from './EstimateActions';
 
 type Section = 'robots' | 'estimates' | 'documents';
