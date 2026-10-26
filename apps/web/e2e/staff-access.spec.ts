@@ -215,3 +215,21 @@ test('CRM labels are Russian and guest proof survives switching sections',async(
  await page.getByRole('button',{name:'Скрыть код'}).click();
  await expect(page.getByText('SYNTHETIC-PROOF')).toHaveCount(0);
 });
+
+test('guest intake queue refreshes on return without remounting claim state',async({page})=>{
+ let arrivals=0;
+ await page.route('**/api/v1/dev/staff/access',r=>r.fulfill({status:200,contentType:'application/json',body:'{"roles":["INTAKE"]}'}));
+ await page.route('**/api/v1/dev/staff/queue?*',r=>r.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}));
+ await page.route('**/api/v1/dev/guest-intake/queue',r=>{
+   arrivals++;
+   return r.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:arrivals>1?[{id:'guest-new',createdAt:'2026-10-26T10:00:00Z'}]:[]})});
+ });
+ await page.goto('/staff');
+ const nav=page.getByRole('navigation',{name:'Навигация CRM'});
+ await nav.getByRole('button',{name:/Приёмка/}).click();
+ await expect(page.getByText('Ожидающих заявок нет.')).toBeVisible();
+ await nav.getByRole('button',{name:/Очередь/}).click();
+ await nav.getByRole('button',{name:/Приёмка/}).click();
+ await expect(page.getByText('Демо-заявка guest-ne')).toBeVisible();
+ expect(arrivals).toBeGreaterThanOrEqual(2);
+});
