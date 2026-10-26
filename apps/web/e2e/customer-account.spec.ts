@@ -184,3 +184,15 @@ test('login is discoverable directly in global navigation on desktop and mobile'
   await expect(page).toHaveURL(/\/account\/login$/);
  }
 });
+
+test('Keycloak entry is visible and points to same-origin guarded OIDC start',async({page})=>{
+ await page.goto('/account/login');
+ const entry=page.getByRole('link',{name:'Войти через Keycloak'});
+ await expect(entry).toBeVisible();
+ await expect(entry).toHaveAttribute('href','/api/v1/dev/oidc/start');
+ await expect(page.getByRole('heading',{name:'Локальная тестовая учётная запись'})).toBeVisible();
+ // A denied development IdP must not grant a session or navigate to private data.
+ await page.route('**/api/v1/dev/oidc/start',r=>r.fulfill({status:403,body:'{}'}));
+ await entry.click();
+ await expect(page).toHaveURL(/\/api\/v1\/dev\/oidc\/start$/);
+});
