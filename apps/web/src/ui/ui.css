@@ -1,0 +1,31 @@
+.ui-container{width:min(100% - 3rem,1200px);margin-inline:auto}
+.ui-page{width:min(100% - 3rem,1200px);margin:3.5rem auto 5rem;min-height:48vh}
+.ui-page>h1{letter-spacing:-.055em;margin:0 0 1.5rem;font-size:clamp(2rem,4vw,3.5rem)}
+.ui-card{padding:clamp(1.25rem,2vw,2rem);background:var(--rp-surface);border:1px solid color-mix(in srgb,var(--rp-foreground) 13%,transparent);border-radius:1.15rem;box-shadow:0 14px 48px -40px #071f28a0}
+.ui-section-heading h2{font-size:clamp(1.65rem,2.5vw,2.6rem);margin:.6rem 0;letter-spacing:-.045em}
+.ui-section-heading p{opacity:.75;max-width:65ch}
+.ui-eyebrow{font-size:.73rem;text-transform:uppercase;letter-spacing:.12em;font-weight:800;color:var(--rp-action)}
+.ui-button{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:44px;padding:.7rem 1.15rem;font-size:.95rem;font-weight:710;text-decoration:none;border-radius:.75rem;cursor:pointer;transition:transform .15s ease,background .15s ease}
+.ui-button:hover:not(:disabled){transform:translateY(-1px)}
+.ui-button--primary{background:var(--rp-action);color:var(--rp-action-text);border:1px solid transparent}
+.ui-button--secondary{background:var(--rp-surface);color:var(--rp-foreground);border:1px solid color-mix(in srgb,var(--rp-foreground) 26%,transparent)}
+.ui-button--ghost{background:transparent;color:var(--rp-foreground);border:1px solid transparent}
+.ui-button:disabled{opacity:.5;cursor:not-allowed}
+.ui-alert{padding:1rem 1.2rem;border-radius:.7rem;border-inline-start:4px solid;line-height:1.5}
+.ui-alert--error{background:var(--rp-error-surface);color:var(--rp-error-text)}
+.ui-alert--warning{background:var(--rp-safety-surface);color:var(--rp-safety-text)}
+.ui-alert--info{background:var(--rp-surface);color:var(--rp-foreground);border-color:var(--rp-action)}
+.ui-empty{padding:3rem 1.5rem;text-align:center;border:1px dashed color-mix(in srgb,var(--rp-foreground) 24%,transparent);border-radius:1rem;background:var(--rp-surface)}
+.ui-empty-icon{font-size:2.5rem;color:var(--rp-accent)}
+.ui-empty h3{margin:.5rem 0}.ui-empty p{opacity:.7}
+.ui-skeleton{height:6rem;border-radius:.8rem;background:linear-gradient(95deg,var(--rp-surface) 15%,color-mix(in srgb,var(--rp-foreground) 10%,var(--rp-surface)) 50%,var(--rp-surface) 85%);background-size:200% 100%;animation:ui-shimmer 1.5s ease-in-out infinite}
+@keyframes ui-shimmer{to{background-position-x:-200%}}
+.ui-field{display:grid;gap:.45rem;margin:1rem 0}.ui-field label{font-weight:700}.ui-field input,.ui-field select,.ui-field textarea{width:100%;background:var(--rp-surface);color:var(--rp-foreground);border:1px solid color-mix(in srgb,var(--rp-foreground) 28%,transparent);border-radius:.7rem;min-height:44px;padding:.7rem}.ui-field small{opacity:.7}
+.ui-badge{display:inline-flex;align-items:center;padding:.25rem .65rem;border-radius:100px;font-size:.78rem;font-weight:730;background:var(--rp-surface);border:1px solid color-mix(in srgb,var(--rp-foreground) 18%,transparent)}
+.ui-badge--success{border-color:var(--rp-action);color:var(--rp-action)}.ui-badge--error{background:var(--rp-error-surface);color:var(--rp-error-text)}.ui-badge--warning{background:var(--rp-safety-surface);color:var(--rp-safety-text)}
+.ui-tabs{display:flex;gap:.35rem;flex-wrap:wrap;padding:.4rem;background:var(--rp-surface);border-radius:.9rem;border:1px solid color-mix(in srgb,var(--rp-foreground) 12%,transparent);margin:1.5rem 0}
+.ui-tabs a{display:inline-flex;align-items:center;padding:.72rem .95rem;text-decoration:none;border-radius:.6rem;color:var(--rp-foreground);font-size:.9rem;font-weight:650}.ui-tabs a[aria-current="page"]{background:var(--rp-action);color:var(--rp-action-text)}
+.ui-dialog{max-width:min(94vw,520px);padding:1.5rem;background:var(--rp-surface);color:var(--rp-foreground);border:1px solid color-mix(in srgb,var(--rp-foreground) 18%,transparent);border-radius:1.25rem;box-shadow:0 20px 60px #0004}.ui-dialog::backdrop{background:#091e24a9}.ui-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:2rem}
+.ui-header{display:flex;align-items:center}.ui-nav{display:flex;align-items:center;flex-wrap:wrap;gap:.75rem}
+@media(max-width:600px){.ui-container,.ui-page{width:calc(100% - 2rem)}.ui-page{margin:2rem auto 4rem}.ui-tabs{flex-wrap:nowrap;overflow-x:auto}.ui-tabs a{white-space:nowrap}.ui-card{padding:1rem}}
+@media(prefers-reduced-motion:reduce){.ui-skeleton{animation:none}.ui-button{transition:none}}
