@@ -5,6 +5,7 @@ import type { paths } from './shared/api/schema';
 import './style.css';
 import { CustomerAccount } from './pages/customer/CustomerAccount';
 import { CustomerLogin } from './pages/customer/CustomerLogin';
+import { GuestIntake, ClaimProof } from './pages/customer/GuestIntake';
 import { StaffPortal } from './pages/staff/StaffPortal';
 import { PublicCatalog, PublicModelDetails } from './pages/public/PublicCatalog';
 
@@ -82,6 +83,7 @@ function App() {
         <NavLink to="/catalog/brands" end>Бренды</NavLink>
         <NavLink to="/catalog/models" end>Модели</NavLink>
         <NavLink to="/account" end>Личный кабинет</NavLink>
+        <NavLink to="/request-demo" end>Тестовая заявка</NavLink>
         <NavLink to="/account/login" className="header-login">Войти</NavLink>
         <NavLink to="/staff" end>Сотрудникам</NavLink>
       </nav>
@@ -127,6 +129,8 @@ function App() {
       <Route path="/catalog/brands" element={<PublicCatalog kind="brands" />} />
       <Route path="/catalog/models" element={<PublicCatalog kind="models" />} />
       <Route path="/catalog/models/:modelId" element={<PublicModelDetails />} />
+      <Route path="/request-demo" element={<GuestIntake />} />
+      <Route path="/account/claim" element={<ClaimProof />} />
       <Route path="/account/login" element={<CustomerLogin />} />
       <Route path="/account/*" element={<CustomerAccount />} />
       <Route path="/staff/*" element={<StaffPortal />} />
