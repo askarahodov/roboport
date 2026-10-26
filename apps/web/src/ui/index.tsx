@@ -4,7 +4,7 @@ import './ui.css';
 
 type Props = {children: React.ReactNode; className?: string};
 export function Container({children,className=''}:Props){return <div className={'ui-container '+className}>{children}</div>;}
-export function PageShell({children,className=''}:Props){return <main className={'ui-page '+className}>{children}</main>;}
+export function PageShell({children,className=''}:Props){return <div className={'ui-page '+className}>{children}</div>;}
 export function Card({children,className=''}:Props){return <div className={'ui-card '+className}>{children}</div>;}
 export function SectionHeading({eyebrow,title,description}:{eyebrow?:string;title:string;description?:string}){return <div className="ui-section-heading">{eyebrow&&<span className="ui-eyebrow">{eyebrow}</span>}<h2>{title}</h2>{description&&<p>{description}</p>}</div>;}
 export function Button({children,variant='primary',className='',...props}:React.ButtonHTMLAttributes<HTMLButtonElement>&{variant?:'primary'|'secondary'|'ghost'}){return <button {...props} className={'ui-button ui-button--'+variant+' '+className}>{children}</button>;}
