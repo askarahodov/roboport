@@ -1,6 +1,6 @@
 import React from 'react';
-import { PageShell, Tabs, Card, Skeleton } from '../../ui';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { PageShell, Tabs, Card } from '../../ui';
+import { Link, useLocation } from 'react-router-dom';
 import { CustomerTickets } from './CustomerTickets';
 import { CustomerSummary } from './CustomerSummary';
 import { CustomerOverview } from './CustomerOverview';
