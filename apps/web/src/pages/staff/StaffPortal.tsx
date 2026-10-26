@@ -3,7 +3,7 @@ import { TicketWorkflow } from './TicketWorkflow';
 import { StaffEstimates, StaffStock } from './StaffOperations';
 import { StaffAudit } from './StaffAudit';
 import { StaffGuestClaims } from './StaffGuestClaims';
-import { PageShell, Card, Alert, Skeleton, EmptyState, Badge, Button } from '../../ui';
+import { Card, Alert, Skeleton, EmptyState, Badge, Button } from '../../ui';
 import './staff.css';
 
 type Role = 'INTAKE' | 'ENGINEER' | 'STOCK' | 'MANAGER' | 'FINANCE' | 'AUDITOR';
@@ -57,7 +57,7 @@ function StaffQueue({roles}:{roles:Role[]}) {
       <button type="button" onClick={()=>setRetry(n=>n+1)}>Повторить очередь</button></>}
     {status==='ready'&&<div className="crm-filters"><label>Поиск по номеру <input placeholder="UUID заявки" value={query} onChange={e=>setQuery(e.target.value)} /></label><label>Статус <select value={filter} onChange={e=>setFilter(e.target.value)}><option value="ALL">Все статусы</option>{states.map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>Сортировка <select value={sort} onChange={e=>setSort(e.target.value as 'state'|'version')}><option value="state">По статусу</option><option value="version">По версии</option></select></label></div>}
     {status==='ready'&&(visible.length?
-      <ul className="crm-ticket-grid">{visible.map(t=><li className="crm-ticket" key={t.id}><div className="crm-ticket-head"><div><span className="crm-ticket-label">ЗАЯВКА</span><h4 title={t.id}>{t.id.slice(0,8)}…</h4></div><Badge tone={t.state==='SAFETY_HOLD'||t.state==='QC_FAILED'?'error':'neutral'}>{t.state}</Badge></div><p>Версия {t.version} · серверное назначение</p><TicketWorkflow ticket={t} roles={roles} onChanged={()=>setRetry(n=>n+1)}/></li>)}</ul>:
+      <ul className="crm-ticket-grid">{visible.map(t=><li className="crm-ticket" key={t.id}><div className="crm-ticket-head"><div><span className="crm-ticket-label">ЗАЯВКА</span><h4 title={t.id}>{t.id.slice(0,8)}…</h4></div><Badge tone={t.state==='SAFETY_HOLD'||t.state==='QC_FAILED'?'error':'neutral'}>{t.state}</Badge></div><p>версия {t.version} · серверное назначение</p><TicketWorkflow ticket={t} roles={roles} onChanged={()=>setRetry(n=>n+1)}/></li>)}</ul>:
       <EmptyState title={items.length?"По фильтру заявок нет.":"Назначенных заявок нет."} description="Отображаются только заявки, разрешённые сервером." />)}
   </section>;
 }
@@ -91,7 +91,7 @@ export function StaffPortal() {
   const [active,setActive]=React.useState('Очередь');
   const selected=allowed.some(x=>x.label===active)?active:allowed[0]?.label;
   const hasQueue=roles.some(r=>['INTAKE','ENGINEER','MANAGER'].includes(r));
-  return <PageShell className="crm-workspace">
+  return <section className="ui-page crm-workspace">
     <div className="crm-heading"><div><span className="ui-eyebrow">ROBOport / SERVICE OPERATIONS</span><h1>Рабочее пространство</h1><p>Обслуживание роботов · синтетический стенд, реальные операции отключены</p></div><Badge tone="warning">DEV / TEST</Badge></div>
     {state==='loading'&&<Skeleton label="Проверка прав сотрудника…" />}
     {state==='login'&&<Alert>401 — требуется локальный вход. <a href="/account/login">Перейти ко входу</a></Alert>}
@@ -112,5 +112,5 @@ export function StaffPortal() {
         {selected==='Очередь'&&roles.includes('MANAGER')&&<StaffGuestClaims roles={roles}/>}
       </div>
     </div>}
-  </PageShell>;
+  </section>;
 }
