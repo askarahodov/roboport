@@ -85,3 +85,23 @@ body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,
 @media(max-width:1050px){.hero{grid-template-columns:1fr 40%}.hero-content{padding:5rem 2.5rem}.service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.app>header{gap:.8rem}}
 @media(max-width:720px){.app>header{padding:1rem}.app>header nav{order:3;flex-basis:100%;overflow-x:auto;flex-wrap:nowrap}.app>header nav a{white-space:nowrap}.app>header nav .header-login{width:auto;margin-left:0}.hero{grid-template-columns:1fr}.hero-content{padding:4rem 1.5rem}.hero-visual{min-height:275px}.hero-mark{font-size:13rem}.hero-visual-label{right:1.5rem;bottom:1rem}.service-grid{grid-template-columns:1fr}.landing-section{padding-block:3.5rem!important}.landing-cta{display:block;padding-block:3.5rem!important}.hero-actions .btn{flex:1}}
 @media(prefers-reduced-motion:reduce){.btn,.service-card,.app>header nav a{transition:none}.btn:hover,.service-card:hover{transform:none}}
+
+/* Account workspace: compact desktop side rail, scrollable mobile section menu. */
+.customer-account.ui-page{width:min(100% - 3rem,1350px)}
+.customer-account>h1{margin-bottom:.7rem}
+.account-layout{display:grid;grid-template-columns:minmax(210px,245px) minmax(0,1fr);gap:2rem;align-items:start;margin-top:2rem}
+.account-sidebar{position:sticky;top:1.5rem;padding:1.15rem;background:var(--rp-surface);border:1px solid color-mix(in srgb,var(--rp-foreground) 13%,transparent);border-radius:1rem}
+.account-sidebar .ui-eyebrow{display:block;margin:.4rem .5rem 1rem}
+.account-sidebar .ui-tabs{display:flex;flex-direction:column;background:transparent;border:0;margin:0;padding:0;gap:.25rem;overflow:visible}
+.account-sidebar .ui-tabs a{width:100%}
+.account-content{min-width:0}
+.account-content>h2{font-size:clamp(1.6rem,2.5vw,2.3rem);letter-spacing:-.04em;margin:0 0 .5rem}
+.account-subtitle{opacity:.72;margin:0 0 1.5rem}
+.account-content>.ui-card{margin:1.25rem 0}
+.account-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;padding:0;list-style:none;margin:1.5rem 0}
+.account-stat{display:flex;flex-direction:column;gap:1rem;padding:1.3rem;min-height:130px;background:var(--rp-background);border:1px solid color-mix(in srgb,var(--rp-foreground) 13%,transparent);border-radius:.85rem;overflow-wrap:anywhere}
+.account-stat-link{display:flex;justify-content:space-between;text-decoration:none;color:var(--rp-foreground);font-weight:750}
+.account-stat-link:hover{color:var(--rp-action)}
+.account-hint{font-size:.86rem;opacity:.75}
+@media(max-width:860px){.account-layout{grid-template-columns:minmax(0,1fr);gap:1rem}.account-sidebar{position:static;padding:.65rem}.account-sidebar .ui-eyebrow{display:none}.account-sidebar .ui-tabs{flex-direction:row;overflow-x:auto;flex-wrap:nowrap}.account-sidebar .ui-tabs a{width:auto;white-space:nowrap}}
+@media(max-width:540px){.customer-account.ui-page{width:calc(100% - 2rem)}.account-stats{grid-template-columns:1fr}.account-stat{min-height:105px}}

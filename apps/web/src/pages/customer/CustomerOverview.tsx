@@ -42,7 +42,7 @@ export function CustomerOverview(){
  return <section aria-label="Обзор клиентского кабинета">
   <h3>Ваши данные</h3>
   <p>Демонстрационный стенд. Сведения доступны только после серверной проверки прав.</p>
-  <ul>{sections.map(s=><li key={s.key}><Link to={s.url}>{s.label}</Link>{' — '}
+  <ul className="account-stats">{sections.map(s=><li className="account-stat" key={s.key}><Link className="account-stat-link" to={s.url}>{s.label} <span aria-hidden="true">↗</span></Link>
    {states[s.key].status==='loading'?<span role="status">загрузка…</span>:
     states[s.key].status==='denied'?<span role="alert">доступ отозван</span>:
     states[s.key].status==='error'?<span role="alert">ошибка загрузки</span>:
