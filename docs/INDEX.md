@@ -1,34 +1,49 @@
-# Карта документации ROBOport
+# Карта документации ROBOport → Airmatik Pro Service
 
-**Вся смысловая документация проекта пишется по-русски**. Допустимые исключения — язык программирования, стандартные названия API/SQL/HTTP, английские поля/параметры и команды инструментов. Не дублируйте одно и то же правило в нескольких независимых документах.
+**Дата сверки:** 26.10.2026. Все смысловые документы ведём **на русском**. Код/API/HTTP/SQL/команды сохраняем на языке исходных интерфейсов.
 
-| Документ | Что определяет | Читатели |
+Статусы: **current** — работает и проверяется; **legacy** — существующий домен робототехники; **planned** — новые возможности автосервиса, которых пока нет. Не смешивать.
+
+## Для новой разработки Airmatik
+
+| Документ | Статус | Назначение |
 |---|---|---|
-| [`DOCUMENTATION_POLICY.md`](DOCUMENTATION_POLICY.md) | Единый DoD и актуальность инструкций разработчика, сотрудников и клиентов | Все авторы PR, QA и Technical Writer |
-| [`implementation/ISSUE_STANDARD.md`](implementation/ISSUE_STANDARD.md) | Шаблон задач с обязательным документационным impact | Все |
-| [`TECHNICAL_SPEC.md`](../TECHNICAL_SPEC.md) | Все функции, инварианты, границы MVP | Все агенты |
-| [`REPOSITORY_STRUCTURE.md`](REPOSITORY_STRUCTURE.md) | Дерево репозитория, владение кодом | Оркестратор, разработчики |
-| [`TECH_STACK.md`](TECH_STACK.md) | Стек, версии, отложенные технологии | Архитектор, DevOps |
-| [`architecture/ADR.md`](architecture/ADR.md) | Технические решения и их статус | Все |
-| [`architecture/BOUNDARIES.md`](architecture/BOUNDARIES.md) | Границы модулей | Backend, БД |
-| [`data/DATA_MODEL.md`](data/DATA_MODEL.md) | Сущности и ограничения | Backend, БД |
-| [`domain/TICKET_FSM.md`](domain/TICKET_FSM.md) | Состояния заявки и guards | Backend, QA |
-| [`api/API_IMPLEMENTATION.md`](api/API_IMPLEMENTATION.md) | Точность OpenAPI/HTTP | Backend, Frontend |
-| [`security/SECURITY_MODEL.md`](security/SECURITY_MODEL.md) | RBAC/ACL/ABAC и негативные сценарии | Backend, Security |
-| [`security/LOCAL_AUTH_AND_MINIO.md`](security/LOCAL_AUTH_AND_MINIO.md) | Локальная аутентификация, сессии, ACL и приватный MinIO в dev | Backend, DevOps, AI-агенты |
-| [`design/PRELIMINARY_BRANDBOOK.md`](design/PRELIMINARY_BRANDBOOK.md) | Разработческий брендбук и две темы | Design, Frontend |
-| [`implementation/WORK_BREAKDOWN.md`](implementation/WORK_BREAKDOWN.md) | Список GitHub Issues и зависимости | Оркестратор |
-| [`implementation/DEVELOPMENT_ROADMAP.md`](implementation/DEVELOPMENT_ROADMAP.md) | Очередность и этапы | Оркестратор |
-| [`quality/ACCEPTANCE_TESTS.md`](quality/ACCEPTANCE_TESTS.md) | Приёмочные и негативные тесты | QA |
-| [`operations/DEV_ENVIRONMENT.md`](operations/DEV_ENVIRONMENT.md) | Команды и dev-окружение | Все |
-| [`operations/SECURITY_RELEASE_GATES.md`](operations/SECURITY_RELEASE_GATES.md) | Порог разработки и публичного запуска | Владелец |
+| [PRODUCT.md](auto/PRODUCT.md) | planned | Продуктовая концепция и сценарии автосервиса |
+| [FUNCTIONAL_MATRIX.md](auto/FUNCTIONAL_MATRIX.md) | planned | Функции и сравнение с существующим кодом |
+| [ARCHITECTURE.md](auto/ARCHITECTURE.md) | planned / частично current | Границы автомобильных модулей, безопасность |
+| [ADR-AUTO-001](auto/ADR-001.md) | current decision | Решение о поэтапной миграции |
+| [PARTS_CATALOG.md](auto/PARTS_CATALOG.md) | planned | Лицензированные OEM/aftermarket провайдеры |
+| [DOCUMENTATION_AUDIT.md](auto/DOCUMENTATION_AUDIT.md) | current | Сверка фактической реализации и устаревших разделов |
+| [Руководства по ролям](guides/INDEX.md) | planned | Администратор, приёмщик, механик, склад, руководитель, бухгалтер, клиент |
+| [Политика документации](DOCUMENTATION_POLICY.md) | current | Обязательное обновление руководств в том же PR |
 
-## Порядок чтения для новой AI-задачи
+## Для разработчика / эксплуатации
 
-`GitHub Issue → AGENTS.md → TECHNICAL_SPEC.md → релевантные ADR/FSM/API/DB документы → тесты → код`. Если Issue требует неописанного решения, записать отдельное ADR/блокер, а не додумывать принципиальные правила.
+| Документ | Статус | Назначение |
+|---|---|---|
+| [AGENTS.md](../AGENTS.md) | current | Инструкции AI-агентов и безопасная разработка |
+| [Технологический стек](TECH_STACK.md) | current/legacy | Проверенные версии, инфраструктура, ограничения |
+| [Окружение](operations/DEV_ENVIRONMENT.md) | current dev | Команды dev build, проверки, Windows/Linux |
+| [LOCAL_STACK.md](../infra/dev/LOCAL_STACK.md) | current dev | Отдельный синтетический стек PostgreSQL/Keycloak/MinIO |
+| [Правила API](api/API_IMPLEMENTATION.md) | current/legacy | Контракт, защита, правила новых endpoints |
+| [Стандарт GitHub Issues](implementation/ISSUE_STANDARD.md) | current | Acceptance criteria + обязательный docs impact |
+| [Структура репозитория](REPOSITORY_STRUCTURE.md) | частично legacy | Размещение исходников; плановые каталоги отделять от текущих |
+| [Release gates](operations/SECURITY_RELEASE_GATES.md) | legacy/частично current | Не переносить в production без нового auto review |
 
-## Пользовательская база знаний Airmatik
+## Документация существующего робототехнического домена
 
-Новые инструкции для администратора, мастера-приёмщика, механика/диагноста, кладовщика/закупщика, руководителя, бухгалтера и клиента находятся в разработке: [эпик #121](https://github.com/askarahodov/roboport/issues/121), [персонал #123](https://github.com/askarahodov/roboport/issues/123), [клиенты #124](https://github.com/askarahodov/roboport/issues/124). Не принимать этот раздел за работающий help center: платформа публикации и проверки запланированы в [#125](https://github.com/askarahodov/roboport/issues/125).
+Следующие источники **не являются** требованиями нового автосервиса, но остаются значимыми для безопасности и тестов существующих модулей:
 
-Текущая карта документов описывает преимущественно робототехнический (legacy) домен; технический аудит и разделение current/planned/legacy — [#122](https://github.com/askarahodov/roboport/issues/122).
+- [TECHNICAL_SPEC.md](../TECHNICAL_SPEC.md) — legacy-спецификация ROBOport.
+- [ADR существующего проекта](architecture/ADR.md) и [границы модулей](architecture/BOUNDARIES.md).
+- [Модель данных](data/DATA_MODEL.md), [FSM](domain/TICKET_FSM.md) и [сверка схем](data/SCHEMA_RECONCILIATION.md).
+- [Матрица тестов](quality/ACCEPTANCE_TESTS.md) и [модель безопасности](security/SECURITY_MODEL.md).
+- [Исторический roadmap](implementation/DEVELOPMENT_ROADMAP.md) и [WBS](implementation/WORK_BREAKDOWN.md) — прежняя нумерация, НЕ активный backlog Airmatik.
+
+**Актуальный backlog:** [автосервис #107](https://github.com/askarahodov/roboport/issues/107), [документация #121](https://github.com/askarahodov/roboport/issues/121).
+
+## Порядок работы AI-агента
+
+`Issue → AGENTS.md → auto PRODUCT/ADR (если auto), legacy TECHNICAL_SPEC (если robot) → контракт + существующие тесты → код → scoped tests → обновить документацию тех. и пользовательскую → PR/CI/review`.
+
+Новый сервис **ещё не открыт** для реальных клиентов. Публикация навигационной базы знаний и проверка всех ссылок: [#125](https://github.com/askarahodov/roboport/issues/125).
