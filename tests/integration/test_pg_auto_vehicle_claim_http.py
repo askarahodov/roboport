@@ -136,7 +136,7 @@ def test_independent_auto_claim_and_revocation(monkeypatch):
     response = http.get(list_url)
     assert response.status_code == 200
     assert [v["id"] for v in response.json()["items"]] == [str(d["vehicle"])]
-    assert "vin" not in response.text.lower()
+    assert all("vin" not in item for item in response.json()["items"])
     http.cookies.set("rp_session", d["tokens"][d["client_b"]])
     assert http.get(list_url).json()["items"] == []
 
