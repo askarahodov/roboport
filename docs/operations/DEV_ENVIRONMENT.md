@@ -54,3 +54,9 @@ docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
 `apps/web/package-lock.json` присутствует, `npm ci` проверяется CI. Внешние OIDC, локальные сессии, PostgreSQL и MinIO **уже тестируются** на синтетике, но не означают production-readiness. Скрипты миграций нельзя применять к действующей базе без backup/rollback. `docker compose ... down -v` **удаляет данные dev volumes**. Не использовать реальные VIN, телефоны, клиентские обращения или секреты в Git и screenshots.
 
 Подробности: [модель безопасности](../security/LOCAL_AUTH_AND_MINIO.md), [документационный аудит](../auto/DOCUMENTATION_AUDIT.md).
+
+## GitHub Actions — политика параллельных прогонов (#135)
+
+Тяжёлый workflow `.github/workflows/ci.yml` запускается на каждый `pull_request`, при push в `main` и по ручному `workflow_dispatch`. Отдельный `push` feature-ветки **не** создаёт второй идентичный прогон, если PR уже открыт. В рамках одного PR новые изменения отменяют устаревшие CI-прогоны через `concurrency.cancel-in-progress`, но не отменяют проверки других PR или `main`.
+
+Не закрывать PR, пока **последний head SHA** не прошёл PostgreSQL, API, Web и Browser E2E. Установка Playwright Chromium требует сетевого доступа runner к зависимостям; зависание установки браузера — инфраструктурный блокер, а не `PASS`, и нельзя скрывать его отключением browser job. При проблемах проверять шаг `Install browser test runner and Chromium`, GitHub Actions run и публикацию `trace` для ошибок тестов.

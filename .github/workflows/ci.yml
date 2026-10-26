@@ -1,8 +1,13 @@
 name: ROBOport bootstrap CI
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+# Для feature-веток достаточно PR-проверок. Устаревшие прогоны одного PR отменяются.
+concurrency:
+  group: roboport-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
