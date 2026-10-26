@@ -19,7 +19,7 @@ def main():
     try:
         target=urlsplit(dsn)
         ok=(target.scheme in ("postgresql","postgresql+psycopg")
-            and target.hostname=="127.0.0.1" and target.port is not None
+            and target.hostname in ("127.0.0.1","postgres") and target.port is not None
             and os.environ.get("ROBOport_SYNTHETIC_AUTH_API")=="1")
     except ValueError:
         ok=False

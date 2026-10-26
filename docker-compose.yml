@@ -1,0 +1,97 @@
+name: roboport
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: roboport
+      POSTGRES_PASSWORD: ${ROBO_DEV_DB_PASSWORD:?Set ROBO_DEV_DB_PASSWORD}
+      POSTGRES_DB: roboport
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roboport -d roboport"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  minio:
+    image: tobi312/minio@sha256:e2226dea4b9aef896db02f7396102d48eb58cd339d930332e3d8bdac80012a78
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    command:
+      - start-dev
+      - --import-realm
+      - --https-port=8443
+      - --hostname=https://localhost:9443
+      - --https-certificate-file=/opt/keycloak/conf/local.crt
+      - --https-certificate-key-file=/opt/keycloak/conf/local.key
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${ROBO_DEV_KC_ADMIN:?Set ROBO_DEV_KC_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${ROBO_DEV_KC_PASSWORD:?Set ROBO_DEV_KC_PASSWORD}
+    ports:
+      - "127.0.0.1:9443:8443"
+    volumes:
+      - ./tests/fixtures/keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro
+      - ./infra/dev/tls/local.crt:/opt/keycloak/conf/local.crt:ro
+      - ./infra/dev/tls/local.key:/opt/keycloak/conf/local.key:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      ROBOport_DATABASE_URL: postgresql+psycopg://roboport:${ROBO_DEV_DB_PASSWORD}@postgres:5432/roboport
+      ROBOport_SYNTHETIC_AUTH_API: "1"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: roboport
+      MINIO_SECURE: "false"
+      ROBOport_SEED_CLIENT_A_PASSWORD: ${ROBOport_SEED_CLIENT_A_PASSWORD}
+      ROBOport_SEED_CLIENT_B_PASSWORD: ${ROBOport_SEED_CLIENT_B_PASSWORD}
+      ROBOport_SEED_ADMIN_PASSWORD: ${ROBOport_SEED_ADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  minio_data:
