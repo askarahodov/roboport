@@ -48,7 +48,7 @@ test('assigned staff queue renders only backend scoped tickets',async ({page})=>
   }));
   await page.goto('/staff');
   await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('TRIAGE');
-  await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('версия 2');
+  await expect(page.getByRole('region',{name:'Назначенные заявки'})).toContainText('Версия 2');
 });
 
 test('queue request forbidden after role revocation hides ticket data',async ({page})=>{
@@ -163,7 +163,7 @@ test('mobile dark staff page is keyboard reachable without horizontal overflow',
   }));
   await page.goto('/staff');
   await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
-  await expect(page.locator('main')).toHaveClass(/dark/);
+  await expect(page.locator('main').first()).toHaveClass(/dark/);
   await page.getByRole('button',{name:'Зарезервировать'}).focus();
   await expect(page.getByRole('button',{name:'Зарезервировать'})).toBeFocused();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
