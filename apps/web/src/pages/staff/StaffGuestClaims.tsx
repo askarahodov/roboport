@@ -19,6 +19,7 @@ export function StaffGuestClaims({roles}:{roles:string[]}){
  const [refresh,setRefresh]=React.useState(0);
  const [proofInfo,setProofInfo]=React.useState<{claimId:string;proof:string}|null>(null);
  const [claim,setClaim]=React.useState('');
+ const [reviewQueue,setReviewQueue]=React.useState<string[]>([]);
  const [outcome,setOutcome]=React.useState('');
  const [busy,setBusy]=React.useState(false);
  const [error,setError]=React.useState(false);
@@ -46,6 +47,27 @@ export function StaffGuestClaims({roles}:{roles:string[]}){
     setRefresh(n=>n+1);
    }catch{setError(true);}finally{setBusy(false);}
  }
+ React.useEffect(()=>{
+  if(!roles.includes('MANAGER'))return;
+  const ctrl=new AbortController();
+  void (async()=>{try{
+    const r=await fetch('/api/v1/dev/guest-claims/review-queue',
+      {credentials:'include',cache:'no-store',signal:ctrl.signal});
+    if(!r.ok)return;
+    const data=await r.json() as {items?:{id:string}[]};
+    if(!ctrl.signal.aborted&&Array.isArray(data.items)){
+      setReviewQueue(data.items.map(x=>x.id));
+    }
+  }catch{ /* no claims shown if unavailable */ }})();
+  return()=>ctrl.abort();
+ },[roles.includes('MANAGER'),refresh]);
+ async function selectForReview(id:string){
+  setBusy(true);setError(false);
+  try{
+   await post('/api/v1/dev/guest-claims/'+encodeURIComponent(id)+'/assign-review');
+   setClaim(id);
+  }catch{setError(true);}finally{setBusy(false);}
+ }
  async function review(approve:boolean){
   setBusy(true);setError(false);setOutcome('');
   try{
@@ -72,6 +94,7 @@ export function StaffGuestClaims({roles}:{roles:string[]}){
    </section>}
    {roles.includes('MANAGER')&&<form onSubmit={e=>{e.preventDefault();void review(true);}}>
      <h3>Независимое решение менеджера</h3>
+     {reviewQueue.length>0&&<ul>{reviewQueue.map(id=><li key={id}><span>Подтверждение {id.slice(0,8)}</span>{' '}<Button type="button" variant="secondary" disabled={busy} onClick={()=>void selectForReview(id)}>Взять на проверку</Button></li>)}</ul>}
      <FormField id="review-claim" label="Идентификатор подтверждения"><input id="review-claim" required autoComplete="off" value={claim} onChange={e=>setClaim(e.target.value)} /></FormField>
      <Button type="submit" disabled={busy}>Подтвердить владение</Button>{' '}
      <Button type="button" variant="secondary" disabled={busy||!claim} onClick={()=>void review(false)}>Отклонить</Button>
