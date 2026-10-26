@@ -32,6 +32,11 @@ export function CustomerLogin() {
   }
   return <section><h1>Вход в личный кабинет</h1>
     <p>Только для синтетических локальных учётных записей. Саморегистрация отключена.</p>
+    <div className="login-methods" aria-label="Способы входа">
+      <a className="btn btn-primary" href="/api/v1/dev/oidc/start">Войти через Keycloak</a>
+      <p className="auth-help">Вход через тестовый сервер авторизации доступен только на локальном HTTPS-стенде. Учётная запись должна быть заранее связана с клиентом.</p>
+    </div>
+    <h2>Локальная тестовая учётная запись</h2>
     <form onSubmit={event=>void submit(event)}>
       <label>Логин <input autoComplete="username" required minLength={3} maxLength={128}
         value={login} onChange={event=>setLogin(event.target.value)} /></label>
