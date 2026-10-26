@@ -57,6 +57,74 @@ def upgrade():
     op.execute("""CREATE TRIGGER guest_claim_guard BEFORE UPDATE ON guest_ticket_claim
                   FOR EACH ROW EXECUTE FUNCTION guard_guest_claim()""")
     op.execute("""
+      CREATE TABLE guest_intake_request (
+        id uuid PRIMARY KEY,
+        ticket_id uuid NOT NULL UNIQUE REFERENCES service_ticket(id) ON DELETE RESTRICT,
+        request_key_hash char(64) NOT NULL UNIQUE CHECK (request_key_hash ~ '^[0-9a-f]{64}
+        id uuid PRIMARY KEY,
+        claim_id uuid NOT NULL REFERENCES guest_ticket_claim(id) ON DELETE RESTRICT,
+        actor_id uuid REFERENCES app_user(id) ON DELETE RESTRICT,
+        action text NOT NULL CHECK (action IN ('INTAKE','PROOF_ACCEPTED','PROOF_REJECTED','VERIFIED','DECLINED')),
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    """)
+    op.execute("""CREATE TRIGGER guest_claim_audit_immutable BEFORE UPDATE OR DELETE ON guest_claim_audit
+                  FOR EACH ROW EXECUTE FUNCTION reject_audit_mutation()""")
+
+def downgrade():
+    op.execute("DROP TABLE guest_claim_audit")
+    op.execute("DROP TABLE guest_intake_request")
+    op.execute("DROP TABLE guest_intake_rate")
+    op.execute("DROP TABLE guest_ticket_claim")
+    op.execute("DROP FUNCTION guard_guest_claim()")
+),
+        receipt_hash char(64) NOT NULL UNIQUE CHECK (receipt_hash ~ '^[0-9a-f]{64}
+        id uuid PRIMARY KEY,
+        claim_id uuid NOT NULL REFERENCES guest_ticket_claim(id) ON DELETE RESTRICT,
+        actor_id uuid REFERENCES app_user(id) ON DELETE RESTRICT,
+        action text NOT NULL CHECK (action IN ('INTAKE','PROOF_ACCEPTED','PROOF_REJECTED','VERIFIED','DECLINED')),
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    """)
+    op.execute("""CREATE TRIGGER guest_claim_audit_immutable BEFORE UPDATE OR DELETE ON guest_claim_audit
+                  FOR EACH ROW EXECUTE FUNCTION reject_audit_mutation()""")
+
+def downgrade():
+    op.execute("DROP TABLE guest_claim_audit")
+    op.execute("DROP TABLE guest_ticket_claim")
+    op.execute("DROP FUNCTION guard_guest_claim()")
+),
+        status text NOT NULL DEFAULT 'PENDING_REVIEW'
+          CHECK (status IN ('PENDING_REVIEW','CLAIMED')),
+        claimed_by uuid REFERENCES app_user(id) ON DELETE RESTRICT,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        CHECK ((status='PENDING_REVIEW' AND claimed_by IS NULL)
+          OR (status='CLAIMED' AND claimed_by IS NOT NULL))
+      )
+    """)
+    op.execute("""
+      CREATE TABLE guest_intake_rate (
+        origin_hash char(64) PRIMARY KEY CHECK (origin_hash ~ '^[0-9a-f]{64}
+        id uuid PRIMARY KEY,
+        claim_id uuid NOT NULL REFERENCES guest_ticket_claim(id) ON DELETE RESTRICT,
+        actor_id uuid REFERENCES app_user(id) ON DELETE RESTRICT,
+        action text NOT NULL CHECK (action IN ('INTAKE','PROOF_ACCEPTED','PROOF_REJECTED','VERIFIED','DECLINED')),
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    """)
+    op.execute("""CREATE TRIGGER guest_claim_audit_immutable BEFORE UPDATE OR DELETE ON guest_claim_audit
+                  FOR EACH ROW EXECUTE FUNCTION reject_audit_mutation()""")
+
+def downgrade():
+    op.execute("DROP TABLE guest_claim_audit")
+    op.execute("DROP TABLE guest_ticket_claim")
+    op.execute("DROP FUNCTION guard_guest_claim()")
+),
+        attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        window_started_at timestamptz NOT NULL DEFAULT now()
+      )
+    """)
+    op.execute("""
       CREATE TABLE guest_claim_audit (
         id uuid PRIMARY KEY,
         claim_id uuid NOT NULL REFERENCES guest_ticket_claim(id) ON DELETE RESTRICT,
