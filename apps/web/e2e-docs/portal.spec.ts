@@ -15,6 +15,12 @@ test('главная, навигация, кодовые блоки и поис�
     'Привязка автомобиля к клиенту',
   );
   await expect(page.locator('.markdown-section pre code').first()).toBeVisible();
+  const search = page.locator('.sidebar .search input');
+  await search.fill('доказательство');
+  await expect(page.locator('.sidebar .results-panel')).toBeVisible();
+  await expect(page.locator('.sidebar .results-panel')).toContainText(
+    'Привязка автомобиля',
+  );
 });
 
 test('все пользовательские разделы существуют и явно обозначены как planned', async ({ page }) => {
