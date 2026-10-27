@@ -184,3 +184,64 @@ def test_reissue_consumes_global_issue_budget_and_429_preserves_old_code(monkeyp
     result = _reissue(d)
     assert result.status_code == 200
     assert result.json()["proof"] != old_proof
+
+
+def test_expired_original_proof_can_be_replaced_for_full_new_ttl(monkeypatch):
+    _flags(monkeypatch)
+    d = _scenario()
+    from uuid import uuid4
+    claim = uuid4()
+    original = "ExpiredSyntheticProofOriginal_0000000000000000001"
+    with psycopg.connect(DSN) as db:
+        # У original claim identity/TTL запрещён UPDATE. Создаём тестовую
+        # запись с уже истёкшим TTL, не обходя immutable trigger.
+        db.execute(
+            """INSERT INTO auto_vehicle_claim(
+                 id,link_id,issued_by,proof_hash,proof_expires_at)
+               VALUES(%s,%s,%s,%s,now()-interval '5 minutes')""",
+            (claim, d["link"], d["intake"],
+             hashlib.sha256(original.encode()).hexdigest()),
+        )
+        db.execute(
+            """INSERT INTO auto_vehicle_claim_audit(
+                 id,link_id,claim_id,actor_id,action)
+               VALUES(%s,%s,%s,%s,'ISSUED')""",
+            (uuid4(), d["link"], claim, d["intake"]),
+        )
+    replacement = _reissue(d)
+    assert replacement.status_code == 200, replacement.text
+    assert replacement.json()["claimId"] == str(claim)
+    new_code = replacement.json()["proof"]
+    # Без фикса P1 здесь был бы 403: старая строка proof_expires_at
+    # уже просрочена, но действующая replacement-версия ещё свежая.
+    redeemed = _post(
+        d, d["client_a"], f"/api/v1/dev/auto/claims/{claim}/redeem",
+        {"proof": new_code},
+    )
+    assert redeemed.status_code == 200 and redeemed.json() == {"status": "PENDING_REVIEW"}
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            """SELECT proof_expires_at<now() FROM auto_vehicle_claim WHERE id=%s""",
+            (claim,),
+        ).fetchone()[0] is True
+        assert db.execute(
+            """SELECT proof_expires_at>now() FROM auto_vehicle_claim_reissue WHERE claim_id=%s""",
+            (claim,),
+        ).fetchone()[0] is True
+
+
+def test_completed_claim_and_revoked_link_cannot_reissue(monkeypatch):
+    _flags(monkeypatch)
+    d = _scenario()
+    claim, original = _issue(d)
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+            (d["link"],),
+        )
+    assert _reissue(d).status_code == 403
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_vehicle_claim_reissue WHERE claim_id=%s",
+            (claim,),
+        ).fetchone()[0] == 0
