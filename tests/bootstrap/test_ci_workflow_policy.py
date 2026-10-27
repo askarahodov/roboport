@@ -21,30 +21,34 @@ def test_ci_checks_current_pr_and_main_without_duplicate_feature_push():
     assert {"api", "web", "postgres", "browser-e2e"} <= set(jobs)
 
 
-def test_browser_uses_lockfile_scoped_cache_without_weakening_quality_gates():
+def test_browser_runs_pinned_playwright_image_and_checks_actual_launch():
     root = Path(__file__).resolve().parents[2]
     config = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
-    steps = config["jobs"]["browser-e2e"]["steps"]
+    jobs = config["jobs"]
+    browser = jobs["browser-e2e"]
+    steps = browser["steps"]
+
+    package = json.loads((root / "apps/web/package.json").read_text(encoding="utf-8"))
+    playwright_version = package["devDependencies"]["@playwright/test"]
+    assert playwright_version[0].isdigit()
+    assert not any(x in playwright_version for x in ("^", "~", "*"))
+    # Официальный image Playwright содержит конкретные браузеры и ОС-зависимости.
+    assert browser["container"]["image"] == f"mcr.microsoft.com/playwright:v{playwright_version}-noble"
+    assert "services" not in browser
+
     node = next(step for step in steps if step.get("uses", "").startswith("actions/setup-node@"))
     assert node["with"]["cache"] == "npm"
     assert node["with"]["cache-dependency-path"] == "apps/web/package-lock.json"
+    assert not any(step.get("name") == "Cache Playwright Chromium binaries" for step in steps)
 
-    cache = next(step for step in steps if step.get("name") == "Cache Playwright Chromium binaries")
-    assert cache["uses"] == "actions/cache@v4"
-    assert cache["with"]["path"] == "~/.cache/ms-playwright"
-    assert "runner.os" in cache["with"]["key"]
-    assert "hashFiles('apps/web/package-lock.json')" in cache["with"]["key"]
-    assert steps.index(cache) < next(i for i, step in enumerate(steps) if step.get("name") == "Install browser test runner and Chromium")
+    smoke = next(step for step in steps if step.get("name") == "Verify pinned Chromium and operating system dependencies")
+    assert "chromium.launch({ headless: true })" in smoke["run"]
+    assert "await browser.close()" in smoke["run"]
+    assert not any("npx playwright install --with-deps" in step.get("run", "") for step in steps)
+    assert steps.index(smoke) < next(i for i, step in enumerate(steps) if step.get("name") == "Browser E2E against synthetic FastAPI")
 
-    install = next(step for step in steps if step.get("name") == "Install browser test runner and Chromium")
-    assert "npx playwright install --with-deps chromium" in install["run"]
     assert any(step.get("name") == "Browser E2E against synthetic FastAPI" for step in steps)
     assert any(step.get("name") == "Browser navigation and search smoke for local Docsify portal" for step in steps)
     assert all(step.get("continue-on-error") is not True for step in steps)
     upload = next(step for step in steps if step.get("name") == "Publish browser acceptance screenshots and traces")
     assert upload["if"] == "always()"
-
-    package = json.loads((root / "apps/web/package.json").read_text(encoding="utf-8"))
-    # Установка browser привязана к pinned Playwright, а не к floating dependency.
-    playwright_version = package["devDependencies"]["@playwright/test"]
-    assert playwright_version[0].isdigit() and not any(x in playwright_version for x in ("^", "~", "*"))
