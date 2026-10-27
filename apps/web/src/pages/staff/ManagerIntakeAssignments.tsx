@@ -4,7 +4,7 @@ import { Button, FormField } from '../../ui';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Assignment = { assignmentId: string; userId: string };
 
-async function mutate(path: string, body: object): Promise<unknown> {
+async function mutate(path: string, body: object, idempotencyKey?: string): Promise<unknown> {
   const csrf = await fetch('/api/v1/auth/csrf', {
     method: 'POST', credentials: 'include', cache: 'no-store',
   });
@@ -14,7 +14,8 @@ async function mutate(path: string, body: object): Promise<unknown> {
       || typeof token.csrfToken !== 'string' || !token.csrfToken) throw Error('CSRF');
   const response = await fetch(path, {
     method: 'POST', credentials: 'include', cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token.csrfToken },
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token.csrfToken,
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
     body: JSON.stringify(body),
   });
   if (!response.ok) throw Error('HTTP ' + response.status);
@@ -35,11 +36,13 @@ export function ManagerIntakeAssignments() {
   const [vehicle, setVehicle] = React.useState('');
   const [staff, setStaff] = React.useState('');
   const [items, setItems] = React.useState<Assignment[]>([]);
+  const grantKey = React.useRef<{ payload: string; key: string } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<{ ok: boolean; message: string } | null>(null);
 
   function changedVehicle(value: string) {
     setVehicle(value);
+    grantKey.current = null;
     setItems([]); // Сменили объект — нельзя оставлять назначения предыдущего автомобиля.
     setNotice(null);
   }
@@ -71,11 +74,17 @@ export function ManagerIntakeAssignments() {
     setBusy(true);
     setItems([]);
     setNotice(null);
+    const fingerprint = vehicle.trim().toLowerCase() + ':' + staff.trim().toLowerCase();
+    if (grantKey.current?.payload !== fingerprint) {
+      grantKey.current = { payload: fingerprint, key: crypto.randomUUID() };
+    }
+    const key = grantKey.current.key;
     try {
-      const response: unknown = await mutate(urlFor(vehicle), { userId: staff.trim() });
+      const response: unknown = await mutate(urlFor(vehicle), { userId: staff.trim() }, key);
       if (!response || typeof response !== 'object'
           || !('assignmentId' in response) || typeof response.assignmentId !== 'string'
           || !uuid.test(response.assignmentId)) throw Error('invalid');
+      grantKey.current = null;
       setStaff('');
       setNotice({ ok: true, message: 'Назначена только роль INTAKE на этот автомобиль. Обновите список.' });
     } catch {

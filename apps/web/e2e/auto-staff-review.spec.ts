@@ -283,3 +283,55 @@ test('INTAKE без MANAGER не видит делегирование даже 
   await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
   await expect(page.getByRole('region', { name: 'Назначения приёмщиков (dev)' })).toHaveCount(0);
 });
+
+
+test('INTAKE повторяет создание после сбоя сети с тем же ключом', async ({ page }) => {
+  const keys: string[] = [];
+  await page.route('**/api/v1/dev/auto/vehicles/*/links', route => {
+    const key = route.request().headers()['idempotency-key'];
+    expect(key).toMatch(/^[0-9a-f-]{36}$/);
+    keys.push(key);
+    return route.fulfill(keys.length === 1
+      ? { status: 503, contentType: 'application/json', body: '{}' }
+      : { status: 201, contentType: 'application/json',
+        body: JSON.stringify({ linkId: link, status: 'PENDING' }) });
+  });
+  await staff(page, ['INTAKE']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const panel = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
+  await panel.getByLabel('UUID автомобиля').fill(vehicle);
+  await panel.getByLabel('UUID клиента').fill(customer);
+  await panel.getByRole('button', { name: 'Создать ожидающую связь' }).click();
+  await expect(panel.getByRole('alert')).toContainText('Операция не выполнена');
+  await panel.getByRole('button', { name: 'Создать ожидающую связь' }).click();
+  await expect(panel.getByText('Создана неподтверждённая связь', { exact: false })).toBeVisible();
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
+
+test('MANAGER повторяет grant после сбоя с тем же ключом, без duplicate', async ({ page }) => {
+  const target = '77777777-7777-4777-8777-777777777777';
+  const assignment = '88888888-8888-4888-8888-888888888888';
+  const keys: string[] = [];
+  await page.route('**/api/v1/dev/auto/vehicles/*/intake-assignments', route => {
+    if (route.request().method() !== 'POST') throw Error('unexpected request');
+    const key = route.request().headers()['idempotency-key'];
+    expect(key).toMatch(/^[0-9a-f-]{36}$/);
+    keys.push(key);
+    return route.fulfill(keys.length === 1
+      ? { status: 503, contentType: 'application/json', body: '{}' }
+      : { status: 201, contentType: 'application/json',
+        body: JSON.stringify({ assignmentId: assignment, status: 'ACTIVE' }) });
+  });
+  await staff(page, ['MANAGER']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const region = page.getByRole('region', { name: 'Назначения приёмщиков (dev)' });
+  await region.getByLabel('UUID автомобиля для назначения').fill(vehicle);
+  await region.getByLabel('UUID сотрудника с ролью INTAKE').fill(target);
+  await region.getByRole('button', { name: 'Назначить приёмщика' }).click();
+  await expect(region.getByRole('alert')).toContainText('Назначение отклонено');
+  await region.getByRole('button', { name: 'Назначить приёмщика' }).click();
+  await expect(region.getByText('Назначена только роль INTAKE', { exact: false })).toBeVisible();
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});

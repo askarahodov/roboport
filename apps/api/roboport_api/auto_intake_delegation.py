@@ -9,6 +9,7 @@ import psycopg
 
 from .auto_vehicle_claim import VehicleClaimRejected
 from .session_lookup import session_subject
+from .auto_create_idempotency import existing, remember, AutoIdempotencyConflict
 
 
 class AssignmentConflict(Exception):
@@ -47,7 +48,8 @@ def _record(conn: psycopg.Connection, ident: UUID, vehicle: UUID,
 
 
 def grant_intake(conn: psycopg.Connection, token: str,
-                 vehicle_id: UUID, target_id: UUID) -> UUID:
+                 vehicle_id: UUID, target_id: UUID,
+                 idempotency_key: str | None = None) -> UUID:
     """Сериалицовать создание для vehicle и не позволить эскалацию до MANAGER."""
     if not isinstance(vehicle_id, UUID) or not isinstance(target_id, UUID):
         raise VehicleClaimRejected("bad UUID")
@@ -72,6 +74,20 @@ def grant_intake(conn: psycopg.Connection, token: str,
         ).fetchone()
         if eligible is None:
             raise VehicleClaimRejected("target not active INTAKE")
+        payload = {"objectId": str(vehicle_id), "userId": str(target_id)}
+        previous = existing(
+            conn, actor, "vehicle.intake.grant", idempotency_key, payload,
+        )
+        if previous is not None:
+            granted = conn.execute(
+                """SELECT 1 FROM auto_vehicle_staff_assignment
+                   WHERE id=%s AND vehicle_id=%s AND user_id=%s
+                     AND role_code='INTAKE' AND revoked_at IS NULL""",
+                (previous, vehicle_id, target_id),
+            ).fetchone()
+            if granted is None:
+                raise AutoIdempotencyConflict("staff grant revoked")
+            return previous
         active = conn.execute(
             """SELECT id FROM auto_vehicle_staff_assignment
                WHERE vehicle_id=%s AND user_id=%s AND role_code='INTAKE'
@@ -85,6 +101,7 @@ def grant_intake(conn: psycopg.Connection, token: str,
                VALUES(%s,%s,%s,'INTAKE')""", (ident, vehicle_id, target_id),
         )
         _record(conn, ident, vehicle_id, actor, target_id, "INTAKE_GRANTED")
+        remember(conn, actor, "vehicle.intake.grant", idempotency_key, payload, ident)
         return ident
 
 

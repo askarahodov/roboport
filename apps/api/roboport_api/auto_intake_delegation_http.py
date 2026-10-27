@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim import VehicleClaimRejected
+from .auto_create_idempotency import validated_key, AutoIdempotencyConflict
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_intake_delegation import AssignmentConflict, grant_intake, revoke_intake, list_intake
 
@@ -44,6 +45,7 @@ async def create_intake_assignment(vehicle_id: str, request: Request):
     try:
         ident = UUID(vehicle_id)
         body = GrantPayload.model_validate(await request.json())
+        key = validated_key(request.headers.get('idempotency-key'))
     except (ValueError, TypeError, ValidationError, UnicodeDecodeError):
         return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(config) as conn:
@@ -52,8 +54,9 @@ async def create_intake_assignment(vehicle_id: str, request: Request):
         try:
             assigned = grant_intake(
                 conn, request.cookies.get("rp_session", ""), ident, body.userId,
+                idempotency_key=key,
             )
-        except AssignmentConflict:
+        except (AssignmentConflict, AutoIdempotencyConflict):
             return _response(request, 409, "CONFLICT")
         except VehicleClaimRejected:
             return _response(request, 404, "NOT_FOUND")
