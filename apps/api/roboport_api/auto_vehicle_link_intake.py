@@ -41,7 +41,7 @@ def create_pending_vehicle_link(
                  AND ur.revoked_at IS NULL
                  AND (ur.expires_at IS NULL OR ur.expires_at>now())
                WHERE acl.customer_id=%s AND acl.revoked_at IS NULL
-               LIMIT 1""",
+               LIMIT 1 FOR SHARE OF acl,u,ur""",
             (customer_id,),
         ).fetchone()
         if eligible is None:
