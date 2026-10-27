@@ -109,6 +109,8 @@ jobs:
         run: npm run typecheck
       - working-directory: apps/web
         run: npm run build
+      - name: Validate frontend Docker builder can generate auto dev types
+        run: docker build --target builder -f apps/web/Dockerfile -t roboport-web-builder-check .
       - name: Smoke-test Vite dev proxy against real loopback FastAPI
         shell: bash
         run: |
