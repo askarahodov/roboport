@@ -121,6 +121,8 @@ npm run test:docs:e2e
 Те же команды локально из корня репозитория, **нативный Windows CMD** (без PowerShell, в `PATH` Python 3.13/Node.js 24):
 
 ```cmd
+set PYTHONIOENCODING=utf-8
+set PYTHONUTF8=1
 python scripts\check_docs_links.py
 cd apps\web
 npm ci --no-audit --no-fund
