@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import psycopg
 
 from .auto_vehicle_claim import VehicleClaimRejected, _role_scoped
+from .auto_create_idempotency import existing, remember, AutoIdempotencyConflict
 
 
 class VehicleLinkConflict(Exception):
@@ -18,6 +19,7 @@ def create_pending_vehicle_link(
     staff_token: str,
     vehicle_id: UUID,
     customer_id: UUID,
+    idempotency_key: str | None = None,
 ) -> UUID:
     """В одной транзакции проверить scope, клиента, уникальность и записать audit."""
     if not isinstance(vehicle_id, UUID) or not isinstance(customer_id, UUID):
@@ -44,6 +46,21 @@ def create_pending_vehicle_link(
         ).fetchone()
         if eligible is None:
             raise VehicleClaimRejected("unavailable")
+        payload = {"objectId": str(vehicle_id), "customerId": str(customer_id)}
+        previous = existing(
+            conn, actor, "vehicle.link.propose", idempotency_key, payload,
+        )
+        if previous is not None:
+            # Replay не восстанавливает доступ к отозванной/заменённой связи.
+            link = conn.execute(
+                """SELECT 1 FROM auto_vehicle_customer_link
+                   WHERE id=%s AND vehicle_id=%s AND customer_id=%s
+                     AND revoked_at IS NULL""",
+                (previous, vehicle_id, customer_id),
+            ).fetchone()
+            if link is None:
+                raise AutoIdempotencyConflict("linked object revoked")
+            return previous
         active = conn.execute(
             """SELECT 1 FROM auto_vehicle_customer_link
                WHERE vehicle_id=%s AND customer_id=%s AND revoked_at IS NULL""",
@@ -63,4 +80,6 @@ def create_pending_vehicle_link(
                ) VALUES(%s,%s,%s,'LINK_CREATED')""",
             (uuid4(), link_id, actor),
         )
+        remember(conn, actor, "vehicle.link.propose", idempotency_key,
+                 payload, link_id)
         return link_id
