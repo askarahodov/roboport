@@ -203,3 +203,83 @@ test('две роли: изменение UUID менеджерской заяв
   await expect(region.getByText('UUID подтверждения:', { exact: false })).toContainText(claim);
   await expect(region.getByText(proof, { exact: true })).toBeVisible();
 });
+
+
+test('MANAGER делегирует только INTAKE с живым scope и отзывает назначение', async ({ page }) => {
+  const target = '77777777-7777-4777-8777-777777777777';
+  const assignment = '88888888-8888-4888-8888-888888888888';
+  const seen: string[] = [];
+  let active = false;
+  await page.route('**/api/v1/dev/auto/vehicles/**', route => {
+    const req = route.request();
+    if (!req.url().includes('/intake-assignments')) throw Error('unexpected URL');
+    if (req.method() === 'GET') return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ items: active ? [{ assignmentId: assignment, userId: target }] : [] }),
+    });
+    expect(req.method()).toBe('POST');
+    expect(req.headers()['x-csrf-token']).toBe('local-test-csrf');
+    expect(req.headers()['content-type']).toContain('application/json');
+    seen.push(req.url());
+    if (req.url().endsWith('/revoke')) {
+      expect(req.postDataJSON()).toEqual({});
+      active = false;
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: '{"status":"REVOKED"}' });
+    }
+    expect(req.postDataJSON()).toEqual({ userId: target });
+    active = true;
+    return route.fulfill({
+      status: 201, contentType: 'application/json',
+      body: JSON.stringify({ assignmentId: assignment, status: 'ACTIVE' }),
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await staff(page, ['MANAGER']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const region = page.getByRole('region', { name: 'Назначения приёмщиков (dev)' });
+  await expect(region).toBeVisible();
+  await region.getByLabel('UUID автомобиля для назначения').fill(vehicle);
+  await region.getByLabel('UUID сотрудника с ролью INTAKE').fill(target);
+  await region.getByRole('button', { name: 'Назначить приёмщика' }).click();
+  await expect(region.getByText('Назначена только роль INTAKE', { exact: false })).toBeVisible();
+  await region.getByRole('button', { name: 'Обновить назначения' }).click();
+  await expect(region.getByText(target, { exact: true })).toBeVisible();
+  await region.getByRole('button', { name: 'Отозвать назначение' }).click();
+  await expect(region.getByText('Назначение отозвано', { exact: false })).toBeVisible();
+  await expect(region.getByText(target, { exact: true })).toHaveCount(0);
+  expect(seen).toHaveLength(2);
+  expect(seen[0]).not.toContain('MANAGER');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('manager потерял scope: активные назначения скрываются после 404', async ({ page }) => {
+  const target = '77777777-7777-4777-8777-777777777777';
+  const assignment = '88888888-8888-4888-8888-888888888888';
+  let revoked = false;
+  await page.route('**/api/v1/dev/auto/vehicles/**', route => {
+    if (!route.request().url().includes('/intake-assignments')) throw Error('unexpected');
+    return route.fulfill({
+      status: revoked ? 404 : 200, contentType: 'application/json',
+      body: revoked ? '{"code":"NOT_FOUND"}' : JSON.stringify({
+        items: [{ assignmentId: assignment, userId: target }],
+      }),
+    });
+  });
+  await staff(page, ['MANAGER']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const region = page.getByRole('region', { name: 'Назначения приёмщиков (dev)' });
+  await region.getByLabel('UUID автомобиля для назначения').fill(vehicle);
+  await region.getByRole('button', { name: 'Обновить назначения' }).click();
+  await expect(region.getByText(target, { exact: true })).toBeVisible();
+  revoked = true;
+  await region.getByRole('button', { name: 'Обновить назначения' }).click();
+  await expect(region.getByText(target, { exact: true })).toHaveCount(0);
+  await expect(region.getByRole('alert')).toContainText('проверьте права');
+});
+
+test('INTAKE без MANAGER не видит делегирование даже при известном UUID', async ({ page }) => {
+  await staff(page, ['INTAKE']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Назначения приёмщиков (dev)' })).toHaveCount(0);
+});
