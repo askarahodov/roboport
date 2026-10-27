@@ -137,6 +137,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -144,6 +146,12 @@ jobs:
       - run: python scripts/check_python_pins.py
       - working-directory: apps/web
         run: npm ci --no-audit --no-fund
+      # Кэш зависит от точного lockfile; --with-deps по-прежнему проверяет системные библиотеки.
+      - name: Cache Playwright Chromium binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('apps/web/package-lock.json') }}
       - name: Install browser test runner and Chromium
         working-directory: apps/web
         run: |
