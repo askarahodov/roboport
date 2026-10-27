@@ -7,6 +7,8 @@ RUN npm ci
 
 COPY apps/web/ ./
 COPY design /design
+# Генератор из /app читает ../../contracts; в образе это /contracts.
+COPY contracts/auto-dev-openapi.yaml /contracts/auto-dev-openapi.yaml
 RUN npm run build
 
 FROM nginx:alpine
