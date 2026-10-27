@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit && vite build",
+    "dev": "npm run generate:api:auto-dev && vite",
+    "typecheck": "npm run generate:api:auto-dev && tsc --noEmit",
+    "build": "npm run generate:api:auto-dev && tsc --noEmit && vite build",
     "generate:api": "openapi-typescript ../../contracts/openapi.yaml -o src/shared/api/schema.d.ts",
     "test:e2e": "playwright test",
-    "test:docs:e2e": "playwright test --config playwright.docs.config.ts"
+    "test:docs:e2e": "playwright test --config playwright.docs.config.ts",
+    "generate:api:auto-dev": "openapi-typescript ../../contracts/auto-dev-openapi.yaml -o src/shared/api/autoDevSchema.d.ts"
   },
   "dependencies": {
     "react": "19.2.0",

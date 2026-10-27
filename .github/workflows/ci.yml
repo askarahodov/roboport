@@ -87,6 +87,8 @@ jobs:
       - name: Validate Markdown local links and heading anchors
         run: python scripts/check_docs_links.py
       - run: python -m openapi_spec_validator contracts/openapi.yaml
+      - name: Validate isolated synthetic auto OpenAPI
+        run: python -m openapi_spec_validator contracts/auto-dev-openapi.yaml
   web:
     runs-on: ubuntu-latest
     steps:
@@ -107,6 +109,8 @@ jobs:
         run: npm run typecheck
       - working-directory: apps/web
         run: npm run build
+      - name: Validate frontend Docker builder can generate auto dev types
+        run: docker build --target builder -f apps/web/Dockerfile -t roboport-web-builder-check .
       - name: Smoke-test Vite dev proxy against real loopback FastAPI
         shell: bash
         run: |

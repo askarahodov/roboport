@@ -191,3 +191,18 @@ test('частичный отзыв связи удаляет старую ка�
   await expect(page.getByText('SyntheticMake TestCar 22')).toBeVisible();
   await expect(page.locator('.account-record')).toHaveCount(21);
 });
+
+test('typed SDK отклоняет незаявленный полный VIN даже при HTTP 200', async ({ page }) => {
+  await authorized(page);
+  await page.route(vehiclesUrl, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ items: [{
+      id: '11111111-1111-4111-8111-111111111111',
+      make: 'Synthetic', model: 'Car', variant: null, modelYear: 2026,
+      vinLast4: '1234', vin: 'SYNTHETIC00000001',
+    }] }),
+  }));
+  await page.goto('/account/vehicles');
+  await expect(page.getByRole('alert')).toContainText('Не удалось получить список автомобилей');
+  await expect(page.getByText('Synthetic Car')).toHaveCount(0);
+});
