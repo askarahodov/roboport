@@ -20,4 +20,4 @@ ENV ROBOport_SYNTHETIC_AUTH_API=1
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic -c alembic.ini upgrade head && uvicorn roboport_api.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic -c alembic.ini upgrade head && uvicorn roboport_api.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers"]
