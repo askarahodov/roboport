@@ -105,7 +105,7 @@ def issue(link_id: str, request: Request):
             return JSONResponse(
                 status_code=429,
                 content={"code": "RATE_LIMITED", "requestId": request.state.request_id},
-                headers={"Cache-Control": "no-store", "Retry-After": "900"},
+                headers={"Cache-Control": "no-store", "Retry-After": "3600"},
             )
         except VehicleClaimRejected:
             return _response(request, 403, "FORBIDDEN")
