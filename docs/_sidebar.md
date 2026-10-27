@@ -21,6 +21,7 @@
   - [Каталоги запчастей](/auto/PARTS_CATALOG.md)
   - [Технологии](/TECH_STACK.md)
   - [Локальная разработка](/operations/DEV_ENVIRONMENT.md)
+  - [Версии и журнал dev-проверок](/operations/DOCS_VERSIONS.md)
   - [HTTP API](/api/API_IMPLEMENTATION.md)
   - [Политика документации](/DOCUMENTATION_POLICY.md)
   - [Стандарт Issue](/implementation/ISSUE_STANDARD.md)
