@@ -6,7 +6,7 @@
 
 ## С чего начать
 
-- **Разработчик:** [карта технических документов](INDEX.md), [архитектура Airmatik](auto/ARCHITECTURE.md), [локальный стенд](operations/DEV_ENVIRONMENT.md).
+- **Разработчик:** [карта технических документов](INDEX.md), [архитектура Airmatik](auto/ARCHITECTURE.md), [локальный стенд](operations/DEV_ENVIRONMENT.md), [версии и dev-журнал проверок](operations/DOCS_VERSIONS.md).
 - **Администратор:** [настройка и роли — план](guides/administrator.md).
 - **Мастер-приёмщик:** [запись, машина и наряд — план](guides/intake.md).
 - **Диагност/механик:** [ремонт и контроль качества — план](guides/mechanic.md).
