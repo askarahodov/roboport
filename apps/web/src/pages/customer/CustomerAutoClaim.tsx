@@ -49,6 +49,11 @@ export function CustomerAutoClaim() {
           body: JSON.stringify({ proof: suppliedProof }),
         },
       );
+      if (result.status === 429) {
+        setMessage({ failed: true,
+          text: 'Слишком много попыток предъявления кода. Повторите позже (до 15 минут).' });
+        return;
+      }
       if (!result.ok) throw new Error('denied');
       const data: unknown = await result.json();
       if (!data || typeof data !== 'object' || !('status' in data)
