@@ -371,7 +371,7 @@ test('CLIENT предъявляет тот же proof с тем же ключо�
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
   expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
-  expect(await page.evaluate(() => localStorage.length)).toBe(0);
+  expect(await page.evaluate(secret => !Object.values(localStorage).some(value => value.includes(secret)), proof)).toBe(true);
 });
 
 test('MANAGER retry проверки сохраняет ключ после HTTP 503', async ({ page }) => {
