@@ -46,8 +46,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("only explicit synthetic API with loopback PostgreSQL is allowed")
     if args.apply and not args.confirm_synthetic:
         parser.error("--apply requires --confirm-synthetic")
+    parsed = conninfo_to_dict(
+        dsn.replace("postgresql+psycopg://", "postgresql://", 1)
+    )
+    # Explicit hostaddr takes precedence over PGHOSTADDR/PGSERVICE environment,
+    # so a local-looking URI cannot silently reach a remote database.
+    hostaddr = "::1" if parsed["host"] == "::1" else "127.0.0.1"
     with psycopg.connect(
         dsn.replace("postgresql+psycopg://", "postgresql://", 1),
+        hostaddr=hostaddr,
         connect_timeout=5,
     ) as conn:
         if args.apply:
