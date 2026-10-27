@@ -143,17 +143,20 @@ def test_manager_delegation_holds_session_and_identity_before_grant():
             (uuid4(), d["other"]),
         )
     with psycopg.connect(DSN) as delegating:
-        granted = grant_intake(
-            delegating, d["tokens"][d["manager"]], d["vehicle"], d["other"],
-        )
-        _blocked(
-            "UPDATE user_session SET revoked_at=now() WHERE user_id=%s",
-            (d["manager"],),
-        )
-        _blocked(
-            "UPDATE app_user SET status='DISABLED' WHERE id=%s",
-            (d["manager"],),
-        )
+        # grant_intake creates a transaction itself. An outer transaction is
+        # needed to observe locks *before* commit, not after the function ends.
+        with delegating.transaction():
+            granted = grant_intake(
+                delegating, d["tokens"][d["manager"]], d["vehicle"], d["other"],
+            )
+            _blocked(
+                "UPDATE user_session SET revoked_at=now() WHERE user_id=%s",
+                (d["manager"],),
+            )
+            _blocked(
+                "UPDATE app_user SET status='DISABLED' WHERE id=%s",
+                (d["manager"],),
+            )
     _invalidate_session(d["manager"])
     with psycopg.connect(DSN) as db:
         assert db.execute(
@@ -180,21 +183,24 @@ def test_pending_link_holds_target_client_eligibility_until_commit():
             (uuid4(), vehicle, d["intake"]),
         )
     with psycopg.connect(DSN) as proposing:
-        link = create_pending_vehicle_link(
-            proposing, d["tokens"][d["intake"]], vehicle, d["ca"],
-        )
-        _blocked(
-            "UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",
-            (d["client_a"],),
-        )
-        _blocked(
-            "UPDATE user_role SET revoked_at=now() WHERE user_id=%s AND role_code='CLIENT'",
-            (d["client_a"],),
-        )
-        _blocked(
-            "UPDATE app_user SET status='DISABLED' WHERE id=%s",
-            (d["client_a"],),
-        )
+        # Keep outer transaction open: create_pending_vehicle_link owns its
+        # own transaction when called without a surrounding scope.
+        with proposing.transaction():
+            link = create_pending_vehicle_link(
+                proposing, d["tokens"][d["intake"]], vehicle, d["ca"],
+            )
+            _blocked(
+                "UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",
+                (d["client_a"],),
+            )
+            _blocked(
+                "UPDATE user_role SET revoked_at=now() WHERE user_id=%s AND role_code='CLIENT'",
+                (d["client_a"],),
+            )
+            _blocked(
+                "UPDATE app_user SET status='DISABLED' WHERE id=%s",
+                (d["client_a"],),
+            )
     with psycopg.connect(DSN) as db:
         db.execute(
             "UPDATE account_customer_link SET revoked_at=now() WHERE user_id=%s",
