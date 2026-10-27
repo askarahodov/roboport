@@ -16,8 +16,11 @@ class AssignmentConflict(Exception):
     """Действующее назначение уже существует; не создавать дубли или второй audit."""
 
 
-def _manager(conn: psycopg.Connection, token: str, vehicle_id: UUID) -> UUID:
-    actor = session_subject(conn, token)
+def _manager(
+    conn: psycopg.Connection, token: str, vehicle_id: UUID,
+    *, for_mutation: bool = False,
+) -> UUID:
+    actor = session_subject(conn, token, for_mutation=for_mutation)
     if actor is None:
         raise VehicleClaimRejected("not authenticated")
     # FOR SHARE сериализует отзыв роли/объектного назначения относительно мутации.
@@ -60,7 +63,7 @@ def grant_intake(conn: psycopg.Connection, token: str,
         ).fetchone()
         if row is None:
             raise VehicleClaimRejected("unknown vehicle")
-        actor = _manager(conn, token, vehicle_id)
+        actor = _manager(conn, token, vehicle_id, for_mutation=True)
         if actor == target_id:
             raise VehicleClaimRejected("self assignment forbidden")
         eligible = conn.execute(
@@ -115,7 +118,7 @@ def revoke_intake(conn: psycopg.Connection, token: str,
         ).fetchone()
         if row is None:
             raise VehicleClaimRejected("unknown vehicle")
-        actor = _manager(conn, token, vehicle_id)
+        actor = _manager(conn, token, vehicle_id, for_mutation=True)
         assignment = conn.execute(
             """SELECT user_id,revoked_at FROM auto_vehicle_staff_assignment
                WHERE id=%s AND vehicle_id=%s AND role_code='INTAKE'

@@ -24,7 +24,7 @@ def _role_scoped(
     conn: psycopg.Connection, token: str, role: str, vehicle: UUID,
 ) -> UUID:
     """Действующая сессия + роль + назначение на эту конкретную машину."""
-    actor = session_subject(conn, token)
+    actor = session_subject(conn, token, for_mutation=True)
     if actor is None:
         raise VehicleClaimRejected("unauthorized")
     # Сериализация успешной авторизации с отзывом роли/назначения:
@@ -132,7 +132,7 @@ def redeem_auto_proof(
     conn: psycopg.Connection, client_token: str, claim_id: UUID, proof: str,
     idempotency_key: str | None = None,
 ) -> str:
-    actor = session_subject(conn, client_token)
+    actor = session_subject(conn, client_token, for_mutation=True)
     if actor is None:
         raise VehicleClaimRejected("unauthorized")
     if not isinstance(proof, str) or not 20 <= len(proof) <= 200:

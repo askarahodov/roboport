@@ -15,3 +15,7 @@
 ## Отдельный gate хранения доказательств автомобиля (#130)
 
 Состояние на 27.10.2026: `scripts/inspect_auto_evidence.py` даёт **только агрегированную read-only инвентаризацию** на disposable synthetic PG17. Без утверждённых юридических сроков, согласий, порядка сохранения `Idempotency-Key` replay, аудиторских обязательств, приватности, резервного копирования и восстановления нельзя добавлять `DELETE`, `DROP`, `TRUNCATE` или автоматический archive для `auto_create_receipt`, `auto_claim_retry_receipt`, `auto_vehicle_claim`, `auto_vehicle_claim_reissue` и связанных append-only audit. Даже при успешном dev CI production gate остаётся **закрыт**. Ручная 24-часовая очистка **только** `auto_proof_throttle` — самостоятельная dev-операция и не разрешает удаление proof/evidence.
+
+## Контроль конкурентного отзыва сессий для auto-операций (#130)
+
+Dev AUTH-gate требует проверки не только `user_role` и `auto_vehicle_staff_assignment`, но и жизненного цикла `user_session`/`app_user` до commit операций `issue-proof`, `reissue-proof`, `redeem`, `review`, `revoke`, создания pending-связи и делегирования INTAKE. PG17 concurrency-тесты: `tests/integration/test_pg_auto_session_revocation.py`. Результат не расширяет права `MANAGER`, не создаёт филиалы и не меняет запрет на реальные персональные данные; production security/privacy approval требует отдельного gate.
