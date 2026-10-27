@@ -15,7 +15,7 @@ from .auto_claim_retry import AutoClaimRetryConflict
 from .auto_proof_throttle import AutoProofRateLimited
 from .auto_vehicle_http import _enabled_dsn, _not_found
 from .auto_vehicle_claim import (
-    VehicleClaimRejected, issue_auto_proof, redeem_auto_proof,
+    VehicleClaimRejected, issue_auto_proof, reissue_auto_proof, redeem_auto_proof,
     review_auto_claim, revoke_auto_link,
 )
 
@@ -111,6 +111,41 @@ def issue(link_id: str, request: Request):
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(
         content={"claimId": str(claim), "proof": proof},
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+
+
+@router.post("/api/v1/dev/auto/links/{link_id}/reissue-proof")
+def reissue(link_id: str, request: Request):
+    """Только исходный INTAKE может однократно заменить утерянный секрет.
+
+    Link ID известен сотруднику до ISSUE, поэтому API работает даже если
+    HTTP ответ ISSUE с claim ID был потерян. Старый proof не возвращается.
+    """
+    config = _request_dsn(request)
+    if isinstance(config, JSONResponse):
+        return config
+    try:
+        link = UUID(link_id)
+    except (ValueError, TypeError):
+        return _not_found(request)
+    with psycopg.connect(config) as conn:
+        if not _mutation_ok(request, conn):
+            return _response(request, 403, "FORBIDDEN")
+        try:
+            claim, proof = reissue_auto_proof(
+                conn, request.cookies.get("rp_session", ""), link,
+            )
+        except AutoProofRateLimited:
+            return JSONResponse(
+                status_code=429,
+                content={"code": "RATE_LIMITED", "requestId": request.state.request_id},
+                headers={"Cache-Control": "no-store", "Retry-After": "3600"},
+            )
+        except VehicleClaimRejected:
+            return _response(request, 403, "FORBIDDEN")
+    return JSONResponse(
+        content={"claimId": str(claim), "proof": proof, "status": "REISSUED"},
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
 
