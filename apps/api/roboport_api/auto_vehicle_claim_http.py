@@ -48,6 +48,40 @@ def _request_dsn(request: Request) -> str | JSONResponse:
     return dsn
 
 
+
+class PendingLinkPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    customerId: UUID
+
+
+@router.post("/api/v1/dev/auto/vehicles/{vehicle_id}/links")
+async def propose_vehicle_link(vehicle_id: str, request: Request):
+    """Создать неподтверждённую связь только по назначению INTAKE на авто."""
+    from .auto_vehicle_link_intake import create_pending_vehicle_link, VehicleLinkConflict
+    config = _request_dsn(request)
+    if isinstance(config, JSONResponse):
+        return config
+    try:
+        ident = UUID(vehicle_id)
+        data = PendingLinkPayload.model_validate(await request.json())
+    except (ValueError, ValidationError, TypeError, UnicodeDecodeError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(config) as conn:
+        if not _mutation_ok(request, conn):
+            return _response(request, 403, "FORBIDDEN")
+        try:
+            link_id = create_pending_vehicle_link(
+                conn, request.cookies.get("rp_session", ""), ident, data.customerId,
+            )
+        except VehicleLinkConflict:
+            return _response(request, 409, "CONFLICT")
+        except VehicleClaimRejected:
+            return _response(request, 403, "FORBIDDEN")
+    return JSONResponse(status_code=201,
+                        content={"linkId": str(link_id), "status": "PENDING"},
+                        headers={"Cache-Control": "no-store"})
+
+
 @router.post("/api/v1/dev/auto/links/{link_id}/issue-proof")
 def issue(link_id: str, request: Request):
     config = _request_dsn(request)

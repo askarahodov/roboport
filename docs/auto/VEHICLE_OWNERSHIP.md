@@ -16,7 +16,7 @@
 
 ## Процедура для тестового мастер-приёмщика
 
-1. Подготовить синтетические `auto_vehicle`, `customer`, `auto_vehicle_customer_link` c `verified_at=NULL` и отдельное назначение INTAKE.
+1. Подготовить синтетические `auto_vehicle`, `customer`, действующую `account_customer_link` и отдельное назначение INTAKE на машину. Создать pending-связь через `POST /api/v1/dev/auto/vehicles/{vehicle_id}/links` с JSON `{"customerId":"<UUID синтетического клиента>"}`. Ответ `201` содержит `linkId` и статус `PENDING`; повтор при активной связи — `409`. Ручной INSERT в таблицу связи больше не требуется для этого dev-сценария.
 2. Использовать только HTTPS loopback с активной cookie `rp_session`, `Origin` и `X-CSRF-Token`, на локальном PG17.
 3. `POST /api/v1/dev/auto/links/{link_id}/issue-proof` без тела. Возвращаются `claimId` и одноразовый `proof` только в закрытом HTTPS-ответе сотруднику. **Не помещать proof в Issue, снимки экрана, аудиторские журналы и логи.**
 4. Второй вызов для той же привязки должен отказать: запрет повторной выдачи.
@@ -59,3 +59,12 @@ python -m alembic -c apps/api/alembic.ini upgrade head
 ## Усиление DB-инвариантов назначений — 0023_auto_staff_guard
 
 Аддитивная миграция `0023_auto_staff_guard` запрещает менять actor, vehicle и role уже созданного `auto_vehicle_staff_assignment`, отменять отзыв `revoked_at` и удалять строку назначения. Это необходимо потому, что объектная проверка `_role_scoped` зависит от точной и действующей записи назначения. После отзыва новая выдача доступа оформляется **отдельной** записью, старые доказательства отзыва сохраняются. PostgreSQL тест: `tests/integration/test_pg_auto_staff_guard.py`.
+
+
+## Новый этап: предложение связи через API (#130)
+
+**Статус — current только для синтетического dev.** Миграция `0024_auto_link_intake` вводит append-only аудит `auto_vehicle_link_intake_audit`. Мастер-приёмщик создаёт лишь неподтверждённую связь, если у него активная роль `INTAKE` и персональное назначение на автомобиль, а у клиента существует действующая связка аккаунта с `customer` и роль CLIENT. Все проверки требуют HTTPS loopback, cookie-сессии, корректного Origin и CSRF.
+
+Операция сериализует конкурентные запросы блокировкой автомобиля, проверяет уникальность активной пары и записывает событие аудита в той же транзакции. Она **не устанавливает** `verified_at/verified_by`, не раскрывает VIN или старые наряды и не заменяет независимое доказательство/проверку MANAGER. Аудит содержит только UUID сотрудника и связи, тип действия и метку времени, без клиентских данных.
+
+Проверка: `PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_pending_link_http.py` после Alembic upgrade head на одноразовом PostgreSQL 17. Публичная регистрация автомобилей, staff provisioning через UI и production idempotency пока planned.
