@@ -1,5 +1,6 @@
 import React from 'react';
 import { Alert, EmptyState, Skeleton } from '../../ui';
+import { CustomerAutoClaim } from './CustomerAutoClaim';
 
 import { getAutoDevVehicles, AutoDevHttpError } from '../../shared/api/autoDevClient';
 import type { AutoDevVehicle } from '../../shared/api/autoDevClient';
@@ -86,6 +87,7 @@ export function CustomerVehicles() {
   return <section aria-label="Автомобили в тестовом контуре">
     <p>Тестовый режим Airmatik: отображаются только подтверждённые и неотозванные
       связи. Добавление автомобиля через этот экран пока недоступно.</p>
+    {status === 'ready' && <CustomerAutoClaim />}
     {status === 'loading' && <Skeleton label="Загрузка автомобилей…" />}
     {status === 'denied' && <Alert>Доступ к автомобилям не предоставлен или
       закрытый тестовый API выключен. Для проверки обратитесь к администратору стенда.</Alert>}

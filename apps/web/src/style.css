@@ -118,3 +118,10 @@ body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,
 .account-timeline-panel{margin-top:.8rem;padding:1rem;border-radius:.8rem;border:1px solid color-mix(in srgb,var(--rp-foreground) 15%,transparent)}
 .account-timeline-panel ol{display:grid;gap:.7rem;padding-left:1.5rem}
 .account-timeline-panel li{line-height:1.6;overflow-wrap:anywhere}
+
+
+/* Клиентский одноразовый proof: доступная форма без хранения секрета. */
+.auto-customer-claim{max-width:720px;min-width:0;display:grid;gap:.75rem;padding:1rem;margin:1rem 0;border-radius:.85rem;background:var(--rp-background);border:1px solid color-mix(in srgb,var(--rp-foreground) 16%,transparent)}
+.auto-customer-claim h3,.auto-customer-claim p{margin:.2rem 0}
+.auto-customer-claim input{width:100%;min-width:0;min-height:44px;background:var(--rp-surface);color:var(--rp-foreground);border:1px solid color-mix(in srgb,var(--rp-foreground) 30%,transparent);border-radius:.55rem;padding:.65rem}
+.auto-customer-claim button{min-height:44px}

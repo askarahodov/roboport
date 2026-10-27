@@ -3,6 +3,7 @@ import { TicketWorkflow } from './TicketWorkflow';
 import { StaffEstimates, StaffStock } from './StaffOperations';
 import { StaffAudit } from './StaffAudit';
 import { StaffGuestClaims } from './StaffGuestClaims';
+import { StaffAutoClaims } from './StaffAutoClaims';
 import { Card, Alert, Skeleton, EmptyState, Badge, Button } from '../../ui';
 import './staff.css';
 
@@ -10,6 +11,7 @@ type Role = 'INTAKE' | 'ENGINEER' | 'STOCK' | 'MANAGER' | 'FINANCE' | 'AUDITOR';
 const sections: {label:string; roles:Role[]}[] = [
   {label:'Очередь',roles:['INTAKE','ENGINEER','MANAGER']},
   {label:'Приёмка',roles:['INTAKE']},
+  {label:'Автомобили (dev)',roles:['INTAKE','MANAGER']},
   {label:'Диагностика',roles:['ENGINEER']},
   {label:'Сметы',roles:['MANAGER','FINANCE']},
   {label:'Склад',roles:['STOCK']},
@@ -109,6 +111,7 @@ export function StaffPortal() {
         {selected==='Сметы'&&roles.some(r=>['FINANCE','MANAGER'].includes(r))&&<StaffEstimates />}
         {selected==='Склад'&&roles.includes('STOCK')&&<StaffStock />}
         {selected==='Аудит'&&roles.includes('AUDITOR')&&<StaffAudit />}
+        {selected==='Автомобили (dev)'&&roles.some(r=>r==='INTAKE'||r==='MANAGER')&&<StaffAutoClaims roles={roles} />}
         {roles.some(r=>r==='INTAKE'||r==='MANAGER')&&<div hidden={!((selected==='Приёмка'&&roles.includes('INTAKE'))||(selected==='Очередь'&&roles.includes('MANAGER')))}><StaffGuestClaims roles={roles} active={(selected==='Приёмка'&&roles.includes('INTAKE'))||(selected==='Очередь'&&roles.includes('MANAGER'))}/></div>}
       </div>
     </div>}
