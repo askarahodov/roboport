@@ -48,9 +48,14 @@ body { background: var(--kb-bg); color: var(--kb-ink); font-family: system-ui, -
 .markdown-section blockquote { border-left: 4px solid var(--kb-brand); background: #edf6f4; padding: 12px 16px; border-radius: 0 8px 8px 0; color: #1b4e4c; }
 .markdown-section pre {
   max-width: 100%; overflow-x: auto;
-  border-radius: 10px; background: var(--kb-code);
+  border-radius: 10px; background-color: var(--kb-code) !important;
 }
-.markdown-section pre code, .markdown-section pre code * { color: #e5f6fa; background: transparent; }
+/* Docsify's runtime theme may re-apply a pale background to inner code.
+   Force the wrapper to own the background for consistent WCAG AA contrast. */
+.markdown-section pre code, .markdown-section pre code * {
+  color: #e5f6fa !important;
+  background-color: transparent !important;
+}
 .markdown-section code:not(pre code) { background: #eaf1f3; color: #123c49; border-radius: 4px; }
 .markdown-section table { width: 100%; display: block; overflow-x: auto; }
 .markdown-section th { background: #eaf1f2; }
@@ -103,8 +108,6 @@ body { background: var(--kb-bg); color: var(--kb-ink); font-family: system-ui, -
     background: #26424b; color: #e9f7fa;
   }
   .markdown-section th { background: #26424b; }
-  .markdown-section pre code,
-  .markdown-section pre code * { color: #e5f6fa; background: transparent; }
   .sidebar-toggle { color: var(--kb-ink); }
 }
 
