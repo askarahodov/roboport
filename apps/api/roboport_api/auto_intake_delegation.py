@@ -9,6 +9,7 @@ import psycopg
 
 from .auto_vehicle_claim import VehicleClaimRejected
 from .session_lookup import session_subject
+from .auto_location_scope import location_scope_allows
 from .auto_create_idempotency import existing, remember, AutoIdempotencyConflict
 
 
@@ -35,7 +36,7 @@ def _manager(
            FOR SHARE OF a,ur""",
         (vehicle_id, actor),
     ).fetchone()
-    if granted is None:
+    if granted is None or not location_scope_allows(conn, actor, "MANAGER", vehicle_id):
         raise VehicleClaimRejected("no active manager assignment")
     return actor
 
