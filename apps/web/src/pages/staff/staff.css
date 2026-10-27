@@ -12,3 +12,11 @@
 .auto-claim-confirm input{width:1.2rem;height:1.2rem;flex:none}
 .auto-proof{min-width:0;border:1px solid color-mix(in srgb,var(--rp-foreground) 25%,transparent);border-radius:.7rem;padding:.8rem;background:var(--rp-surface);overflow-wrap:anywhere}
 .auto-proof code{user-select:text;word-break:break-all}
+
+/* Делегирование приёмки: текст UUID не должен раздвигать колонки и карточки. */
+.auto-intake-delegation{padding:1rem 0;border-top:1px solid color-mix(in srgb,var(--rp-foreground) 15%,transparent);min-width:0}
+.auto-intake-delegation form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:.75rem;align-items:end}
+.auto-intake-delegation input{width:100%;min-width:0;min-height:44px;padding:.6rem;border:1px solid color-mix(in srgb,var(--rp-foreground) 25%,transparent);border-radius:.6rem;color:var(--rp-foreground);background:var(--rp-surface)}
+.auto-assignment-list{list-style:none;padding:0;margin:.75rem 0;display:grid;gap:.5rem}
+.auto-assignment-list li{padding:.65rem;display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between;min-width:0;border:1px solid color-mix(in srgb,var(--rp-foreground) 14%,transparent);border-radius:.6rem}
+.auto-assignment-list code{word-break:break-all}
