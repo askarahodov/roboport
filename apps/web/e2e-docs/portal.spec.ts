@@ -23,7 +23,7 @@ test('главная, навигация, кодовые блоки и поис�
   await expect(results).not.toContainText('Ничего не найдено');
 });
 
-test('все пользовательские разделы существуют и явно обозначены как planned', async ({ page }) => {
+test('пользовательские разделы явно разделяют planned и текущий dev-функционал', async ({ page }) => {
   test.setTimeout(100_000);
   const routes = [
     ['administrator', 'Администратор'],
@@ -39,8 +39,10 @@ test('все пользовательские разделы существую�
   for (const [path, heading] of routes) {
     await page.locator('.sidebar-nav a[href*="guides/' + path + '"]').click();
     await expect(page.locator('.markdown-section h1')).toContainText(heading);
+    // Только руководство клиента включает уже проверенную dev-страницу просмотра авто.
+    // Остальные разделы по-прежнему должны прямо обозначаться как planned.
     await expect(page.locator('.markdown-section')).toContainText(
-      'Статус: planned',
+      path === 'client' ? 'Статус: частично current в синтетическом dev' : 'Статус: planned',
     );
     await expect(page.locator('.markdown-section')).not.toContainText(
       '404 - Not found',
@@ -65,5 +67,5 @@ test('на мобильной ширине открывается меню и о
   await expect(page.locator('.sidebar-nav a[href*="guides/client"]')).toBeVisible();
   await page.locator('.sidebar-nav a[href*="guides/client"]').click();
   await expect(page.locator('.markdown-section h1')).toContainText('Клиент автосервиса');
-  await expect(page.locator('.markdown-section')).toContainText('Статус: planned');
+  await expect(page.locator('.markdown-section')).toContainText('Статус: частично current в синтетическом dev');
 });
