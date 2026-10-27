@@ -53,33 +53,43 @@ export function CustomerVehicles() {
     setPageError(false);
     void (async () => {
       try {
-        const response = await fetch(
-          '/api/v1/dev/auto/vehicles?limit=' + PAGE_SIZE + '&offset=' + offset,
-          {
-            credentials: 'include', cache: 'no-store', signal: controller.signal,
-            headers: { Accept: 'application/json' },
-          },
-        );
-        if (controller.signal.aborted) return;
-        if ([401, 403, 404].includes(response.status)) {
-          // Отзыв сессии/доступа очищает даже ранее загруженные страницы.
-          setItems([]);
-          setNextOffset(null);
-          setStatus('denied');
-          return;
+        // Backend возвращает 200 + пустой список, когда customer link отозвана.
+        // Перед расширением списка повторно запрашиваем ВСЕ видимые страницы:
+        // иначе карточки с уже отозванным доступом остались бы на экране.
+        const fresh: Vehicle[] = [];
+        let following: number | null = null;
+        for (let pageOffset = 0; pageOffset <= offset; pageOffset += PAGE_SIZE) {
+          const response = await fetch(
+            '/api/v1/dev/auto/vehicles?limit=' + PAGE_SIZE + '&offset=' + pageOffset,
+            {
+              credentials: 'include', cache: 'no-store', signal: controller.signal,
+              headers: { Accept: 'application/json' },
+            },
+          );
+          if (controller.signal.aborted) return;
+          if ([401, 403, 404].includes(response.status)) {
+            // Отзыв сессии/доступа очищает даже ранее загруженные страницы.
+            setItems([]);
+            setNextOffset(null);
+            setStatus('denied');
+            return;
+          }
+          if (!response.ok) throw new Error('Vehicle API unavailable');
+          const data: unknown = await response.json();
+          if (!isVehiclePage(data)) throw new Error('Invalid vehicle page');
+          if (controller.signal.aborted) return;
+          // Server-side фильтр по актуальной связи действует для каждой страницы.
+          // Offset может пересекать элементы после конкурентных изменений.
+          for (const item of data.items) {
+            if (!fresh.some(existing => existing.id === item.id)) fresh.push(item);
+          }
+          following = data.items.length === PAGE_SIZE && pageOffset + PAGE_SIZE <= MAX_OFFSET
+            ? pageOffset + PAGE_SIZE : null;
+          if (data.items.length < PAGE_SIZE) break;
         }
-        if (!response.ok) throw new Error('Vehicle API unavailable');
-        const data: unknown = await response.json();
-        if (!isVehiclePage(data)) throw new Error('Invalid vehicle page');
         if (controller.signal.aborted) return;
-        // При изменениях между запросами offset может пересекать соседние страницы.
-        // Повторяющиеся идентификаторы нельзя выводить дважды.
-        setItems(previous => offset === 0
-          ? data.items
-          : [...previous, ...data.items.filter(item =>
-            !previous.some(existing => existing.id === item.id))]);
-        setNextOffset(data.items.length === PAGE_SIZE && offset + PAGE_SIZE <= MAX_OFFSET
-          ? offset + PAGE_SIZE : null);
+        setItems(fresh);
+        setNextOffset(following);
         setStatus('ready');
       } catch {
         if (!controller.signal.aborted) {
