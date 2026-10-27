@@ -70,7 +70,7 @@ docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
 | Run | SHA/контекст | Chromium install (приблизительно) |
 | --- | --- | ---: |
 | [40327490281](https://github.com/askarahodov/roboport/actions/runs/40327490281) | main, 26.10.2026 | 22,6 с |
-| [40492285963](https://github.com/askarahodov/roboport/actions/runs/40492285963) | PR #147, 27.10.2026 | 19,9 с |
+| [40492285963](https://github.com/askarahodov/roboport/actions/runs/40492285963) | Auto proof #130, 27.10.2026 | 19,9 с |
 
 **Performance gate ещё не пройден:** сравнить cold и warm run на одинаковом lockfile, cache hit, длительность всего browser job и шага Chromium; не объявлять ускорение до фактических замеров. Если сжатие/восстановление кэша медленнее прямой загрузки, удалить `Cache Playwright Chromium binaries` и его настройку `actions/cache@v4` из CI (npm cache можно оставить). Нельзя отключать `Browser E2E`, Docsify smoke и `--with-deps` ради скорости. Учитывать номер run и проверяемый head SHA.
 
