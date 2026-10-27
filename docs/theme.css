@@ -48,9 +48,14 @@ body { background: var(--kb-bg); color: var(--kb-ink); font-family: system-ui, -
 .markdown-section blockquote { border-left: 4px solid var(--kb-brand); background: #edf6f4; padding: 12px 16px; border-radius: 0 8px 8px 0; color: #1b4e4c; }
 .markdown-section pre {
   max-width: 100%; overflow-x: auto;
-  border-radius: 10px; background: var(--kb-code);
+  border-radius: 10px; background-color: var(--kb-code) !important;
 }
-.markdown-section pre code, .markdown-section pre code * { color: #e5f6fa; }
+/* Docsify's runtime theme may re-apply a pale background to inner code.
+   Force the wrapper to own the background for consistent WCAG AA contrast. */
+.markdown-section pre code, .markdown-section pre code * {
+  color: #e5f6fa !important;
+  background-color: transparent !important;
+}
 .markdown-section code:not(pre code) { background: #eaf1f3; color: #123c49; border-radius: 4px; }
 .markdown-section table { width: 100%; display: block; overflow-x: auto; }
 .markdown-section th { background: #eaf1f2; }
@@ -65,4 +70,56 @@ body { background: var(--kb-bg); color: var(--kb-ink); font-family: system-ui, -
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+/* Dark OS preference. Docsify remains a local dev portal; both palettes use
+   WCAG AA contrast for ordinary text, links, search and code snippets. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --kb-ink: #e5f2f4;
+    --kb-muted: #c0d3d9;
+    --kb-brand: #80d4c7;
+    --kb-brand-dark: #bcf1e9;
+    --kb-bg: #0e1b24;
+    --kb-border: #42616b;
+    --kb-surface: #192c36;
+    --kb-code: #0b1822;
+  }
+  /* Docsify core ships a higher-specificity grey link rule (#333) which
+     becomes unreadable against a dark sidebar if not overridden explicitly. */
+  .sidebar .sidebar-nav a { color: var(--kb-ink) !important; }
+  .sidebar .sidebar-nav a:hover,
+  .sidebar .sidebar-nav li.active > a {
+    background: #285047;
+    color: var(--kb-brand-dark) !important;
+  }
+  .sidebar .search input {
+    color: var(--kb-ink); background: var(--kb-surface);
+    border-color: #7799a5;
+  }
+  .sidebar .search .results-panel,
+  .sidebar .search .results-panel a {
+    color: var(--kb-ink); background: var(--kb-surface);
+  }
+  .sidebar .search .results-panel a:hover { background: #285047; }
+  .markdown-section h1,
+  .markdown-section h2,
+  .markdown-section h3 { color: #e5f2f4; }
+  .markdown-section a { color: #9fece0; }
+  .markdown-section blockquote {
+    background: #24443f; color: #e2f8f3;
+    border-left-color: var(--kb-brand);
+  }
+  .markdown-section code:not(pre code) {
+    background: #26424b; color: #e9f7fa;
+  }
+  .markdown-section th { background: #26424b; }
+  .sidebar-toggle { color: var(--kb-ink); }
+}
+
+/* Keyboard focus visible on document and menu controls, including dark mode. */
+.sidebar-nav a:focus-visible,
+.sidebar-toggle:focus-visible {
+  outline: 3px solid #e2a93c;
+  outline-offset: 2px;
 }
