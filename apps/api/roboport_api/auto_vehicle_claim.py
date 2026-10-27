@@ -84,6 +84,48 @@ def issue_auto_proof(
     return claim_id, proof
 
 
+def reissue_auto_proof(
+    conn: psycopg.Connection, staff_token: str, link_id: UUID,
+) -> tuple[UUID, str]:
+    """Ровно одна замена proof для link без попыток и claimant.
+
+    Нельзя восстанавливать старый секрет: создаётся новый, старый перестаёт
+    быть допустимым при любом предъявлении. Исходный claim неизменяем.
+    """
+    row = conn.execute(
+        """SELECT c.id,c.issued_by,c.proof_attempts,c.claimant_id,c.status,
+                  l.vehicle_id,l.verified_at,l.revoked_at
+           FROM auto_vehicle_claim c
+           JOIN auto_vehicle_customer_link l ON l.id=c.link_id
+           WHERE c.link_id=%s FOR UPDATE OF c,l""",
+        (link_id,),
+    ).fetchone()
+    if row is None:
+        raise VehicleClaimRejected("unavailable")
+    issuer = _role_scoped(conn, staff_token, "INTAKE", row[5])
+    # После отзыва оригинальной роли или передаче назначения другому
+    # сотруднику реанимировать чужое доказательство нельзя.
+    if (issuer != row[1] or row[2] != 0 or row[3] is not None
+            or row[4] != "PENDING" or row[6] is not None or row[7] is not None):
+        raise VehicleClaimRejected("unavailable")
+    if conn.execute(
+        "SELECT 1 FROM auto_vehicle_claim_reissue WHERE claim_id=%s",
+        (row[0],),
+    ).fetchone():
+        raise VehicleClaimRejected("already reissued")
+    # Повторная выдача считается отдельным ISSUE для общего ограничения.
+    consume_attempt(conn, issuer, "ISSUE")
+    replacement = secrets.token_urlsafe(32)
+    conn.execute(
+        """INSERT INTO auto_vehicle_claim_reissue(
+             claim_id,issued_by,proof_hash,proof_expires_at)
+           VALUES(%s,%s,%s,now()+interval '20 minutes')""",
+        (row[0], issuer, hashlib.sha256(replacement.encode()).hexdigest()),
+    )
+    _audit(conn, link=link_id, claim=row[0], actor=issuer, action="REISSUED")
+    return row[0], replacement
+
+
 def redeem_auto_proof(
     conn: psycopg.Connection, client_token: str, claim_id: UUID, proof: str,
     idempotency_key: str | None = None,
@@ -116,13 +158,22 @@ def redeem_auto_proof(
     ).fetchone()
     if eligible is None:
         raise VehicleClaimRejected("customer not linked")
+    # Второй SELECT выполняется ПОСЛЕ row lock на c,l: когда конкурентный
+    # перевыпуск завершился, новый snapshot гарантированно видит его запись.
+    # Это устраняет гонку старого proof с reissue без изменения исходного claim.
+    version = conn.execute(
+        """SELECT proof_hash,proof_expires_at FROM auto_vehicle_claim_reissue
+           WHERE claim_id=%s""",
+        (claim_id,),
+    ).fetchone()
+    effective_hash, effective_expiry = (version if version else (row[4], row[5]))
     payload = {"proof": proof}
     previous = retry_lookup(
         conn, actor, claim_id, "redeem", idempotency_key, payload,
     )
     if previous is not None:
         # Terminal state/expiry/revocation never replays a stale success.
-        if row[8] != "PENDING" or row[5] <= datetime.now(timezone.utc):
+        if row[8] != "PENDING" or effective_expiry <= datetime.now(timezone.utc):
             raise AutoClaimRetryConflict("claim no longer redeemable")
         if (previous == "PENDING_REVIEW" and row[7] == actor) or (
             previous == "REJECTED" and row[7] is None
@@ -136,7 +187,7 @@ def redeem_auto_proof(
     # Ключ идемпотентности не даёт обходить учёт между разными claim.
     consume_attempt(conn, actor, "REDEEM")
     valid = hmac.compare_digest(
-        hashlib.sha256(proof.encode()).hexdigest(), row[4],
+        hashlib.sha256(proof.encode()).hexdigest(), effective_hash,
     )
     conn.execute(
         """UPDATE auto_vehicle_claim
