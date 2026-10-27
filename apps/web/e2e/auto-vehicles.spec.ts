@@ -139,26 +139,54 @@ test('сбой следующей страницы не стирает перв�
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('отзыв доступа на следующей странице немедленно очищает ранее загруженные автомобили', async ({ page }) => {
+test('отозванная account_customer_link скрывает старые карточки даже при 200 + пустой список', async ({ page }) => {
   await authorized(page);
   let revoked = false;
+  const calls: string[] = [];
   await page.route(vehiclesUrl, route => {
-    const offset = new URL(route.request().url()).searchParams.get('offset');
-    if (offset === '20' && revoked) return route.fulfill({
-      status: 403, contentType: 'application/json', body: '{}',
-    });
+    const offset = new URL(route.request().url()).searchParams.get('offset') ?? '';
+    calls.push(offset);
+    // Именно так работает live backend после отзыва связи: не 403, а 200 {items:[]}.
+    const items = revoked ? [] : Array.from(
+      { length: 20 }, (_, index) => fakeVehicle(index + 1),
+    );
     return route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ items: Array.from(
-        { length: 20 }, (_, index) => fakeVehicle(index + 1),
-      ) }),
+      body: JSON.stringify({ items }),
     });
   });
   await page.goto('/account/vehicles');
   await expect(page.locator('.account-record')).toHaveCount(20);
   revoked = true;
   await page.getByRole('button', { name: 'Показать ещё автомобили' }).click();
-  await expect(page.getByText('Доступ к автомобилям не предоставлен', { exact: false })).toBeVisible();
+  await expect(page.getByText('Подтверждённых автомобилей пока нет.')).toBeVisible();
   await expect(page.locator('.account-record')).toHaveCount(0);
   await expect(page.getByText('Показано автомобилей: 20')).toHaveCount(0);
+  // Новая подгрузка сначала повторно запрашивает доступные первые 20.
+  // Запрос смещения 20 не требуется, если первая страница уже пуста.
+  expect(calls).toEqual(['0', '0']);
+});
+
+test('частичный отзыв связи удаляет старую карточку при следующей странице', async ({ page }) => {
+  await authorized(page);
+  let revoked = false;
+  await page.route(vehiclesUrl, route => {
+    const offset = new URL(route.request().url()).searchParams.get('offset');
+    const items = !revoked
+      ? Array.from({ length: 20 }, (_, index) => fakeVehicle(index + 1))
+      : offset === '0'
+        ? Array.from({ length: 20 }, (_, index) => fakeVehicle(index + 2))
+        : [fakeVehicle(22)];
+    return route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify({ items }),
+    });
+  });
+  await page.goto('/account/vehicles');
+  await expect(page.getByText('SyntheticMake TestCar 1')).toBeVisible();
+  revoked = true;
+  await page.getByRole('button', { name: 'Показать ещё автомобили' }).click();
+  await expect(page.getByText('Показано автомобилей: 21')).toBeVisible();
+  await expect(page.getByText('SyntheticMake TestCar 1')).toHaveCount(0);
+  await expect(page.getByText('SyntheticMake TestCar 22')).toBeVisible();
+  await expect(page.locator('.account-record')).toHaveCount(21);
 });
