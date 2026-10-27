@@ -140,3 +140,34 @@ def test_attempt_budget_five_distinct_keys_and_no_duplicate_audit(monkeypatch):
         assert db.execute("""SELECT count(*) FROM auto_vehicle_claim_audit
                        WHERE claim_id=%s AND action='PROOF_REJECTED'""",
                           (claim,)).fetchone()[0] == 5
+
+
+def test_concurrent_same_key_review_is_single_decision(monkeypatch):
+    _flags(monkeypatch)
+    d = _scenario()
+    claim, proof = _issued(d)
+    assert _post(
+        d, d["client_a"], f"/api/v1/dev/auto/claims/{claim}/redeem",
+        {"proof": proof},
+    ).status_code == 200
+    review = f"/api/v1/dev/auto/claims/{claim}/review"
+    key = uuid4().hex
+
+    def attempt(_):
+        response = _post(d, d["manager"], review, {"approve": True}, key)
+        return response.status_code, response.json()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(attempt, range(2)))
+    assert responses == [(200, {"status": "VERIFIED"})] * 2
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            """SELECT count(*) FROM auto_vehicle_claim_audit
+               WHERE claim_id=%s AND action='VERIFIED'""",
+            (claim,),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            """SELECT count(*) FROM auto_claim_retry_receipt
+               WHERE claim_id=%s AND operation='review'""",
+            (claim,),
+        ).fetchone()[0] == 1
