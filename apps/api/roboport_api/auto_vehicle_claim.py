@@ -27,6 +27,8 @@ def _role_scoped(
     actor = session_subject(conn, token)
     if actor is None:
         raise VehicleClaimRejected("unauthorized")
+    # Сериализация успешной авторизации с отзывом роли/назначения:
+    # concurrent UPDATE revoked_at ждёт завершения защищённой операции.
     granted = conn.execute(
         """SELECT 1 FROM user_role ur
            JOIN auto_vehicle_staff_assignment a ON a.user_id=ur.user_id
@@ -34,7 +36,7 @@ def _role_scoped(
            WHERE ur.user_id=%s AND ur.role_code=%s
              AND ur.revoked_at IS NULL
              AND (ur.expires_at IS NULL OR ur.expires_at>now())
-           LIMIT 1""",
+           LIMIT 1 FOR SHARE OF ur,a""",
         (vehicle, role, actor, role),
     ).fetchone()
     if granted is None:
@@ -147,13 +149,16 @@ def redeem_auto_proof(
     if row is None or row[2] is not None or row[3] is not None:
         raise VehicleClaimRejected("unavailable")
     # Проверяем роль и конкретную customer-link даже при replay receipt.
+    # Клиентская роль, сам пользователь и customer entitlement сохраняются
+    # действительными до commit предъявления proof (без чтения чужих данных).
     eligible = conn.execute(
         """SELECT 1 FROM account_customer_link l
            JOIN user_role ur ON ur.user_id=l.user_id AND ur.role_code='CLIENT'
              AND ur.revoked_at IS NULL
              AND (ur.expires_at IS NULL OR ur.expires_at>now())
            JOIN app_user u ON u.id=l.user_id AND u.status='ACTIVE'
-           WHERE l.user_id=%s AND l.customer_id=%s AND l.revoked_at IS NULL""",
+           WHERE l.user_id=%s AND l.customer_id=%s AND l.revoked_at IS NULL
+           FOR SHARE OF l,ur,u""",
         (actor, row[1]),
     ).fetchone()
     if eligible is None:
@@ -224,6 +229,8 @@ def review_auto_claim(
     if reviewer in (row[1], row[2]) or row[2] is None or row[3] is None:
         raise VehicleClaimRejected("independent reviewer required")
     # Проверяем живое полномочие claimant даже после финального решения.
+    # Независимое review удерживает клиентские полномочия до commit;
+    # отзыв до этой проверки даст отказ, после неё ожидает завершения.
     claimant_valid = conn.execute(
         """SELECT 1 FROM app_user u
            JOIN user_role ur ON ur.user_id=u.id AND ur.role_code='CLIENT'
@@ -231,7 +238,8 @@ def review_auto_claim(
               AND (ur.expires_at IS NULL OR ur.expires_at>now())
            JOIN account_customer_link l ON l.user_id=u.id AND l.customer_id=%s
              AND l.revoked_at IS NULL
-           WHERE u.id=%s AND u.status='ACTIVE'""",
+           WHERE u.id=%s AND u.status='ACTIVE'
+           FOR SHARE OF u,ur,l""",
         (row[6], row[2]),
     ).fetchone()
     if claimant_valid is None or row[7] is not None:
