@@ -69,7 +69,8 @@ def test_redeem_retry_no_brute_budget_leak_and_review_retry(monkeypatch):
     assert reviewed.status_code == 200 and reviewed.json()["status"] == "VERIFIED"
     assert _post(d, d["manager"], review, {"approve": True}, review_key).json() == reviewed.json()
     assert _post(d, d["manager"], review, {"approve": False}, review_key).status_code == 409
-    assert _post(d, d["client_a"], redeem, {"proof": proof}, proof_key).status_code == 409
+    # Финальное VERIFIED состояние не разрешает снова предъявлять proof: 403.
+    assert _post(d, d["client_a"], redeem, {"proof": proof}, proof_key).status_code == 403
     # Старый endpoint без ключа по-прежнему single-use.
     assert _post(d, d["manager"], review, {"approve": True}).status_code == 403
     with psycopg.connect(DSN) as db:
