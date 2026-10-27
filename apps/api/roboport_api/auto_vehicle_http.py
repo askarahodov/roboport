@@ -30,14 +30,28 @@ def _enabled_dsn(request: Request) -> str | None:
     return _dsn(request)
 
 
+def _page_int(value: str, *, minimum: int, maximum: int) -> int | None:
+    # FastAPI-422 по умолчанию отличается от нашего Error контракта.
+    # Неоднозначные или чрезмерно длинные query значения не парсим в int.
+    if (not isinstance(value, str) or not 1 <= len(value) <= 5
+            or not value.isascii() or not value.isdecimal()):
+        return None
+    number = int(value)
+    return number if minimum <= number <= maximum else None
+
+
 @router.get("/api/v1/dev/auto/vehicles")
-def list_vehicles(request: Request, limit: int = 20, offset: int = 0):
+def list_vehicles(request: Request, limit: str = "20", offset: str = "0"):
     if os.getenv("ROBOport_SYNTHETIC_AUTO_API") != "1":
         return _not_found(request)
     dsn = _enabled_dsn(request)
     if dsn is None:
         return _error(request, 403)
-    if not 1 <= limit <= 50 or not 0 <= offset <= 10000:
+    page_limit = _page_int(limit, minimum=1, maximum=50)
+    page_offset = _page_int(offset, minimum=0, maximum=10000)
+    if (page_limit is None or page_offset is None
+            or len(request.query_params.getlist("limit")) > 1
+            or len(request.query_params.getlist("offset")) > 1):
         return JSONResponse(
             status_code=422,
             content={
@@ -45,6 +59,7 @@ def list_vehicles(request: Request, limit: int = 20, offset: int = 0):
                 "requestId": request.state.request_id,
             }, headers={"Cache-Control": "no-store"},
         )
+    limit, offset = page_limit, page_offset
     with psycopg.connect(dsn) as conn:
         items = owned_vehicles(
             conn, request.cookies.get("rp_session", ""),
