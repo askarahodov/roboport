@@ -42,6 +42,7 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
   const [revokeId, setRevokeId] = React.useState('');
   const [issued, setIssued] = React.useState<{ claimId: string; proof: string } | null>(null);
   const pendingKey = React.useRef<{ payload: string; key: string } | null>(null);
+  const reviewKey = React.useRef<{ payload: string; key: string } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [outcome, setOutcome] = React.useState<Outcome | null>(null);
   const [confirmRevoke, setConfirmRevoke] = React.useState(false);
@@ -94,13 +95,19 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
 
   function review(approve: boolean) {
     if (!validId(claimId)) return;
+    const fingerprint = claimId.trim().toLowerCase() + ':' + String(approve);
+    if (reviewKey.current?.payload !== fingerprint) {
+      reviewKey.current = { payload: fingerprint, key: crypto.randomUUID() };
+    }
+    const key = reviewKey.current.key;
     void run(async () => {
       const response = fields(await mutate(
         '/api/v1/dev/auto/claims/' + encodeURIComponent(claimId.trim()) + '/review',
-        { approve },
+        { approve }, key,
       ));
       if (response.status !== (approve ? 'VERIFIED' : 'DECLINED'))
         throw new Error('Bad review response');
+      reviewKey.current = null;
       setClaimId('');
       return { type: 'ok', message: approve
         ? 'Связь подтверждена независимым сотрудником.'

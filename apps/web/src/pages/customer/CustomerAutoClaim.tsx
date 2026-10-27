@@ -7,6 +7,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function CustomerAutoClaim() {
   const [claimId, setClaimId] = React.useState('');
   const [proof, setProof] = React.useState('');
+  const retryRef = React.useRef<{ fingerprint: string; key: string } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState<{ text: string; failed: boolean } | null>(null);
 
@@ -19,6 +20,17 @@ export function CustomerAutoClaim() {
     const suppliedProof = proof;
     setProof('');
     try {
+      // Не сохраняем открытый proof в ref, storage, URL или журнале.
+      // Один и тот же код + claimId после потери ответа получают прежний ключ.
+      const digest = await crypto.subtle.digest(
+        'SHA-256', new TextEncoder().encode(claimId.trim().toLowerCase() + ':' + suppliedProof),
+      );
+      const fingerprint = Array.from(new Uint8Array(digest))
+        .map(byte => byte.toString(16).padStart(2, '0')).join('');
+      if (retryRef.current?.fingerprint !== fingerprint) {
+        retryRef.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      const retryKey = retryRef.current.key;
       const csrf = await fetch('/api/v1/auth/csrf', {
         method: 'POST', credentials: 'include', cache: 'no-store',
       });
@@ -32,7 +44,8 @@ export function CustomerAutoClaim() {
         '/api/v1/dev/auto/claims/' + encodeURIComponent(claimId.trim()) + '/redeem',
         {
           method: 'POST', credentials: 'include', cache: 'no-store',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': response.csrfToken },
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': response.csrfToken,
+            'Idempotency-Key': retryKey },
           body: JSON.stringify({ proof: suppliedProof }),
         },
       );
@@ -43,6 +56,7 @@ export function CustomerAutoClaim() {
         throw new Error('Invalid response');
       }
       if (data.status === 'PENDING_REVIEW') {
+        retryRef.current = null;
         setClaimId('');
         setMessage({ failed: false,
           text: 'Код принят. Автомобиль появится только после независимого решения менеджера.' });

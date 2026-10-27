@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import psycopg
 
 from .session_lookup import session_subject
+from .auto_claim_retry import lookup as retry_lookup, remember as retry_remember, AutoClaimRetryConflict
 
 
 class VehicleClaimRejected(Exception):
@@ -82,6 +83,7 @@ def issue_auto_proof(
 
 def redeem_auto_proof(
     conn: psycopg.Connection, client_token: str, claim_id: UUID, proof: str,
+    idempotency_key: str | None = None,
 ) -> str:
     actor = session_subject(conn, client_token)
     if actor is None:
@@ -97,20 +99,36 @@ def redeem_auto_proof(
            WHERE c.id=%s FOR UPDATE OF c,l""",
         (claim_id,),
     ).fetchone()
-    if (row is None or row[2] is not None or row[3] is not None
-            or row[7] is not None or row[8] != "PENDING"
-            or row[6] >= 5 or row[5] <= datetime.now(timezone.utc)):
+    if row is None or row[2] is not None or row[3] is not None:
         raise VehicleClaimRejected("unavailable")
+    # Проверяем роль и конкретную customer-link даже при replay receipt.
     eligible = conn.execute(
         """SELECT 1 FROM account_customer_link l
            JOIN user_role ur ON ur.user_id=l.user_id AND ur.role_code='CLIENT'
              AND ur.revoked_at IS NULL
              AND (ur.expires_at IS NULL OR ur.expires_at>now())
+           JOIN app_user u ON u.id=l.user_id AND u.status='ACTIVE'
            WHERE l.user_id=%s AND l.customer_id=%s AND l.revoked_at IS NULL""",
         (actor, row[1]),
     ).fetchone()
     if eligible is None:
         raise VehicleClaimRejected("customer not linked")
+    payload = {"proof": proof}
+    previous = retry_lookup(
+        conn, actor, claim_id, "redeem", idempotency_key, payload,
+    )
+    if previous is not None:
+        # Terminal state/expiry/revocation never replays a stale success.
+        if row[8] != "PENDING" or row[5] <= datetime.now(timezone.utc):
+            raise AutoClaimRetryConflict("claim no longer redeemable")
+        if (previous == "PENDING_REVIEW" and row[7] == actor) or (
+            previous == "REJECTED" and row[7] is None
+        ):
+            return previous
+        raise AutoClaimRetryConflict("claim state changed")
+    if (row[7] is not None or row[8] != "PENDING"
+            or row[6] >= 5 or row[5] <= datetime.now(timezone.utc)):
+        raise VehicleClaimRejected("unavailable")
     valid = hmac.compare_digest(
         hashlib.sha256(proof.encode()).hexdigest(), row[4],
     )
@@ -122,30 +140,33 @@ def redeem_auto_proof(
            WHERE id=%s""",
         (valid, actor, valid, claim_id),
     )
+    status = "PENDING_REVIEW" if valid else "REJECTED"
     _audit(conn, link=row[0], claim=claim_id, actor=actor,
            action="PROOF_ACCEPTED" if valid else "PROOF_REJECTED")
-    return "PENDING_REVIEW" if valid else "REJECTED"
+    retry_remember(conn, actor, claim_id, "redeem", idempotency_key, payload, status)
+    return status
 
 
 def review_auto_claim(
     conn: psycopg.Connection, manager_token: str, claim_id: UUID, approve: bool,
+    idempotency_key: str | None = None,
 ) -> str:
     if type(approve) is not bool:
         raise VehicleClaimRejected("invalid decision")
     row = conn.execute(
         """SELECT c.link_id,c.issued_by,c.claimant_id,c.claimed_at,c.status,
-                  l.vehicle_id,l.customer_id,l.revoked_at,l.verified_at
+                  l.vehicle_id,l.customer_id,l.revoked_at,l.verified_at,c.reviewed_by
            FROM auto_vehicle_claim c
            JOIN auto_vehicle_customer_link l ON l.id=c.link_id
            WHERE c.id=%s FOR UPDATE OF c,l""",
         (claim_id,),
     ).fetchone()
-    if (row is None or row[4] != "PENDING" or row[2] is None
-            or row[3] is None or row[7] is not None or row[8] is not None):
+    if row is None:
         raise VehicleClaimRejected("unavailable")
     reviewer = _role_scoped(conn, manager_token, "MANAGER", row[5])
-    if reviewer in (row[1], row[2]):
+    if reviewer in (row[1], row[2]) or row[2] is None or row[3] is None:
         raise VehicleClaimRejected("independent reviewer required")
+    # Проверяем живое полномочие claimant даже после финального решения.
     claimant_valid = conn.execute(
         """SELECT 1 FROM app_user u
            JOIN user_role ur ON ur.user_id=u.id AND ur.role_code='CLIENT'
@@ -156,9 +177,20 @@ def review_auto_claim(
            WHERE u.id=%s AND u.status='ACTIVE'""",
         (row[6], row[2]),
     ).fetchone()
-    if claimant_valid is None:
+    if claimant_valid is None or row[7] is not None:
         raise VehicleClaimRejected("claimant access revoked")
     outcome = "VERIFIED" if approve else "DECLINED"
+    previous = retry_lookup(
+        conn, reviewer, claim_id, "review", idempotency_key,
+        {"approve": approve},
+    )
+    if previous is not None:
+        if (previous == outcome and row[4] == outcome and row[9] == reviewer
+                and (row[8] is not None) == approve):
+            return previous
+        raise AutoClaimRetryConflict("review no longer valid")
+    if row[4] != "PENDING" or row[8] is not None:
+        raise VehicleClaimRejected("unavailable")
     conn.execute(
         """UPDATE auto_vehicle_claim
            SET reviewed_by=%s,reviewed_at=now(),status=%s WHERE id=%s""",
@@ -172,6 +204,10 @@ def review_auto_claim(
             (reviewer, row[0]),
         )
     _audit(conn, link=row[0], claim=claim_id, actor=reviewer, action=outcome)
+    retry_remember(
+        conn, reviewer, claim_id, "review", idempotency_key,
+        {"approve": approve}, outcome,
+    )
     return outcome
 
 
