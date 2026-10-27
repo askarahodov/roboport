@@ -59,7 +59,7 @@ docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
 
 Тяжёлый workflow `.github/workflows/ci.yml` запускается на каждый `pull_request`, при push в `main` и по ручному `workflow_dispatch`. Отдельный `push` feature-ветки **не** создаёт второй идентичный прогон, если PR уже открыт. В рамках одного PR новые изменения отменяют устаревшие CI-прогоны через `concurrency.cancel-in-progress`, но не отменяют проверки других PR или `main`.
 
-Не закрывать PR, пока **последний head SHA** не прошёл PostgreSQL, API, Web и Browser E2E. Установка Playwright Chromium требует сетевого доступа runner к зависимостям; зависание установки браузера — инфраструктурный блокер, а не `PASS`, и нельзя скрывать его отключением browser job. При проблемах проверять шаг `Install browser test runner and Chromium`, GitHub Actions run и публикацию `trace` для ошибок тестов.
+Не закрывать PR, пока **последний head SHA** не прошёл PostgreSQL, API, Web и Browser E2E. Если браузер не запускается, это инфраструктурный блокер, а не `PASS`. Для обычного host-runner запускать `npx playwright install --with-deps chromium`; для официального Playwright container проверять реальный `chromium.launch()` и все browser E2E. При проблемах проверять browser smoke, GitHub Actions run и публикацию `trace` для ошибок тестов.
 
 ## Кэш Playwright в CI: измерения и безопасный откат (#135)
 
@@ -100,3 +100,14 @@ npm run test:docs:e2e
 ```
 
 В конфигурации Docsify Playwright локальный HTTP server запускается через `python -m http.server`, который подходит для Linux и Windows при доступном `python`. Для полноценного `npm run test:e2e` необходим запущенный synthetic FastAPI на `127.0.0.1:8000` с тестовыми зависимостями; запускать без production данных. CMD-команды предназначены для локальной проверки, независимый прогон на Windows всё ещё требуется; зелёный Linux CI сам по себе не доказывает Windows-совместимость.
+
+
+## Эксперимент с предустановленным Playwright образцом: #135 / 27.10.2026
+
+**Root cause cold-run:** [main CI 40494924138](https://github.com/askarahodov/roboport/actions/runs/40494924138) потратил ~469,6 с, а [PR CI 40495144700](https://github.com/askarahodov/roboport/actions/runs/40495144700) ~579,6 с на шаг установки. Логи APT показывают, что пакеты системных шрифтов и библиотек скачивались с `azure.archive.ubuntu.com` со скоростью ~46,6–46,7 КБ/с (21,1–25,9 МБ в 7–9 минут). Сам Chromium из CDN скачался за секунды. Это проблема сетевой загрузки ОС-зависимостей на cold runner, а не скорости Chromium. Граница доверия к кэшам: GitHub `pull_request` сохраняет browser cache под `refs/pull/.../merge`, кэш из PR не виден в `main` или соседнем PR, даже при одном и том же ключе.
+
+Для устранения повторного APT CI browser job использует **официальный** `mcr.microsoft.com/playwright:v1.56.1-noble`, соответствующий точной версии `@playwright/test=1.56.1`. В нём уже находятся браузеры и их системные библиотеки. Шаг `Verify pinned Chromium and operating system dependencies` **реально запускает и завершает** headless Chromium перед обязательными E2E и Docsify-тестами; неизвестные/mismatched image не принимаются тестом политики `tests/bootstrap/test_ci_workflow_policy.py`. Кэширование Chromium на runner удалено, поскольку в контейнере оно избыточно. npm cache по lockfile сохранён.
+
+**Безопасность:** контейнер предназначен только для синтетических внутренних E2E, без секретов и внешних недоверенных сайтов. Образ ограничен версией; обновлять `@playwright/test` и образ синхронно. Проводить отдельный security review контейнерного запуска на root перед использованием с недоверенным контентом. Запуск `--with-deps` на host остается необходимым: наличие библиотек в контейнере не подтверждает их наличие на произвольном ноутбуке.
+
+**Критерий checkpoint:** 4/4 GitHub jobs success на PR и на merged main SHA, browser smoke без APT в журнале, E2E+Docsify green, измерить время получения image (первый запуск) и total browser job; при проблемах образа/скачивания откатить изменение `container:` и вернуть два шага `actions/cache@v4` + `npx playwright install --with-deps chromium` из PR #148. Path-based пропуск browser checks **не включён**, пока не доказана корректная матрица влияния backend/контрактов/UX.
