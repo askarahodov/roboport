@@ -39,9 +39,9 @@ async def request_id_middleware(request: Request, call_next):
         if (request.url.scheme != "https"
                 or request.url.hostname not in ("127.0.0.1", "localhost")):
             return not_found(request)
-    # This is a strict opt-in, direct-socket-only dev pilot, not a trusted
-    # proxy implementation. Rate-limit *before* session/CSRF and business
-    # operations; the separate PG transaction persists even for 403/422.
+    # Закрытый dev-пилот по адресу прямого сокета, НЕ доверенная proxy-схема.
+    # Сетевую квоту проверяем до сессии/CSRF и бизнес-операции; отдельная
+    # транзакция PostgreSQL фиксирует расход даже при ответах 403/422.
     if request.method == "POST" and path.startswith("/api/v1/dev/auto/"):
         import os
         flag = os.getenv("ROBOport_SYNTHETIC_AUTO_PEER_LIMIT", "0")
