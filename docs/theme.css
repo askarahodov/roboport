@@ -85,8 +85,14 @@ body { background: var(--kb-bg); color: var(--kb-ink); font-family: system-ui, -
     --kb-surface: #192c36;
     --kb-code: #0b1822;
   }
-  .sidebar-nav a:hover,
-  .sidebar-nav li.active > a { background: #285047; color: var(--kb-brand-dark); }
+  /* Docsify core ships a higher-specificity grey link rule (#333) which
+     becomes unreadable against a dark sidebar if not overridden explicitly. */
+  .sidebar .sidebar-nav a { color: var(--kb-ink) !important; }
+  .sidebar .sidebar-nav a:hover,
+  .sidebar .sidebar-nav li.active > a {
+    background: #285047;
+    color: var(--kb-brand-dark) !important;
+  }
   .sidebar .search input {
     color: var(--kb-ink); background: var(--kb-surface);
     border-color: #7799a5;
