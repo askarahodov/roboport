@@ -59,7 +59,7 @@ docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
 
 Тяжёлый workflow `.github/workflows/ci.yml` запускается на каждый `pull_request`, при push в `main` и по ручному `workflow_dispatch`. Отдельный `push` feature-ветки **не** создаёт второй идентичный прогон, если PR уже открыт. В рамках одного PR новые изменения отменяют устаревшие CI-прогоны через `concurrency.cancel-in-progress`, но не отменяют проверки других PR или `main`.
 
-Не закрывать PR, пока **последний head SHA** не прошёл PostgreSQL, API, Web и Browser E2E. Установка Playwright Chromium требует сетевого доступа runner к зависимостям; зависание установки браузера — инфраструктурный блокер, а не `PASS`, и нельзя скрывать его отключением browser job. При проблемах проверять шаг `Install browser test runner and Chromium`, GitHub Actions run и публикацию `trace` для ошибок тестов. 
+Не закрывать PR, пока **последний head SHA** не прошёл PostgreSQL, API, Web и Browser E2E. Установка Playwright Chromium требует сетевого доступа runner к зависимостям; зависание установки браузера — инфраструктурный блокер, а не `PASS`, и нельзя скрывать его отключением browser job. При проблемах проверять шаг `Install browser test runner and Chromium`, GitHub Actions run и публикацию `trace` для ошибок тестов.
 
 ## Кэш Playwright в CI: измерения и безопасный откат (#135)
 
@@ -72,7 +72,14 @@ docker compose --env-file infra/dev/.env.local -f infra/dev/compose.local.yml ps
 | [40327490281](https://github.com/askarahodov/roboport/actions/runs/40327490281) | main, 26.10.2026 | 22,6 с |
 | [40492285963](https://github.com/askarahodov/roboport/actions/runs/40492285963) | Auto proof #130, 27.10.2026 | 19,9 с |
 
-**Performance gate ещё не пройден:** сравнить cold и warm run на одинаковом lockfile, cache hit, длительность всего browser job и шага Chromium; не объявлять ускорение до фактических замеров. Если сжатие/восстановление кэша медленнее прямой загрузки, удалить `Cache Playwright Chromium binaries` и его настройку `actions/cache@v4` из CI (npm cache можно оставить). Нельзя отключать `Browser E2E`, Docsify smoke и `--with-deps` ради скорости. Учитывать номер run и проверяемый head SHA.
+Проверка на одном SHA `8e62e4da77044f12a4290c93986303431f6e0b20`, в [run 40493776383](https://github.com/askarahodov/roboport/actions/runs/40493776383) (re-run browser, attempt 2). Замеры получены из временных отметок GitHub job logs; полный цикл от первой до последней строки, не wall time workflow:
+
+| Режим | Chromium install | Browser job целиком | Кэш Chromium |
+| --- | ---: | ---: | --- |
+| Cold (первый прогон, job `122153944688`) | ~22,8 с | ~87,0 с | cache miss, скачивание; сохранение ~267 MB |
+| Warm (повтор, job `122154916868`) | ~15,5 с | ~74,1 с | cache hit, браузеры не скачиваются |
+
+**Результат одного контролируемого сравнения:** повторный запуск быстрее примерно на 7,3 с для install и на 12,8 с в целом. Это не статистическая гарантия: системные `--with-deps` выполняются всегда, время сетевых операций/планирования runner может отличаться. Оба прогона имели зелёные четыре CI jobs; браузерные E2E и Docsify прошли. Для строгого performance-gate нужны дополнительные повторения и отдельное решение о запуске browser job по безопасному path-based impact. Если сжатие/восстановление кэша медленнее прямой загрузки, удалить `Cache Playwright Chromium binaries` и его настройку `actions/cache@v4` из CI (npm cache можно оставить). Нельзя отключать `Browser E2E`, Docsify smoke и `--with-deps` ради скорости. Учитывать номер run и проверяемый head SHA.
 
 Локальный smoke Docsify (не требует запущенных PostgreSQL/API; нужен Python 3 в `PATH`):
 
