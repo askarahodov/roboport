@@ -52,15 +52,17 @@ test('автомобили dev: безопасная маска VIN, светл�
 
 test('машина pending скрыта, ошибка восстанавливается после повтора', async ({ page }) => {
   await authorized(page);
-  let attempt = 0;
-  await page.route(vehiclesUrl, route => {
-    attempt++;
-    return route.fulfill(attempt === 1
-      ? { status: 503, contentType: 'application/json', body: '{}' }
-      : { status: 200, contentType: 'application/json', body: '{"items":[]}' });
-  });
+  // React StrictMode может отменять и повторять стартовый fetch.
+  // Сбой моделируется состоянием сервера до явного действия пользователя.
+  let recovered = false;
+  await page.route(vehiclesUrl, route => route.fulfill(
+    recovered
+      ? { status: 200, contentType: 'application/json', body: '{"items":[]}' }
+      : { status: 503, contentType: 'application/json', body: '{}' },
+  ));
   await page.goto('/account/vehicles');
   await expect(page.getByRole('alert')).toContainText('Не удалось получить список');
+  recovered = true;
   await page.getByRole('button', { name: 'Обновить автомобили' }).click();
   await expect(page.getByText('Подтверждённых автомобилей пока нет.')).toBeVisible();
   await expect(page.getByText('SyntheticMake TestCar')).toHaveCount(0);
