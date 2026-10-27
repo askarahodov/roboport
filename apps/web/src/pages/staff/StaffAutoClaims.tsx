@@ -1,5 +1,6 @@
 import React from 'react';
 import { Alert, Button, Card, FormField } from '../../ui';
+import { ManagerIntakeAssignments } from './ManagerIntakeAssignments';
 
 // Только синтетический loopback API. UUID клиента и машины сами по себе не дают полномочий.
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -181,6 +182,7 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
           </Button>
         </form>
       </div>}
+      {manager && <ManagerIntakeAssignments />}
       {outcome && <p role={outcome.type === 'error' ? 'alert' : 'status'}>{outcome.message}</p>}
     </section>
   </Card>;
