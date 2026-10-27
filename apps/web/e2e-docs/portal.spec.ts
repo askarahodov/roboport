@@ -109,8 +109,13 @@ test('390px и 1280px: Docsify контраст AA, dark/light и отсутст
           '.sidebar .search input',
         ];
         const rgb = (css: string) => {
-          const digits = css.match(/[\d.]+/g)?.map(Number) ?? [];
-          return [digits[0] ?? 0, digits[1] ?? 0, digits[2] ?? 0];
+          // Chromium may serialize computed CSS colors as color(srgb 0..1)
+          // instead of legacy rgb(0..255), especially on Windows.
+          const srgb = css.match(/^color\\(srgb\\s+([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)/);
+          if (srgb) return [1, 2, 3].map(i => Number(srgb[i]) * 255);
+          const legacy = css.match(/^rgba?\\(\\s*([\\d.]+)[,\\s]+([\\d.]+)[,\\s]+([\\d.]+)/);
+          if (legacy) return [1, 2, 3].map(i => Number(legacy[i]));
+          throw new Error(`Unrecognized computed CSS color: ${css}`);
         };
         const luminance = (css: string) => rgb(css)
           .map(v => v / 255)
