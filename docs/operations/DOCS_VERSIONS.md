@@ -64,3 +64,9 @@ git archive --format=zip --output=roboport-docs-snapshot.zip <commit-sha> docs
 - **Изменения интерфейса:** обновлять руководства затронутых ролей в том же PR; см. [политику документации](../DOCUMENTATION_POLICY.md).
 
 Актуальные задачи: [#125 — публикация и навигация](https://github.com/askarahodov/roboport/issues/125), [#119 — quality/release gate](https://github.com/askarahodov/roboport/issues/119).
+
+## Проверка визуальной доступности dev-портала (#125)
+
+Проверяемая dev-версия Docsify поддерживает цветовую схему ОС Light/Dark без сохранения user preferences и без внешних cookie. Playwright выполняет фактический расчёт контраста на пяти типах элементов, проверяет root overflow в окнах 390 и 1280 px, последовательность Tab/Enter и видимый keyboard-focus. Эти проверки **не** являются сертификатом WCAG всей будущей системы, не заменяют screen-reader/assistive technology аудит и не разрешают публичный release. CI сохраняет обязательную проверку внутренних ссылок Markdown/anchor и реальных sidebar/search переходов.
+
+**Решение по публикации:** единственный утверждённый вариант сегодня — локальный docs-only dev HTTP-сервер, никогда не открытый в публичную сеть. Внешние pinned CDN Docsify assets — **принятый только для dev риск**, а не гарантия доступности и цепочки поставки; автономная self-host доставка не реализована. Версионная архивация по SHA и будущая публичная доставка остаются блокированы #119/#121 до отдельно проверенного решения. Journal rows добавлять только после post-merge CI (URL + точный commit); дата в таблице не заменяет hash.
