@@ -86,9 +86,23 @@ def test_invalid_batch_size_cannot_modify_db(batch_size):
     with psycopg.connect(DSN) as conn:
         _counter(conn, d["client_a"], "REDEEM", "30 hours")
     with psycopg.connect(DSN) as conn:
+        # Это общий PG17 CI: параметризованные случаи не должны полагаться
+        # на отсутствие чужих просроченных счётчиков.
+        before = expired_counts(conn)
         with pytest.raises(ValueError):
             prune_expired(conn, batch_size=batch_size)
-        assert expired_counts(conn) == {"REDEEM": 1}
+        assert expired_counts(conn) == before
+        assert conn.execute(
+            """SELECT attempts FROM auto_proof_throttle
+               WHERE actor_id=%s AND operation='REDEEM'""",
+            (d["client_a"],),
+        ).fetchone() == (3,)
+        # Удаляем только собственную synthetic fixture, не чужие записи.
+        conn.execute(
+            """DELETE FROM auto_proof_throttle
+               WHERE actor_id=%s AND operation='REDEEM'""",
+            (d["client_a"],),
+        )
 
 
 def test_cleanup_does_not_delete_proof_audit_or_retry_receipts():
