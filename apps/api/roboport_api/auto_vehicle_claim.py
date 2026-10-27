@@ -181,7 +181,7 @@ def redeem_auto_proof(
             return previous
         raise AutoClaimRetryConflict("claim state changed")
     if (row[7] is not None or row[8] != "PENDING"
-            or row[6] >= 5 or row[5] <= datetime.now(timezone.utc)):
+            or row[6] >= 5 or effective_expiry <= datetime.now(timezone.utc)):
         raise VehicleClaimRejected("unavailable")
     # Только новая попытка расходует общий лимит; повтор того же receipt — нет.
     # Ключ идемпотентности не даёт обходить учёт между разными claim.
