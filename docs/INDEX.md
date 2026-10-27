@@ -26,6 +26,7 @@
 | [AGENTS.md](../AGENTS.md) | current | Инструкции AI-агентов и безопасная разработка |
 | [Технологический стек](TECH_STACK.md) | current/legacy | Проверенные версии, инфраструктура, ограничения |
 | [Окружение](operations/DEV_ENVIRONMENT.md) | current dev | Команды dev build, проверки, Windows/Linux |
+| [Версии docs и dev-журнал](operations/DOCS_VERSIONS.md) | current dev | Provenance Git SHA ↔ CI, правила будущей публикации и откат |
 | [LOCAL_STACK.md](../infra/dev/LOCAL_STACK.md) | current dev | Отдельный синтетический стек PostgreSQL/Keycloak/MinIO |
 | [Правила API](api/API_IMPLEMENTATION.md) | current/legacy | Контракт, защита, правила новых endpoints |
 | [Стандарт GitHub Issues](implementation/ISSUE_STANDARD.md) | current | Acceptance criteria + обязательный docs impact |
