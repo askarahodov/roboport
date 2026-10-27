@@ -111,3 +111,25 @@ npm run test:docs:e2e
 **Безопасность:** контейнер предназначен только для синтетических внутренних E2E, без секретов и внешних недоверенных сайтов. Образ ограничен версией; обновлять `@playwright/test` и образ синхронно. Проводить отдельный security review контейнерного запуска на root перед использованием с недоверенным контентом. Запуск `--with-deps` на host остается необходимым: наличие библиотек в контейнере не подтверждает их наличие на произвольном ноутбуке.
 
 **Checkpoint подтверждён:** [PR #150](https://github.com/askarahodov/roboport/pull/150), [PR CI 40499075107](https://github.com/askarahodov/roboport/actions/runs/40499075107) — 4/4 GREEN, browser job ~101,7 с (первый image pull ~26 с). [Main CI 40499418679](https://github.com/askarahodov/roboport/actions/runs/40499418679) на `a42acda76e1a2ca0e7b8f7f330ef9cb162edcf06` — 4/4 GREEN, browser job ~108,9 с; нет скачивания apt-пакетов, browser smoke и E2E+Docsify зелёные. При проблемах образа/скачивания откатить изменение `container:` и вернуть шаги `actions/cache@v4` + `npx playwright install --with-deps chromium` из PR #148. Path-based пропуск browser checks **не включён**, пока не доказана корректная матрица влияния backend/контрактов/UX.
+
+## CI #135 — подтверждение native Windows CMD и безопасный объём browser-проверок
+
+**Текущая политика:** `.github/workflows/ci.yml` проверяет `postgres`, `api`, `web` и `browser-e2e` **для каждого PR и push в main без path-based skip**, поскольку изменение FastAPI, контракта, маршрутов, миграций или документации может повлиять на E2E/Docsify. Без полного dependency graph невозможно безопасно сделать выбор по `apps/web/**`; вместо потенциально ложного зелёного статуса оставлена обязательная проверка. `concurrency.cancel-in-progress` отменяет устаревшие запуски одной PR-ветки, не выключая проверку нового commit SHA.
+
+Дополнительно отдельный job `windows-cmd` запускается на **реальном GitHub-hosted `windows-latest` runner**, со штатным `shell: cmd` и установленными Python 3.13 / Node.js 24. Он проверяет внутренние ссылки документации, выполняет `npm ci`, генерацию TypeScript-контракта и `npm run typecheck`, настоящую frontend-сборку, установку pinned Chromium для Windows и Playwright Docsify navigation/search smoke. Скрипты PowerShell (`.ps1`) и WSL здесь не используются. Screenshots/trace публикуются как `roboport-windows-cmd-evidence` даже при красном тесте. Этот job является **обязательной пятой** CI-проверкой и не заменяет более полные Linux/PostgreSQL/автомобильные E2E.
+
+Те же команды локально из корня репозитория, **нативный Windows CMD** (без PowerShell, в `PATH` Python 3.13/Node.js 24):
+
+```cmd
+python scripts\check_docs_links.py
+cd apps\web
+npm ci --no-audit --no-fund
+npm run typecheck
+npm run build
+npx playwright install chromium
+npm run test:docs:e2e
+```
+
+Это доказательство совместимости **frontend и Docsify** на Windows, **не** доказательство полного локального bootstrap контейнеров, HTTPS, PostgreSQL 17, Keycloak/OIDC или MinIO под CMD. Скрипт `infra/dev/bootstrap-local.sh` требует Unix shell; его нативная замена остаётся #122/#119. Реальные client/VIN/PII и production-credentials для smoke запрещены.
+
+**Benchmark/rollback:** производительность устранения холодных `apt` задержек подтверждена в PR #150: вместо 469–580 секунд **только на browser install** Linux container browser job ~102–109 секунд **целиком** (конкретные GitHub-run ссылки и caveats выше). При проблеме с Windows CMD приоритет — исправить реальную несовместимость, а не `continue-on-error` или пропуск. Для точечного отката Windows job допустим revert PR после фиксации причины; для Linux Chromium — документированный rollback к host-runner из PR #148 с `npx playwright install --with-deps chromium`, сохраняя полные E2E и Docsify.
