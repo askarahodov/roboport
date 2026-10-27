@@ -111,9 +111,9 @@ test('390px и 1280px: Docsify контраст AA, dark/light и отсутст
         const rgb = (css: string) => {
           // Chromium may serialize computed CSS colors as color(srgb 0..1)
           // instead of legacy rgb(0..255), especially on Windows.
-          const srgb = css.match(/^color\\(srgb\\s+([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)/);
+          const srgb = css.match(/^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
           if (srgb) return [1, 2, 3].map(i => Number(srgb[i]) * 255);
-          const legacy = css.match(/^rgba?\\(\\s*([\\d.]+)[,\\s]+([\\d.]+)[,\\s]+([\\d.]+)/);
+          const legacy = css.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
           if (legacy) return [1, 2, 3].map(i => Number(legacy[i]));
           throw new Error(`Unrecognized computed CSS color: ${css}`);
         };
