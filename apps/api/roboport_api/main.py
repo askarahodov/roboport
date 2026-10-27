@@ -27,6 +27,14 @@ async def request_id_middleware(request: Request, call_next):
     # All synthetic dev endpoints must fail before DB/storage access on unsafe transports.
     # Apply to the exact /dev root and slash-delimited descendants, not lookalike paths.
     path = request.url.path
+    # Never infer a trusted socket/TLS peer from caller-controlled proxy headers.
+    # There is no approved reverse-proxy ingress for synthetic auto yet.
+    # Reject these before API/database activity, even when ASGI scope already
+    # claims HTTPS (e.g. proxy middleware may have rewritten the scope).
+    if path == "/api/v1/dev/auto" or path.startswith("/api/v1/dev/auto/"):
+        from .auto_proxy_boundary import has_untrusted_proxy_headers
+        if has_untrusted_proxy_headers(request.headers):
+            return not_found(request)
     if path == "/api/v1/dev" or path.startswith("/api/v1/dev/"):
         if (request.url.scheme != "https"
                 or request.url.hostname not in ("127.0.0.1", "localhost")):
