@@ -132,6 +132,10 @@ jobs:
           grep -q '"requestId"' /tmp/roboport-error.json
   browser-e2e:
     runs-on: ubuntu-latest
+    # В официальном образе уже установлены Chromium и системные библиотеки.
+    # Версия обязана совпадать с @playwright/test в apps/web/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -146,16 +150,12 @@ jobs:
       - run: python scripts/check_python_pins.py
       - working-directory: apps/web
         run: npm ci --no-audit --no-fund
-      # Кэш зависит от точного lockfile; --with-deps по-прежнему проверяет системные библиотеки.
-      - name: Cache Playwright Chromium binaries
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('apps/web/package-lock.json') }}
-      - name: Install browser test runner and Chromium
+      # Проверка реального запуска защищает от расхождения версий/библиотек.
+      # Не устанавливаем системные пакеты apt заново на каждом cold runner.
+      - name: Verify pinned Chromium and operating system dependencies
         working-directory: apps/web
         run: |
-          npx playwright install --with-deps chromium
+          node --input-type=module -e "import { chromium } from '@playwright/test'; const browser = await chromium.launch({ headless: true }); await browser.close();"
       - name: Browser E2E against synthetic FastAPI
         shell: bash
         run: |
