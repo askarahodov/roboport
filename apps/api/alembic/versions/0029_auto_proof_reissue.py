@@ -44,17 +44,8 @@ def upgrade():
 
 
 def downgrade():
-    # ТОЛЬКО для disposable dev: audit REISSUED останется при откате.
+    # Только disposable dev. Исторический REISSUED остаётся в append-only
+    # audit и должен оставаться допустимым CHECK даже после отката.
+    # Нельзя перестраивать constraint с более узким списком значений:
+    # PostgreSQL отвергнет его, если уже есть REISSUED.
     op.execute("DROP TABLE auto_vehicle_claim_reissue")
-    op.execute("""
-      ALTER TABLE auto_vehicle_claim_audit
-      DROP CONSTRAINT auto_vehicle_claim_audit_action_check
-    """)
-    op.execute("""
-      ALTER TABLE auto_vehicle_claim_audit
-      ADD CONSTRAINT auto_vehicle_claim_audit_action_check
-      CHECK (action IN (
-        'ISSUED','PROOF_ACCEPTED','PROOF_REJECTED',
-        'VERIFIED','DECLINED','REVOKED'
-      ))
-    """)
