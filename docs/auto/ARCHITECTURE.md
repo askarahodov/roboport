@@ -3,7 +3,7 @@
 > **Статус: current только для синтетического dev / production planned.** Реализованы схема авто, подтверждение связи, приватное чтение и экран `/account/vehicles`. Публичный автомобильный API, запись на ремонт, заказ-наряды, OEM и мобильное приложение пока запланированы. Исторический [аудит документации](DOCUMENTATION_AUDIT.md) датирован 26.10.2026.
 
 ## Current
-React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0025; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
+React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0030; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
 
 ## Decision
 Модульный монолит и Strangler Pattern. Существующие таблицы и API не переименовывать и не удалять до регрессионного доказательства; автомобильные контексты добавлять отдельными модулями и миграциями. Основание: ADR-001.md.
@@ -39,7 +39,7 @@ VIN nullable, нормализованный uppercase 17 символов из 
 
 Аддитивная миграция `0022_auto_vehicle_claim` содержит одноразовые доказательства и отдельные staff object assignments `auto_vehicle_staff_assignment` для ролей `INTAKE`/`MANAGER`. Доказательство выдаёт назначенный мастер-приёмщик, предъявляет клиент с действующей `account_customer_link`, подтверждает независимо назначенный менеджер. Все мутации требуют cookie-сессию + same-origin/CSRF, производятся в транзакции и создают append-only audit; повторное подтверждение запрещено. После отзыва связи список автомобилей скрывает запись, старая история заявок робототехнического домена не передаётся.
 
-Эта схема реализована **только в закрытом synthetic HTTPS loopback API**, филиалы и production customer UI пока не реализованы; полномочия сотрудников на конкретный автомобиль создаются лишь dev-fixtures. Подробнее: [VEHICLE_OWNERSHIP.md](VEHICLE_OWNERSHIP.md). Публичный и production API будут отдельно рассмотрены в #131/#119.
+Эта схема реализована **только в закрытом synthetic HTTPS loopback API**, production филиалы и bootstrap MANAGER пока не реализованы; полномочия сотрудников на конкретный автомобиль создаются лишь dev-fixtures. Подробнее: [VEHICLE_OWNERSHIP.md](VEHICLE_OWNERSHIP.md). Публичный и production API будут отдельно рассмотрены в #131/#119.
 
 ## Клиентский просмотр автомобилей (UI checkpoint #131)
 
