@@ -1,9 +1,9 @@
-"""Synthetic direct-peer auto POST limiter, no raw IP stored.
+"""Синтетический лимит auto POST по прямому peer, без хранения сырого IP.
 
 Revision ID: 0031_auto_peer_throttle
 Revises: 0030_auto_location_scope
 
-No production trusted ingress, public IP quota or PII.
+Без production ingress, публичной IP-квоты и реальных ПДн.
 """
 from alembic import op
 
@@ -25,5 +25,5 @@ def upgrade():
 
 
 def downgrade():
-    # Disposable synthetic DB only; reverting a live quota resets its budget.
+    # Только disposable synthetic БД: откат сбрасывает действующий бюджет.
     op.execute("DROP TABLE auto_peer_throttle")
