@@ -61,6 +61,8 @@ def test_windows_cmd_smoke_is_native_and_cannot_suppress_linux_quality_gates():
     assert {"api", "web", "postgres", "browser-e2e", "windows-cmd"} <= set(jobs)
     windows = jobs["windows-cmd"]
     assert windows["runs-on"] == "windows-latest"
+    assert windows["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert str(windows["env"]["PYTHONUTF8"]) == "1"
     assert windows["defaults"]["run"]["shell"] == "cmd"
     assert "container" not in windows
     steps = windows["steps"]
