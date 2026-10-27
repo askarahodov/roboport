@@ -7,7 +7,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function validId(value: string) { return uuid.test(value.trim()); }
 type Outcome = { type: 'ok' | 'error'; message: string };
 
-async function mutate(path: string, body?: Record<string, unknown>): Promise<unknown> {
+async function mutate(path: string, body?: Record<string, unknown>, idempotencyKey?: string): Promise<unknown> {
   const csrf = await fetch('/api/v1/auth/csrf', {
     method: 'POST', credentials: 'include', cache: 'no-store',
   });
@@ -17,7 +17,8 @@ async function mutate(path: string, body?: Record<string, unknown>): Promise<unk
     || typeof data.csrfToken !== 'string' || !data.csrfToken) throw new Error('CSRF');
   const result = await fetch(path, {
     method: 'POST', credentials: 'include', cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': data.csrfToken },
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': data.csrfToken,
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
     body: JSON.stringify(body ?? {}),
   });
   if (!result.ok) throw new Error('HTTP ' + result.status);
@@ -40,6 +41,7 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
   const [claimId, setClaimId] = React.useState('');
   const [revokeId, setRevokeId] = React.useState('');
   const [issued, setIssued] = React.useState<{ claimId: string; proof: string } | null>(null);
+  const pendingKey = React.useRef<{ payload: string; key: string } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [outcome, setOutcome] = React.useState<Outcome | null>(null);
   const [confirmRevoke, setConfirmRevoke] = React.useState(false);
@@ -58,13 +60,19 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
 
   function createLink() {
     if (!validId(vehicleId) || !validId(customerId)) return;
+    const fingerprint = vehicleId.trim().toLowerCase() + ':' + customerId.trim().toLowerCase();
+    if (pendingKey.current?.payload !== fingerprint) {
+      pendingKey.current = { payload: fingerprint, key: crypto.randomUUID() };
+    }
+    const key = pendingKey.current.key;
     void run(async () => {
       const response = fields(await mutate(
         '/api/v1/dev/auto/vehicles/' + encodeURIComponent(vehicleId.trim()) + '/links',
-        { customerId: customerId.trim() },
+        { customerId: customerId.trim() }, key,
       ));
       if (typeof response.linkId !== 'string' || !validId(response.linkId)
         || response.status !== 'PENDING') throw new Error('Bad link response');
+      pendingKey.current = null;
       setLinkId(response.linkId);
       return { type: 'ok', message: 'Создана неподтверждённая связь. Доступ клиенту ещё не выдан.' };
     });
