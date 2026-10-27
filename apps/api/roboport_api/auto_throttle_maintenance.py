@@ -11,7 +11,6 @@ import psycopg
 
 RETENTION_HOURS = 24
 MAX_BATCH = 1000
-_OLD = "window_started_at < now() - interval '24 hours'"
 
 
 def expired_counts(conn: psycopg.Connection) -> dict[str, int]:
