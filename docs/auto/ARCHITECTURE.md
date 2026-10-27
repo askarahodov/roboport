@@ -1,6 +1,6 @@
 # Airmatik — целевая архитектура
 
-> **Статус: planned / partly current.** В main уже существует только SQL-основа автомобильной сущности (`auto_vehicle`, `auto_vehicle_customer_link` в миграции 0021). Запись на ремонт, auto API, workflow заказ-наряда, OEM и мобильное приложение пока запланированы. Текущее состояние сверять с [аудитом документации](DOCUMENTATION_AUDIT.md).
+> **Статус: current только для синтетического dev / production planned.** Реализованы схема авто, подтверждение связи, приватное чтение и экран `/account/vehicles`. Публичный автомобильный API, запись на ремонт, заказ-наряды, OEM и мобильное приложение пока запланированы. Исторический [аудит документации](DOCUMENTATION_AUDIT.md) датирован 26.10.2026.
 
 ## Current
 React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0024; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
@@ -33,13 +33,13 @@ VIN nullable, нормализованный uppercase 17 символов из 
 
 После отдельного среза для тестирования введены два **приватных синтетических** endpoint: `GET /api/v1/dev/auto/vehicles` и `GET /api/v1/dev/auto/vehicles/{vehicle_id}`. Они не входят в публичный OpenAPI и не считаются готовым клиентским функционалом. Для запуска требуется `ROBOport_SYNTHETIC_AUTO_API=1`, активный синтетический auth `ROBOport_SYNTHETIC_AUTH_API=1`, локальный PostgreSQL и HTTPS loopback. Ответы `Cache-Control: no-store` и только последние четыре символа VIN.
 
-Операции доступны клиенту только при активной cookie-сессии, роли CLIENT, подтверждённой (`verified_at` и `verified_by`) и неотозванной связи автомобиля и существующей `account_customer_link`. Само знание VIN или новый pending link доступа не даёт. Проверка роли, сессии и связи выполняется в одном SQL запросе: A/B изоляция, отзыв связи/роли/сессии подтверждаются интеграционными тестами. Автомобильный write API, staff review, OpenAPI/SDK и пользовательский интерфейс **planned** и остаются в #112.
+Операции доступны клиенту только при активной cookie-сессии, роли CLIENT, подтверждённой (`verified_at` и `verified_by`) и неотозванной связи автомобиля и существующей `account_customer_link`. Само знание VIN или новый pending link доступа не даёт. Проверка роли, сессии и связи выполняется в одном SQL запросе: A/B изоляция, отзыв связи/роли/сессии подтверждаются интеграционными тестами. Первоначальный read-only срез расширен последующими dev-only этапами: proof/claim review (#130), клиентским UI и отдельным OpenAPI/TS SDK (#131). **Публичные** операции и production authorization остаются planned.
 
 ## Подтверждение клиентской связи с машиной (dev milestone #130)
 
 Аддитивная миграция `0022_auto_vehicle_claim` содержит одноразовые доказательства и отдельные staff object assignments `auto_vehicle_staff_assignment` для ролей `INTAKE`/`MANAGER`. Доказательство выдаёт назначенный мастер-приёмщик, предъявляет клиент с действующей `account_customer_link`, подтверждает независимо назначенный менеджер. Все мутации требуют cookie-сессию + same-origin/CSRF, производятся в транзакции и создают append-only audit; повторное подтверждение запрещено. После отзыва связи список автомобилей скрывает запись, старая история заявок робототехнического домена не передаётся.
 
-Эта схема реализована **только в закрытом synthetic HTTPS loopback API**, филиалы и customer web UI пока не реализованы; полномочия сотрудников на конкретный автомобиль создаются лишь dev-fixtures. Подробнее: [VEHICLE_OWNERSHIP.md](VEHICLE_OWNERSHIP.md). Публичный и production API будут отдельно рассмотрены в #131/#119.
+Эта схема реализована **только в закрытом synthetic HTTPS loopback API**, филиалы и production customer UI пока не реализованы; полномочия сотрудников на конкретный автомобиль создаются лишь dev-fixtures. Подробнее: [VEHICLE_OWNERSHIP.md](VEHICLE_OWNERSHIP.md). Публичный и production API будут отдельно рассмотрены в #131/#119.
 
 ## Клиентский просмотр автомобилей (UI checkpoint #131)
 
@@ -54,3 +54,8 @@ VIN nullable, нормализованный uppercase 17 символов из 
 ## Автомобильный dev OpenAPI и TypeScript SDK (#131)
 
 Для двух действующих read-only GET операций добавлен **отдельный** `contracts/auto-dev-openapi.yaml` версии `0.1.0-dev` с `x-synthetic-only: true` и сервером **только HTTPS loopback**. Схемы AutoVehicle, AutoVehiclePage, AutoDevError проверяются независимо и сверяются с реальными HTTP-ответами PostgreSQL; полный VIN отсутствует. Клиентский `autoDevClient.ts` использует OpenAPI-generated типы и runtime-проверку JSON, same-origin cookie credentials, no-store; генерация из YAML выполняется до dev/typecheck/build и файл результата не сохраняется в git. Новая схема **не** расширяет публичный `contracts/openapi.yaml` (legacy/robot contract 46 операций) и не включает автомобильный dev API в FastAPI `/openapi.json`. Это QA-предпосылка для будущего `/api/v1/auto/*`, а не production approval. Переход на cursor pagination и мобильную аутентификацию остаётся blocked до #119.
+
+
+### Docker build guard (#131)
+
+В `apps/web/Dockerfile` генератор TypeScript читает `../../contracts/auto-dev-openapi.yaml` относительно `/app`, то есть `/contracts/auto-dev-openapi.yaml` внутри builder stage. Dockerfile явно копирует этот файл из корневого build context, а CI собирает `docker build --target builder -f apps/web/Dockerfile .` для проверки реальной сборки образа. `docker-compose.yml` остаётся legacy/dev-конфигурацией: успешная сборка **не означает**, что синтетический HTTPS loopback API безопасно доступен из контейнера или пригоден для production.
