@@ -38,7 +38,7 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
   const [linkId, setLinkId] = React.useState('');
   const [claimId, setClaimId] = React.useState('');
   const [revokeId, setRevokeId] = React.useState('');
-  const [proof, setProof] = React.useState<string | null>(null);
+  const [issued, setIssued] = React.useState<{ claimId: string; proof: string } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [outcome, setOutcome] = React.useState<Outcome | null>(null);
   const [confirmRevoke, setConfirmRevoke] = React.useState(false);
@@ -48,7 +48,7 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
     setBusy(true);
     setOutcome(null);
     // Одноразовый секрет никогда не переживает следующую операцию.
-    setProof(null);
+    setIssued(null);
     try { setOutcome(await action()); }
     catch { setOutcome({ type: 'error',
       message: 'Операция не выполнена. Проверьте полномочия на автомобиль, сессию и состояние связи.' }); }
@@ -78,8 +78,7 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
       if (typeof response.claimId !== 'string' || !validId(response.claimId)
         || typeof response.proof !== 'string' || response.proof.length < 40
         || response.proof.length > 200) throw new Error('Bad proof response');
-      setClaimId(response.claimId);
-      setProof(response.proof);
+      setIssued({ claimId: response.claimId, proof: response.proof });
       return { type: 'ok', message: 'Код выдан однократно. Передайте его по согласованному закрытому тестовому каналу.' };
     });
   }
@@ -140,16 +139,16 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
           <h4>2. Выдать одноразовый код</h4>
           <FormField label="UUID связи" id="auto-link-id">
             <input id="auto-link-id" required autoComplete="off" value={linkId}
-              onChange={e => { setLinkId(e.target.value); setProof(null); }} />
+              onChange={e => { setLinkId(e.target.value); setIssued(null); }} />
           </FormField>
           <Button type="submit" disabled={busy || !validId(linkId)}>
             Выдать код для клиента
           </Button>
-          {proof && <div className="auto-proof" role="status">
+          {issued && <div className="auto-proof" role="status">
             <p><strong>Временный код — не копируйте его в задачи или логи.</strong></p>
-            <p>UUID подтверждения: <code>{claimId}</code></p>
-            <p>Одноразовый код: <code>{proof}</code></p>
-            <Button type="button" variant="secondary" onClick={() => setProof(null)}>Скрыть код</Button>
+            <p>UUID подтверждения: <code>{issued.claimId}</code></p>
+            <p>Одноразовый код: <code>{issued.proof}</code></p>
+            <Button type="button" variant="secondary" onClick={() => setIssued(null)}>Скрыть код</Button>
           </div>}
         </form>
       </div>}
