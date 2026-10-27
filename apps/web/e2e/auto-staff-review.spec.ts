@@ -106,3 +106,79 @@ test('STOCK/AUDITOR не получают автомобильные дейст�
   await expect(page.getByRole('button', { name: 'Автомобили (dev)' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toHaveCount(0);
 });
+
+
+test('CLIENT предъявляет proof только POST/CSRF, не получает право без решения MANAGER', async ({ page }) => {
+  await page.route('**/api/v1/auth/me', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: '{"subjectId":"55555555-5555-4555-8555-555555555555"}',
+  }));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"csrfToken":"local-test-csrf"}',
+  }));
+  await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"items":[]}',
+  }));
+  let count = 0;
+  await page.route('**/api/v1/dev/auto/claims/*/redeem', route => {
+    count += 1;
+    const request = route.request();
+    expect(request.method()).toBe('POST');
+    expect(request.headers()['x-csrf-token']).toBe('local-test-csrf');
+    expect(request.postDataJSON()).toEqual({ proof });
+    expect(request.url()).not.toContain(proof);
+    return route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"status":"PENDING_REVIEW"}',
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/account/vehicles');
+  const form = page.getByRole('form', { name: 'Подтверждение автомобиля (dev)' });
+  await expect(form).toBeVisible();
+  await form.getByLabel('UUID подтверждения').fill(claim);
+  await form.getByLabel('Одноразовый код').fill(proof);
+  await expect(form.getByLabel('Одноразовый код')).toHaveAttribute('type', 'password');
+  await form.getByRole('button', { name: 'Предъявить код' }).click();
+  await expect(form.getByRole('status')).toContainText('только после независимого решения');
+  await expect(form.getByLabel('Одноразовый код')).toHaveValue('');
+  await expect(page.getByText('Подтверждённых автомобилей пока нет.')).toBeVisible();
+  expect(count).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('CLIENT не видит форму подтверждения после запрета чтения списка', async ({ page }) => {
+  await page.route('**/api/v1/auth/me', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: '{"subjectId":"55555555-5555-4555-8555-555555555555"}',
+  }));
+  await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
+    status: 403, contentType: 'application/json', body: '{"code":"FORBIDDEN"}',
+  }));
+  await page.goto('/account/vehicles');
+  await expect(page.getByText('Доступ к автомобилям не предоставлен', { exact: false })).toBeVisible();
+  await expect(page.getByRole('form', { name: 'Подтверждение автомобиля (dev)' })).toHaveCount(0);
+});
+
+test('CLIENT ошибочный proof не подтверждает машину и очищает поле', async ({ page }) => {
+  await page.route('**/api/v1/auth/me', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: '{"subjectId":"55555555-5555-4555-8555-555555555555"}',
+  }));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"csrfToken":"local-test-csrf"}',
+  }));
+  await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"items":[]}',
+  }));
+  await page.route('**/api/v1/dev/auto/claims/*/redeem', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"status":"REJECTED"}',
+  }));
+  await page.goto('/account/vehicles');
+  const form = page.getByRole('form', { name: 'Подтверждение автомобиля (dev)' });
+  await form.getByLabel('UUID подтверждения').fill(claim);
+  await form.getByLabel('Одноразовый код').fill(proof);
+  await form.getByRole('button', { name: 'Предъявить код' }).click();
+  await expect(form.getByRole('alert')).toContainText('Код не принят');
+  await expect(form.getByLabel('Одноразовый код')).toHaveValue('');
+  await expect(page.getByText('Подтверждённых автомобилей пока нет.')).toBeVisible();
+});
