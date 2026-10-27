@@ -4,3 +4,6 @@ infra/dev/.env
 
 # Disposable local TLS must never be committed
 infra/dev/tls/
+
+# Типы закрытого автомобильного API генерируются из contracts/auto-dev-openapi.yaml
+apps/web/src/shared/api/autoDevSchema.d.ts
