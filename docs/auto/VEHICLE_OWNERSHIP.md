@@ -152,3 +152,19 @@ PYTHONPATH=apps/api python scripts/maintain_auto_proof_throttle.py --apply --con
 SQL `FOR UPDATE SKIP LOCKED` пропускает счётчики, которые одновременно меняют живые запросы; очистка ограничена одним пакетом, не блокирует все попытки. При необходимости запускайте следующую партию вручную после контрольного просмотра. **Автоматический cron, фоновые задания и права на production-очистку не включены.**
 
 Скрипт **не трогает** `auto_create_receipt`, `auto_claim_retry_receipt`, `auto_vehicle_claim`, `auto_vehicle_claim_reissue` или append-only audit: их retention/архивирование требует юридической политики, согласованного срока replay и отдельного дизайна. Тесты: `PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_throttle_maintenance.py tests/bootstrap/test_auto_throttle_maintenance_policy.py` на disposable PG17. Для реальной эксплуатации и ПД gate #119 остаётся блокирующим.
+
+## Инвентаризация receipts и аудита перед юридическим retention-решением (#130)
+
+**Статус: только synthetic dev / read-only, не архивирование и не удаление.** После миграций 0022–0029 есть семь взаимосвязанных источников доказательств, включая `auto_create_receipt` и `auto_claim_retry_receipt` (повторяемость create/redeem/review), `auto_vehicle_claim` и `auto_vehicle_claim_reissue` (хеши/TTL proof), `auto_vehicle_claim_audit`, `auto_vehicle_link_intake_audit`, `auto_vehicle_staff_assignment_audit` (история выдачи, отзывов и делегирования). Прежде чем определять сроки удаления/архива, необходимо согласовать длительность retry, хранение доказательств/аудита, сроки исковой давности, требования ПД, привязку к согласиям, экспорт и restore-test. Значения сроков в коде для этих источников **не утверждены** и не выдумываются.
+
+Безопасная команда из корня проекта (Python 3.13, установленный `apps/api/requirements-dev.txt`, disposable PostgreSQL 17):
+
+```bash
+ROBOport_SYNTHETIC_AUTO_API=1 PYTHONPATH=apps/api python scripts/inspect_auto_evidence.py
+```
+
+`ROBOport_DATABASE_URL` должен явно указывать на локальный PostgreSQL (`127.0.0.1`, `localhost` или `::1`), без `service` и `hostaddr`. Подключение дополнительно фиксирует loopback `hostaddr`, а PostgreSQL-транзакция использует `SET TRANSACTION READ ONLY`. Вывод — только агрегированные количества по фиксированным таблицам: всего, за последние 24 часа, 1–7 дней, 7–30 дней и старше 30 дней. UUID, fingerprint, proof, логин, VIN, email и отдельные строки **не выводятся**. Любые `--apply`, `--delete`, `--archive` не предусмотрены и отклоняются.
+
+Даже loopback через туннель может вести к внешней базе: перед запуском оператор обязан проверить окружение. Никаких фоновый задач, выгрузки оригинальных данных, удаления или архивирования скрипт не выполняет. Проверки на PG17: `PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_evidence_inventory.py`; проверка запретов CLI: `PYTHONPATH=apps/api python -m pytest -q tests/bootstrap/test_auto_evidence_inventory_policy.py`.
+
+**Release gate:** без утверждённых LEGAL/BIZ и SECURITY из [политики релиза](../operations/SECURITY_RELEASE_GATES.md) сроки хранения и механизм удаления receipts/аудита остаются **planned**. История доказательств зависит от связи с пользователями/claims по `ON DELETE RESTRICT` и неизменяемых триггеров, поэтому очистка throttle из #153 не является прецедентом для удаления юридических записей.
