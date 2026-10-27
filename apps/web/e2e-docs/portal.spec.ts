@@ -71,3 +71,15 @@ test('на мобильной ширине открывается меню и о
   await expect(page.locator('.markdown-section h1')).toContainText('Клиент автосервиса');
   await expect(page.locator('.markdown-section')).toContainText('Статус: частично current в синтетическом dev');
 });
+
+test('журнал dev-проверок доступен из Docsify sidebar и раскрывает реальный статус', async ({ page }) => {
+  await page.goto('/docs/');
+  await page.locator('.sidebar-nav a[href*="operations/DOCS_VERSIONS"]').click();
+  await expect(page.locator('.markdown-section h1')).toContainText('Версии базы знаний');
+  await expect(page.locator('.markdown-section')).toContainText('Git SHA');
+  await expect(page.locator('.markdown-section')).toContainText('не является');
+  await expect(page.locator('.markdown-section')).toContainText('Не завершено');
+  await expect(page.locator('.markdown-section')).not.toContainText('404 - Not found');
+  await page.locator('.markdown-section a', { hasText: 'политику документации' }).click();
+  await expect(page.locator('.markdown-section h1')).toContainText('Политика документации');
+});
