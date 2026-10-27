@@ -52,3 +52,45 @@ def test_browser_runs_pinned_playwright_image_and_checks_actual_launch():
     assert all(step.get("continue-on-error") is not True for step in steps)
     upload = next(step for step in steps if step.get("name") == "Publish browser acceptance screenshots and traces")
     assert upload["if"] == "always()"
+
+def test_windows_cmd_smoke_is_native_and_cannot_suppress_linux_quality_gates():
+    """Issue #135: run real Windows CMD, preserve all four Linux CI jobs."""
+    root = Path(__file__).resolve().parents[2]
+    config = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    jobs = config["jobs"]
+    assert {"api", "web", "postgres", "browser-e2e", "windows-cmd"} <= set(jobs)
+    windows = jobs["windows-cmd"]
+    assert windows["runs-on"] == "windows-latest"
+    assert windows["env"]["PYTHONIOENCODING"] == "utf-8"
+    assert str(windows["env"]["PYTHONUTF8"]) == "1"
+    assert windows["defaults"]["run"]["shell"] == "cmd"
+    assert "container" not in windows
+    steps = windows["steps"]
+    python = next(x for x in steps if x.get("uses", "").startswith("actions/setup-python@"))
+    node = next(x for x in steps if x.get("uses", "").startswith("actions/setup-node@"))
+    assert python["with"]["python-version"] == "3.13"
+    assert str(node["with"]["node-version"]) == "24"
+    assert node["with"]["cache"] == "npm"
+    assert node["with"]["cache-dependency-path"] == "apps/web/package-lock.json"
+    commands = [x["run"] for x in steps if "run" in x]
+    assert commands == [
+        "python scripts/check_docs_links.py",
+        "npm ci --no-audit --no-fund",
+        "npm run typecheck",
+        "npm run build",
+        "npx playwright install chromium",
+        "npm run test:docs:e2e",
+    ]
+    assert all("pwsh" not in command and ".ps1" not in command for command in commands)
+    assert all(x.get("continue-on-error") is not True for x in steps)
+    upload = next(x for x in steps if x.get("name") == "Upload Windows CMD Docsify traces and screenshots")
+    assert upload["if"] == "always()"
+    assert upload["with"]["name"] == "roboport-windows-cmd-evidence"
+    # Fail-closed scope: no conditional browser path filtering. API, contracts,
+    # migrations and docs can all change browser behavior or documentation.
+    linux_browser = jobs["browser-e2e"]
+    assert "if" not in linux_browser
+    assert "if" not in jobs["api"] and "if" not in jobs["postgres"]
+    names = {s.get("name") for s in linux_browser["steps"]}
+    assert "Browser E2E against synthetic FastAPI" in names
+    assert "Browser navigation and search smoke for local Docsify portal" in names
