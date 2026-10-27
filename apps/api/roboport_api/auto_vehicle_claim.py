@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import psycopg
 
 from .session_lookup import session_subject
+from .auto_location_scope import location_scope_allows
 from .auto_proof_throttle import consume_attempt
 from .auto_claim_retry import lookup as retry_lookup, remember as retry_remember, AutoClaimRetryConflict
 
@@ -39,7 +40,7 @@ def _role_scoped(
            LIMIT 1 FOR SHARE OF ur,a""",
         (vehicle, role, actor, role),
     ).fetchone()
-    if granted is None:
+    if granted is None or not location_scope_allows(conn, actor, role, vehicle):
         raise VehicleClaimRejected("scope denied")
     return actor
 

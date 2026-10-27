@@ -19,3 +19,9 @@
 ## Контроль конкурентного отзыва сессий для auto-операций (#130)
 
 Dev AUTH-gate требует проверки не только `user_role` и `auto_vehicle_staff_assignment`, но и жизненного цикла `user_session`/`app_user` до commit операций `issue-proof`, `reissue-proof`, `redeem`, `review`, `revoke`, создания pending-связи и делегирования INTAKE. PG17 concurrency-тесты: `tests/integration/test_pg_auto_session_revocation.py`. Результат не расширяет права `MANAGER`, не создаёт филиалы и не меняет запрет на реальные персональные данные; production security/privacy approval требует отдельного gate.
+
+## Филиальные права: технический пилот vs production gate (#130)
+
+Миграция `0030_auto_location_scope` вводит технический `auto_service_location`, неизменяемую связь автомобиля с филиалом и журнал текущих/отозванных `auto_location_role_grant`. При **явном synthetic flag `ROBOport_SYNTHETIC_AUTO_BRANCH_SCOPE=1`** staff-операции проверяют активную роль, vehicle assignment и grant на один и тот же филиал; пустые/чужие/отозванные полномочия запрещены. SQL-факторы сохраняют блокировки до commit; PG17-тесты — `tests/integration/test_pg_auto_location_scope.py`. При выключенном pilot flag поведение текущей synthetic системы сохраняется, поэтому это **не** обязательная production enforcement-модель.
+
+До реализации защищённого и независимо утверждённого bootstrap владельца организации/филиала, выдачи `MANAGER` по правилу least privilege, перехода legacy-машин к явному филиалу, политики перевода автомобиля между филиалами и независимого security review этот этап не может быть использован для реального запуска. Нет нового публичного API, пользовательских операций с реальными подразделениями, незаметной выдачи прав или доступа к данным клиентов.
