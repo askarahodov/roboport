@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from roboport_api.auto_intake_delegation import grant_intake
+from roboport_api.auto_create_idempotency import validated_key
 from roboport_api.main import app
 from test_pg_auto_pending_link_http import _scene, _flags
 from test_pg_auto_vehicle_claim_http import _scenario
@@ -39,10 +40,14 @@ def test_pending_link_http_retry_conflict_and_live_revocation(monkeypatch):
     # Другая разрешённая customer-пара с тем же ключом не может получить receipt.
     other = http.post(url, json={"customerId": str(s["unrelated"])}, headers=headers)
     assert other.status_code == 409
-    for bad in ("", "short", "x" * 129, "has space", "ä" * 20):
+    for bad in ("", "short", "x" * 129, "has space"):
         invalid = http.post(url, json=payload,
                             headers={**normal, "Idempotency-Key": bad})
         assert invalid.status_code == 422
+    # Не-ASCII HTTP header отбрасывается httpx до транспорта, поэтому
+    # валидируем этот класс входных значений непосредственно в сервисе.
+    with pytest.raises(ValueError):
+        validated_key("ä" * 20)
     with psycopg.connect(DSN) as db:
         db.execute(
             "UPDATE user_role SET revoked_at=now() WHERE user_id=%s AND role_code='INTAKE'",
