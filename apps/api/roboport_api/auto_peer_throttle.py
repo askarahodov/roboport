@@ -1,8 +1,8 @@
-"""Opt-in synthetic/dev limiter, scoped to direct numeric loopback peers.
+"""Добровольно включаемый dev-лимит для числового прямого loopback peer.
 
-Do NOT read HTTP forwarding headers. The packaged Uvicorn has proxy parsing
-disabled; a separately approved ingress policy is required for production.
-Only a keyed fingerprint of the ASGI socket peer is persisted in PostgreSQL.
+HTTP-заголовки переадресации не являются источником сетевого адреса.
+В поставляемом Uvicorn их обработка отключена; для production нужна
+отдельно утверждённая ingress-политика. PostgreSQL хранит только HMAC peer.
 """
 import hashlib
 import hmac
@@ -15,11 +15,11 @@ WINDOW_SECONDS = 900
 
 
 def peer_fingerprint(client: object, secret: str) -> str | None:
-    """Return HMAC-SHA256 of numeric loopback peer, or fail closed.
+    """Вернуть HMAC-SHA256 числового loopback peer либо запретить запрос.
 
-    ASGI scope.client comes from the server's direct socket, not Host or XFF.
-    A synthetic TestClient can inject it; this is *not* proof of a remote
-    production peer or a trusted-proxy deployment.
+    ASGI scope.client задаётся сервером прямого соединения, не Host или XFF.
+    TestClient может эмулировать peer; это не доказательство подлинности
+    удалённого production-клиента и не замена доверенной proxy-схемы.
     """
     if not isinstance(secret, str) or len(secret.encode("utf-8")) < 32:
         return None
@@ -33,8 +33,8 @@ def peer_fingerprint(client: object, secret: str) -> str | None:
         address = ipaddress.ip_address(client[0])
     except ValueError:
         return None
-    # Python 3.13 may consider ::ffff:127.0.0.1 loopback. For this
-    # direct-socket pilot require an unambiguous native v4/v6 peer instead.
+    # В Python 3.13 ::ffff:127.0.0.1 считается loopback. В dev-пилоте
+    # допускаем только однозначный нативный IPv4 или IPv6 peer.
     if (not address.is_loopback
             or (isinstance(address, ipaddress.IPv6Address)
                 and address.ipv4_mapped is not None)):
@@ -46,10 +46,10 @@ def peer_fingerprint(client: object, secret: str) -> str | None:
 
 
 def consume_peer_request(dsn: str, fingerprint: str) -> bool:
-    """Atomic cross-worker POST quota; rejected attempts still consume budget.
+    """Атомарный межпроцессный POST-лимит: отказы тоже расходуют квоту.
 
-    Independent transaction intentionally commits before CSRF, session and
-    business mutation. A 403/error/HTTP retry therefore cannot restore quota.
+    Отдельная транзакция коммитится до проверки CSRF/сессии и бизнес-операции,
+    поэтому ответ 403, ошибка и повтор HTTP-запроса не возвращают бюджет.
     """
     with psycopg.connect(dsn) as conn:
         attempts = conn.execute(
