@@ -7,7 +7,6 @@ Only a keyed fingerprint of the ASGI socket peer is persisted in PostgreSQL.
 import hashlib
 import hmac
 import ipaddress
-from collections.abc import Sequence
 
 import psycopg
 
@@ -34,7 +33,11 @@ def peer_fingerprint(client: object, secret: str) -> str | None:
         address = ipaddress.ip_address(client[0])
     except ValueError:
         return None
-    if not address.is_loopback:
+    # Python 3.13 may consider ::ffff:127.0.0.1 loopback. For this
+    # direct-socket pilot require an unambiguous native v4/v6 peer instead.
+    if (not address.is_loopback
+            or (isinstance(address, ipaddress.IPv6Address)
+                and address.ipv4_mapped is not None)):
         return None
     canonical = address.compressed.encode("ascii")
     return hmac.new(
