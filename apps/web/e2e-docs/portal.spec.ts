@@ -127,14 +127,22 @@ test('390px и 1280px: Docsify контраст AA, dark/light и отсутст
         };
         return selectors.map(selector => {
           const element = document.querySelector(selector);
-          if (!element) return { selector, ratio: 0 };
-          const fg = luminance(getComputedStyle(element).color);
-          const bg = luminance(opaqueBg(element));
-          return { selector, ratio: (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05) };
+          if (!element) return { selector, ratio: 0, foreground: 'absent', background: 'absent', preBackground: 'absent' };
+          const foreground = getComputedStyle(element).color;
+          const background = opaqueBg(element);
+          const preBackground = getComputedStyle(element.closest('pre') ?? element).backgroundColor;
+          const fg = luminance(foreground);
+          const bg = luminance(background);
+          return {
+            selector, foreground, background, preBackground,
+            ratio: (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05),
+          };
         });
       });
-      for (const { selector, ratio } of samples) {
-        expect(ratio, `WCAG AA text contrast ${selector}, ${scheme}, ${width}px`).toBeGreaterThanOrEqual(4.5);
+      for (const { selector, ratio, foreground, background, preBackground } of samples) {
+        expect(ratio,
+          `WCAG AA ${selector} ${scheme}/${width}px; foreground=${foreground}, opaqueBg=${background}, preBg=${preBackground}`,
+        ).toBeGreaterThanOrEqual(4.5);
       }
       const widthReport = await page.evaluate(() => ({
         viewport: innerWidth,
