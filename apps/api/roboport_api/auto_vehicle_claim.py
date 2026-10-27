@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import psycopg
 
 from .session_lookup import session_subject
+from .auto_proof_throttle import consume_attempt
 from .auto_claim_retry import lookup as retry_lookup, remember as retry_remember, AutoClaimRetryConflict
 
 
@@ -69,6 +70,8 @@ def issue_auto_proof(
         "SELECT 1 FROM auto_vehicle_claim WHERE link_id=%s", (link_id,),
     ).fetchone():
         raise VehicleClaimRejected("claim already exists")
+    # Бюджет действует на выдающего INTAKE по всем авто, не на link UUID.
+    consume_attempt(conn, issuer, "ISSUE")
     proof = secrets.token_urlsafe(32)
     claim_id = uuid4()
     conn.execute(
@@ -129,6 +132,9 @@ def redeem_auto_proof(
     if (row[7] is not None or row[8] != "PENDING"
             or row[6] >= 5 or row[5] <= datetime.now(timezone.utc)):
         raise VehicleClaimRejected("unavailable")
+    # Только новая попытка расходует общий лимит; повтор того же receipt — нет.
+    # Ключ идемпотентности не даёт обходить учёт между разными claim.
+    consume_attempt(conn, actor, "REDEEM")
     valid = hmac.compare_digest(
         hashlib.sha256(proof.encode()).hexdigest(), row[4],
     )
