@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError, Field
 
 from .auth_http import _mutation_ok
+from .auto_create_idempotency import validated_key, AutoIdempotencyConflict
 from .auto_vehicle_http import _enabled_dsn, _not_found
 from .auto_vehicle_claim import (
     VehicleClaimRejected, issue_auto_proof, redeem_auto_proof,
@@ -64,6 +65,7 @@ async def propose_vehicle_link(vehicle_id: str, request: Request):
     try:
         ident = UUID(vehicle_id)
         data = PendingLinkPayload.model_validate(await request.json())
+        key = validated_key(request.headers.get("idempotency-key"))
     except (ValueError, ValidationError, TypeError, UnicodeDecodeError):
         return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(config) as conn:
@@ -72,8 +74,9 @@ async def propose_vehicle_link(vehicle_id: str, request: Request):
         try:
             link_id = create_pending_vehicle_link(
                 conn, request.cookies.get("rp_session", ""), ident, data.customerId,
+                idempotency_key=key,
             )
-        except VehicleLinkConflict:
+        except (VehicleLinkConflict, AutoIdempotencyConflict):
             return _response(request, 409, "CONFLICT")
         except VehicleClaimRejected:
             return _response(request, 403, "FORBIDDEN")
