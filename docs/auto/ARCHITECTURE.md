@@ -3,7 +3,7 @@
 > **Статус: current только для синтетического dev / production planned.** Реализованы схема авто, подтверждение связи, приватное чтение и экран `/account/vehicles`. Публичный автомобильный API, запись на ремонт, заказ-наряды, OEM и мобильное приложение пока запланированы. Исторический [аудит документации](DOCUMENTATION_AUDIT.md) датирован 26.10.2026.
 
 ## Current
-React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0024; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
+React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0025; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
 
 ## Decision
 Модульный монолит и Strangler Pattern. Существующие таблицы и API не переименовывать и не удалять до регрессионного доказательства; автомобильные контексты добавлять отдельными модулями и миграциями. Основание: ADR-001.md.
@@ -59,3 +59,7 @@ VIN nullable, нормализованный uppercase 17 символов из 
 ### Docker build guard (#131)
 
 В `apps/web/Dockerfile` генератор TypeScript читает `../../contracts/auto-dev-openapi.yaml` относительно `/app`, то есть `/contracts/auto-dev-openapi.yaml` внутри builder stage. Dockerfile явно копирует этот файл из корневого build context, а CI собирает `docker build --target builder -f apps/web/Dockerfile .` для проверки реальной сборки образа. `docker-compose.yml` остаётся legacy/dev-конфигурацией: успешная сборка **не означает**, что синтетический HTTPS loopback API безопасно доступен из контейнера или пригоден для production.
+
+## Управление object-scoped INTAKE в dev (#130)
+
+Миграция `0025_auto_intake_delegation` добавляет append-only audit выдачи и отзыва назначения роли INTAKE. Приватный HTTPS loopback API позволяет только уже назначенному MANAGER делегировать и отзывать INTAKE **на том же автомобиле**; менеджерский grant, глобальный `user_role` и филиалы через API не изменяются. SQL-блокировка автомобиля сериализует конкурентные выдачи, отзыв необратим, audit без PII. Для production требуются независимые authority grants, организация/филиалы, правовая процедура и #119.
