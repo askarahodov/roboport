@@ -435,3 +435,67 @@ test('CLIENT при 429 получает понятное сообщение и 
   await expect(form.getByRole('alert')).toContainText('Слишком много попыток');
   await expect(form.getByLabel('Одноразовый код')).toHaveValue('');
 });
+
+
+test('потерянный ISSUE response: исходный INTAKE перевыпускает код один раз с подтверждением', async ({ page }) => {
+  const replacement = 'OnlyNewSyntheticSecret_2026_TEST_NO_STORAGE';
+  let replaced = 0;
+  await page.route('**/api/v1/dev/auto/links/*/issue-proof', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: '{}',
+  }));
+  await page.route('**/api/v1/dev/auto/links/*/reissue-proof', route => {
+    replaced += 1;
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().headers()['x-csrf-token']).toBe('local-test-csrf');
+    expect(route.request().url()).not.toContain(replacement);
+    return route.fulfill(replaced === 1
+      ? { status: 200, contentType: 'application/json',
+        body: JSON.stringify({ claimId: claim, proof: replacement, status: 'REISSUED' }) }
+      : { status: 403, contentType: 'application/json', body: '{"code":"FORBIDDEN"}' });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await staff(page, ['INTAKE']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
+  await region.getByLabel('UUID связи', { exact: true }).fill(link);
+  await region.getByRole('button', { name: 'Выдать код для клиента' }).click();
+  await expect(region.getByRole('alert')).toContainText('Операция не выполнена');
+  const reissueButton = region.getByRole('button', { name: 'Перевыпустить код однократно' });
+  await expect(reissueButton).toBeDisabled();
+  await region.getByRole('checkbox', {
+    name: 'Подтверждаю замену и аннулирование предыдущего кода',
+  }).check();
+  await reissueButton.click();
+  await expect(region.getByText('Новый код создан.', { exact: false })).toBeVisible();
+  await expect(region.getByText(replacement, { exact: true })).toBeVisible();
+  await expect(region.getByText(claim, { exact: true })).toBeVisible();
+  await expect(reissueButton).toBeDisabled();
+  expect(replaced).toBe(1);
+  await expect(page).not.toHaveURL(/OnlyNewSyntheticSecret/);
+  expect(await page.evaluate(secret =>
+    !Object.values(localStorage).some(value => value.includes(secret)), replacement,
+  )).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('повторный перевыпуск отклоняется и удаляет ранее показанный секрет', async ({ page }) => {
+  await page.route('**/api/v1/dev/auto/links/*/reissue-proof', route => route.fulfill({
+    status: 403, contentType: 'application/json', body: '{"code":"FORBIDDEN"}',
+  }));
+  await staff(page, ['INTAKE']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
+  await region.getByLabel('UUID связи', { exact: true }).fill(link);
+  await region.getByRole('checkbox', {
+    name: 'Подтверждаю замену и аннулирование предыдущего кода',
+  }).check();
+  await region.getByRole('button', { name: 'Перевыпустить код однократно' }).click();
+  await expect(region.getByRole('alert')).toContainText('Операция не выполнена');
+  await expect(region.getByText('Одноразовый код:', { exact: false })).toHaveCount(0);
+});
+
+test('MANAGER и STOCK не видят перевыпуск INTAKE', async ({ page }) => {
+  await staff(page, ['MANAGER']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('button', { name: 'Перевыпустить код однократно' })).toHaveCount(0);
+});
