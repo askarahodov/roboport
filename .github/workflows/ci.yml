@@ -177,3 +177,46 @@ jobs:
             apps/web/test-results/
           if-no-files-found: warn
           retention-days: 14
+
+  windows-cmd:
+    # Real native Windows runner, not Git Bash, WSL or PowerShell.
+    # Dev smoke only: full PostgreSQL/API/browser E2E remain mandatory in Linux.
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Windows CMD - verify docs and links
+        run: python scripts/check_docs_links.py
+      - name: Windows CMD - install pinned frontend dependencies
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+      - name: Windows CMD - generate TS SDK and typecheck
+        working-directory: apps/web
+        run: npm run typecheck
+      - name: Windows CMD - frontend production build
+        working-directory: apps/web
+        run: npm run build
+      - name: Windows CMD - install pinned Playwright Chromium
+        working-directory: apps/web
+        run: npx playwright install chromium
+      - name: Windows CMD - Docsify browser navigation and search
+        working-directory: apps/web
+        run: npm run test:docs:e2e
+      - name: Upload Windows CMD Docsify traces and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roboport-windows-cmd-evidence
+          path: apps/web/test-results/
+          if-no-files-found: warn
+          retention-days: 14
