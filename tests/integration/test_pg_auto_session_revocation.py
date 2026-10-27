@@ -1,5 +1,8 @@
 """PG17: revocation of live session/account cannot overtake auto mutations."""
 from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+from time import monotonic, sleep
 
 import psycopg
 import pytest
@@ -10,6 +13,7 @@ from roboport_api.auto_vehicle_claim import (
 )
 from roboport_api.auto_intake_delegation import grant_intake
 from roboport_api.auto_vehicle_link_intake import create_pending_vehicle_link
+from roboport_api.session_lookup import session_subject
 from test_pg_auto_vehicle_claim_http import _scenario
 from test_pg_baseline import DSN
 
@@ -231,3 +235,57 @@ def test_pending_link_holds_target_client_eligibility_until_commit():
             "SELECT count(*) FROM auto_vehicle_customer_link WHERE vehicle_id=%s",
             (another_vehicle,),
         ).fetchone() == (0,)
+
+
+def test_password_change_lock_order_never_deadlocks_with_mutation_session():
+    """Concurrent password rotation locks user before sessions, as auto does.
+
+    Wait until the worker is *actually waiting for the user row lock*, rather
+    than relying on sleep timing. It must not hold a session row lock while
+    waiting: otherwise change-password cannot revoke sessions and deadlocks.
+    """
+    d = _scenario()
+    actor = d["manager"]
+    started = Queue(maxsize=1)
+
+    def mutate():
+        with psycopg.connect(DSN) as worker:
+            worker.execute("SET LOCAL lock_timeout='3s'")
+            pid = worker.execute("SELECT pg_backend_pid()").fetchone()[0]
+            started.put(pid)
+            return session_subject(
+                worker, d["tokens"][actor], for_mutation=True,
+            )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with psycopg.connect(DSN) as changing:
+            changing_pid = changing.execute("SELECT pg_backend_pid()").fetchone()[0]
+            changing.execute(
+                "UPDATE app_user SET password_changed_at=now() WHERE id=%s",
+                (actor,),
+            )
+            future = pool.submit(mutate)
+            worker_pid = started.get(timeout=3)
+            # Observe a real PostgreSQL lock wait to force the race: in the
+            # old code, the worker could hold s before waiting for u.
+            end = monotonic() + 2.0
+            blocked = False
+            with psycopg.connect(DSN) as observer:
+                while monotonic() < end:
+                    blockers = observer.execute(
+                        "SELECT pg_blocking_pids(%s)", (worker_pid,),
+                    ).fetchone()[0]
+                    if changing_pid in blockers:
+                        blocked = True
+                        break
+                    sleep(0.01)
+            assert blocked, "worker did not reach the conflicting user lock"
+            # Same order as real change_password: update user, then sessions.
+            # If worker had locked session first, PG would deadlock here.
+            changing.execute(
+                "UPDATE user_session SET revoked_at=now() WHERE user_id=%s",
+                (actor,),
+            )
+        # After the password-change transaction commits, locked session
+        # lookup has to re-check revocation and reject the old cookie.
+        assert future.result(timeout=4) is None
