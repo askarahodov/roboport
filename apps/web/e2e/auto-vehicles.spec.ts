@@ -183,11 +183,11 @@ test('частичный отзыв связи удаляет старую ка�
     });
   });
   await page.goto('/account/vehicles');
-  await expect(page.getByText('SyntheticMake TestCar 1')).toBeVisible();
+  await expect(page.getByText('SyntheticMake TestCar 1', { exact: true })).toBeVisible();
   revoked = true;
   await page.getByRole('button', { name: 'Показать ещё автомобили' }).click();
   await expect(page.getByText('Показано автомобилей: 21')).toBeVisible();
-  await expect(page.getByText('SyntheticMake TestCar 1')).toHaveCount(0);
+  await expect(page.getByText('SyntheticMake TestCar 1', { exact: true })).toHaveCount(0);
   await expect(page.getByText('SyntheticMake TestCar 22')).toBeVisible();
   await expect(page.locator('.account-record')).toHaveCount(21);
 });
