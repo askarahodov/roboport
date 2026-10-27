@@ -48,6 +48,7 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
   const [busy, setBusy] = React.useState(false);
   const [outcome, setOutcome] = React.useState<Outcome | null>(null);
   const [confirmRevoke, setConfirmRevoke] = React.useState(false);
+  const [confirmReissue, setConfirmReissue] = React.useState(false);
 
   async function run(action: () => Promise<Outcome>) {
     if (busy) return;
@@ -94,6 +95,23 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
         || response.proof.length > 200) throw new Error('Bad proof response');
       setIssued({ claimId: response.claimId, proof: response.proof });
       return { type: 'ok', message: 'Код выдан однократно. Передайте его по согласованному закрытому тестовому каналу.' };
+    });
+  }
+
+  function reissueProof() {
+    if (!validId(linkId) || !confirmReissue) return;
+    void run(async () => {
+      const response = fields(await mutate(
+        '/api/v1/dev/auto/links/' + encodeURIComponent(linkId.trim()) + '/reissue-proof',
+      ));
+      if (response.status !== 'REISSUED'
+        || typeof response.claimId !== 'string' || !validId(response.claimId)
+        || typeof response.proof !== 'string' || response.proof.length < 40
+        || response.proof.length > 200) throw new Error('Bad replacement response');
+      setIssued({ claimId: response.claimId, proof: response.proof });
+      setConfirmReissue(false);
+      return { type: 'ok',
+        message: 'Новый код создан. Предыдущий код аннулирован. Другой перевыпуск для этой заявки запрещён.' };
     });
   }
 
@@ -159,11 +177,22 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
           <h4>2. Выдать одноразовый код</h4>
           <FormField label="UUID связи" id="auto-link-id">
             <input id="auto-link-id" required autoComplete="off" value={linkId}
-              onChange={e => { setLinkId(e.target.value); setIssued(null); }} />
+              onChange={e => { setLinkId(e.target.value); setIssued(null); setConfirmReissue(false); }} />
           </FormField>
           <Button type="submit" disabled={busy || !validId(linkId)}>
             Выдать код для клиента
           </Button>
+          <p>Если первый ответ с кодом потерялся, его нельзя получить повторно.
+            Возможен только один перевыпуск для этой связи, до любой попытки клиента.
+            После перевыпуска прежний код навсегда недействителен.</p>
+          <label className="auto-claim-confirm">
+            <input type="checkbox" checked={confirmReissue}
+              onChange={e => setConfirmReissue(e.target.checked)} />
+            Подтверждаю замену и аннулирование предыдущего кода
+          </label>
+          <Button type="button" variant="secondary"
+            disabled={busy || !validId(linkId) || !confirmReissue}
+            onClick={reissueProof}>Перевыпустить код однократно</Button>
           {issued && <div className="auto-proof" role="status">
             <p><strong>Временный код — не копируйте его в задачи или логи.</strong></p>
             <p>UUID подтверждения: <code>{issued.claimId}</code></p>
