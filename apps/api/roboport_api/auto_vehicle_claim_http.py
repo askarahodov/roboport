@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, Field
 
 from .auth_http import _mutation_ok
 from .auto_create_idempotency import validated_key, AutoIdempotencyConflict
+from .auto_claim_retry import AutoClaimRetryConflict
 from .auto_vehicle_http import _enabled_dsn, _not_found
 from .auto_vehicle_claim import (
     VehicleClaimRejected, issue_auto_proof, redeem_auto_proof,
@@ -115,6 +116,7 @@ async def redeem(claim_id: str, request: Request):
     try:
         ident = UUID(claim_id)
         data = ProofPayload.model_validate(await request.json())
+        key = validated_key(request.headers.get("idempotency-key"))
     except (ValueError, ValidationError, TypeError, UnicodeDecodeError):
         return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(config) as conn:
@@ -123,7 +125,10 @@ async def redeem(claim_id: str, request: Request):
         try:
             status = redeem_auto_proof(
                 conn, request.cookies.get("rp_session", ""), ident, data.proof,
+                idempotency_key=key,
             )
+        except AutoClaimRetryConflict:
+            return _response(request, 409, "CONFLICT")
         except VehicleClaimRejected:
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(content={"status": status}, headers={"Cache-Control": "no-store"})
@@ -137,6 +142,7 @@ async def review(claim_id: str, request: Request):
     try:
         ident = UUID(claim_id)
         data = DecisionPayload.model_validate(await request.json())
+        key = validated_key(request.headers.get("idempotency-key"))
     except (ValueError, ValidationError, TypeError, UnicodeDecodeError):
         return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(config) as conn:
@@ -145,7 +151,10 @@ async def review(claim_id: str, request: Request):
         try:
             status = review_auto_claim(
                 conn, request.cookies.get("rp_session", ""), ident, data.approve,
+                idempotency_key=key,
             )
+        except AutoClaimRetryConflict:
+            return _response(request, 409, "CONFLICT")
         except VehicleClaimRejected:
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(content={"status": status}, headers={"Cache-Control": "no-store"})
