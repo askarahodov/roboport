@@ -1,0 +1,188 @@
+openapi: 3.1.0
+info:
+  title: Airmatik — закрытый синтетический API чтения автомобилей
+  version: 0.1.0-dev
+  description: >-
+    Не является production API, мобильным API или публичным договором на обслуживание.
+    Работает только при явных ROBOport_SYNTHETIC_AUTO_API=1 и
+    ROBOport_SYNTHETIC_AUTH_API=1, локальном PostgreSQL и HTTPS loopback.
+    Ни один метод этой схемы не должен попадать в публичный FastAPI OpenAPI.
+x-synthetic-only: true
+x-release-blocked-by:
+  - '#119'
+  - '#131'
+servers:
+  - url: https://127.0.0.1
+    description: Тестовый HTTPS loopback; не внешний адрес
+tags:
+  - name: AutoDevVehicles
+    description: Только чтение проверенных клиентских связей, без истории прежнего владельца
+components:
+  securitySchemes:
+    localSession:
+      type: apiKey
+      in: cookie
+      name: rp_session
+      description: Защищённая HttpOnly cookie. Заголовки X-User-ID не авторизуют.
+  schemas:
+    AutoVehicle:
+      type: object
+      required: [id, make, model, variant, modelYear, vinLast4]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        make:
+          type: string
+          minLength: 1
+        model:
+          type: string
+          minLength: 1
+        variant:
+          type: [string, 'null']
+        modelYear:
+          type: [integer, 'null']
+          minimum: 1886
+          maximum: 2100
+        vinLast4:
+          type: [string, 'null']
+          pattern: '^[A-HJ-NPR-Z0-9]{4}$'
+          description: >-
+            Только последние 4 символа VIN. Полный VIN и документы других
+            владельцев никогда не возвращаются.
+    AutoVehiclePage:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/AutoVehicle'
+          description: >-
+            Только проверенные и действующие привязки. 200 с пустым массивом
+            также означает отзыв прав на конкретную машину или customer link;
+            клиент обязан повторно проверять уже отображённые страницы.
+    AutoDevError:
+      type: object
+      required: [code, message, requestId]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum: [UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, INVALID_INPUT]
+        message:
+          type: string
+        requestId:
+          type: string
+          format: uuid
+  responses:
+    AutoUnauthorized:
+      description: Нет активной серверной сессии
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AutoDevError'
+    AutoForbidden:
+      description: Закрытый синтетический контур недоступен для запроса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AutoDevError'
+    AutoNotFound:
+      description: Функция выключена или объект не принадлежит текущему клиенту
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AutoDevError'
+    AutoInvalidInput:
+      description: Нарушено ограничение пагинации
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AutoDevError'
+paths:
+  /api/v1/dev/auto/vehicles:
+    get:
+      tags: [AutoDevVehicles]
+      operationId: listVerifiedAutoDevVehicles
+      summary: Список подтверждённых автомобилей текущего клиента (dev only)
+      description: >-
+        Требует активную сессию, роль CLIENT и неотозванную account_customer_link.
+        Значения limit и offset — временная offset пагинация. При изменении
+        доступа сервер может вернуть 200 с пустым списком вместо 403.
+      security:
+        - localSession: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 10000
+            default: 0
+      responses:
+        '200':
+          description: Текущие подтверждённые автомобили; 200 с items=[] допустим
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoVehiclePage'
+        '401':
+          $ref: '#/components/responses/AutoUnauthorized'
+        '403':
+          $ref: '#/components/responses/AutoForbidden'
+        '404':
+          $ref: '#/components/responses/AutoNotFound'
+        '422':
+          $ref: '#/components/responses/AutoInvalidInput'
+  /api/v1/dev/auto/vehicles/{vehicle_id}:
+    get:
+      tags: [AutoDevVehicles]
+      operationId: getVerifiedAutoDevVehicle
+      summary: Карточка подтверждённого автомобиля текущего клиента (dev only)
+      description: >-
+        При чужом, ожидающем проверки, отозванном или отсутствующем автомобиле
+        возвращается одинаковый 404, даже если UUID известен.
+      security:
+        - localSession: []
+      parameters:
+        - in: path
+          name: vehicle_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Открытая текущему клиенту машина (без полного VIN)
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoVehicle'
+        '401':
+          $ref: '#/components/responses/AutoUnauthorized'
+        '403':
+          $ref: '#/components/responses/AutoForbidden'
+        '404':
+          $ref: '#/components/responses/AutoNotFound'
+  # Write/proof/claim endpoints намеренно НЕ входят в read-only контракт до review.
