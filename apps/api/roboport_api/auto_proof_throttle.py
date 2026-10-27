@@ -29,13 +29,13 @@ def consume_attempt(conn: psycopg.Connection, actor: UUID, operation: str) -> No
              attempts=CASE
                WHEN auto_proof_throttle.window_started_at
                    <= now() - %s::interval THEN 1
-               ELSE auto_proof_throttle.attempts + 1 END,
+               ELSE LEAST(auto_proof_throttle.attempts + 1, %s) END,
              window_started_at=CASE
                WHEN auto_proof_throttle.window_started_at
                    <= now() - %s::interval THEN now()
                ELSE auto_proof_throttle.window_started_at END
            RETURNING attempts""",
-        (actor, operation, interval, interval),
+        (actor, operation, interval, limit + 1, interval),
     ).fetchone()[0]
     if count > limit:
         # Сохраняем блокировку окна: нельзя восстановить бюджет новыми ключами.
