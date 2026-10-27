@@ -335,3 +335,62 @@ test('MANAGER повторяет grant после сбоя с тем же клю
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
+
+
+test('CLIENT предъявляет тот же proof с тем же ключом после потерянного ответа', async ({ page }) => {
+  await page.route('**/api/v1/auth/me', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: '{"subjectId":"55555555-5555-4555-8555-555555555555"}',
+  }));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"csrfToken":"local-test-csrf"}',
+  }));
+  await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"items":[]}',
+  }));
+  const keys: string[] = [];
+  await page.route('**/api/v1/dev/auto/claims/*/redeem', route => {
+    const request = route.request();
+    keys.push(request.headers()['idempotency-key']);
+    expect(request.postDataJSON()).toEqual({ proof });
+    return route.fulfill(keys.length === 1
+      ? { status: 503, contentType: 'application/json', body: '{}' }
+      : { status: 200, contentType: 'application/json', body: '{"status":"PENDING_REVIEW"}' });
+  });
+  await page.goto('/account/vehicles');
+  const form = page.getByRole('form', { name: 'Подтверждение автомобиля (dev)' });
+  await form.getByLabel('UUID подтверждения').fill(claim);
+  await form.getByLabel('Одноразовый код').fill(proof);
+  await form.getByRole('button', { name: 'Предъявить код' }).click();
+  await expect(form.getByRole('alert')).toContainText('Предъявление не удалось');
+  await expect(form.getByLabel('Одноразовый код')).toHaveValue('');
+  // Секрет не сохранён — клиент вводит его повторно.
+  await form.getByLabel('Одноразовый код').fill(proof);
+  await form.getByRole('button', { name: 'Предъявить код' }).click();
+  await expect(form.getByRole('status')).toContainText('Код принят');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+  expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(await page.evaluate(() => localStorage.length)).toBe(0);
+});
+
+test('MANAGER retry проверки сохраняет ключ после HTTP 503', async ({ page }) => {
+  const keys: string[] = [];
+  await page.route('**/api/v1/dev/auto/claims/*/review', route => {
+    keys.push(route.request().headers()['idempotency-key']);
+    expect(route.request().postDataJSON()).toEqual({ approve: true });
+    return route.fulfill(keys.length === 1
+      ? { status: 503, contentType: 'application/json', body: '{}' }
+      : { status: 200, contentType: 'application/json', body: '{"status":"VERIFIED"}' });
+  });
+  await staff(page, ['MANAGER']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const panel = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
+  await panel.getByLabel('UUID подтверждения').fill(claim);
+  await panel.getByRole('button', { name: 'Подтвердить связь' }).click();
+  await expect(panel.getByRole('alert')).toContainText('Операция не выполнена');
+  await panel.getByRole('button', { name: 'Подтвердить связь' }).click();
+  await expect(panel.getByText('Связь подтверждена независимым сотрудником.')).toBeVisible();
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
