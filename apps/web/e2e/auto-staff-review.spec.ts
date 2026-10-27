@@ -182,3 +182,24 @@ test('CLIENT ошибочный proof не подтверждает машину
   await expect(form.getByLabel('Одноразовый код')).toHaveValue('');
   await expect(page.getByText('Подтверждённых автомобилей пока нет.')).toBeVisible();
 });
+
+
+test('две роли: изменение UUID менеджерской заявки не меняет пару выданного кода', async ({ page }) => {
+  const otherClaim = '66666666-6666-4666-8666-666666666666';
+  await page.route('**/api/v1/dev/auto/**', route => {
+    expect(route.request().url()).toContain('/issue-proof');
+    return route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ claimId: claim, proof }) });
+  });
+  await staff(page, ['INTAKE', 'MANAGER']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
+  await region.getByLabel('UUID связи', { exact: true }).fill(link);
+  await region.getByRole('button', { name: 'Выдать код для клиента' }).click();
+  await expect(region.getByText('UUID подтверждения:', { exact: false })).toContainText(claim);
+  await expect(region.getByText(proof, { exact: true })).toBeVisible();
+  await region.getByLabel('UUID подтверждения').fill(otherClaim);
+  await expect(region.getByLabel('UUID подтверждения')).toHaveValue(otherClaim);
+  await expect(region.getByText('UUID подтверждения:', { exact: false })).toContainText(claim);
+  await expect(region.getByText(proof, { exact: true })).toBeVisible();
+});
