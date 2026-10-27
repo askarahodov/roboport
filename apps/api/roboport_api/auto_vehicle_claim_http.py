@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, Field
 from .auth_http import _mutation_ok
 from .auto_create_idempotency import validated_key, AutoIdempotencyConflict
 from .auto_claim_retry import AutoClaimRetryConflict
+from .auto_proof_throttle import AutoProofRateLimited
 from .auto_vehicle_http import _enabled_dsn, _not_found
 from .auto_vehicle_claim import (
     VehicleClaimRejected, issue_auto_proof, redeem_auto_proof,
@@ -100,6 +101,12 @@ def issue(link_id: str, request: Request):
             return _response(request, 403, "FORBIDDEN")
         try:
             claim, proof = issue_auto_proof(conn, request.cookies.get("rp_session", ""), link)
+        except AutoProofRateLimited:
+            return JSONResponse(
+                status_code=429,
+                content={"code": "RATE_LIMITED", "requestId": request.state.request_id},
+                headers={"Cache-Control": "no-store", "Retry-After": "3600"},
+            )
         except VehicleClaimRejected:
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(
@@ -126,6 +133,12 @@ async def redeem(claim_id: str, request: Request):
             status = redeem_auto_proof(
                 conn, request.cookies.get("rp_session", ""), ident, data.proof,
                 idempotency_key=key,
+            )
+        except AutoProofRateLimited:
+            return JSONResponse(
+                status_code=429,
+                content={"code": "RATE_LIMITED", "requestId": request.state.request_id},
+                headers={"Cache-Control": "no-store", "Retry-After": "900"},
             )
         except AutoClaimRetryConflict:
             return _response(request, 409, "CONFLICT")

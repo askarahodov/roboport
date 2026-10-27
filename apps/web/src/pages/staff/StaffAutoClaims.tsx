@@ -6,6 +6,7 @@ import { ManagerIntakeAssignments } from './ManagerIntakeAssignments';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function validId(value: string) { return uuid.test(value.trim()); }
 type Outcome = { type: 'ok' | 'error'; message: string };
+class RateLimited extends Error {}
 
 async function mutate(path: string, body?: Record<string, unknown>, idempotencyKey?: string): Promise<unknown> {
   const csrf = await fetch('/api/v1/auth/csrf', {
@@ -21,6 +22,7 @@ async function mutate(path: string, body?: Record<string, unknown>, idempotencyK
       ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
     body: JSON.stringify(body ?? {}),
   });
+  if (result.status === 429) throw new RateLimited('Proof throttle');
   if (!result.ok) throw new Error('HTTP ' + result.status);
   return await result.json() as unknown;
 }
@@ -54,8 +56,10 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
     // Одноразовый секрет никогда не переживает следующую операцию.
     setIssued(null);
     try { setOutcome(await action()); }
-    catch { setOutcome({ type: 'error',
-      message: 'Операция не выполнена. Проверьте полномочия на автомобиль, сессию и состояние связи.' }); }
+    catch (error) { setOutcome({ type: 'error',
+      message: error instanceof RateLimited
+        ? 'Лимит выдачи одноразовых кодов исчерпан. Повторите позже (до 60 минут).'
+        : 'Операция не выполнена. Проверьте полномочия на автомобиль, сессию и состояние связи.' }); }
     finally { setBusy(false); }
   }
 
