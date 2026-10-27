@@ -394,3 +394,44 @@ test('MANAGER retry проверки сохраняет ключ после HTTP
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
+
+
+test('INTAKE при 429 видит лимит выдачи и не видит новый секрет', async ({ page }) => {
+  await page.route('**/api/v1/dev/auto/links/*/issue-proof', route => route.fulfill({
+    status: 429, contentType: 'application/json',
+    headers: { 'Retry-After': '3600', 'Cache-Control': 'no-store' },
+    body: '{"code":"RATE_LIMITED"}',
+  }));
+  await staff(page, ['INTAKE']);
+  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  const panel = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
+  await panel.getByLabel('UUID связи', { exact: true }).fill(link);
+  await panel.getByRole('button', { name: 'Выдать код для клиента' }).click();
+  await expect(panel.getByRole('alert')).toContainText('Лимит выдачи одноразовых кодов исчерпан');
+  await expect(panel.getByText('Одноразовый код:', { exact: false })).toHaveCount(0);
+});
+
+test('CLIENT при 429 получает понятное сообщение и поле proof очищено', async ({ page }) => {
+  await page.route('**/api/v1/auth/me', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: '{"subjectId":"55555555-5555-4555-8555-555555555555"}',
+  }));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"csrfToken":"local-test-csrf"}',
+  }));
+  await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"items":[]}',
+  }));
+  await page.route('**/api/v1/dev/auto/claims/*/redeem', route => route.fulfill({
+    status: 429, contentType: 'application/json',
+    headers: { 'Retry-After': '900', 'Cache-Control': 'no-store' },
+    body: '{"code":"RATE_LIMITED"}',
+  }));
+  await page.goto('/account/vehicles');
+  const form = page.getByRole('form', { name: 'Подтверждение автомобиля (dev)' });
+  await form.getByLabel('UUID подтверждения').fill(claim);
+  await form.getByLabel('Одноразовый код').fill(proof);
+  await form.getByRole('button', { name: 'Предъявить код' }).click();
+  await expect(form.getByRole('alert')).toContainText('Слишком много попыток');
+  await expect(form.getByLabel('Одноразовый код')).toHaveValue('');
+});
