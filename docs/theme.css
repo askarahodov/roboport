@@ -66,3 +66,51 @@ body { background: var(--kb-bg); color: var(--kb-ink); font-family: system-ui, -
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+/* Dark OS preference. Docsify remains a local dev portal; both palettes use
+   WCAG AA contrast for ordinary text, links, search and code snippets. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --kb-ink: #e5f2f4;
+    --kb-muted: #c0d3d9;
+    --kb-brand: #80d4c7;
+    --kb-brand-dark: #bcf1e9;
+    --kb-bg: #0e1b24;
+    --kb-border: #42616b;
+    --kb-surface: #192c36;
+    --kb-code: #0b1822;
+  }
+  .sidebar-nav a:hover,
+  .sidebar-nav li.active > a { background: #285047; color: var(--kb-brand-dark); }
+  .sidebar .search input {
+    color: var(--kb-ink); background: var(--kb-surface);
+    border-color: #7799a5;
+  }
+  .sidebar .search .results-panel,
+  .sidebar .search .results-panel a {
+    color: var(--kb-ink); background: var(--kb-surface);
+  }
+  .sidebar .search .results-panel a:hover { background: #285047; }
+  .markdown-section h1,
+  .markdown-section h2,
+  .markdown-section h3 { color: #e5f2f4; }
+  .markdown-section a { color: #9fece0; }
+  .markdown-section blockquote {
+    background: #24443f; color: #e2f8f3;
+    border-left-color: var(--kb-brand);
+  }
+  .markdown-section code:not(pre code) {
+    background: #26424b; color: #e9f7fa;
+  }
+  .markdown-section th { background: #26424b; }
+  .markdown-section pre code,
+  .markdown-section pre code * { color: #e5f6fa; }
+  .sidebar-toggle { color: var(--kb-ink); }
+}
+
+/* Keyboard focus visible on document and menu controls, including dark mode. */
+.sidebar-nav a:focus-visible,
+.sidebar-toggle:focus-visible {
+  outline: 3px solid #e2a93c;
+  outline-offset: 2px;
+}
