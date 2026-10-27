@@ -39,6 +39,47 @@ async def request_id_middleware(request: Request, call_next):
         if (request.url.scheme != "https"
                 or request.url.hostname not in ("127.0.0.1", "localhost")):
             return not_found(request)
+    # Закрытый dev-пилот по адресу прямого сокета, НЕ доверенная proxy-схема.
+    # Сетевую квоту проверяем до сессии/CSRF и бизнес-операции; отдельная
+    # транзакция PostgreSQL фиксирует расход даже при ответах 403/422.
+    if request.method == "POST" and path.startswith("/api/v1/dev/auto/"):
+        import os
+        flag = os.getenv("ROBOport_SYNTHETIC_AUTO_PEER_LIMIT", "0")
+        if flag != "0":
+            if flag != "1" or os.getenv("ROBOport_SYNTHETIC_AUTO_API") != "1":
+                return not_found(request)
+            from .auth_http import _dsn
+            from .auto_peer_throttle import (
+                peer_fingerprint, consume_peer_request, WINDOW_SECONDS,
+            )
+            from starlette.concurrency import run_in_threadpool
+            import psycopg
+            dsn = _dsn(request)
+            fingerprint = peer_fingerprint(
+                request.scope.get("client"),
+                os.getenv("ROBOport_SYNTHETIC_AUTO_PEER_HMAC_KEY", ""),
+            )
+            if dsn is None or fingerprint is None:
+                return not_found(request)
+            try:
+                permitted = await run_in_threadpool(
+                    consume_peer_request, dsn, fingerprint,
+                )
+            except psycopg.Error:
+                return JSONResponse(
+                    status_code=503,
+                    content={"code": "UNAVAILABLE", "requestId": request.state.request_id},
+                    headers={"Cache-Control": "no-store", "Retry-After": "60"},
+                )
+            if not permitted:
+                return JSONResponse(
+                    status_code=429,
+                    content={"code": "RATE_LIMITED", "requestId": request.state.request_id},
+                    headers={
+                        "Cache-Control": "no-store",
+                        "Retry-After": str(WINDOW_SECONDS),
+                    },
+                )
     response = await call_next(request)
     response.headers["X-Request-ID"] = request.state.request_id
     return response
