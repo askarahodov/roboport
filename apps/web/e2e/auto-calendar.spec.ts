@@ -156,7 +156,7 @@ test('calendar warns when the backend has additional records',async({page})=>{
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
-  await expect(page.getByRole('alert')).toContainText('Показаны только первые 100 записей');
+  await expect(page.getByRole('alert')).toContainText('Полный список недоступен');
 });
 
 test('calendar mobile layout remains in viewport',async({page})=>{
