@@ -99,3 +99,50 @@ test('mobile staff console remains within viewport in dark mode', async ({ page 
   await expect(page.getByText('Активных назначений нет.')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+
+test('organization administration entry is discoverable in main navigation on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route(endpoint, route => route.fulfill({
+    status: 403, contentType: 'application/json', body: '{"code":"FORBIDDEN"}',
+  }));
+  await page.goto('/');
+  const navigation = page.getByRole('navigation', { name: 'Разделы сервиса' });
+  const link = navigation.getByRole('link', { name: 'Организации (dev)' });
+  await expect(link).toBeVisible();
+  await link.click();
+  await expect(page).toHaveURL(/\/staff\/auto-admin$/);
+  await expect(page.getByRole('heading', { name: 'Сотрудники организации' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'UUID организации' }).fill(org);
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('switching organizations clears previous success and active staff data', async ({ page }) => {
+  const otherOrg = '55555555-5555-4555-8555-555555555555';
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route(endpoint, route => {
+    if (route.request().method() !== 'GET') return route.fulfill({
+      status: 201, contentType: 'application/json', body: JSON.stringify({ grantId: grant }),
+    });
+    if (route.request().url().includes(otherOrg)) return route.fulfill({
+      status: 403, contentType: 'application/json', body: '{"code":"FORBIDDEN"}',
+    });
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ items: [{ grantId: grant, userId: user, role: 'INTAKE', locationId: null }] }),
+    });
+  });
+  await page.goto('/staff/auto-admin');
+  await page.getByRole('textbox', { name: 'UUID организации' }).fill(org);
+  await expect(page.getByText(user)).toBeVisible();
+  await page.getByRole('textbox', { name: 'UUID пользователя' }).fill(user);
+  await page.getByRole('button', { name: 'Назначить' }).click();
+  await expect(page.getByRole('status')).toContainText('Назначение создано.');
+  await page.getByRole('textbox', { name: 'UUID организации' }).fill(otherOrg);
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText(user)).toHaveCount(0);
+  await expect(page.getByRole('status').filter({ hasText: 'Назначение создано.' })).toHaveCount(0);
+});
