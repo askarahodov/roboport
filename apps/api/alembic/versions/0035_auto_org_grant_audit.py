@@ -51,5 +51,6 @@ def upgrade():
 
 def downgrade():
     # Only disposable synthetic databases; destroys audit evidence.
+    op.execute("DROP TRIGGER auto_org_grant_audit_event ON auto_organization_role_grant")
     op.execute("DROP TABLE auto_organization_grant_audit")
     op.execute("DROP FUNCTION auto_org_grant_audit_trigger()")
