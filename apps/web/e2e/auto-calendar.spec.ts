@@ -83,9 +83,12 @@ test('calendar blocks zero and reverse intervals before posting',async({page})=>
 
 test('calendar ignores an old denied response after tenant changes',async({page})=>{
   const nextOrg='77777777-7777-4777-8777-777777777777';
+  let oldRequested!:()=>void;
+  const oldRequest=new Promise<void>(resolve=>{oldRequested=resolve;});
   await page.route(base,async route=>{
     const requestOrg=new URL(route.request().url()).pathname.split('/organizations/')[1]?.split('/')[0];
     if(requestOrg===org){
+      oldRequested();
       await new Promise(resolve=>setTimeout(resolve,250));
       try{await route.fulfill({status:403,body:'{"code":"FORBIDDEN"}'});}catch{return;}
     }else{
@@ -95,6 +98,7 @@ test('calendar ignores an old denied response after tenant changes',async({page}
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await oldRequest;
   await page.getByRole('textbox',{name:'UUID организации'}).fill(nextOrg);
   await expect(page.getByText('Записей нет.')).toBeVisible();
   await page.waitForTimeout(350);
