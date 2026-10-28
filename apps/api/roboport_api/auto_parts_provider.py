@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 class Applicability(StrEnum):
@@ -42,10 +42,15 @@ class CatalogPart:
     def __post_init__(self) -> None:
         if not all((self.provider, self.source_revision, self.brand, self.article)):
             raise ValueError("Каталожная запись неполна")
+        if not isinstance(self.applicability, Applicability):
+            raise ValueError("Неизвестный статус применяемости")
+        if not isinstance(self.retrieved_at, datetime):
+            raise ValueError("retrieved_at должен быть datetime")
         if self.retrieved_at.tzinfo is None or self.retrieved_at.utcoffset() is None:
             raise ValueError("retrieved_at должен содержать timezone")
 
 
+@runtime_checkable
 class PartsCatalogProvider(Protocol):
     def find_vehicle(self, vin: str) -> str: ...
     def search_by_oem(self, article: str) -> tuple[CatalogPart, ...]: ...
