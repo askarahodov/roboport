@@ -138,3 +138,78 @@ def test_idempotency_concurrent_same_key_waits_for_committed_result():
                 with two.transaction():
                     create_appointment(two,*args,request_key=key)
         assert create_appointment(two,*args,request_key=key)==created
+
+
+def test_reschedule_idempotency_replay_mismatch_and_no_duplicate_events():
+    d=_scenario()
+    start=datetime.now(timezone.utc)+timedelta(days=14)
+    with psycopg.connect(DSN) as db:
+        org,loc,bay=_org_and_bay(db)
+        db.execute("UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+                   (d["manager"],d["link"]))
+        db.execute("INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) VALUES(%s,%s)",
+                   (d["vehicle"],loc))
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,%s,%s,'INTAKE')""",(uuid4(),org,loc,d["intake"]))
+    token=d["tokens"][d["intake"]]
+    key=uuid4()
+    with psycopg.connect(DSN) as db:
+        a,original,_=create_appointment(db,token,org,loc,bay,d["link"],
+                                         start,start+timedelta(hours=1))
+        first=reschedule_appointment(db,token,org,a,bay,
+                        start+timedelta(hours=2),start+timedelta(hours=3),
+                        request_key=key)
+        assert first==reschedule_appointment(db,token,org,a,bay,
+                        (start+timedelta(hours=2)).astimezone(timezone(timedelta(hours=2))),
+                        (start+timedelta(hours=3)).astimezone(timezone(timedelta(hours=2))),
+                        request_key=key)
+        with pytest.raises(AppointmentKeyConflict):
+            reschedule_appointment(db,token,org,a,bay,
+                        start+timedelta(hours=4),start+timedelta(hours=5),
+                        request_key=key)
+        assert db.execute("SELECT count(*) FROM auto_appointment_reschedule WHERE appointment_id=%s",
+                          (a,)).fetchone()[0]==1
+        assert db.execute("SELECT count(*) FROM auto_reschedule_idempotency WHERE appointment_id=%s",
+                          (a,)).fetchone()[0]==1
+        with pytest.raises(AppointmentConflict):
+            reschedule_appointment(db,token,org,a,bay,
+                        start+timedelta(hours=2),start+timedelta(hours=3),
+                        request_key=uuid4())
+        assert db.execute("SELECT count(*) FROM auto_reschedule_idempotency WHERE appointment_id=%s",
+                          (a,)).fetchone()[0]==1
+        second=reschedule_appointment(db,token,org,a,bay,
+                        start+timedelta(hours=4),start+timedelta(hours=5))
+        assert second != first
+        # Replaying an old key still returns the original booking ID.
+        assert reschedule_appointment(db,token,org,a,bay,
+                        start+timedelta(hours=2),start+timedelta(hours=3),
+                        request_key=key)==first
+        assert db.execute("SELECT count(*) FROM auto_appointment_reschedule WHERE appointment_id=%s",
+                          (a,)).fetchone()[0]==2
+        assert db.execute("SELECT count(*) FROM auto_bay_booking WHERE organization_id=%s",
+                          (org,)).fetchone()[0]==3
+
+
+def test_reschedule_idempotency_rechecks_revoked_link_before_replay():
+    d=_scenario()
+    start=datetime.now(timezone.utc)+timedelta(days=15)
+    with psycopg.connect(DSN) as db:
+        org,loc,bay=_org_and_bay(db)
+        db.execute("UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+                   (d["manager"],d["link"]))
+        db.execute("INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) VALUES(%s,%s)",
+                   (d["vehicle"],loc))
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,%s,%s,'INTAKE')""",(uuid4(),org,loc,d["intake"]))
+    token=d["tokens"][d["intake"]]
+    with psycopg.connect(DSN) as db:
+        appointment,_,_=create_appointment(db,token,org,loc,bay,d["link"],
+                                           start,start+timedelta(hours=1))
+        key=uuid4()
+        args=(token,org,appointment,bay,start+timedelta(hours=2),start+timedelta(hours=3))
+        reschedule_appointment(db,*args,request_key=key)
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+        with pytest.raises(AppointmentDenied):
+            reschedule_appointment(db,*args,request_key=key)
