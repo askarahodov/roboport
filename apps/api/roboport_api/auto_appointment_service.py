@@ -1,5 +1,7 @@
 """Closed synthetic appointment creation, never public or production."""
 from datetime import datetime, timezone
+import hashlib
+import json
 from uuid import UUID, uuid4
 import psycopg
 from .auto_org_authority import organization_role_allows
@@ -10,11 +12,16 @@ class AppointmentDenied(ValueError):
 class AppointmentConflict(ValueError):
     pass
 
+class AppointmentKeyConflict(ValueError):
+    pass
+
 def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        location: UUID, bay: UUID, link: UUID,
-                       starts: datetime, ends: datetime, employee: UUID | None = None) -> tuple[UUID, UUID, UUID]:
+                       starts: datetime, ends: datetime, employee: UUID | None = None,
+                       request_key: UUID | None = None) -> tuple[UUID, UUID, UUID]:
     if (not all(isinstance(x, UUID) for x in (organization,location,bay,link))
             or (employee is not None and not isinstance(employee, UUID))
+            or (request_key is not None and not isinstance(request_key, UUID))
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
             or starts <= datetime.now(timezone.utc)
@@ -24,6 +31,35 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
         if not organization_role_allows(conn, token, organization, "INTAKE",
                                         location, for_mutation=True):
             raise AppointmentDenied("organization intake required")
+        # The unique ledger index serializes concurrent requests with the same
+        # actor/key. Its insert and the booking commit or roll back together.
+        booking, appointment, order = uuid4(),uuid4(),uuid4()
+        if request_key is not None:
+            from .session_lookup import session_subject
+            actor = session_subject(conn, token, for_mutation=True)
+            if actor is None:
+                raise AppointmentDenied("session unavailable")
+            fingerprint = hashlib.sha256(json.dumps({
+                "location":str(location),"bay":str(bay),"link":str(link),
+                "employee":str(employee) if employee else None,
+                "starts":starts.astimezone(timezone.utc).isoformat(),
+                "ends":ends.astimezone(timezone.utc).isoformat(),
+            },sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            inserted = conn.execute("""INSERT INTO auto_appointment_idempotency
+              (organization_id,actor_id,request_key,fingerprint,
+               appointment_id,booking_id,work_order_id)
+              VALUES (%s,%s,%s,%s,%s,%s,%s)
+              ON CONFLICT (organization_id,actor_id,request_key) DO NOTHING
+              RETURNING request_key""",
+              (organization,actor,request_key,fingerprint,appointment,booking,order)).fetchone()
+            if inserted is None:
+                existing = conn.execute("""SELECT fingerprint,appointment_id,booking_id,work_order_id
+                  FROM auto_appointment_idempotency
+                  WHERE organization_id=%s AND actor_id=%s AND request_key=%s""",
+                  (organization,actor,request_key)).fetchone()
+                if existing is None or existing[0] != fingerprint:
+                    raise AppointmentKeyConflict("idempotency key used for different request")
+                return existing[1],existing[2],existing[3]
         # Guard current ownership with row locks; no legacy roles are inherited.
         row = conn.execute(
             """SELECT link.vehicle_id FROM auto_vehicle_customer_link link
@@ -41,7 +77,6 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             (bay,organization,location),
         ).fetchone() is None:
             raise AppointmentDenied("bay unavailable")
-        booking, appointment, order = uuid4(),uuid4(),uuid4()
         try:
             with conn.transaction():
                 conn.execute(
