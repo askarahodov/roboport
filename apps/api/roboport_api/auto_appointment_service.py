@@ -88,13 +88,17 @@ def cancel_appointment(conn: psycopg.Connection, token: str,
             conn, token, organization, "INTAKE", scoped[0], for_mutation=True
         ):
             raise AppointmentDenied("organization intake required")
+        # Lock appointment before resolving the latest booking: rescheduling
+        # takes the same lock, so a concurrent cancel cannot target stale data.
+        conn.execute("SELECT id FROM auto_appointment WHERE id=%s FOR UPDATE", (appointment,))
+        current = current_appointment_booking(conn, appointment)
         booking = conn.execute(
             """SELECT b.id,b.canceled_at
-               FROM auto_appointment a JOIN auto_bay_booking b ON b.id=a.booking_id
+               FROM auto_appointment a JOIN auto_bay_booking b ON b.id=%s
                WHERE a.id=%s AND a.organization_id=%s
                  AND b.organization_id=a.organization_id
                  AND b.location_id=a.location_id FOR UPDATE OF b""",
-            (appointment,organization),
+            (current,appointment,organization),
         ).fetchone()
         if booking is None:
             raise AppointmentDenied("booking unavailable")
