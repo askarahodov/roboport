@@ -153,6 +153,12 @@ test('transfer clears old candidates and removed employee is excluded from looku
   await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
   expect(new URLSearchParams(queries[queries.length-1]).has('employeeId')).toBe(false);
   expect(new URLSearchParams(queries[queries.length-1]).get('bayId')).toBe(another);
+  await page.getByRole('button',{name:'Отмена переноса'}).click();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID специалиста'}).fill(appointment);
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
+  expect(new URLSearchParams(queries[queries.length-1]).get('employeeId')).toBe(appointment);
 });
 
 test('calendar blocks zero and reverse intervals before posting',async({page})=>{
