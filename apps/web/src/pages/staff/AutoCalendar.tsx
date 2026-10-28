@@ -33,6 +33,10 @@ export function AutoCalendar() {
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [form,setForm]=React.useState<Form>(empty);
   const [busy,setBusy]=React.useState(false);
+  const [slots,setSlots]=React.useState<Array<{startsAt:string;endsAt:string}>>([]);
+  const [slotsMessage,setSlotsMessage]=React.useState('');
+  const [slotsBusy,setSlotsBusy]=React.useState(false);
+  const slotRequest=React.useRef(0);
   const [clearEmployee,setClearEmployee]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [revision,setRevision]=React.useState(0);
@@ -70,7 +74,33 @@ export function AutoCalendar() {
       }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
   },[org,location,day,revision,valid,cursor]);
-  function resetPage(){setCursor(null);setHistory([]);}
+  function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
+  function resetPage(){setCursor(null);setHistory([]);resetSlots();}
+  async function findSlots(){
+    const retained=target?items.find(x=>x.appointmentId===target)?.employeeId:null;
+    const effectiveEmployee=target&&clearEmployee?null:(form.employee.trim()||retained||null);
+    if(!valid||!uuid.test(form.bay.trim())||
+       (effectiveEmployee!==null&&!uuid.test(effectiveEmployee)))return;
+    const requestId=++slotRequest.current;
+    setSlotsBusy(true);setSlots([]);setSlotsMessage('');
+    const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),day});
+    if(effectiveEmployee)query.set('employeeId',effectiveEmployee);
+    if(target&&!target.startsWith('cancel:'))query.set('appointmentId',target);
+    try{
+      const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
+        '/slot-candidates?'+query,{credentials:'include',cache:'no-store'});
+      if(!response.ok)throw new Error();
+      const data:unknown=await response.json();
+      if(!data||typeof data!=='object'||!('items' in data)||!Array.isArray(data.items)||
+        !data.items.every((x:unknown)=>x&&typeof x==='object'&&
+          'startsAt' in x&&typeof x.startsAt==='string'&&
+          'endsAt' in x&&typeof x.endsAt==='string'))throw new Error();
+      if(requestId!==slotRequest.current)return;
+      setSlots(data.items as Array<{startsAt:string;endsAt:string}>);
+      if(data.items.length===0)setSlotsMessage('Подходящих окон не найдено.');
+    }catch{if(requestId===slotRequest.current)setSlotsMessage('Не удалось проверить окна или нет доступа.');}
+    finally{if(requestId===slotRequest.current)setSlotsBusy(false);}
+  }
 
   async function action(path:string,payload:unknown,success:string){
     if(busy||!valid)return;
@@ -85,7 +115,7 @@ export function AutoCalendar() {
         body:JSON.stringify(payload)});
       if(!response.ok){setMessage(response.status===409?'Пост или специалист занят / смена недоступна (409).':
         [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
-      setMessage(success);setTarget(null);resetPage();setRevision(n=>n+1);
+      setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);resetPage();setRevision(n=>n+1);
     }catch{setMessage('Не удалось выполнить запрос. Проверьте сессию.');}
     finally{setBusy(false);}
   }
@@ -93,13 +123,21 @@ export function AutoCalendar() {
   function fields(includeLink:boolean){
     return <div>
       <label>UUID поста <input aria-label="UUID поста" value={form.bay}
-        onChange={e=>setForm(s=>({...s,bay:e.target.value}))}/></label>
+        onChange={e=>{resetSlots();setForm(s=>({...s,bay:e.target.value}));}}/></label>
       {includeLink&&<label>UUID связи клиента с автомобилем <input aria-label="UUID связи клиента"
         value={form.link} onChange={e=>setForm(s=>({...s,link:e.target.value}))}/></label>}
       <label>UUID специалиста (необязательно) <input aria-label="UUID специалиста" disabled={clearEmployee} value={form.employee}
-        onChange={e=>setForm(s=>({...s,employee:e.target.value}))}/></label>
+        onChange={e=>{resetSlots();setForm(s=>({...s,employee:e.target.value}));}}/></label>
       {target&&<label><input type="checkbox" aria-label="Снять назначение специалиста" checked={clearEmployee}
-        onChange={e=>setClearEmployee(e.target.checked)}/> Снять назначение специалиста</label>}
+        onChange={e=>{resetSlots();setClearEmployee(e.target.checked);}}/> Снять назначение специалиста</label>}
+      <button type="button" disabled={slotsBusy||!valid||!uuid.test(form.bay.trim())||
+        (!(target&&clearEmployee)&&!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
+        onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
+      {slotsMessage&&<p role="status">{slotsMessage}</p>}
+      {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><ul>
+        {slots.map(slot=><li key={slot.startsAt}><button type="button" onClick={()=>setForm(v=>({...v,starts:slot.startsAt,ends:slot.endsAt}))}>
+          {slot.startsAt} — {slot.endsAt}</button></li>)}
+      </ul></div>}
       <label>Начало (ISO 8601 с часовым поясом) <input aria-label="Начало ISO" value={form.starts}
         onChange={e=>setForm(s=>({...s,starts:e.target.value}))}
         placeholder="2030-01-01T10:00:00+03:00"/></label>
@@ -128,23 +166,23 @@ export function AutoCalendar() {
         <strong>{entry.startsAt} — {entry.endsAt}</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
         <p>Специалист: {entry.employeeId??'не назначен'}</p>
-        <button type="button" disabled={busy} onClick={()=>{setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId,employee:entry.employeeId??''});}}>
+        <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId,employee:entry.employeeId??''});}}>
           Перенести</button>
-        <button type="button" disabled={busy} onClick={()=>setTarget('cancel:'+entry.appointmentId)}>Отменить запись</button>
+        <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget('cancel:'+entry.appointmentId);}}>Отменить запись</button>
       </li>)}</ul>}
       <nav aria-label="Страницы календаря">
         <span>Страница {history.length+1}</span>
         {history.length>0&&<button type="button" disabled={busy} onClick={()=>{
-          setCursor(history[history.length-1]);setHistory(s=>s.slice(0,-1));
+          resetSlots();setCursor(history[history.length-1]);setHistory(s=>s.slice(0,-1));
         }}>Предыдущая страница</button>}
         {hasMore&&nextCursor&&<button type="button" disabled={busy} onClick={()=>{
-          setHistory(s=>[...s,cursor]);setCursor(nextCursor);
+          resetSlots();setHistory(s=>[...s,cursor]);setCursor(nextCursor);
         }}>Следующая страница</button>}
       </nav>
       {target?.startsWith('cancel:')&&<div role="group" aria-label="Подтверждение отмены">
         <p>Отменить выбранную запись?</p>
         <button type="button" disabled={busy} onClick={()=>void action(base+'/'+target.slice(7)+'/cancel',{},'Запись отменена.')}>Подтвердить отмену</button>
-        <button type="button" onClick={()=>setTarget(null)}>Назад</button>
+        <button type="button" onClick={()=>{resetSlots();setTarget(null);setClearEmployee(false);}}>Назад</button>
       </div>}
       {!target?.startsWith('cancel:')&&<form onSubmit={e=>{
         e.preventDefault();
@@ -156,7 +194,7 @@ export function AutoCalendar() {
       }}>
         <h2>{target?'Перенести запись':'Новая запись'}</h2>{fields(!target)}
         <button type="submit" disabled={busy||!validForm}>{target?'Сохранить перенос':'Создать запись'}</button>
-        {target&&<button type="button" onClick={()=>setTarget(null)}>Отмена переноса</button>}
+        {target&&<button type="button" onClick={()=>{resetSlots();setTarget(null);setClearEmployee(false);setForm(empty);}}>Отмена переноса</button>}
       </form>}
     </>}
     {message&&<p role="status">{message}</p>}

@@ -127,3 +127,30 @@ def read_calendar(org_id: str, request: Request, locationId: str,
              "nextAppointmentId":page[-1]["appointmentId"]} if more else {})
     return JSONResponse(content={"items":page,"hasMore":more,**cursor},
                         headers={"Cache-Control":"no-store"})
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/slot-candidates")
+def read_slot_candidates(org_id: str, request: Request, locationId: str,
+                         bayId: str, day: str, employeeId: str | None = None,
+                         appointmentId: str | None = None):
+    from .auto_slot_candidates import candidate_slots, SlotsDenied
+    from datetime import timezone
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,location,bay=UUID(org_id),UUID(locationId),UUID(bayId)
+        employee=UUID(employeeId) if employeeId is not None else None
+        appointment=UUID(appointmentId) if appointmentId is not None else None
+        if len(day)!=10 or datetime.strptime(day,"%Y-%m-%d").strftime("%Y-%m-%d")!=day:
+            raise ValueError("invalid UTC day")
+        start=datetime.strptime(day,"%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            slots=candidate_slots(db,request.cookies.get("rp_session",""),
+                                  org,location,bay,start,employee,appointment)
+        except SlotsDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(content={"items":slots,"guaranteed":False},
+                        headers={"Cache-Control":"no-store"})
