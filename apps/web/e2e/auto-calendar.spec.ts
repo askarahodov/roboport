@@ -156,7 +156,36 @@ test('calendar warns when the backend has additional records',async({page})=>{
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
-  await expect(page.getByRole('alert')).toContainText('Полный список недоступен');
+  await expect(page.getByRole('alert')).toContainText('Есть дополнительные записи');
+});
+
+test('calendar navigates all pages and resets cursor on tenant switch',async({page})=>{
+  const nextOrg='77777777-7777-4777-8777-777777777777';
+  const queries:string[]=[];
+  await page.route(base,route=>{
+    const req=route.request();
+    const url=new URL(req.url());
+    queries.push(url.search);
+    const second=url.searchParams.has('afterStartsAt');
+    const oldTenant=url.pathname.includes(org);
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      items:[],hasMore:oldTenant&&!second,
+      ...(oldTenant&&!second?{nextStartsAt:'2030-01-01T10:00:00+00:00',nextAppointmentId:appointment}:{})
+    })});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByRole('button',{name:'Следующая страница'})).toBeVisible();
+  await page.getByRole('button',{name:'Следующая страница'}).click();
+  await expect(page.getByText('Страница 2')).toBeVisible();
+  expect(queries.some(q=>new URLSearchParams(q).get('afterAppointmentId')===appointment)).toBe(true);
+  await page.getByRole('button',{name:'Предыдущая страница'}).click();
+  await expect(page.getByText('Страница 1')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(nextOrg);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await expect(page.getByText('Страница 1')).toBeVisible();
+  expect(new URLSearchParams(queries[queries.length-1]).has('afterStartsAt')).toBe(false);
 });
 
 test('calendar mobile layout remains in viewport',async({page})=>{
