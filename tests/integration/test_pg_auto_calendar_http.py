@@ -89,6 +89,19 @@ def test_calendar_101_rows_signals_truncation_without_cross_tenant_data(monkeypa
     payload=response.json()
     assert len(payload["items"])==100
     assert payload["hasMore"] is True
+    assert payload["nextStartsAt"]==payload["items"][-1]["startsAt"]
+    assert payload["nextAppointmentId"]==payload["items"][-1]["appointmentId"]
+    second=client.get(url,params={**args,"afterStartsAt":payload["nextStartsAt"],
+                                  "afterAppointmentId":payload["nextAppointmentId"]})
+    assert second.status_code==200,second.text
+    assert len(second.json()["items"])==1
+    assert second.json()["hasMore"] is False
+    assert "nextStartsAt" not in second.json()
+    assert second.json()["items"][0]["appointmentId"] not in {
+        item["appointmentId"] for item in payload["items"]}
+    assert client.get(url,params={**args,"afterStartsAt":payload["nextStartsAt"]}).status_code==403
+    assert client.get(url,params={**args,"afterStartsAt":"bad",
+        "afterAppointmentId":payload["nextAppointmentId"]}).status_code==422
     assert len({item["appointmentId"] for item in payload["items"]})==100
     assert [item["startsAt"] for item in payload["items"]]==sorted(
         item["startsAt"] for item in payload["items"])
