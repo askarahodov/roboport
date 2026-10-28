@@ -57,7 +57,7 @@ test('admin console creates and revokes only the selected tenant grant', async (
   expect(posts).toHaveLength(1);
   await page.getByRole('button', { name: 'Подтвердить отзыв' }).click();
   await expect.poll(() => posts.length, { message: 'revoke must submit exactly one POST' }).toBe(2);
-  await expect(page.getByRole('status')).toContainText('Доступ сотрудника отозван.');
+  await expect(page.getByRole('status').filter({hasText:'Доступ сотрудника отозван.'})).toBeVisible();
   await expect(page.getByText('Активных назначений нет.')).toBeVisible();
   expect(posts).toHaveLength(2);
   expect(posts[0]).toEqual({
