@@ -10,7 +10,7 @@ from roboport_api.auto_parts_provider import (
 
 def test_implements_vendor_independent_protocol_and_provenance():
     provider = FixturePartsCatalog()
-    assert isinstance(provider, PartsCatalogProvider) if getattr(PartsCatalogProvider, "_is_runtime_protocol", False) else callable(provider.search_by_oem)
+    assert isinstance(provider, PartsCatalogProvider)
     result = provider.search_by_oem(" syn-001 ")
     assert len(result) == 1
     part = result[0]
@@ -74,3 +74,5 @@ def test_malformed_provider_record_fails_closed():
             CatalogPart(**(args | {field: ""}))
     with pytest.raises(ValueError):
         CatalogPart(**(args | {"retrieved_at": datetime(2026, 1, 1)}))
+    with pytest.raises(ValueError):
+        CatalogPart(**(args | {"applicability": "guess"}))
