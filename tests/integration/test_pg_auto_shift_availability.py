@@ -1,5 +1,6 @@
 """PG17 shift coverage, tenant boundaries, cancellation and invalid inputs."""
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 import psycopg
@@ -53,3 +54,20 @@ def test_adjacent_shifts_do_not_falsely_cover_single_long_appointment():
         assert shift_covers_interval(db,org,loc,actor,start,middle)
         assert shift_covers_interval(db,org,loc,actor,middle,end)
         assert not shift_covers_interval(db,org,loc,actor,start,end)
+
+
+def test_dst_fold_endpoints_are_compared_by_absolute_utc_instant():
+    actor=_scenario()["intake"]
+    zone=ZoneInfo("America/New_York")
+    with psycopg.connect(DSN) as db:
+        org,loc,_=_org_and_bay(db)
+        db.execute("""INSERT INTO auto_staff_shift
+          (id,organization_id,location_id,user_id,starts_at,ends_at)
+          VALUES(%s,%s,%s,%s,%s,%s)""",
+          (uuid4(),org,loc,actor,
+           datetime(2030,11,3,5,0,tzinfo=timezone.utc),
+           datetime(2030,11,3,7,0,tzinfo=timezone.utc)))
+        late=datetime(2030,11,3,1,15,tzinfo=zone,fold=1)
+        early=datetime(2030,11,3,1,45,tzinfo=zone,fold=0)
+        assert not shift_covers_interval(db,org,loc,actor,late,early)
+        assert shift_covers_interval(db,org,loc,actor,early,late)
