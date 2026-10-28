@@ -3,7 +3,6 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCS = ROOT / "docs" / "auto"
 
 
 def _read(relative: str) -> str:
@@ -48,7 +47,7 @@ def test_full_product_end_state_and_migration_not_robot_plus_auto_tab():
 def test_roadmap_tracks_all_new_business_verticals_and_release_boundary():
     roadmap = _read("docs/auto/FEATURE_ROADMAP.md")
     for issue in range(165, 175):
-        assert f"#{issue}" in roadmap or issue == 174
+        assert f"#{issue}" in roadmap
     for issue in ("#119", "#112", "#113", "#114", "#115", "#117", "#121"):
         assert issue in roadmap
     assert "current-dev" in roadmap
