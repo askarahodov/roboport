@@ -3,8 +3,8 @@ import React from 'react';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Entry = { appointmentId:string; bookingId:string; bayId:string;
   startsAt:string; endsAt:string; workOrderId:string };
-type Form = { bay:string; link:string; starts:string; ends:string };
-const empty:Form={bay:'',link:'',starts:'',ends:''};
+type Form = { bay:string; link:string; employee:string; starts:string; ends:string };
+const empty:Form={bay:'',link:'',employee:'',starts:'',ends:''};
 const validUtcDay=(day:string)=>{
   if(!/^\d{4}-\d{2}-\d{2}$/.test(day))return false;
   const value=new Date(day+'T00:00:00Z');
@@ -80,7 +80,7 @@ export function AutoCalendar() {
       const response=await fetch(path,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':data.csrfToken},
         body:JSON.stringify(payload)});
-      if(!response.ok){setMessage(response.status===409?'Пост занят (409).':
+      if(!response.ok){setMessage(response.status===409?'Пост или специалист занят / смена недоступна (409).':
         [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
       setMessage(success);setTarget(null);resetPage();setRevision(n=>n+1);
     }catch{setMessage('Не удалось выполнить запрос. Проверьте сессию.');}
@@ -93,6 +93,8 @@ export function AutoCalendar() {
         onChange={e=>setForm(s=>({...s,bay:e.target.value}))}/></label>
       {includeLink&&<label>UUID связи клиента с автомобилем <input aria-label="UUID связи клиента"
         value={form.link} onChange={e=>setForm(s=>({...s,link:e.target.value}))}/></label>}
+      <label>UUID специалиста (необязательно) <input aria-label="UUID специалиста" value={form.employee}
+        onChange={e=>setForm(s=>({...s,employee:e.target.value}))}/></label>
       <label>Начало (ISO 8601 с часовым поясом) <input aria-label="Начало ISO" value={form.starts}
         onChange={e=>setForm(s=>({...s,starts:e.target.value}))}
         placeholder="2030-01-01T10:00:00+03:00"/></label>
@@ -100,7 +102,7 @@ export function AutoCalendar() {
         onChange={e=>setForm(s=>({...s,ends:e.target.value}))}/></label>
     </div>;
   }
-  const validForm=uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
+  const validForm=(!form.employee.trim()||uuid.test(form.employee.trim()))&&uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
     validIsoInstant(form.starts)&&validIsoInstant(form.ends)&&
     Date.parse(form.ends)>Date.parse(form.starts)&&
     Date.parse(form.ends)-Date.parse(form.starts)<=86400000&&
@@ -141,7 +143,8 @@ export function AutoCalendar() {
       {!target?.startsWith('cancel:')&&<form onSubmit={e=>{
         e.preventDefault();
         if(!validForm)return;
-        const payload={bayId:form.bay.trim(),startsAt:form.starts,endsAt:form.ends};
+        const payload={bayId:form.bay.trim(),startsAt:form.starts,endsAt:form.ends,
+          ...(form.employee.trim()?{employeeId:form.employee.trim()}:{})};
         if(target)void action(base+'/'+target+'/reschedule',payload,'Запись перенесена.');
         else void action(base,{...payload,locationId:location.trim(),customerLinkId:form.link.trim()},'Запись создана.');
       }}>
