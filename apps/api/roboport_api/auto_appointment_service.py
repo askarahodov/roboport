@@ -108,3 +108,84 @@ def cancel_appointment(conn: psycopg.Connection, token: str,
             (uuid4(),appointment,organization,actor),
         )
         return "CANCELED"
+
+
+def current_appointment_booking(conn: psycopg.Connection, appointment: UUID) -> UUID:
+    """Caller must first lock the appointment identity row FOR UPDATE."""
+    row = conn.execute(
+        """SELECT COALESCE(
+             (SELECT r.new_booking_id FROM auto_appointment_reschedule r
+              WHERE r.appointment_id=a.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1),
+             a.booking_id)
+           FROM auto_appointment a WHERE a.id=%s""", (appointment,),
+    ).fetchone()
+    if row is None:
+        raise AppointmentDenied("appointment unavailable")
+    return row[0]
+
+
+def reschedule_appointment(conn: psycopg.Connection, token: str,
+                           organization: UUID, appointment: UUID, bay: UUID,
+                           starts: datetime, ends: datetime) -> UUID:
+    if (not all(isinstance(x, UUID) for x in (organization,appointment,bay))
+            or not all(isinstance(t, datetime) and t.tzinfo is not None
+                       and t.utcoffset() is not None for t in (starts,ends))
+            or starts <= datetime.now(timezone.utc) or ends <= starts
+            or (ends-starts).total_seconds() > 86400):
+        raise AppointmentDenied("invalid reschedule")
+    with conn.transaction():
+        # Serialize all reschedules of one appointment with a row-level lock.
+        a = conn.execute(
+            """SELECT location_id,customer_link_id,vehicle_id
+               FROM auto_appointment
+               WHERE id=%s AND organization_id=%s FOR UPDATE""",
+            (appointment,organization),
+        ).fetchone()
+        if a is None or not organization_role_allows(
+                conn,token,organization,"INTAKE",a[0],for_mutation=True):
+            raise AppointmentDenied("appointment or scope unavailable")
+        scope = conn.execute(
+            """SELECT 1 FROM auto_vehicle_customer_link link
+               JOIN auto_vehicle_location_binding b ON b.vehicle_id=link.vehicle_id
+               WHERE link.id=%s AND link.vehicle_id=%s AND link.revoked_at IS NULL
+                 AND link.verified_at IS NOT NULL AND b.location_id=%s
+               FOR SHARE OF link,b""", (a[1],a[2],a[0]),
+        ).fetchone()
+        if scope is None:
+            raise AppointmentDenied("verified vehicle link unavailable")
+        old = current_appointment_booking(conn,appointment)
+        previous = conn.execute(
+            """SELECT id,canceled_at FROM auto_bay_booking
+               WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
+            (old,organization,a[0]),
+        ).fetchone()
+        if previous is None or previous[1] is not None:
+            raise AppointmentDenied("appointment already canceled")
+        # The INSERT trigger also locks enabled bay/location/organization rows.
+        fresh = uuid4()
+        try:
+            with conn.transaction():
+                conn.execute(
+                    """INSERT INTO auto_bay_booking
+                       (id,organization_id,location_id,bay_id,starts_at,ends_at)
+                       VALUES(%s,%s,%s,%s,%s,%s)""",
+                    (fresh,organization,a[0],bay,starts,ends),
+                )
+                from .session_lookup import session_subject
+                actor = session_subject(conn,token,for_mutation=True)
+                if actor is None:
+                    raise AppointmentDenied("session unavailable")
+                conn.execute(
+                    """INSERT INTO auto_appointment_reschedule
+                       (id,appointment_id,organization_id,old_booking_id,
+                        new_booking_id,actor_id)
+                       VALUES(%s,%s,%s,%s,%s,%s)""",
+                    (uuid4(),appointment,organization,old,fresh,actor),
+                )
+                conn.execute(
+                    "UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",
+                    (old,),
+                )
+        except psycopg.errors.ExclusionViolation as exc:
+            raise AppointmentConflict("bay already reserved") from exc
+        return fresh
