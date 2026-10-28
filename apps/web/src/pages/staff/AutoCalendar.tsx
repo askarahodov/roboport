@@ -11,6 +11,16 @@ const validUtcDay=(day:string)=>{
   return !Number.isNaN(value.getTime())&&value.toISOString().slice(0,10)===day;
 };
 
+const validIsoInstant=(value:string)=>{
+  const match=/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-](\d{2}):(\d{2}))$/i.exec(value);
+  if(!match||!validUtcDay(match[1]))return false;
+  const hour=Number(match[2]),minute=Number(match[3]),second=Number(match[4]);
+  const offsetHour=match[7]===undefined?0:Number(match[7]);
+  const offsetMinute=match[8]===undefined?0:Number(match[8]);
+  return hour<24&&minute<60&&second<60&&offsetHour<=14&&offsetMinute<60&&
+    (offsetHour!==14||offsetMinute===0)&&!Number.isNaN(Date.parse(value));
+};
+
 export function AutoCalendar() {
   const [org,setOrg]=React.useState('');
   const [location,setLocation]=React.useState('');
@@ -91,8 +101,7 @@ export function AutoCalendar() {
     </div>;
   }
   const validForm=uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
-    !Number.isNaN(Date.parse(form.starts))&&!Number.isNaN(Date.parse(form.ends)) &&
-    /(?:Z|[+-]\d{2}:\d{2})$/i.test(form.starts)&&/(?:Z|[+-]\d{2}:\d{2})$/i.test(form.ends)&&
+    validIsoInstant(form.starts)&&validIsoInstant(form.ends)&&
     Date.parse(form.ends)>Date.parse(form.starts)&&
     Date.parse(form.ends)-Date.parse(form.starts)<=86400000&&
     Date.parse(form.starts)>Date.now();
