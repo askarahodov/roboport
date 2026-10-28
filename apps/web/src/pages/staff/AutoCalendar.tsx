@@ -17,6 +17,9 @@ export function AutoCalendar() {
   const [day,setDay]=React.useState(()=>new Date().toISOString().slice(0,10));
   const [items,setItems]=React.useState<Entry[]>([]);
   const [hasMore,setHasMore]=React.useState(false);
+  const [cursor,setCursor]=React.useState<{startsAt:string;appointmentId:string}|null>(null);
+  const [nextCursor,setNextCursor]=React.useState<{startsAt:string;appointmentId:string}|null>(null);
+  const [history,setHistory]=React.useState<Array<{startsAt:string;appointmentId:string}|null>>([]);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [form,setForm]=React.useState<Form>(empty);
   const [busy,setBusy]=React.useState(false);
@@ -25,7 +28,7 @@ export function AutoCalendar() {
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
   React.useEffect(()=>{
-    setItems([]);setHasMore(false);setMessage('');setTarget(null);
+    setItems([]);setHasMore(false);setNextCursor(null);setMessage('');setTarget(null);
     if(!valid){setStatus('idle');return;}
     const controller=new AbortController();
     setStatus('loading');
@@ -34,6 +37,7 @@ export function AutoCalendar() {
     if(Number.isNaN(start.getTime())){setStatus('idle');return;}
     const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+'/calendar';
     const query=new URLSearchParams({locationId:location.trim(),startsAt:start.toISOString(),endsAt:end.toISOString()});
+    if(cursor){query.set('afterStartsAt',cursor.startsAt);query.set('afterAppointmentId',cursor.appointmentId);}
     void fetch(path+'?'+query,{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async response=>{
         if(controller.signal.aborted)return;
@@ -45,10 +49,15 @@ export function AutoCalendar() {
             ['appointmentId','bookingId','bayId','workOrderId','startsAt','endsAt'].every(
               key=>key in x&&typeof (x as Record<string,unknown>)[key]==='string')))throw new Error();
         if(!('hasMore' in data)||typeof data.hasMore!=='boolean')throw new Error();
-        if(!controller.signal.aborted){setItems(data.items as Entry[]);setHasMore(data.hasMore);setStatus('ready');}
+        const next=data.hasMore && 'nextStartsAt' in data && typeof data.nextStartsAt==='string' &&
+          'nextAppointmentId' in data && typeof data.nextAppointmentId==='string' &&
+          uuid.test(data.nextAppointmentId)?{startsAt:data.nextStartsAt,appointmentId:data.nextAppointmentId}:null;
+        if(data.hasMore&&!next)throw new Error();
+        if(!controller.signal.aborted){setItems(data.items as Entry[]);setHasMore(data.hasMore);setNextCursor(next);setStatus('ready');}
       }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
-  },[org,location,day,revision,valid]);
+  },[org,location,day,revision,valid,cursor]);
+  function resetPage(){setCursor(null);setHistory([]);}
 
   async function action(path:string,payload:unknown,success:string){
     if(busy||!valid)return;
@@ -63,7 +72,7 @@ export function AutoCalendar() {
         body:JSON.stringify(payload)});
       if(!response.ok){setMessage(response.status===409?'Пост занят (409).':
         [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
-      setMessage(success);setTarget(null);setRevision(n=>n+1);
+      setMessage(success);setTarget(null);resetPage();setRevision(n=>n+1);
     }catch{setMessage('Не удалось выполнить запрос. Проверьте сессию.');}
     finally{setBusy(false);}
   }
@@ -90,15 +99,15 @@ export function AutoCalendar() {
   return <section aria-label="Календарь приёмщика (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>Календарь приёмщика</h1>
     <p>Синтетический HTTPS-стенд. Время поиска — сутки UTC. Реальных клиентов не добавляйте.</p>
-    <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>setOrg(e.target.value)}/></label>
-    <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>setLocation(e.target.value)}/></label>
-    <label>День (UTC) <input aria-label="День UTC" type="date" value={day} onChange={e=>setDay(e.target.value)}/></label>
+    <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>{resetPage();setOrg(e.target.value);}}/></label>
+    <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>{resetPage();setLocation(e.target.value);}}/></label>
+    <label>День (UTC) <input aria-label="День UTC" type="date" value={day} onChange={e=>{resetPage();setDay(e.target.value);}}/></label>
     {status==='idle'&&<p>Укажите организацию, филиал и день.</p>}
     {status==='loading'&&<p role="status">Загрузка календаря…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или dev API отключён.</p>}
     {status==='error'&&<p role="alert">Ошибка загрузки календаря. <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить</button></p>}
     {status==='ready'&&<><h2>Записи</h2>
-      {hasMore&&<p role="alert">Показаны только первые 100 записей. Полный список недоступен в этом представлении.</p>}
+      {hasMore&&<p role="status">Есть дополнительные записи. Перейдите на следующую страницу.</p>}
       {items.length===0?<p>Записей нет.</p>:<ul>{items.map(entry=><li key={entry.appointmentId}>
         <strong>{entry.startsAt} — {entry.endsAt}</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
@@ -106,6 +115,15 @@ export function AutoCalendar() {
           Перенести</button>
         <button type="button" disabled={busy} onClick={()=>setTarget('cancel:'+entry.appointmentId)}>Отменить запись</button>
       </li>)}</ul>}
+      <nav aria-label="Страницы календаря">
+        <span>Страница {history.length+1}</span>
+        {history.length>0&&<button type="button" disabled={busy} onClick={()=>{
+          setCursor(history[history.length-1]);setHistory(s=>s.slice(0,-1));
+        }}>Предыдущая страница</button>}
+        {hasMore&&nextCursor&&<button type="button" disabled={busy} onClick={()=>{
+          setHistory(s=>[...s,cursor]);setCursor(nextCursor);
+        }}>Следующая страница</button>}
+      </nav>
       {target?.startsWith('cancel:')&&<div role="group" aria-label="Подтверждение отмены">
         <p>Отменить выбранную запись?</p>
         <button type="button" disabled={busy} onClick={()=>void action(base+'/'+target.slice(7)+'/cancel',{},'Запись отменена.')}>Подтвердить отмену</button>
