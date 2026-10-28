@@ -115,4 +115,4 @@ def read_calendar(org_id: str, request: Request, locationId: str,
                                  org,location,start,end)
         except CalendarDenied:
             return _response(request,403,"FORBIDDEN")
-    return JSONResponse(content={"items":items},headers={"Cache-Control":"no-store"})
+    return JSONResponse(content={"items":items[:100],"hasMore":len(items)>100},headers={"Cache-Control":"no-store"})
