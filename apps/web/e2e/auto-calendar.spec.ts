@@ -11,7 +11,7 @@ const base='**/api/v1/dev/auto/organizations/**';
 test('calendar opens on the current UTC day, not a fixed fixture date',async({page})=>{
   await page.clock.setFixedTime(new Date('2026-10-28T23:30:00Z'));
   await page.goto('/staff/auto-calendar');
-  await expect(page.getByRole('textbox',{name:'День UTC'})).toHaveValue('2026-10-28');
+  await expect(page.getByLabel('День UTC')).toHaveValue('2026-10-28');
 });
 
 test('calendar denies access without showing previous tenant records',async({page})=>{
@@ -120,8 +120,8 @@ test('calendar rejects invalid UTC calendar day before querying API',async({page
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
   await expect(page.getByText('Записей нет.')).toBeVisible();
   const before=reads;
-  await page.getByRole('textbox',{name:'День UTC'}).evaluate((input:HTMLInputElement)=>{input.type='text';});
-  await page.getByRole('textbox',{name:'День UTC'}).fill('2030-02-30');
+  await page.getByLabel('День UTC').evaluate((input:HTMLInputElement)=>{input.type='text';});
+  await page.getByLabel('День UTC').fill('2030-02-30');
   await expect(page.getByText('Укажите организацию, филиал и день.')).toBeVisible();
   expect(reads).toBe(before);
 });
