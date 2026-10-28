@@ -152,7 +152,7 @@ test('calendar refuses past and overlong appointments before posting',async({pag
 
 test('calendar warns when the backend has additional records',async({page})=>{
   await page.route(base,route=>route.fulfill({status:200,contentType:'application/json',
-    body:'{"items":[],"hasMore":true}'}));
+    body:'{"items":[],"hasMore":true,"nextStartsAt":"2030-01-01T10:00:00Z","nextAppointmentId":"55555555-5555-4555-8555-555555555555"}'}));
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
