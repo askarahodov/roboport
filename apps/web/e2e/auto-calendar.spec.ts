@@ -8,6 +8,12 @@ const appointment='55555555-5555-4555-8555-555555555555';
 const work='66666666-6666-4666-8666-666666666666';
 const base='**/api/v1/dev/auto/organizations/**';
 
+test('calendar opens on the current UTC day, not a fixed fixture date',async({page})=>{
+  await page.clock.setFixedTime(new Date('2026-10-28T23:30:00Z'));
+  await page.goto('/staff/auto-calendar');
+  await expect(page.getByRole('textbox',{name:'День UTC'})).toHaveValue('2026-10-28');
+});
+
 test('calendar denies access without showing previous tenant records',async({page})=>{
   await page.route(base,route=>route.fulfill({status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'}));
   await page.goto('/');
