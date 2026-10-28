@@ -37,15 +37,25 @@ def test_dev_staff_http_requires_admin_tenant_session_and_csrf(monkeypatch):
     assert client.post(wrong, json=payload, headers=headers).status_code == 403
     assert client.post(url, json={**payload, "role": "ADMIN"},
                        headers=headers).status_code == 403
+    # GET also requires a live ADMIN of this organization, without CSRF mutation token.
+    assert client.get(wrong).status_code == 403
+    listed = client.get(url)
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == {"items": []}
     created = client.post(url, json=payload, headers=headers)
     assert created.status_code == 201, created.text
     ident = created.json()["grantId"]
+    listed = client.get(url)
+    assert listed.status_code == 200
+    assert listed.json()["items"] == [{"grantId": ident, "userId": str(d["intake"]),
+        "role": "INTAKE", "locationId": str(loc)}]
     assert client.post(url, json=payload, headers=headers).status_code == 409
     assert client.post(f"{wrong}/{ident}/revoke", headers=headers).status_code == 403
     revoked = client.post(f"{url}/{ident}/revoke", headers=headers)
     assert revoked.status_code == 200, revoked.text
     assert revoked.json()["status"] == "REVOKED"
     assert client.post(f"{url}/{ident}/revoke", headers=headers).json()["status"] == "ALREADY_REVOKED"
+    assert client.get(url).json() == {"items": []}
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT actor_id,action FROM auto_org_staff_action
             WHERE grant_id=%s ORDER BY created_at,id""", (ident,)).fetchall() == [
