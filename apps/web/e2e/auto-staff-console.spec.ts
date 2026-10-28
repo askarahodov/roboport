@@ -140,7 +140,7 @@ test('switching organizations clears previous success and active staff data', as
   await expect(page.getByText(user)).toBeVisible();
   await page.getByRole('textbox', { name: 'UUID пользователя' }).fill(user);
   await page.getByRole('button', { name: 'Назначить' }).click();
-  await expect(page.getByRole('status')).toContainText('Назначение создано.');
+  await expect(page.getByRole('status').filter({ hasText: 'Назначение создано.' })).toBeVisible();
   await page.getByRole('textbox', { name: 'UUID организации' }).fill(otherOrg);
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByText(user)).toHaveCount(0);
