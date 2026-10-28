@@ -111,6 +111,9 @@ def test_idempotent_create_replays_same_ids_and_rejects_payload_change():
             create_appointment(db,*args,request_key=uuid4())
         assert db.execute("SELECT count(*) FROM auto_appointment_idempotency WHERE organization_id=%s",
                           (org,)).fetchone()[0]==1
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+        with pytest.raises(AppointmentDenied):
+            create_appointment(db,*args,request_key=key)
 
 
 def test_idempotency_concurrent_same_key_waits_for_committed_result():
