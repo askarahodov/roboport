@@ -153,6 +153,12 @@ test('transfer clears old candidates and removed employee is excluded from looku
   await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
   expect(new URLSearchParams(queries[queries.length-1]).has('employeeId')).toBe(false);
   expect(new URLSearchParams(queries[queries.length-1]).get('bayId')).toBe(another);
+  expect(new URLSearchParams(queries[queries.length-1]).get('appointmentId')).toBe(appointment);
+  await page.getByRole('checkbox',{name:'Снять назначение специалиста'}).uncheck();
+  await page.getByRole('textbox',{name:'UUID специалиста'}).fill('');
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
+  expect(new URLSearchParams(queries[queries.length-1]).get('employeeId')).toBe(appointment);
   await page.getByRole('button',{name:'Отмена переноса'}).click();
   await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
   await page.getByRole('textbox',{name:'UUID специалиста'}).fill(appointment);
