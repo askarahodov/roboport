@@ -45,3 +45,58 @@ def test_calendar_tenant_active_booking_and_limited_window(monkeypatch):
     assert client.get(wrong,params=args).status_code==403
     assert client.get(url,params={**args,"locationId":str(other_loc)}).status_code==403
     assert client.get(url,params={**args,"endsAt":(start+timedelta(days=10)).isoformat()}).status_code==403
+
+
+def test_calendar_101_rows_signals_truncation_without_cross_tenant_data(monkeypatch):
+    """PG17 boundary: 100 items returned, 101st detected, no customer metadata."""
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,bay=_org_and_bay(db)
+        db.execute("UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+                   (d["manager"],d["link"]))
+        db.execute("INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) VALUES(%s,%s)",
+                   (d["vehicle"],loc))
+        db.execute("""INSERT INTO auto_organization_role_grant
+           (id,organization_id,location_id,user_id,role_code)
+           VALUES(%s,%s,%s,%s,'INTAKE')""",(uuid4(),org,loc,d["intake"]))
+        vehicle=db.execute("SELECT vehicle_id FROM auto_vehicle_customer_link WHERE id=%s",
+                           (d["link"],)).fetchone()[0]
+        start=datetime.now(timezone.utc)+timedelta(days=3)
+        for index in range(101):
+            booking,appointment,order=uuid4(),uuid4(),uuid4()
+            begins=start+timedelta(minutes=10*index)
+            db.execute("""INSERT INTO auto_bay_booking
+                (id,organization_id,location_id,bay_id,starts_at,ends_at)
+                VALUES(%s,%s,%s,%s,%s,%s)""",
+                (booking,org,loc,bay,begins,begins+timedelta(minutes=5)))
+            db.execute("""INSERT INTO auto_appointment
+                (id,booking_id,organization_id,location_id,vehicle_id,customer_link_id)
+                VALUES(%s,%s,%s,%s,%s,%s)""",
+                (appointment,booking,org,loc,vehicle,d["link"]))
+            db.execute("""INSERT INTO auto_work_order
+                (id,appointment_id,organization_id,location_id)
+                VALUES(%s,%s,%s,%s)""",(order,appointment,org,loc))
+    client=TestClient(app,base_url="https://127.0.0.1")
+    client.cookies.set("rp_session",d["tokens"][d["intake"]])
+    url=f"/api/v1/dev/auto/organizations/{org}/calendar"
+    args={"locationId":str(loc),"startsAt":start.isoformat(),
+          "endsAt":(start+timedelta(days=1)).isoformat()}
+    response=client.get(url,params=args)
+    assert response.status_code==200,response.text
+    payload=response.json()
+    assert len(payload["items"])==100
+    assert payload["hasMore"] is True
+    assert len({item["appointmentId"] for item in payload["items"]})==100
+    assert [item["startsAt"] for item in payload["items"]]==sorted(
+        item["startsAt"] for item in payload["items"])
+    assert "customerId" not in response.text and "vehicleId" not in response.text
+    # Exactly 100 overlapping bookings must not report a phantom next page.
+    boundary=client.get(url,params={**args,
+        "endsAt":(start+timedelta(minutes=1000)).isoformat()})
+    assert boundary.status_code==200,boundary.text
+    assert len(boundary.json()["items"])==100
+    assert boundary.json()["hasMore"] is False
+    assert client.get(url,params={**args,"locationId":str(uuid4())}).status_code==403
