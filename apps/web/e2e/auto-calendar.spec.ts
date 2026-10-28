@@ -188,6 +188,28 @@ test('calendar navigates all pages and resets cursor on tenant switch',async({pa
   expect(new URLSearchParams(queries[queries.length-1]).has('afterStartsAt')).toBe(false);
 });
 
+test('calendar rejects impossible ISO instants and offset before POST',async({page})=>{
+  let posts=0;
+  await page.route(base,route=>{
+    if(route.request().method()==='POST'){posts++;return route.fulfill({status:201,body:'{}'});}
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-02-30T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-03-01T11:00:00Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-03-01T10:00:00+14:30');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-03-01T10:00:00+03:00');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeEnabled();
+  expect(posts).toBe(0);
+});
+
 test('calendar mobile layout remains in viewport',async({page})=>{
   await page.setViewportSize({width:390,height:844});
   await page.route(base,route=>route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'}));
