@@ -59,6 +59,53 @@ test('calendar creates, reschedules and cancels via exact tenant paths',async({p
     '/api/v1/dev/auto/organizations/'+org+'/appointments/'+appointment+'/cancel']);
 });
 
+test('calendar blocks zero and reverse intervals before posting',async({page})=>{
+  let posts=0;
+  await page.route(base,route=>{
+    if(route.request().method()==='POST'){posts++;return route.fulfill({status:201,body:'{}'});}
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T10:00:00Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T09:00:00Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeEnabled();
+  expect(posts).toBe(0);
+});
+
+test('calendar ignores an old denied response after tenant changes',async({page})=>{
+  const nextOrg='77777777-7777-4777-8777-777777777777';
+  let oldRequested!:()=>void;
+  const oldRequest=new Promise<void>(resolve=>{oldRequested=resolve;});
+  await page.route(base,async route=>{
+    const requestOrg=new URL(route.request().url()).pathname.split('/organizations/')[1]?.split('/')[0];
+    if(requestOrg===org){
+      oldRequested();
+      await new Promise(resolve=>setTimeout(resolve,250));
+      try{await route.fulfill({status:403,body:'{"code":"FORBIDDEN"}'});}catch{return;}
+    }else{
+      await route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+    }
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await oldRequest;
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(nextOrg);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.waitForTimeout(350);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 test('calendar mobile layout remains in viewport',async({page})=>{
   await page.setViewportSize({width:390,height:844});
   await page.route(base,route=>route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}));

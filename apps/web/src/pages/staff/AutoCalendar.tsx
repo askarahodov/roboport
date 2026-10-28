@@ -30,6 +30,7 @@ export function AutoCalendar() {
     const query=new URLSearchParams({locationId:location.trim(),startsAt:start.toISOString(),endsAt:end.toISOString()});
     void fetch(path+'?'+query,{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async response=>{
+        if(controller.signal.aborted)return;
         if([401,403,404].includes(response.status)){setStatus('denied');return;}
         if(!response.ok)throw new Error();
         const data:unknown=await response.json();
@@ -75,7 +76,8 @@ export function AutoCalendar() {
   }
   const validForm=uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
     !Number.isNaN(Date.parse(form.starts))&&!Number.isNaN(Date.parse(form.ends)) &&
-    /(?:Z|[+-]\d{2}:\d{2})$/i.test(form.starts)&&/(?:Z|[+-]\d{2}:\d{2})$/i.test(form.ends);
+    /(?:Z|[+-]\d{2}:\d{2})$/i.test(form.starts)&&/(?:Z|[+-]\d{2}:\d{2})$/i.test(form.ends)&&
+    Date.parse(form.ends)>Date.parse(form.starts);
   return <section aria-label="Календарь приёмщика (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>Календарь приёмщика</h1>
     <p>Синтетический HTTPS-стенд. Время поиска — сутки UTC. Реальных клиентов не добавляйте.</p>
