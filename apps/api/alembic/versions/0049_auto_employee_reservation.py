@@ -96,7 +96,7 @@ def upgrade():
       BEGIN
         IF OLD.canceled_at IS NULL AND NEW.canceled_at IS NOT NULL THEN
           UPDATE auto_employee_reservation
-             SET canceled_at=NEW.canceled_at
+             SET canceled_at=GREATEST(clock_timestamp(),created_at)
            WHERE booking_id=NEW.id AND canceled_at IS NULL;
         END IF;
         RETURN NEW;
