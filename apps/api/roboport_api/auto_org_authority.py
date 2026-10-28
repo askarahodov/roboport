@@ -26,9 +26,15 @@ def organization_role_allows(conn: psycopg.Connection, token: str,
     actor = session_subject(conn, token, for_mutation=for_mutation)
     if actor is None:
         return False
-    lock = " FOR SHARE OF o, g, l" if for_mutation and location_id else (
-        " FOR SHARE OF o, g" if for_mutation else ""
-    )
+    lock = " FOR SHARE OF o, g" if for_mutation else ""
+    if for_mutation and location_id is not None:
+        scoped = conn.execute(
+            """SELECT id FROM auto_service_location
+               WHERE id=%s AND organization_id=%s AND disabled_at IS NULL
+               FOR SHARE""", (location_id, organization_id),
+        ).fetchone()
+        if scoped is None:
+            return False
     row = conn.execute(
         """SELECT g.id FROM auto_organization_role_grant g
            JOIN auto_organization o ON o.id=g.organization_id
