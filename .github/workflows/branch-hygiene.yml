@@ -1,0 +1,106 @@
+name: Branch hygiene — merged PRs
+
+on:
+  pull_request:
+    types: [closed]
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/branch-hygiene.yml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview only: do not delete branches'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: branch-hygiene
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only verifiably merged, unchanged, unreferenced branches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const dryRun = context.eventName === 'workflow_dispatch' &&
+              context.payload.inputs?.dry_run !== 'false';
+            const protectedNames = new Set(['main', 'master', 'develop', 'development', 'staging', 'production']);
+            const repository = await github.rest.repos.get({owner, repo});
+            protectedNames.add(repository.data.default_branch);
+            const open = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100
+            });
+            const activeBranches = new Set(open
+              .filter(p => p.head.repo?.full_name === repository.data.full_name)
+              .map(p => p.head.ref));
+            let candidates;
+            if (context.eventName === 'pull_request') {
+              candidates = [context.payload.pull_request];
+            } else {
+              const closed = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'closed', per_page: 100
+              });
+              candidates = closed.filter(p => p.merged_at);
+            }
+            let deleted = 0, skipped = 0;
+            const seen = new Set();
+            for (const pr of candidates) {
+              const branch = pr.head?.ref;
+              if (!pr.merged_at || !branch ||
+                  pr.head.repo?.full_name !== repository.data.full_name ||
+                  protectedNames.has(branch) ||
+                  branch.startsWith('release/') ||
+                  branch.startsWith('hotfix/') ||
+                  activeBranches.has(branch) || seen.has(branch)) {
+                skipped++;
+                continue;
+              }
+              seen.add(branch);
+              let ref;
+              try {
+                ref = await github.rest.git.getRef({
+                  owner, repo, ref: 'heads/' + branch
+                });
+              } catch (e) {
+                if (e.status === 404) { skipped++; continue; }
+                throw e;
+              }
+              // Never delete a branch whose tip changed since the merged PR.
+              if (ref.data.object.sha !== pr.head.sha) { skipped++; continue; }
+              if (dryRun) {
+                core.info('DRY RUN: would delete ' + branch + ' (PR #' + pr.number + ')');
+              } else {
+                try {
+                  await github.rest.git.deleteRef({
+                    owner, repo, ref: 'heads/' + branch
+                  });
+                  core.info('Deleted ' + branch + ' (merged PR #' + pr.number + ')');
+                  deleted++;
+                } catch (e) {
+                  // Protection and permission failures must remain visible.
+                  core.warning('Could not delete ' + branch + ': ' + e.message);
+                  skipped++;
+                }
+              }
+            }
+            core.summary.addHeading('Merged branch cleanup')
+              .addRaw('Mode: ' + (dryRun ? 'dry run' : 'delete') + '\n\n')
+              .addRaw('Candidates: ' + candidates.length + '\n\n')
+              .addRaw('Deleted: ' + deleted + '\n\n')
+              .addRaw('Skipped / preserved: ' + skipped + '\n')
+              .write();
