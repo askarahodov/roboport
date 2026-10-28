@@ -16,8 +16,12 @@ def shift_covers_interval(conn: psycopg.Connection, organization: UUID,
     if (not all(isinstance(value, UUID) for value in (organization, location, employee))
         or not all(isinstance(value, datetime) and value.tzinfo is not None
                    and value.utcoffset() is not None for value in (starts, ends))
-        or starts <= datetime.now(timezone.utc)
-        or ends <= starts or ends - starts > timedelta(hours=24)):
+        ):
+        return False
+    starts_utc=starts.astimezone(timezone.utc)
+    ends_utc=ends.astimezone(timezone.utc)
+    if (starts_utc<=datetime.now(timezone.utc) or ends_utc<=starts_utc
+        or ends_utc-starts_utc>timedelta(hours=24)):
         return False
     row = conn.execute("""
         SELECT 1 FROM auto_staff_shift s
@@ -29,5 +33,5 @@ def shift_covers_interval(conn: psycopg.Connection, organization: UUID,
           AND l.disabled_at IS NULL AND o.disabled_at IS NULL
           AND s.starts_at<=%s AND s.ends_at>=%s
         LIMIT 1
-    """, (organization, location, employee, starts, ends)).fetchone()
+    """, (organization, location, employee, starts_utc, ends_utc)).fetchone()
     return row is not None
