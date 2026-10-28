@@ -10,7 +10,7 @@
 - [S4: AutoDealer CRM](https://autodealer.ru/online/help/crm/index.html) и [воронка](https://autodealer.ru/online/help/crm/voronka-prodazh.html) — сделки и аналитика.
 - [S5: AutoDealer «Движение денежных средств»](https://autodealer.ru/online/help/dengi/dvizhenie-denezhnykh-sredstv.html) — статьи, кассы/счета, сальдо.
 - [S6: AutoDealer — общий перечень функций](https://autodealer.ru/online/order) — склад, поставщики, телефония, зарплата, кассы, онлайн-запись, отчёты.
-- [S7: AutoDealer — обучающая база](https://autodealer.ru/support/knowledge-base) — складские документы, импорт, работы, нормы и настройки.
+- [S7: AutoDealer — справочные материалы настольной версии](https://autodealer.ru/support/knowledge-base) — примеры складских документов, импорта, работ и настроек. **Это другой вариант продукта, не подтверждение наличия каждой функции в AutoDealer Online**; такие элементы требуют отдельной проверки. Конкретные desktop UI и команды не копируются.
 - [S8: AutoDealer — изменения 2026](https://autodealer.ru/online/updates) — примеры новых представлений записи и резервов; источник датируется релизами.
 - Наше фактическое состояние: `apps/api/roboport_api/auto_*.py`, Alembic `0021–0032`, `apps/web`, PG17 тесты, `docs/auto/ARCHITECTURE.md`. Исторический `service_ticket`, `inventory`, `estimate` относится к legacy robot domain и **не считается автомобильной реализацией**.
 
