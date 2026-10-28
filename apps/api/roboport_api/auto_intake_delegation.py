@@ -10,6 +10,7 @@ import psycopg
 from .auto_vehicle_claim import VehicleClaimRejected
 from .session_lookup import session_subject
 from .auto_location_scope import location_scope_allows
+from .auto_manager_authority import manager_assignment
 from .auto_create_idempotency import existing, remember, AutoIdempotencyConflict
 
 
@@ -25,18 +26,8 @@ def _manager(
     if actor is None:
         raise VehicleClaimRejected("not authenticated")
     # FOR SHARE сериализует отзыв роли/объектного назначения относительно мутации.
-    granted = conn.execute(
-        """SELECT a.id FROM auto_vehicle_staff_assignment a
-           JOIN user_role ur ON ur.user_id=a.user_id AND ur.role_code='MANAGER'
-             AND ur.revoked_at IS NULL
-             AND (ur.expires_at IS NULL OR ur.expires_at>now())
-           WHERE a.vehicle_id=%s AND a.user_id=%s
-             AND a.role_code='MANAGER' AND a.revoked_at IS NULL
-           ORDER BY a.created_at DESC LIMIT 1
-           FOR SHARE OF a,ur""",
-        (vehicle_id, actor),
-    ).fetchone()
-    if granted is None or not location_scope_allows(conn, actor, "MANAGER", vehicle_id):
+    granted = manager_assignment(conn, actor, vehicle_id)
+    if not granted or not location_scope_allows(conn, actor, "MANAGER", vehicle_id):
         raise VehicleClaimRejected("no active manager assignment")
     return actor
 
