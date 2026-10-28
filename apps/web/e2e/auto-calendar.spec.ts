@@ -207,6 +207,11 @@ test('calendar rejects impossible ISO instants and offset before POST',async({pa
   await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
   await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-03-01T10:00:00+03:00');
   await expect(page.getByRole('button',{name:'Создать запись'})).toBeEnabled();
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2032-02-29T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2032-02-29T11:00:00Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeEnabled();
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2031-02-29T10:00:00Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
   expect(posts).toBe(0);
 });
 
