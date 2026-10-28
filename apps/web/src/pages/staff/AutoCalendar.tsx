@@ -98,7 +98,7 @@ export function AutoCalendar() {
     {status==='denied'&&<p role="alert">Доступ запрещён или dev API отключён.</p>}
     {status==='error'&&<p role="alert">Ошибка загрузки календаря. <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить</button></p>}
     {status==='ready'&&<><h2>Записи</h2>
-      {hasMore&&<p role="alert">Показаны только первые 100 записей. Сузьте период, чтобы увидеть остальные.</p>}
+      {hasMore&&<p role="alert">Показаны только первые 100 записей. Полный список недоступен в этом представлении.</p>}
       {items.length===0?<p>Записей нет.</p>:<ul>{items.map(entry=><li key={entry.appointmentId}>
         <strong>{entry.startsAt} — {entry.endsAt}</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
