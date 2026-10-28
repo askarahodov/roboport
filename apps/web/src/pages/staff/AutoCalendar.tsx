@@ -5,6 +5,11 @@ type Entry = { appointmentId:string; bookingId:string; bayId:string;
   startsAt:string; endsAt:string; workOrderId:string };
 type Form = { bay:string; link:string; starts:string; ends:string };
 const empty:Form={bay:'',link:'',starts:'',ends:''};
+const validUtcDay=(day:string)=>{
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(day))return false;
+  const value=new Date(day+'T00:00:00Z');
+  return !Number.isNaN(value.getTime())&&value.toISOString().slice(0,10)===day;
+};
 
 export function AutoCalendar() {
   const [org,setOrg]=React.useState('');
@@ -17,7 +22,7 @@ export function AutoCalendar() {
   const [message,setMessage]=React.useState('');
   const [revision,setRevision]=React.useState(0);
   const [target,setTarget]=React.useState<string | null>(null);
-  const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&/^\d{4}-\d{2}-\d{2}$/.test(day);
+  const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
   React.useEffect(()=>{
     setItems([]);setMessage('');setTarget(null);
     if(!valid){setStatus('idle');return;}
@@ -77,7 +82,9 @@ export function AutoCalendar() {
   const validForm=uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
     !Number.isNaN(Date.parse(form.starts))&&!Number.isNaN(Date.parse(form.ends)) &&
     /(?:Z|[+-]\d{2}:\d{2})$/i.test(form.starts)&&/(?:Z|[+-]\d{2}:\d{2})$/i.test(form.ends)&&
-    Date.parse(form.ends)>Date.parse(form.starts);
+    Date.parse(form.ends)>Date.parse(form.starts)&&
+    Date.parse(form.ends)-Date.parse(form.starts)<=86400000&&
+    Date.parse(form.starts)>Date.now();
   return <section aria-label="Календарь приёмщика (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>Календарь приёмщика</h1>
     <p>Синтетический HTTPS-стенд. Время поиска — сутки UTC. Реальных клиентов не добавляйте.</p>

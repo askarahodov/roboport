@@ -11,7 +11,7 @@ const base='**/api/v1/dev/auto/organizations/**';
 test('calendar opens on the current UTC day, not a fixed fixture date',async({page})=>{
   await page.clock.setFixedTime(new Date('2026-10-28T23:30:00Z'));
   await page.goto('/staff/auto-calendar');
-  await expect(page.getByRole('textbox',{name:'День UTC'})).toHaveValue('2026-10-28');
+  await expect(page.getByLabel('День UTC')).toHaveValue('2026-10-28');
 });
 
 test('calendar denies access without showing previous tenant records',async({page})=>{
@@ -110,6 +110,44 @@ test('calendar ignores an old denied response after tenant changes',async({page}
   await page.waitForTimeout(350);
   await expect(page.getByText('Записей нет.')).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('calendar rejects invalid UTC calendar day before querying API',async({page})=>{
+  let reads=0;
+  await page.route(base,route=>{reads++;return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});});
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  const before=reads;
+  await page.getByLabel('День UTC').evaluate((input:HTMLInputElement)=>{input.type='text';});
+  await page.getByLabel('День UTC').fill('2030-02-30');
+  await expect(page.getByText('Укажите организацию, филиал и день.')).toBeVisible();
+  expect(reads).toBe(before);
+});
+
+test('calendar refuses past and overlong appointments before posting',async({page})=>{
+  await page.clock.setFixedTime(new Date('2026-10-28T12:00:00Z'));
+  let posts=0;
+  await page.route(base,route=>{
+    if(route.request().method()==='POST'){posts++;return route.fulfill({status:201,body:'{}'});}
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2026-10-28T11:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2026-10-28T13:00:00Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-02T10:00:01Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-02T10:00:00Z');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeEnabled();
+  expect(posts).toBe(0);
 });
 
 test('calendar mobile layout remains in viewport',async({page})=>{
