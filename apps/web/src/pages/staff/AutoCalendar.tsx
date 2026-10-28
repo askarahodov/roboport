@@ -75,7 +75,8 @@ export function AutoCalendar() {
   }
   const validForm=uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
     !Number.isNaN(Date.parse(form.starts))&&!Number.isNaN(Date.parse(form.ends)) &&
-    /(?:Z|[+-]\d{2}:\d{2})$/i.test(form.starts)&&/(?:Z|[+-]\d{2}:\d{2})$/i.test(form.ends);
+    /(?:Z|[+-]\d{2}:\d{2})$/i.test(form.starts)&&/(?:Z|[+-]\d{2}:\d{2})$/i.test(form.ends)&&
+    Date.parse(form.ends)>Date.parse(form.starts);
   return <section aria-label="Календарь приёмщика (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>Календарь приёмщика</h1>
     <p>Синтетический HTTPS-стенд. Время поиска — сутки UTC. Реальных клиентов не добавляйте.</p>
