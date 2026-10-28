@@ -67,7 +67,6 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                 SELECT 1 FROM auto_bay_booking b
                 WHERE b.bay_id=%s AND b.organization_id=%s
                   AND b.location_id=%s AND b.canceled_at IS NULL
-                  AND (%s::uuid IS NULL OR b.id<>%s::uuid)
                   AND b.starts_at<c.ends_at AND b.ends_at>c.starts_at
               )
               AND (%s::uuid IS NULL OR (
@@ -85,7 +84,7 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                 )
               ))
             ORDER BY c.starts_at LIMIT 48
-        """, (day, day, bay, org, location, old_booking, old_booking,
-              employee, employee, org, location, employee, old_booking, old_booking)).fetchall()
+        """, (day, day, bay, org, location, employee, employee, org, location,
+              employee, old_booking, old_booking)).fetchall()
     return [{"startsAt": a.isoformat(), "endsAt": b.isoformat()}
             for a, b in rows]
