@@ -89,3 +89,7 @@
 ## Привязка записи к автомобилю (0042, current-dev)
 
 `0042_auto_appointment` создаёт единственную неизменяемую связку appointment → active bay booking → verified, not revoked vehicle/customer link, с явным organization/location. Проверка в PostgreSQL `FOR SHARE` удерживает booking и связь клиента до фиксации appointment; неверный tenant, ожидающая/отозванная связь, отменённое бронирование отклоняются. `tests/integration/test_pg_auto_appointment.py` проверяет позитивный сценарий, отсутствие повторного использования того же booking и negative ACL. **Существование такой записи не означает наличия права на чтение или production-запись**: API, WorkOrder, график/календарь, перенос, timezone и внешняя верификация ещё planned. Удаление/смена идентичности запрещены; отдельная история состояния будет следующим срезом.
+
+## События жизненного цикла записи (0043, current-dev)
+
+Миграция `0043_auto_appointment_events` добавляет append-only таблицу `auto_appointment_event`. После создания `auto_appointment` триггер записывает `CREATED`; при первой отмене связанного `auto_bay_booking` записывается `BOOKING_CANCELED` (если Appointment существует). Оба события возникают атомарно с основной транзакцией, изменение и удаление запрещены, повторный no-op cancel не дублирует событие. Тест: `tests/integration/test_pg_auto_appointment_events.py`. **Не реализованы:** кто именно отменил запись, переносы, уведомления, WorkOrder, production API/UI и user timezone; события не служат полноценным actor audit и не доказывают разрешение пользователя на отмену.
