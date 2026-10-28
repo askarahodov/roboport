@@ -87,6 +87,7 @@ function App() {
         <NavLink to="/request-demo" end>Тестовая заявка</NavLink>
         <NavLink to="/account/login" className="header-login">Войти</NavLink>
         <NavLink to="/staff" end>Сотрудникам</NavLink>
+        <NavLink to="/staff/auto-admin" end>Организации (dev)</NavLink>
       </nav>
       <label>Тема <select aria-label="Тема оформления" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="auto">Авто</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
     </header>

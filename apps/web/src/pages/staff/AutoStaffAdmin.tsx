@@ -74,7 +74,7 @@ export function AutoStaffAdmin() {
   return <section aria-label="Сотрудники организации (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>Сотрудники организации</h1>
     <p>Только локальный синтетический стенд. Права проверяет сервер, а не этот экран. Реальных сотрудников не добавляйте.</p>
-    <label>UUID организации <input value={organization} onChange={e => setOrganization(e.target.value)}
+    <label>UUID организации <input value={organization} onChange={e => { setOrganization(e.target.value); setMessage(''); }}
       placeholder="UUID организации" aria-label="UUID организации" /></label>
     {state === 'idle' && <p>Укажите корректный UUID организации.</p>}
     {state === 'loading' && <p role="status">Загрузка назначений…</p>}
