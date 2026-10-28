@@ -156,7 +156,7 @@ test('calendar warns when the backend has additional records',async({page})=>{
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
-  await expect(page.getByRole('alert')).toContainText('Есть дополнительные записи');
+  await expect(page.getByRole('status')).toContainText('Есть дополнительные записи');
 });
 
 test('calendar navigates all pages and resets cursor on tenant switch',async({page})=>{
