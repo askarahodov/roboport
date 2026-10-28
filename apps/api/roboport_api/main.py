@@ -18,6 +18,8 @@ from .auto_vehicle_claim_http import router as auto_vehicle_claim_router
 app.include_router(auto_vehicle_claim_router)
 from .auto_intake_delegation_http import router as auto_intake_delegation_router
 app.include_router(auto_intake_delegation_router)
+from .auto_org_staff_http import router as auto_org_staff_router
+app.include_router(auto_org_staff_router)
 
 
 @app.middleware("http")
