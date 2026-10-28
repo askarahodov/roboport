@@ -36,6 +36,7 @@ export function AutoCalendar() {
   const [slots,setSlots]=React.useState<Array<{startsAt:string;endsAt:string}>>([]);
   const [slotsMessage,setSlotsMessage]=React.useState('');
   const [slotsBusy,setSlotsBusy]=React.useState(false);
+  const slotRequest=React.useRef(0);
   const [clearEmployee,setClearEmployee]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [revision,setRevision]=React.useState(0);
@@ -73,10 +74,12 @@ export function AutoCalendar() {
       }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
   },[org,location,day,revision,valid,cursor]);
-  function resetPage(){setCursor(null);setHistory([]);setSlots([]);setSlotsMessage('');}
+  function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
+  function resetPage(){setCursor(null);setHistory([]);resetSlots();}
   async function findSlots(){
     if(!valid||!uuid.test(form.bay.trim())||
        (form.employee.trim()&&!uuid.test(form.employee.trim())))return;
+    const requestId=++slotRequest.current;
     setSlotsBusy(true);setSlots([]);setSlotsMessage('');
     const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),day});
     if(form.employee.trim())query.set('employeeId',form.employee.trim());
@@ -89,10 +92,11 @@ export function AutoCalendar() {
         !data.items.every((x:unknown)=>x&&typeof x==='object'&&
           'startsAt' in x&&typeof x.startsAt==='string'&&
           'endsAt' in x&&typeof x.endsAt==='string'))throw new Error();
+      if(requestId!==slotRequest.current)return;
       setSlots(data.items as Array<{startsAt:string;endsAt:string}>);
       if(data.items.length===0)setSlotsMessage('Подходящих окон не найдено.');
-    }catch{setSlotsMessage('Не удалось проверить окна или нет доступа.');}
-    finally{setSlotsBusy(false);}
+    }catch{if(requestId===slotRequest.current)setSlotsMessage('Не удалось проверить окна или нет доступа.');}
+    finally{if(requestId===slotRequest.current)setSlotsBusy(false);}
   }
 
   async function action(path:string,payload:unknown,success:string){
@@ -116,13 +120,13 @@ export function AutoCalendar() {
   function fields(includeLink:boolean){
     return <div>
       <label>UUID поста <input aria-label="UUID поста" value={form.bay}
-        onChange={e=>setForm(s=>({...s,bay:e.target.value}))}/></label>
+        onChange={e=>{resetSlots();setForm(s=>({...s,bay:e.target.value}));}}/></label>
       {includeLink&&<label>UUID связи клиента с автомобилем <input aria-label="UUID связи клиента"
         value={form.link} onChange={e=>setForm(s=>({...s,link:e.target.value}))}/></label>}
       <label>UUID специалиста (необязательно) <input aria-label="UUID специалиста" disabled={clearEmployee} value={form.employee}
-        onChange={e=>setForm(s=>({...s,employee:e.target.value}))}/></label>
+        onChange={e=>{resetSlots();setForm(s=>({...s,employee:e.target.value}));}}/></label>
       {target&&<label><input type="checkbox" aria-label="Снять назначение специалиста" checked={clearEmployee}
-        onChange={e=>setClearEmployee(e.target.checked)}/> Снять назначение специалиста</label>}
+        onChange={e=>{resetSlots();setClearEmployee(e.target.checked);}}/> Снять назначение специалиста</label>}
       <button type="button" disabled={slotsBusy||!valid||!uuid.test(form.bay.trim())||
         (!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
         onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
