@@ -143,6 +143,7 @@ def test_cancellation_started_before_reservation_creation_does_not_roll_back():
                 "SELECT created_at FROM auto_employee_reservation WHERE id=%s",
                 (ident,)).fetchone()[0]
             assert created>=old_timestamp
+            reserve.commit()  # Release booking row lock before cancellation updates it.
             cancel.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",
                            (booking,))
         with psycopg.connect(DSN) as verify:
