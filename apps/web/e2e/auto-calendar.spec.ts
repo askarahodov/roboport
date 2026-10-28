@@ -99,6 +99,30 @@ test('staff selects a synthetic candidate slot without treating it as a reservat
   expect(queries).toBe(1);
 });
 
+test('candidate response for previous bay is ignored after switching bay',async({page})=>{
+  let requested!:()=>void;
+  const seen=new Promise<void>(resolve=>{requested=resolve;});
+  await page.route(base,async route=>{
+    if(route.request().url().includes('/slot-candidates')){
+      requested();
+      await new Promise(resolve=>setTimeout(resolve,200));
+      try{return await route.fulfill({status:200,contentType:'application/json',
+        body:'{"items":[{"startsAt":"2030-01-01T10:00:00Z","endsAt":"2030-01-01T11:00:00Z"}],"guaranteed":false}'});}catch{return;}
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await seen;
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(appointment);
+  await page.waitForTimeout(300);
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toHaveCount(0);
+});
+
 test('calendar blocks zero and reverse intervals before posting',async({page})=>{
   let posts=0;
   await page.route(base,route=>{
