@@ -19,7 +19,7 @@ def upgrade():
         appointment_id uuid NOT NULL REFERENCES auto_appointment(id),
         request_key uuid NOT NULL,
         fingerprint text NOT NULL CHECK (fingerprint ~ '^[0-9a-f]{64}$'),
-        new_booking_id uuid NOT NULL REFERENCES auto_bay_booking(id),
+        new_booking_id uuid NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (organization_id,actor_id,appointment_id,request_key)
       )
