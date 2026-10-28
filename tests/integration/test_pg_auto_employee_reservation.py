@@ -124,3 +124,33 @@ def test_employee_reservation_concurrent_overlap_is_serialized():
             with two.transaction():
                 _reserve(two,second,org,loc,employee,
                          start+timedelta(minutes=15),start+timedelta(hours=1))
+
+
+def test_cancellation_started_before_reservation_creation_does_not_roll_back():
+    """Transaction-time now() must not invalidate later reservation created_at."""
+    employee=_scenario()["intake"]
+    start=datetime.now(timezone.utc)+timedelta(days=11)
+    with psycopg.connect(DSN) as setup:
+        org,loc,bay=_setup(setup,employee,start)
+        booking=_book(setup,org,loc,bay,start,start+timedelta(hours=1))
+    with psycopg.connect(DSN) as cancel, psycopg.connect(DSN) as reserve:
+        with cancel.transaction():
+            # Pin transaction timestamp before the reservation INSERT commits.
+            old_timestamp=cancel.execute("SELECT now()").fetchone()[0]
+            ident=_reserve(reserve,booking,org,loc,employee,start,
+                           start+timedelta(hours=1))
+            created=reserve.execute(
+                "SELECT created_at FROM auto_employee_reservation WHERE id=%s",
+                (ident,)).fetchone()[0]
+            assert created>=old_timestamp
+            cancel.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",
+                           (booking,))
+        with psycopg.connect(DSN) as verify:
+            canceled=verify.execute(
+                "SELECT created_at,canceled_at FROM auto_employee_reservation WHERE id=%s",
+                (ident,)).fetchone()
+            assert canceled[1] is not None
+            assert canceled[1]>=canceled[0]
+            assert verify.execute(
+                "SELECT canceled_at IS NOT NULL FROM auto_bay_booking WHERE id=%s",
+                (booking,)).fetchone()==(True,)
