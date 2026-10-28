@@ -4,7 +4,8 @@ const org = '11111111-1111-4111-8111-111111111111';
 const user = '22222222-2222-4222-8222-222222222222';
 const grant = '33333333-3333-4333-8333-333333333333';
 const loc = '44444444-4444-4444-8444-444444444444';
-const endpoint = '**/api/v1/dev/auto/organizations/*/staff*';
+// Playwright * does not match nested /staff/{grantId}/revoke paths.
+const endpoint = '**/api/v1/dev/auto/organizations/**';
 
 test('admin console denies access and does not render staff identifiers after 403', async ({ page }) => {
   await page.route(endpoint, route => route.fulfill({
