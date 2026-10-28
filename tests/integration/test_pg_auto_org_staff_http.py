@@ -11,6 +11,7 @@ from test_pg_baseline import DSN
 
 def test_dev_staff_http_requires_admin_tenant_session_and_csrf(monkeypatch):
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
     monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
     d = _scenario()
     org_a, org_b, loc = uuid4(), uuid4(), uuid4()
