@@ -17,6 +17,7 @@ class CreateAppointment(BaseModel):
     locationId: UUID
     bayId: UUID
     customerLinkId: UUID
+    employeeId: UUID | None = None
     startsAt: datetime
     endsAt: datetime
 
@@ -36,12 +37,12 @@ async def create(org_id: str, request: Request):
         try:
             appointment,booking,work_order=create_appointment(
                 db,request.cookies.get("rp_session",""),org,body.locationId,
-                body.bayId,body.customerLinkId,body.startsAt,body.endsAt,
+                body.bayId,body.customerLinkId,body.startsAt,body.endsAt,body.employeeId,
             )
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
         except AppointmentConflict:
-            return _response(request,409,"BAY_BUSY")
+            return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(status_code=201,content={
         "appointmentId":str(appointment),"bookingId":str(booking),
         "workOrderId":str(work_order)},headers={"Cache-Control":"no-store"})
@@ -68,6 +69,7 @@ def cancel(org_id: str, appointment_id: str, request: Request):
 class ReschedulePayload(BaseModel):
     model_config=ConfigDict(extra="forbid")
     bayId: UUID
+    employeeId: UUID | None = None
     startsAt: datetime
     endsAt: datetime
 
@@ -87,7 +89,8 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
         try:
             booking=reschedule_appointment(
                 db,request.cookies.get("rp_session",""),org,ident,body.bayId,
-                body.startsAt,body.endsAt,
+                body.startsAt,body.endsAt,body.employeeId,
+                clear_employee=('employeeId' in body.model_fields_set and body.employeeId is None),
             )
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")

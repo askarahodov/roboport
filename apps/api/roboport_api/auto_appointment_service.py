@@ -12,8 +12,9 @@ class AppointmentConflict(ValueError):
 
 def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        location: UUID, bay: UUID, link: UUID,
-                       starts: datetime, ends: datetime) -> tuple[UUID, UUID, UUID]:
+                       starts: datetime, ends: datetime, employee: UUID | None = None) -> tuple[UUID, UUID, UUID]:
     if (not all(isinstance(x, UUID) for x in (organization,location,bay,link))
+            or (employee is not None and not isinstance(employee, UUID))
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
             or starts <= datetime.now(timezone.utc)
@@ -49,6 +50,8 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        VALUES(%s,%s,%s,%s,%s,%s)""",
                     (booking,organization,location,bay,starts,ends),
                 )
+                if employee is not None:
+                    _reserve_employee(conn, booking, organization, location, employee, starts, ends)
                 conn.execute(
                     """INSERT INTO auto_appointment
                        (id,booking_id,organization_id,location_id,vehicle_id,customer_link_id)
@@ -61,9 +64,17 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        VALUES(%s,%s,%s,%s)""",
                     (order,appointment,organization,location),
                 )
-        except psycopg.errors.ExclusionViolation as exc:
+        except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException) as exc:
             raise AppointmentConflict("bay already reserved") from exc
         return appointment,booking,order
+
+
+def _reserve_employee(conn: psycopg.Connection, booking: UUID, organization: UUID,
+                      location: UUID, employee: UUID, starts: datetime, ends: datetime) -> None:
+    conn.execute("""INSERT INTO auto_employee_reservation
+      (id,booking_id,organization_id,location_id,employee_id,starts_at,ends_at)
+      VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+      (uuid4(),booking,organization,location,employee,starts,ends))
 
 
 def cancel_appointment(conn: psycopg.Connection, token: str,
@@ -130,7 +141,8 @@ def current_appointment_booking(conn: psycopg.Connection, appointment: UUID) -> 
 
 def reschedule_appointment(conn: psycopg.Connection, token: str,
                            organization: UUID, appointment: UUID, bay: UUID,
-                           starts: datetime, ends: datetime) -> UUID:
+                           starts: datetime, ends: datetime, employee: UUID | None = None,
+                           clear_employee: bool = False) -> UUID:
     if (not all(isinstance(x, UUID) for x in (organization,appointment,bay))
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
@@ -165,6 +177,9 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
         ).fetchone()
         if previous is None or previous[1] is not None:
             raise AppointmentDenied("appointment already canceled")
+        existing=conn.execute("""SELECT employee_id FROM auto_employee_reservation
+          WHERE booking_id=%s AND canceled_at IS NULL""",(old,)).fetchone()
+        assigned=None if clear_employee else (employee if employee is not None else (existing[0] if existing else None))
         # The INSERT trigger also locks enabled bay/location/organization rows.
         fresh = uuid4()
         try:
@@ -190,6 +205,8 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                     "UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",
                     (old,),
                 )
-        except psycopg.errors.ExclusionViolation as exc:
+                if assigned is not None:
+                    _reserve_employee(conn, fresh, organization, a[0], assigned, starts, ends)
+        except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException) as exc:
             raise AppointmentConflict("bay already reserved") from exc
         return fresh

@@ -46,17 +46,21 @@ test('calendar creates, reschedules and cancels via exact tenant paths',async({p
   await expect(page.getByText('Записей нет.')).toBeVisible();
   await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
   await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'UUID специалиста'}).fill(appointment);
   await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
   await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
   await page.getByRole('button',{name:'Создать запись'}).click();
   await expect(page.getByText('Appointment '+appointment+' · WorkOrder '+work)).toBeVisible();
   await page.getByRole('button',{name:'Перенести'}).click();
+  await page.getByRole('checkbox',{name:'Снять назначение специалиста'}).check();
   await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T12:00:00Z');
   await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T13:00:00Z');
   await page.getByRole('button',{name:'Сохранить перенос'}).click();
   await expect(page.getByText('Appointment '+appointment+' · WorkOrder '+work)).toBeVisible();
   await page.getByRole('button',{name:'Отменить запись'}).click();
   expect(calls).toHaveLength(2);
+  expect((calls[0].body as {employeeId?:string}).employeeId).toBe(appointment);
+  expect((calls[1].body as {employeeId?:string|null}).employeeId).toBeNull();
   await page.getByRole('button',{name:'Подтвердить отмену'}).click();
   await expect(page.getByText('Записей нет.')).toBeVisible();
   expect(calls.map(x=>x.path)).toEqual([
