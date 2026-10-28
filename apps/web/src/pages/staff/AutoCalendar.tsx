@@ -16,6 +16,7 @@ export function AutoCalendar() {
   const [location,setLocation]=React.useState('');
   const [day,setDay]=React.useState(()=>new Date().toISOString().slice(0,10));
   const [items,setItems]=React.useState<Entry[]>([]);
+  const [hasMore,setHasMore]=React.useState(false);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [form,setForm]=React.useState<Form>(empty);
   const [busy,setBusy]=React.useState(false);
@@ -24,7 +25,7 @@ export function AutoCalendar() {
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
   React.useEffect(()=>{
-    setItems([]);setMessage('');setTarget(null);
+    setItems([]);setHasMore(false);setMessage('');setTarget(null);
     if(!valid){setStatus('idle');return;}
     const controller=new AbortController();
     setStatus('loading');
@@ -43,7 +44,8 @@ export function AutoCalendar() {
           !data.items.every((x:unknown)=>x&&typeof x==='object' &&
             ['appointmentId','bookingId','bayId','workOrderId','startsAt','endsAt'].every(
               key=>key in x&&typeof (x as Record<string,unknown>)[key]==='string')))throw new Error();
-        if(!controller.signal.aborted){setItems(data.items as Entry[]);setStatus('ready');}
+        if(!('hasMore' in data)||typeof data.hasMore!=='boolean')throw new Error();
+        if(!controller.signal.aborted){setItems(data.items as Entry[]);setHasMore(data.hasMore);setStatus('ready');}
       }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
   },[org,location,day,revision,valid]);
@@ -96,6 +98,7 @@ export function AutoCalendar() {
     {status==='denied'&&<p role="alert">Доступ запрещён или dev API отключён.</p>}
     {status==='error'&&<p role="alert">Ошибка загрузки календаря. <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить</button></p>}
     {status==='ready'&&<><h2>Записи</h2>
+      {hasMore&&<p role="alert">Показаны только первые 100 записей. Сузьте период, чтобы увидеть остальные.</p>}
       {items.length===0?<p>Записей нет.</p>:<ul>{items.map(entry=><li key={entry.appointmentId}>
         <strong>{entry.startsAt} — {entry.endsAt}</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
