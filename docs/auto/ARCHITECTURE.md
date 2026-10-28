@@ -3,7 +3,7 @@
 > **Статус: current только для синтетического dev / production planned.** Реализованы схема авто, подтверждение связи, приватное чтение и экран `/account/vehicles`. Публичный автомобильный API, запись на ремонт, заказ-наряды, OEM и мобильное приложение пока запланированы. Исторический [аудит документации](DOCUMENTATION_AUDIT.md) датирован 26.10.2026.
 
 ## Current
-React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0030; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
+React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0032; OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
 
 ## Decision
 Модульный монолит и Strangler Pattern. Существующие таблицы и API не переименовывать и не удалять до регрессионного доказательства; автомобильные контексты добавлять отдельными модулями и миграциями. Основание: ADR-001.md.
