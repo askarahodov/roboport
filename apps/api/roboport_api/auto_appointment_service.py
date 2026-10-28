@@ -178,11 +178,15 @@ def current_appointment_booking(conn: psycopg.Connection, appointment: UUID) -> 
 def reschedule_appointment(conn: psycopg.Connection, token: str,
                            organization: UUID, appointment: UUID, bay: UUID,
                            starts: datetime, ends: datetime, employee: UUID | None = None,
-                           clear_employee: bool = False) -> UUID:
+                           clear_employee: bool = False,
+                           request_key: UUID | None = None) -> UUID:
     if (not all(isinstance(x, UUID) for x in (organization,appointment,bay))
+            or (employee is not None and not isinstance(employee, UUID))
+            or (request_key is not None and not isinstance(request_key, UUID))
+            or (clear_employee and employee is not None)
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
-            or starts <= datetime.now(timezone.utc) or ends <= starts
+            or ends <= starts
             or (ends-starts).total_seconds() > 86400):
         raise AppointmentDenied("invalid reschedule")
     with conn.transaction():
@@ -205,6 +209,38 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
         ).fetchone()
         if scope is None:
             raise AppointmentDenied("verified vehicle link unavailable")
+        # Appointment row was locked before this ledger check, serializing
+        # competing reschedules and retries without duplicate history.
+        from .session_lookup import session_subject
+        actor = session_subject(conn,token,for_mutation=True)
+        if actor is None:
+            raise AppointmentDenied("session unavailable")
+        fresh = uuid4()
+        if request_key is not None:
+            fingerprint = hashlib.sha256(json.dumps({
+                "bay":str(bay),
+                "starts":starts.astimezone(timezone.utc).isoformat(),
+                "ends":ends.astimezone(timezone.utc).isoformat(),
+                "employee_mode":"clear" if clear_employee else ("replace" if employee is not None else "retain"),
+                "employee":str(employee) if employee else None,
+            },sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            inserted = conn.execute("""INSERT INTO auto_reschedule_idempotency
+              (organization_id,actor_id,appointment_id,request_key,fingerprint,new_booking_id)
+              VALUES(%s,%s,%s,%s,%s,%s)
+              ON CONFLICT (organization_id,actor_id,appointment_id,request_key) DO NOTHING
+              RETURNING request_key""",
+              (organization,actor,appointment,request_key,fingerprint,fresh)).fetchone()
+            if inserted is None:
+                existing = conn.execute("""SELECT fingerprint,new_booking_id
+                  FROM auto_reschedule_idempotency
+                  WHERE organization_id=%s AND actor_id=%s
+                    AND appointment_id=%s AND request_key=%s""",
+                    (organization,actor,appointment,request_key)).fetchone()
+                if existing is None or existing[0] != fingerprint:
+                    raise AppointmentKeyConflict("idempotency key used for different reschedule")
+                return existing[1]
+        if starts <= datetime.now(timezone.utc):
+            raise AppointmentDenied("reschedule must start in future")
         old = current_appointment_booking(conn,appointment)
         previous = conn.execute(
             """SELECT id,canceled_at FROM auto_bay_booking
@@ -217,7 +253,6 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
           WHERE booking_id=%s AND canceled_at IS NULL""",(old,)).fetchone()
         assigned=None if clear_employee else (employee if employee is not None else (existing[0] if existing else None))
         # The INSERT trigger also locks enabled bay/location/organization rows.
-        fresh = uuid4()
         try:
             with conn.transaction():
                 conn.execute(
@@ -226,10 +261,6 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                        VALUES(%s,%s,%s,%s,%s,%s)""",
                     (fresh,organization,a[0],bay,starts,ends),
                 )
-                from .session_lookup import session_subject
-                actor = session_subject(conn,token,for_mutation=True)
-                if actor is None:
-                    raise AppointmentDenied("session unavailable")
                 conn.execute(
                     """INSERT INTO auto_appointment_reschedule
                        (id,appointment_id,organization_id,old_booking_id,
