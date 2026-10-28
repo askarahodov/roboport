@@ -173,10 +173,10 @@ export function AutoCalendar() {
       <nav aria-label="Страницы календаря">
         <span>Страница {history.length+1}</span>
         {history.length>0&&<button type="button" disabled={busy} onClick={()=>{
-          setCursor(history[history.length-1]);setHistory(s=>s.slice(0,-1));
+          resetSlots();setCursor(history[history.length-1]);setHistory(s=>s.slice(0,-1));
         }}>Предыдущая страница</button>}
         {hasMore&&nextCursor&&<button type="button" disabled={busy} onClick={()=>{
-          setHistory(s=>[...s,cursor]);setCursor(nextCursor);
+          resetSlots();setHistory(s=>[...s,cursor]);setCursor(nextCursor);
         }}>Следующая страница</button>}
       </nav>
       {target?.startsWith('cancel:')&&<div role="group" aria-label="Подтверждение отмены">
