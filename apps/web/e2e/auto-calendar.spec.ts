@@ -71,6 +71,34 @@ test('calendar creates, reschedules and cancels via exact tenant paths',async({p
     '/api/v1/dev/auto/organizations/'+org+'/appointments/'+appointment+'/cancel']);
 });
 
+test('staff selects a synthetic candidate slot without treating it as a reservation',async({page})=>{
+  const start='2030-01-01T10:00:00+00:00',end='2030-01-01T11:00:00+00:00';
+  let queries=0;
+  await page.route(base,route=>{
+    if(route.request().url().includes('/slot-candidates')){
+      queries++;
+      const url=new URL(route.request().url());
+      expect(url.searchParams.get('bayId')).toBe(bay);
+      expect(url.searchParams.get('employeeId')).toBe(appointment);
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({items:[{startsAt:start,endsAt:end}],guaranteed:false})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID специалиста'}).fill(appointment);
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
+  await page.getByRole('button',{name:start+' — '+end}).click();
+  await expect(page.getByRole('textbox',{name:'Начало ISO'})).toHaveValue(start);
+  await expect(page.getByRole('textbox',{name:'Конец ISO'})).toHaveValue(end);
+  expect(queries).toBe(1);
+});
+
 test('calendar blocks zero and reverse intervals before posting',async({page})=>{
   let posts=0;
   await page.route(base,route=>{
