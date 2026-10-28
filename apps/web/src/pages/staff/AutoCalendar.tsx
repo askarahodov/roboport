@@ -78,11 +78,11 @@ export function AutoCalendar() {
   function resetPage(){setCursor(null);setHistory([]);resetSlots();}
   async function findSlots(){
     if(!valid||!uuid.test(form.bay.trim())||
-       (!clearEmployee&&form.employee.trim()&&!uuid.test(form.employee.trim())))return;
+       (!(target&&clearEmployee)&&form.employee.trim()&&!uuid.test(form.employee.trim())))return;
     const requestId=++slotRequest.current;
     setSlotsBusy(true);setSlots([]);setSlotsMessage('');
     const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),day});
-    if(!clearEmployee&&form.employee.trim())query.set('employeeId',form.employee.trim());
+    if(!(target&&clearEmployee)&&form.employee.trim())query.set('employeeId',form.employee.trim());
     try{
       const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
         '/slot-candidates?'+query,{credentials:'include',cache:'no-store'});
@@ -112,7 +112,7 @@ export function AutoCalendar() {
         body:JSON.stringify(payload)});
       if(!response.ok){setMessage(response.status===409?'Пост или специалист занят / смена недоступна (409).':
         [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
-      setMessage(success);setTarget(null);resetPage();setRevision(n=>n+1);
+      setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);resetPage();setRevision(n=>n+1);
     }catch{setMessage('Не удалось выполнить запрос. Проверьте сессию.');}
     finally{setBusy(false);}
   }
@@ -128,7 +128,7 @@ export function AutoCalendar() {
       {target&&<label><input type="checkbox" aria-label="Снять назначение специалиста" checked={clearEmployee}
         onChange={e=>{resetSlots();setClearEmployee(e.target.checked);}}/> Снять назначение специалиста</label>}
       <button type="button" disabled={slotsBusy||!valid||!uuid.test(form.bay.trim())||
-        (!clearEmployee&&!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
+        (!(target&&clearEmployee)&&!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
         onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
       {slotsMessage&&<p role="status">{slotsMessage}</p>}
       {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><ul>
@@ -179,7 +179,7 @@ export function AutoCalendar() {
       {target?.startsWith('cancel:')&&<div role="group" aria-label="Подтверждение отмены">
         <p>Отменить выбранную запись?</p>
         <button type="button" disabled={busy} onClick={()=>void action(base+'/'+target.slice(7)+'/cancel',{},'Запись отменена.')}>Подтвердить отмену</button>
-        <button type="button" onClick={()=>setTarget(null)}>Назад</button>
+        <button type="button" onClick={()=>{resetSlots();setTarget(null);setClearEmployee(false);}}>Назад</button>
       </div>}
       {!target?.startsWith('cancel:')&&<form onSubmit={e=>{
         e.preventDefault();
@@ -191,7 +191,7 @@ export function AutoCalendar() {
       }}>
         <h2>{target?'Перенести запись':'Новая запись'}</h2>{fields(!target)}
         <button type="submit" disabled={busy||!validForm}>{target?'Сохранить перенос':'Создать запись'}</button>
-        {target&&<button type="button" onClick={()=>setTarget(null)}>Отмена переноса</button>}
+        {target&&<button type="button" onClick={()=>{resetSlots();setTarget(null);setClearEmployee(false);setForm(empty);}}>Отмена переноса</button>}
       </form>}
     </>}
     {message&&<p role="status">{message}</p>}
