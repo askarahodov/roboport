@@ -77,12 +77,15 @@ export function AutoCalendar() {
   function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
   function resetPage(){setCursor(null);setHistory([]);resetSlots();}
   async function findSlots(){
+    const retained=target?items.find(x=>x.appointmentId===target)?.employeeId:null;
+    const effectiveEmployee=target&&clearEmployee?null:(form.employee.trim()||retained||null);
     if(!valid||!uuid.test(form.bay.trim())||
-       (!(target&&clearEmployee)&&form.employee.trim()&&!uuid.test(form.employee.trim())))return;
+       (effectiveEmployee!==null&&!uuid.test(effectiveEmployee)))return;
     const requestId=++slotRequest.current;
     setSlotsBusy(true);setSlots([]);setSlotsMessage('');
     const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),day});
-    if(!(target&&clearEmployee)&&form.employee.trim())query.set('employeeId',form.employee.trim());
+    if(effectiveEmployee)query.set('employeeId',effectiveEmployee);
+    if(target&&!target.startsWith('cancel:'))query.set('appointmentId',target);
     try{
       const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
         '/slot-candidates?'+query,{credentials:'include',cache:'no-store'});
