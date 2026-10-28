@@ -1,16 +1,26 @@
 # Автокаталоги 2026 — предварительный выбор
 
-Не воспроизводить защищённые базы конкурента. Разделить OEM/aftermarket справочник, склад, торговые предложения. Интеграция только через лицензионный API.
+Не воспроизводить защищённые базы конкурента. OEM/aftermarket справочник, локальная номенклатура склада и коммерческие предложения — отдельные сущности. Внешняя интеграция допускается только через лицензированный API.
 
-| Провайдер | Заявленные возможности | Что проверить |
+| Провайдер | Заявленные возможности | Что проверить до договора |
 |---|---|---|
-| Laximo | OEM/aftermarket, API, применяемость | договор, охват, кеширование |
-| PartsAPI | марки/модели, VIN, кроссы, TecDoc, нормочасы | версия Q2 2026, регион, API тариф |
-| ABCP | каталоги товарных групп, кроссы и API | отдельная подписка, лицензия, изображения |
-| AutoDealer Catalog | оригинальные схемы, VIN/Frame, API как опция | договорное API, права данных |
+| Laximo | OEM/aftermarket, API, применяемость | договор, охват, версии, caching |
+| PartsAPI | VIN, кроссы, TecDoc, нормочасы | регион, API-тариф, доступность |
+| ABCP | товарные группы, кроссы, API | подписка, права на изображения |
+| AutoDealer Catalog | схемы, VIN/Frame, возможный API | отдельный договор, права данных |
 
-Публичные источники: https://doc.laximo.ru/ ; https://partsapi.ru/docs ; https://www.abcp.ru/catalogs ; https://autodealer.ru/catalog .
+Материалы для проверки договорных условий: https://doc.laximo.ru/ ; https://partsapi.ru/docs ; https://www.abcp.ru/catalogs ; https://autodealer.ru/catalog . Условия лицензий, тарифы, источники данных и их актуальность на октябрь 2026 **не подтверждены**. Никаких scraping, реальных VIN/ПДн и коммерческих справочников без разрешения.
 
-Контракт PartsCatalogProvider: findVehicle, searchByOem, listAlternatives, getApplicability, getAssemblies. Результат: provider, sourceVersion, retrievedAt, brand, article, applicability (VERIFIED/UNVERIFIED/UNKNOWN). Ошибки: LICENSE_REQUIRED, RATE_LIMITED, UNAVAILABLE, NOT_FOUND, INVALID_INPUT. SupplierOffer имеет свою цену, остаток и ETA и не является доказательством применимости.
+## Реально работает: offline fixture (current-dev, #231)
 
-Реальные ключи и актуальность версии на октябрь 2026 не подтверждены. До договора используется только fixture adapter. Track #111.
+Модуль `apps/api/roboport_api/auto_parts_provider.py` определяет независимый Python `PartsCatalogProvider` с методами `find_vehicle`, `search_by_oem`, `list_alternatives`, `get_applicability`, `get_assemblies`. `FixturePartsCatalog` не совершает сетевых запросов, возвращает только синтетическую запись `SYN-001`, всегда `UNKNOWN` применяемость и пустые аналоги/узлы. Синтетический VIN `1HGCM82633A004352` служит исключительно тестовым примером, не подтверждением связи автомобиля/детали.
+
+Каждая выдаваемая запись содержит `provider`, `source_revision`, timezone-aware `retrieved_at`, `brand`, `article`, `applicability` (`VERIFIED` / `UNVERIFIED` / `UNKNOWN`). Одна только cross-ссылка не повышает статус до `VERIFIED`. Поля provenance обязательны; неполная карточка отклоняется.
+
+Невалидный VIN или номер детали даёт `INVALID_INPUT`; неизвестный корректный VIN — `NOT_FOUND`. Нет подходящих деталей/аналогов — пустой tuple, **не** подтверждение применяемости. Провайдер обязан явным образом сигнализировать `RATE_LIMITED` (429), `UNAVAILABLE` (timeout/сбой), `LICENSE_REQUIRED`; при ошибках fixture не возвращает частичные данные. Это модель доменных исключений, **не опубликованные HTTP-коды**.
+
+Проверка без сети: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_parts_provider.py`. Задача не меняет DDL, auth или публичные URL.
+
+## Планируется (#111, #115)
+
+Лицензированные online адаптеры, adapter sandbox, HTTP OpenAPI, проверенная применяемость и отдельный поток предложений поставщиков — **planned**, не current. Автомобильный интерфейс кладовщика для этого провайдера ещё не существует; реальные действия в UI не документируются как готовые. Перед выводом функции пользователю необходимы контрактный security-review, лицензия, scoped tenant ACL и release gate #119. Внешняя цена, наличие и ETA никогда не означают совместимость с автомобилем.
