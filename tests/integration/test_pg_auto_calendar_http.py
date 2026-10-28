@@ -39,6 +39,7 @@ def test_calendar_tenant_active_booking_and_limited_window(monkeypatch):
     assert response.json()["items"]==[{"appointmentId":str(a),"bookingId":str(fresh),
          "bayId":str(bay),"startsAt":(start+timedelta(hours=2)).isoformat(),
          "endsAt":(start+timedelta(hours=3)).isoformat(),"workOrderId":str(w)}]
+    assert response.json()["hasMore"] is False
     assert "customerId" not in response.text and "vehicleId" not in response.text
     wrong=f"/api/v1/dev/auto/organizations/{other}/calendar"
     assert client.get(wrong,params=args).status_code==403

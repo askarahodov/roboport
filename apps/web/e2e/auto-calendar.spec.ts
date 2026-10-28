@@ -32,7 +32,7 @@ test('calendar creates, reschedules and cancels via exact tenant paths',async({p
   await page.route(base,route=>{
     const req=route.request();
     if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',
-      body:JSON.stringify({items:current?[{appointmentId:appointment,bookingId:bay,bayId:bay,
+      body:JSON.stringify({hasMore:false,items:current?[{appointmentId:appointment,bookingId:bay,bayId:bay,
       startsAt:'2030-01-01T10:00:00+00:00',endsAt:'2030-01-01T11:00:00+00:00',workOrderId:work}]:[]})});
     expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
     calls.push({path:new URL(req.url()).pathname,body:req.postDataJSON()});
@@ -69,7 +69,7 @@ test('calendar blocks zero and reverse intervals before posting',async({page})=>
   let posts=0;
   await page.route(base,route=>{
     if(route.request().method()==='POST'){posts++;return route.fulfill({status:201,body:'{}'});}
-    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
   });
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
@@ -98,7 +98,7 @@ test('calendar ignores an old denied response after tenant changes',async({page}
       await new Promise(resolve=>setTimeout(resolve,250));
       try{await route.fulfill({status:403,body:'{"code":"FORBIDDEN"}'});}catch{return;}
     }else{
-      await route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+      await route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
     }
   });
   await page.goto('/staff/auto-calendar');
@@ -114,7 +114,7 @@ test('calendar ignores an old denied response after tenant changes',async({page}
 
 test('calendar rejects invalid UTC calendar day before querying API',async({page})=>{
   let reads=0;
-  await page.route(base,route=>{reads++;return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});});
+  await page.route(base,route=>{reads++;return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});});
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
@@ -131,7 +131,7 @@ test('calendar refuses past and overlong appointments before posting',async({pag
   let posts=0;
   await page.route(base,route=>{
     if(route.request().method()==='POST'){posts++;return route.fulfill({status:201,body:'{}'});}
-    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
   });
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
@@ -150,9 +150,18 @@ test('calendar refuses past and overlong appointments before posting',async({pag
   expect(posts).toBe(0);
 });
 
+test('calendar warns when the backend has additional records',async({page})=>{
+  await page.route(base,route=>route.fulfill({status:200,contentType:'application/json',
+    body:'{"items":[],"hasMore":true}'}));
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByRole('alert')).toContainText('Полный список недоступен');
+});
+
 test('calendar mobile layout remains in viewport',async({page})=>{
   await page.setViewportSize({width:390,height:844});
-  await page.route(base,route=>route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}));
+  await page.route(base,route=>route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'}));
   await page.goto('/staff/auto-calendar');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);

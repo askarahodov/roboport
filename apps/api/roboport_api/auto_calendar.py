@@ -34,7 +34,7 @@ def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UU
             AND b.organization_id=a.organization_id
             AND b.location_id=a.location_id AND b.canceled_at IS NULL
             AND b.starts_at < %s AND b.ends_at > %s
-          ORDER BY b.starts_at,a.id LIMIT 100
+          ORDER BY b.starts_at,a.id LIMIT 101
         """,(org,location,end,start)).fetchall()
         return [{"appointmentId":str(a),"bookingId":str(b),"bayId":str(bay),
                  "startsAt":s.isoformat(),"endsAt":e.isoformat(),
