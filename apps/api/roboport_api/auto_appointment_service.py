@@ -64,3 +64,47 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
         except psycopg.errors.ExclusionViolation as exc:
             raise AppointmentConflict("bay already reserved") from exc
         return appointment,booking,order
+
+
+def cancel_appointment(conn: psycopg.Connection, token: str,
+                       organization: UUID, appointment: UUID) -> str:
+    """Revoke the reservation, preserving Appointment and WorkOrder history."""
+    if not isinstance(organization, UUID) or not isinstance(appointment, UUID):
+        raise AppointmentDenied("invalid identifiers")
+    from .session_lookup import session_subject
+    with conn.transaction():
+        # Lock session first, then tenant location and staff grant, then booking.
+        actor = session_subject(conn, token, for_mutation=True)
+        if actor is None:
+            raise AppointmentDenied("session unavailable")
+        scoped = conn.execute(
+            """SELECT location_id FROM auto_appointment
+               WHERE id=%s AND organization_id=%s""",
+            (appointment,organization),
+        ).fetchone()
+        if scoped is None:
+            raise AppointmentDenied("appointment unavailable")
+        if not organization_role_allows(
+            conn, token, organization, "INTAKE", scoped[0], for_mutation=True
+        ):
+            raise AppointmentDenied("organization intake required")
+        booking = conn.execute(
+            """SELECT b.id,b.canceled_at
+               FROM auto_appointment a JOIN auto_bay_booking b ON b.id=a.booking_id
+               WHERE a.id=%s AND a.organization_id=%s
+                 AND b.organization_id=a.organization_id
+                 AND b.location_id=a.location_id FOR UPDATE OF b""",
+            (appointment,organization),
+        ).fetchone()
+        if booking is None:
+            raise AppointmentDenied("booking unavailable")
+        if booking[1] is not None:
+            return "ALREADY_CANCELED"
+        conn.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s", (booking[0],))
+        conn.execute(
+            """INSERT INTO auto_appointment_actor_action
+               (id,appointment_id,organization_id,actor_id,action)
+               VALUES(%s,%s,%s,%s,'CANCELED')""",
+            (uuid4(),appointment,organization,actor),
+        )
+        return "CANCELED"
