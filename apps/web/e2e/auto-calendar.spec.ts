@@ -334,3 +334,111 @@ test('calendar mobile layout remains in viewport',async({page})=>{
 });
 
 
+
+
+test('create retries uncertain network response using identical key and payload',async({page})=>{
+  const requests:{key:string|undefined;body:string|null}[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(base,route=>{
+    const req=route.request();
+    if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
+    requests.push({key:req.headers()['idempotency-key'],body:req.postData()});
+    if(requests.length===1)return route.abort('failed');
+    return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({
+      appointmentId:appointment,bookingId:bay,workOrderId:work})});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
+  await page.getByRole('button',{name:'Создать запись'}).click();
+  await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toBeVisible();
+  await page.getByRole('button',{name:'Повторить запрос с тем же ключом'}).click();
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  expect(requests).toHaveLength(2);
+  expect(requests[0].key).toMatch(/^[0-9a-f-]{36}$/);
+  expect(requests[1]).toEqual(requests[0]);
+  await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toHaveCount(0);
+});
+
+test('uncertain create cannot be retried in another tenant context',async({page})=>{
+  let posts=0;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(base,route=>{
+    if(route.request().method()==='GET')return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
+    posts++;
+    return route.abort('failed');
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
+  await page.getByRole('button',{name:'Создать запись'}).click();
+  await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID организации'}).fill('77777777-7777-4777-8777-777777777777');
+  await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toHaveCount(0);
+  expect(posts).toBe(1);
+});
+
+
+test('HTTP 503 keeps the original idempotency key on retry',async({page})=>{
+  const keys:string[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(base,route=>{
+    const req=route.request();
+    if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
+    keys.push(req.headers()['idempotency-key']);
+    return route.fulfill({status:keys.length===1?503:201,contentType:'application/json',
+      body:keys.length===1?'{"code":"TEMPORARY"}':JSON.stringify({appointmentId:appointment,bookingId:bay,workOrderId:work})});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
+  await page.getByRole('button',{name:'Создать запись'}).click();
+  await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toBeVisible();
+  await page.getByRole('button',{name:'Повторить запрос с тем же ключом'}).click();
+  await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toHaveCount(0);
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
+
+test('late failed request from previous tenant cannot restore pending retry',async({page})=>{
+  let received!:()=>void;
+  let failOld!:()=>void;
+  const seen=new Promise<void>(resolve=>received=resolve);
+  const release=new Promise<void>(resolve=>failOld=resolve);
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(base,async route=>{
+    if(route.request().method()==='GET')return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
+    received();
+    await release;
+    try{await route.abort('failed');}catch{return;}
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
+  await page.getByRole('button',{name:'Создать запись'}).click();
+  await seen;
+  await page.getByRole('textbox',{name:'UUID организации'}).fill('77777777-7777-4777-8777-777777777777');
+  failOld();
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toHaveCount(0);
+});
