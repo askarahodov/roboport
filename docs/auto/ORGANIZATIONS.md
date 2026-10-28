@@ -117,3 +117,7 @@
 ## Закрытый HTTP-перенос и корректная отмена (0048, current-dev)
 
 `POST /api/v1/dev/auto/organizations/{org_id}/appointments/{appointment_id}/reschedule` принимает `bayId`, `startsAt`, `endsAt` и требует активной сессии, CSRF и роли `INTAKE` организации/филиала. Возвращает `RESCHEDULED` с новым `bookingId`; конфликт поста — `409 BAY_BUSY`, чужой tenant или отсутствие прав — `403`. Миграция `0048_auto_current_cancel` исправляет фиксацию событий при отмене после переноса: отменяется текущая бронь, а `BOOKING_CANCELED` и `APPOINTMENT_CANCELED` записываются только при фактической отмене Appointment, не при освобождении прежнего слота. Тест `tests/integration/test_pg_auto_reschedule_http.py`. Публичный API и календарь всё ещё недоступны.
+
+## Серверный календарь приёмщика (current-dev)
+
+`GET /api/v1/dev/auto/organizations/{org_id}/calendar` принимает `locationId`, `startsAt`, `endsAt` (timezone-aware ISO 8601). Чтение требует активной сессии и роли `INTAKE` в указанном филиале, ограничено 7 сутками и 100 записями за запрос. Возвращаются только UUID записи/актуальной брони/поста/наряда и интервалы; данные клиента/автомобиля не выдаются. Отменённые и устаревшие брони после переноса не отображаются. Это закрытый synthetic HTTPS loopback API, без production-календаря и постраничной выгрузки свыше 100 записей.
