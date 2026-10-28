@@ -2,7 +2,7 @@ import React from 'react';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Entry = { appointmentId:string; bookingId:string; bayId:string;
-  startsAt:string; endsAt:string; workOrderId:string };
+  startsAt:string; endsAt:string; workOrderId:string; employeeId:string|null };
 type Form = { bay:string; link:string; employee:string; starts:string; ends:string };
 const empty:Form={bay:'',link:'',employee:'',starts:'',ends:''};
 const validUtcDay=(day:string)=>{
@@ -59,6 +59,8 @@ export function AutoCalendar() {
           !data.items.every((x:unknown)=>x&&typeof x==='object' &&
             ['appointmentId','bookingId','bayId','workOrderId','startsAt','endsAt'].every(
               key=>key in x&&typeof (x as Record<string,unknown>)[key]==='string')))throw new Error();
+        if(!data.items.every((x:Entry)=>'employeeId' in x &&
+          (x.employeeId===null||(typeof x.employeeId==='string'&&uuid.test(x.employeeId)))))throw new Error();
         if(!('hasMore' in data)||typeof data.hasMore!=='boolean')throw new Error();
         const next=data.hasMore && 'nextStartsAt' in data && typeof data.nextStartsAt==='string' &&
           'nextAppointmentId' in data && typeof data.nextAppointmentId==='string' &&
@@ -125,7 +127,8 @@ export function AutoCalendar() {
       {items.length===0?<p>Записей нет.</p>:<ul>{items.map(entry=><li key={entry.appointmentId}>
         <strong>{entry.startsAt} — {entry.endsAt}</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
-        <button type="button" disabled={busy} onClick={()=>{setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId});}}>
+        <p>Специалист: {entry.employeeId??'не назначен'}</p>
+        <button type="button" disabled={busy} onClick={()=>{setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId,employee:entry.employeeId??''});}}>
           Перенести</button>
         <button type="button" disabled={busy} onClick={()=>setTarget('cancel:'+entry.appointmentId)}>Отменить запись</button>
       </li>)}</ul>}

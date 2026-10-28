@@ -38,7 +38,8 @@ def test_calendar_tenant_active_booking_and_limited_window(monkeypatch):
     assert response.status_code==200,response.text
     assert response.json()["items"]==[{"appointmentId":str(a),"bookingId":str(fresh),
          "bayId":str(bay),"startsAt":(start+timedelta(hours=2)).isoformat(),
-         "endsAt":(start+timedelta(hours=3)).isoformat(),"workOrderId":str(w)}]
+         "endsAt":(start+timedelta(hours=3)).isoformat(),"workOrderId":str(w),
+         "employeeId":None}]
     assert response.json()["hasMore"] is False
     assert "customerId" not in response.text and "vehicleId" not in response.text
     wrong=f"/api/v1/dev/auto/organizations/{other}/calendar"
@@ -88,6 +89,7 @@ def test_calendar_101_rows_signals_truncation_without_cross_tenant_data(monkeypa
     assert response.status_code==200,response.text
     payload=response.json()
     assert len(payload["items"])==100
+    assert all(x["employeeId"] is None for x in payload["items"])
     assert payload["hasMore"] is True
     assert payload["nextStartsAt"]==payload["items"][-1]["startsAt"]
     assert payload["nextAppointmentId"]==payload["items"][-1]["appointmentId"]
@@ -113,3 +115,48 @@ def test_calendar_101_rows_signals_truncation_without_cross_tenant_data(monkeypa
     assert len(boundary.json()["items"])==100
     assert boundary.json()["hasMore"] is False
     assert client.get(url,params={**args,"locationId":str(uuid4())}).status_code==403
+
+
+def test_calendar_reports_only_current_employee_assignment_after_reschedule(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    start=datetime.now(timezone.utc)+timedelta(days=4)
+    with psycopg.connect(DSN) as db:
+        org,loc,bay=_org_and_bay(db)
+        db.execute("UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+                   (d["manager"],d["link"]))
+        db.execute("INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) VALUES(%s,%s)",
+                   (d["vehicle"],loc))
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,%s,%s,'INTAKE')""",(uuid4(),org,loc,d["intake"]))
+        db.execute("""INSERT INTO auto_staff_shift
+          (id,organization_id,location_id,user_id,starts_at,ends_at)
+          VALUES(%s,%s,%s,%s,%s,%s)""",
+          (uuid4(),org,loc,d["intake"],start,start+timedelta(hours=8)))
+    token=d["tokens"][d["intake"]]
+    with psycopg.connect(DSN) as db:
+        appointment,old,_=create_appointment(db,token,org,loc,bay,d["link"],start,
+                      start+timedelta(hours=1),d["intake"])
+    client=TestClient(app,base_url="https://127.0.0.1")
+    client.cookies.set("rp_session",token)
+    url=f"/api/v1/dev/auto/organizations/{org}/calendar"
+    args={"locationId":str(loc),"startsAt":start.isoformat(),
+          "endsAt":(start+timedelta(days=1)).isoformat()}
+    first=client.get(url,params=args)
+    assert first.status_code==200,first.text
+    assert first.json()["items"][0]["employeeId"]==str(d["intake"])
+    with psycopg.connect(DSN) as db:
+        new=reschedule_appointment(db,token,org,appointment,bay,
+            start+timedelta(hours=2),start+timedelta(hours=3),clear_employee=True)
+    changed=client.get(url,params=args)
+    assert changed.status_code==200,changed.text
+    assert len(changed.json()["items"])==1
+    assert changed.json()["items"][0]["bookingId"]==str(new)
+    assert changed.json()["items"][0]["employeeId"] is None
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT canceled_at IS NOT NULL FROM auto_employee_reservation WHERE booking_id=%s",
+                          (old,)).fetchone()==(True,)
+    assert "customerId" not in changed.text and "vehicleId" not in changed.text
