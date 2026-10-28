@@ -39,6 +39,7 @@ export function AutoCalendar() {
   const slotRequest=React.useRef(0);
   const [clearEmployee,setClearEmployee]=React.useState(false);
   const [message,setMessage]=React.useState('');
+  const [pending,setPending]=React.useState<{path:string;body:string;key:string;success:string;org:string;location:string}|null>(null);
   const [revision,setRevision]=React.useState(0);
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
@@ -76,6 +77,7 @@ export function AutoCalendar() {
   },[org,location,day,revision,valid,cursor]);
   function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
   function resetPage(){setCursor(null);setHistory([]);resetSlots();}
+  React.useEffect(()=>{setPending(null);},[org,location]);
   async function findSlots(){
     const retained=target?items.find(x=>x.appointmentId===target)?.employeeId:null;
     const effectiveEmployee=target&&clearEmployee?null:(form.employee.trim()||retained||null);
@@ -108,22 +110,32 @@ export function AutoCalendar() {
     finally{if(requestId===slotRequest.current)setSlotsBusy(false);}
   }
 
-  async function action(path:string,payload:unknown,success:string){
-    if(busy||!valid)return;
+  async function action(path:string,payload:unknown,success:string,
+                        retry?:{path:string;body:string;key:string;success:string;org:string;location:string}){
+    if(busy||!valid||(pending&&!retry))return;
+    const isIdempotent=path.endsWith('/reschedule')||path.endsWith('/appointments');
+    const snapshot=retry??(isIdempotent?{
+      path,body:JSON.stringify(payload),key:crypto.randomUUID(),success,
+      org:org.trim(),location:location.trim(),
+    }:null);
+    if(retry&&(retry.org!==org.trim()||retry.location!==location.trim()))return;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
-      if(!csrf.ok)throw new Error();
+      if(!csrf.ok)throw new Error('csrf');
       const data:unknown=await csrf.json();
-      if(!data||typeof data!=='object'||!('csrfToken' in data)||typeof data.csrfToken!=='string')throw new Error();
+      if(!data||typeof data!=='object'||!('csrfToken' in data)||typeof data.csrfToken!=='string')throw new Error('csrf');
       const response=await fetch(path,{method:'POST',credentials:'include',cache:'no-store',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':data.csrfToken},
-        body:JSON.stringify(payload)});
-      if(!response.ok){setMessage(response.status===409?'Пост или специалист занят / смена недоступна (409).':
+        headers:{'Content-Type':'application/json','X-CSRF-Token':data.csrfToken,
+          ...(snapshot?{'Idempotency-Key':snapshot.key}:{})},
+        body:snapshot?snapshot.body:JSON.stringify(payload)});
+      if(!response.ok){setPending(null);setMessage(response.status===409?'Пост или специалист занят / ключ запроса использован (409).':
         [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
-      setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);resetPage();setRevision(n=>n+1);
-    }catch{setMessage('Не удалось выполнить запрос. Проверьте сессию.');}
-    finally{setBusy(false);}
+      setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);resetPage();setRevision(n=>n+1);
+    }catch{
+      if(snapshot){setPending(snapshot);setMessage('Результат запроса неизвестен. Повторите с прежним ключом или обновите календарь перед новой операцией.');}
+      else setMessage('Не удалось выполнить запрос. Проверьте сессию.');
+    }finally{setBusy(false);}
   }
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+'/appointments';
   function fields(includeLink:boolean){
@@ -192,7 +204,7 @@ export function AutoCalendar() {
       </div>}
       {!target?.startsWith('cancel:')&&<form onSubmit={e=>{
         e.preventDefault();
-        if(!validForm)return;
+        if(!validForm||pending)return;
         const payload={bayId:form.bay.trim(),startsAt:form.starts,endsAt:form.ends,
           ...(target&&clearEmployee?{employeeId:null}:form.employee.trim()?{employeeId:form.employee.trim()}:{})};
         if(target)void action(base+'/'+target+'/reschedule',payload,'Запись перенесена.');
@@ -204,5 +216,9 @@ export function AutoCalendar() {
       </form>}
     </>}
     {message&&<p role="status">{message}</p>}
+    {pending&&<div role="group" aria-label="Неопределённый результат записи">
+      <button type="button" disabled={busy} onClick={()=>void action(pending.path,JSON.parse(pending.body),pending.success,pending)}>Повторить запрос с тем же ключом</button>
+      <button type="button" disabled={busy} onClick={()=>{setPending(null);setMessage('Результат неизвестен: проверьте календарь перед новой записью.');setRevision(n=>n+1);}}>Закрыть повтор и проверить календарь</button>
+    </div>}
   </section>;
 }
