@@ -11,6 +11,10 @@ from roboport_api.auto_manager_bootstrap import (
 )
 from roboport_api.auto_intake_delegation import _manager
 from roboport_api.auto_vehicle_claim import VehicleClaimRejected
+from roboport_api.guest_claim import ClaimRejected, _staff
+from roboport_api.authorization import authorize_ticket
+from roboport_api.main import app
+from fastapi.testclient import TestClient
 from roboport_api.session_tokens import new_token, token_digest
 from test_pg_auto_vehicle_claim_http import _scenario
 from test_pg_baseline import DSN
@@ -100,14 +104,31 @@ def test_two_admins_issue_no_rights_before_approval_and_exact_scopes(monkeypatch
                  AND revoked_at IS NULL""",
             (loc,target),
         ).fetchone() == (1,)
+        # Ни один одобренный auto MANAGER не получает legacy user_role.
         assert db.execute(
             "SELECT count(*) FROM user_role WHERE user_id=%s AND role_code='MANAGER'",
             (target,),
-        ).fetchone() == (1,)
+        ).fetchone() == (0,)
+        with pytest.raises(ClaimRejected):
+            _staff(db, tokens[target], "MANAGER")
+        assert not authorize_ticket(
+            db, tokens[target], "ticket.manage", d["old_ticket"],
+        )
         assert db.execute(
             """SELECT action,actor_id FROM auto_manager_approval_audit
                WHERE request_id=%s ORDER BY created_at,id""", (req,),
         ).fetchall() == [("PROPOSED", a), ("APPROVED", b)]
+    # Legacy review queue и назначение чужого ticket.manage остаются
+    # недоступны даже после полного auto одобрения двух ADMIN.
+    monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    http = TestClient(app, base_url="https://127.0.0.1")
+    http.cookies.set("rp_session", tokens[target])
+    assert http.get("/api/v1/dev/guest-claims/review-queue").status_code == 403
+    assert http.post(
+        "/api/v1/dev/guest-claims/" + str(uuid4()) + "/assign-review",
+        headers={"Origin": "https://127.0.0.1"},
+    ).status_code == 403
     with pytest.raises(ManagerBootstrapRejected):
         _approve(b,tokens,req)
     with pytest.raises(ManagerBootstrapRejected):
@@ -263,3 +284,24 @@ def test_no_manager_from_wrong_location_or_unbound_vehicle(monkeypatch):
             "SELECT vehicle_id,location_id,target_id FROM auto_manager_approval_request WHERE id=%s",
             (req,),
         ).fetchone() == (d["vehicle"],loc,target)
+
+
+def test_revoked_automotive_grant_never_falls_back_to_global_role(monkeypatch):
+    _enable(monkeypatch)
+    d, loc, a, b, target, tokens = _setup()
+    req = _propose(d,a,tokens,target)
+    _approve(b,tokens,req)
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """UPDATE auto_location_role_grant SET revoked_at=now()
+               WHERE location_id=%s AND user_id=%s AND role_code='MANAGER'""",
+            (loc,target),
+        )
+    # Даже ошибочное выключение опционального branch-flag не должно
+    # превратить scoped auto MANAGER в безусловного legacy руководителя.
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_BRANCH_SCOPE", "0")
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(VehicleClaimRejected):
+            _manager(db,tokens[target],d["vehicle"])
+        with pytest.raises(ClaimRejected):
+            _staff(db,tokens[target],"MANAGER")
