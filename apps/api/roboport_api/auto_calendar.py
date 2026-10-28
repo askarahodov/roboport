@@ -24,7 +24,7 @@ def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UU
                                        for_mutation=True):
             raise CalendarDenied("intake authority required")
         rows=conn.execute("""
-          SELECT a.id, b.id,b.bay_id,b.starts_at,b.ends_at,w.id
+          SELECT a.id, b.id,b.bay_id,b.starts_at,b.ends_at,w.id,er.employee_id
           FROM auto_appointment a
           JOIN LATERAL (
             SELECT COALESCE(
@@ -35,6 +35,9 @@ def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UU
           ) resolved ON TRUE
           JOIN auto_bay_booking b ON b.id=resolved.current_id
           JOIN auto_work_order w ON w.appointment_id=a.id
+          LEFT JOIN auto_employee_reservation er ON er.booking_id=b.id
+            AND er.organization_id=a.organization_id
+            AND er.location_id=a.location_id AND er.canceled_at IS NULL
           WHERE a.organization_id=%s AND a.location_id=%s
             AND b.organization_id=a.organization_id
             AND b.location_id=a.location_id AND b.canceled_at IS NULL
@@ -45,4 +48,5 @@ def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UU
         """,(org,location,end,start,after_start,after_start,after_appointment)).fetchall()
         return [{"appointmentId":str(a),"bookingId":str(b),"bayId":str(bay),
                  "startsAt":s.isoformat(),"endsAt":e.isoformat(),
-                 "workOrderId":str(w)} for a,b,bay,s,e,w in rows]
+                 "workOrderId":str(w),"employeeId":str(employee) if employee else None}
+                for a,b,bay,s,e,w,employee in rows]
