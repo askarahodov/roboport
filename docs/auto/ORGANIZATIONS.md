@@ -113,3 +113,7 @@
 ## Перенос записи без смены WorkOrder (0047, current-dev)
 
 Внутренний `reschedule_appointment` под живой ролью `INTAKE` сохраняет исходные Appointment и WorkOrder, создаёт новую бронь поста и неизменяемую запись `auto_appointment_reschedule` с исполнителем и ссылками на старую/новую бронь. После резервирования старая бронь освобождается атомарно; конфликт нового времени откатывает всю транзакцию. Перенос **не** создаёт событие отмены наряда. Текущая бронь определяется по последнему событию переноса. Пока отсутствует HTTP-маршрут переноса и календарь; смена филиала не поддерживается. Тест: `tests/integration/test_pg_auto_reschedule.py`.
+
+## Закрытый HTTP-перенос и корректная отмена (0048, current-dev)
+
+`POST /api/v1/dev/auto/organizations/{org_id}/appointments/{appointment_id}/reschedule` принимает `bayId`, `startsAt`, `endsAt` и требует активной сессии, CSRF и роли `INTAKE` организации/филиала. Возвращает `RESCHEDULED` с новым `bookingId`; конфликт поста — `409 BAY_BUSY`, чужой tenant или отсутствие прав — `403`. Миграция `0048_auto_current_cancel` исправляет фиксацию событий при отмене после переноса: отменяется текущая бронь, а `BOOKING_CANCELED` и `APPOINTMENT_CANCELED` записываются только при фактической отмене Appointment, не при освобождении прежнего слота. Тест `tests/integration/test_pg_auto_reschedule_http.py`. Публичный API и календарь всё ещё недоступны.
