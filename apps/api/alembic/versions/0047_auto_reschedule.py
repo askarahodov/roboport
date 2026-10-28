@@ -22,6 +22,38 @@ def upgrade():
         CHECK (old_booking_id <> new_booking_id)
       )
     """)
+    # A reschedule releases an old slot; it is not a business cancellation.
+    # Preserve CREATED/CANCELED events only for genuine cancellations.
+    op.execute("""
+      CREATE OR REPLACE FUNCTION capture_auto_appointment_canceled()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF OLD.canceled_at IS NULL AND NEW.canceled_at IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM auto_appointment_reschedule r
+                           WHERE r.old_booking_id=NEW.id) THEN
+          INSERT INTO auto_appointment_event(appointment_id,action)
+          SELECT a.id,'BOOKING_CANCELED' FROM auto_appointment a
+          WHERE a.booking_id=NEW.id;
+        END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE OR REPLACE FUNCTION capture_auto_work_order_canceled()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF OLD.canceled_at IS NULL AND NEW.canceled_at IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM auto_appointment_reschedule r
+                           WHERE r.old_booking_id=NEW.id) THEN
+          INSERT INTO auto_work_order_event(work_order_id,action)
+          SELECT w.id,'APPOINTMENT_CANCELED'
+          FROM auto_work_order w
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          WHERE a.booking_id=NEW.id;
+        END IF;
+        RETURN NEW;
+      END $fn$
+    """)
     op.execute("""
       CREATE TRIGGER auto_appointment_reschedule_immutable
       BEFORE UPDATE OR DELETE ON auto_appointment_reschedule
@@ -31,3 +63,28 @@ def upgrade():
 def downgrade():
     # Disposable synthetic database only. Never discard production audit data.
     op.execute("DROP TABLE auto_appointment_reschedule")
+    op.execute("""
+      CREATE OR REPLACE FUNCTION capture_auto_appointment_canceled()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF OLD.canceled_at IS NULL AND NEW.canceled_at IS NOT NULL THEN
+          INSERT INTO auto_appointment_event(appointment_id,action)
+          SELECT a.id,'BOOKING_CANCELED' FROM auto_appointment a
+          WHERE a.booking_id=NEW.id;
+        END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE OR REPLACE FUNCTION capture_auto_work_order_canceled()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF OLD.canceled_at IS NULL AND NEW.canceled_at IS NOT NULL THEN
+          INSERT INTO auto_work_order_event(work_order_id,action)
+          SELECT w.id,'APPOINTMENT_CANCELED'
+          FROM auto_work_order w JOIN auto_appointment a ON a.id=w.appointment_id
+          WHERE a.booking_id=NEW.id;
+        END IF;
+        RETURN NEW;
+      END $fn$
+    """)
