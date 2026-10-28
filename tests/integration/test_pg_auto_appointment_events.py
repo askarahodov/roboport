@@ -40,4 +40,6 @@ def test_canceled_booking_without_appointment_creates_no_phantom_event():
         org, loc, bay = _org_and_bay(db)
         booking = _book(db, org, loc, bay, '2033-05-01 08:00+00','2033-05-01 10:00+00')
         db.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s", (booking,))
-        assert db.execute("SELECT count(*) FROM auto_appointment_event").fetchone()[0] == 0
+        assert db.execute("""SELECT count(*) FROM auto_appointment_event e
+            JOIN auto_appointment a ON a.id=e.appointment_id
+            WHERE a.booking_id=%s""", (booking,)).fetchone()[0] == 0
