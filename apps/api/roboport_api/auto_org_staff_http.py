@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
-from .auto_org_staff import grant_staff, revoke_staff, OrgStaffDenied, OrgStaffConflict
+from .auto_org_staff import grant_staff, revoke_staff, list_staff, OrgStaffDenied, OrgStaffConflict
 
 router = APIRouter(include_in_schema=False)
 
@@ -64,3 +64,20 @@ def remove_staff(org_id: str, grant_id: str, request: Request):
         except OrgStaffDenied:
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(content={"status": result}, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/staff")
+def get_staff(org_id: str, request: Request):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        organization = UUID(org_id)
+    except (TypeError, ValueError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            items = list_staff(db, request.cookies.get("rp_session", ""), organization)
+        except OrgStaffDenied:
+            return _response(request, 403, "FORBIDDEN")
+    return JSONResponse(content={"items": items}, headers={"Cache-Control": "no-store"})
