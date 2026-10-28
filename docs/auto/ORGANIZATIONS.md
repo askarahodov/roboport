@@ -93,3 +93,7 @@
 ## События жизненного цикла записи (0043, current-dev)
 
 Миграция `0043_auto_appointment_events` добавляет append-only таблицу `auto_appointment_event`. После создания `auto_appointment` триггер записывает `CREATED`; при первой отмене связанного `auto_bay_booking` записывается `BOOKING_CANCELED` (если Appointment существует). Оба события возникают атомарно с основной транзакцией, изменение и удаление запрещены, повторный no-op cancel не дублирует событие. Тест: `tests/integration/test_pg_auto_appointment_events.py`. **Не реализованы:** кто именно отменил запись, переносы, уведомления, WorkOrder, production API/UI и user timezone; события не служат полноценным actor audit и не доказывают разрешение пользователя на отмену.
+
+## Автомобильный заказ-наряд WorkOrder (0044, current-dev)
+
+Миграция `0044_auto_work_order` создаёт неизменяемую идентичность автомобильного заказ-наряда, связанную с **единственной** `auto_appointment`. Организация/филиал должны точно совпадать с записью; отменённая бронь не может породить новый наряд. Уникальность `appointment_id` защищает от дублирующего наряда, `FOR SHARE` сериализует создание с отменой связанной брони. Тест `tests/integration/test_pg_auto_work_order.py` проверяет чужую организацию, отмену, дубликат и запрет UPDATE/DELETE. **Это только schema foundation:** позиции работ/материалов, стоимость, склад, actor-audit, статусы, UI/API и production WorkOrder остаются planned.
