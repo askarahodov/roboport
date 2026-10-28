@@ -86,6 +86,8 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
     try:
         org,ident=UUID(org_id),UUID(appointment_id)
         body=ReschedulePayload.model_validate(await request.json())
+        idempotency_header=request.headers.get('Idempotency-Key')
+        request_key=UUID(idempotency_header) if idempotency_header is not None else None
     except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as db:
@@ -96,11 +98,14 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
                 db,request.cookies.get("rp_session",""),org,ident,body.bayId,
                 body.startsAt,body.endsAt,body.employeeId,
                 clear_employee=('employeeId' in body.model_fields_set and body.employeeId is None),
+                request_key=request_key,
             )
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
+        except AppointmentKeyConflict:
+            return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
         except AppointmentConflict:
-            return _response(request,409,"BAY_BUSY")
+            return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(content={"status":"RESCHEDULED","bookingId":str(booking)},
                         headers={"Cache-Control":"no-store"})
 
