@@ -13,10 +13,12 @@ class SlotsDenied(ValueError):
 
 def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                     location: UUID, bay: UUID, start: datetime,
-                    employee: UUID | None = None) -> list[dict]:
+                    employee: UUID | None = None,
+                    appointment: UUID | None = None) -> list[dict]:
     """At most 47 one-hour candidates with 30-minute steps in a UTC day."""
     if (not all(isinstance(v, UUID) for v in (org, location, bay))
         or (employee is not None and not isinstance(employee, UUID))
+        or (appointment is not None and not isinstance(appointment, UUID))
         or not isinstance(start, datetime) or start.tzinfo is None
         or start.utcoffset() is None):
         raise SlotsDenied("invalid scope or day")
@@ -37,6 +39,20 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
         """, (bay, org, location)).fetchone()
         if found is None:
             raise SlotsDenied("scoped bay unavailable")
+        old_booking = None
+        if appointment is not None:
+            scoped = conn.execute("""
+                SELECT COALESCE((SELECT r.new_booking_id FROM auto_appointment_reschedule r
+                  WHERE r.appointment_id=a.id
+                  ORDER BY r.created_at DESC,r.id DESC LIMIT 1),a.booking_id)
+                FROM auto_appointment a WHERE a.id=%s AND a.organization_id=%s
+                  AND a.location_id=%s
+            """, (appointment,org,location)).fetchone()
+            if scoped is None or conn.execute("""SELECT 1 FROM auto_bay_booking
+                WHERE id=%s AND canceled_at IS NULL AND organization_id=%s
+                  AND location_id=%s""",(scoped[0],org,location)).fetchone() is None:
+                raise SlotsDenied("scoped active appointment required")
+            old_booking = scoped[0]
         rows = conn.execute("""
             WITH candidates AS (
               SELECT s AS starts_at, s + interval '60 minutes' AS ends_at
@@ -51,6 +67,7 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                 SELECT 1 FROM auto_bay_booking b
                 WHERE b.bay_id=%s AND b.organization_id=%s
                   AND b.location_id=%s AND b.canceled_at IS NULL
+                  AND (%s::uuid IS NULL OR b.id<>%s::uuid)
                   AND b.starts_at<c.ends_at AND b.ends_at>c.starts_at
               )
               AND (%s::uuid IS NULL OR (
@@ -63,11 +80,12 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                 AND NOT EXISTS (
                   SELECT 1 FROM auto_employee_reservation er
                   WHERE er.employee_id=%s AND er.canceled_at IS NULL
+                    AND (%s::uuid IS NULL OR er.booking_id<>%s::uuid)
                     AND er.starts_at<c.ends_at AND er.ends_at>c.starts_at
                 )
               ))
             ORDER BY c.starts_at LIMIT 48
-        """, (day, day, bay, org, location, employee, employee, org, location,
-              employee)).fetchall()
+        """, (day, day, bay, org, location, old_booking, old_booking,
+              employee, employee, org, location, employee, old_booking, old_booking)).fetchall()
     return [{"startsAt": a.isoformat(), "endsAt": b.isoformat()}
             for a, b in rows]
