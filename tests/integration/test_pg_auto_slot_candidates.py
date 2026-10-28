@@ -123,5 +123,6 @@ def test_reschedule_slots_exclude_only_own_current_booking(monkeypatch):
             "appointmentId":str(appointment)}
     response=client.get(url,params=params)
     assert response.status_code==200,response.text
-    assert at.isoformat() in {x["startsAt"] for x in response.json()["items"]}
+    # After the successful move the second bay is occupied by that appointment.
+    assert at.isoformat() not in {x["startsAt"] for x in response.json()["items"]}
     assert client.get(url,params={**params,"appointmentId":str(uuid4())}).status_code==403
