@@ -67,7 +67,7 @@ def test_slot_candidates_scope_bay_conflicts_shift_and_http(monkeypatch):
 
 
 def test_reschedule_slots_exclude_only_own_current_booking(monkeypatch):
-    from roboport_api.auto_appointment_service import create_appointment
+    from roboport_api.auto_appointment_service import create_appointment,reschedule_appointment
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
@@ -102,9 +102,12 @@ def test_reschedule_slots_exclude_only_own_current_booking(monkeypatch):
         same_bay=candidate_slots(db,token,org,loc,bay,start,d["intake"],appointment)
         assert at.isoformat() not in {x["startsAt"] for x in no_context}
         assert at.isoformat() in {x["startsAt"] for x in scoped}
-        assert at.isoformat() in {x["startsAt"] for x in same_bay}
+        assert at.isoformat() not in {x["startsAt"] for x in same_bay}
         assert at.isoformat() not in {x["startsAt"] for x in candidate_slots(
             db,token,org,loc,bay,start,d["intake"])}
+        moved=reschedule_appointment(db,token,org,appointment,second_bay,
+                  at,at+timedelta(hours=1))
+        assert db.execute("SELECT bay_id FROM auto_bay_booking WHERE id=%s",(moved,)).fetchone()==(second_bay,)
         other,other_loc,_=_org_and_bay(db)
         from roboport_api.auto_slot_candidates import SlotsDenied
         import pytest
