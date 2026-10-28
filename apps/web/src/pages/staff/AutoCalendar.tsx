@@ -30,6 +30,7 @@ export function AutoCalendar() {
     const query=new URLSearchParams({locationId:location.trim(),startsAt:start.toISOString(),endsAt:end.toISOString()});
     void fetch(path+'?'+query,{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async response=>{
+        if(controller.signal.aborted)return;
         if([401,403,404].includes(response.status)){setStatus('denied');return;}
         if(!response.ok)throw new Error();
         const data:unknown=await response.json();
