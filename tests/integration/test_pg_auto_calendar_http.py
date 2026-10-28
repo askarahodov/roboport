@@ -93,4 +93,10 @@ def test_calendar_101_rows_signals_truncation_without_cross_tenant_data(monkeypa
     assert [item["startsAt"] for item in payload["items"]]==sorted(
         item["startsAt"] for item in payload["items"])
     assert "customerId" not in response.text and "vehicleId" not in response.text
+    # Exactly 100 overlapping bookings must not report a phantom next page.
+    boundary=client.get(url,params={**args,
+        "endsAt":(start+timedelta(minutes=1000)).isoformat()})
+    assert boundary.status_code==200,boundary.text
+    assert len(boundary.json()["items"])==100
+    assert boundary.json()["hasMore"] is False
     assert client.get(url,params={**args,"locationId":str(uuid4())}).status_code==403
