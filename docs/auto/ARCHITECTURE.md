@@ -1,4 +1,4 @@
-# Airmatik — целевая архитектура
+# Airmatik Pro Service — архитектура полностью автомобильной платформы
 
 > **Статус: current только для синтетического dev / production planned.** Реализованы схема авто, подтверждение связи, приватное чтение и экран `/account/vehicles`. Публичный автомобильный API, запись на ремонт, заказ-наряды, OEM и мобильное приложение пока запланированы. Исторический [аудит документации](DOCUMENTATION_AUDIT.md) датирован 26.10.2026.
 
@@ -67,3 +67,13 @@ VIN nullable, нормализованный uppercase 17 символов из 
 ## Proof recovery без хранения секрета (#130 / #147)
 
 Новая `0029_auto_proof_reissue` добавляет таблицу с единственным неизменяемым replacement proof по claim UUID, без изменения исходного `auto_vehicle_claim`, его исходного хеша и истории аудита. Триггер аудита допускает новое append-only событие REISSUED. API повторной выдачи привязан к исходному `link_id` (доступному даже если первый HTTP-ответ потерян), прежнему issuing INTAKE, object scope, CSRF и глобальному issue throttle. Первая попытка предъявления/решение/отзыв связи необратимо запрещают recovery. При предъявлении секрет выбирается отдельным запросом **после блокировки claim** — это устраняет READ COMMITTED race в момент перевыпуска.  Производственный процесс владения остаётся blocked.
+
+## Решение заказчика от 28.10.2026 — единственная цель: автомобили и СТО
+
+Старый robot domain **исключён из целевой архитектуры**. Задача [#165](https://github.com/askarahodov/roboport/issues/165) завершает инвентаризацию robot UI/API/DDL/ролей, проверяемую миграцию, cutover, архив/restore и decommission. Наличие старого `service_ticket`, `inventory`, `estimate`, `customer`, `robot_device` означает только *legacy код*, пока для каждой операции не создана и не проверена автомобильная семантика. Правило «временно хранить старые таблицы» **не** разрешает оставлять робототехнический продукт в конечном интерфейсе или публикуемом API.
+
+Канонические бизнес-сценарии и полная матрица возможностей — [продукт](PRODUCT.md), [матрица AutoDealer](FUNCTIONAL_MATRIX.md), [дорожная карта](FEATURE_ROADMAP.md). Новые bounded contexts: Organization/Location (#166), Vehicle/Customer (#112/#130), Appointment/WorkBay (#113), WorkOrder/Inspection/Labor/Estimate/QC (#114/#167), Catalog/Purchase/Stock Ledger (#111/#115/#168), CRM (#169), Payments/Documents (#170), Analytics/Payroll (#171), Import/Cutover (#172/#165) и Client/Mobile (#117/#118). Не путать dev-макет автосвязи с готовой организацией или действующей клиентской историей.
+
+Автомобильный MANAGER, выданный двумя независимыми ADMIN в closed dev bootstrap (#163, миграция `0032`), не получает глобальный `user_role MANAGER`, который открыл бы robot `guest-claims` и `ticket.manage`. Проверка auto роли связана с одобренной заявкой, vehicle assignment и активным филиальным grant. Это временный synthetic security pilot, не bootstrap реальной организации.
+
+Для production нужны авторизация для нескольких организаций, реальный tenant boundary, trusted ingress/peer, подтверждение законных владельцев/согласий, retention, лицензии OEM/нормочасов и финансовая нормативная проверка. До этого выпуск блокируется [#119](https://github.com/askarahodov/roboport/issues/119). Финальный target build обязан иметь только автомобильные UI, API и документы, что проверяется отдельным cutover E2E и reconciliation при миграции.

@@ -1,59 +1,54 @@
-# ROBOport → Airmatik Pro Service — постепенный переход к платформе автосервиса
+# Airmatik Pro Service — система управления автосервисом
 
-> **Статус: разработка на синтетических данных.** Текущий код преимущественно обслуживает робототехнику (legacy); автомобильный сервис ещё не готов. Первая схема автомобилей присутствует только в PostgreSQL. **Новая продуктовая цель (26.10.2026):** переход к системе автосервиса Airmatik Pro Service. [Продукт](docs/auto/PRODUCT.md), [архитектура](docs/auto/ARCHITECTURE.md), [матрица](docs/auto/FUNCTIONAL_MATRIX.md), [ADR](docs/auto/ADR-001.md), [каталоги 2026](docs/auto/PARTS_CATALOG.md), [Epic #107](https://github.com/askarahodov/roboport/issues/107). Ниже описана существующая робототехническая реализация, которая не является готовым автосервисом. Миграция поэтапная; dev — только на синтетических данных.
+**Целевая предметная область — исключительно автомобили и работа СТО.** Продукт создаётся как полноценная автомобильная система: клиенты/автомобили, запись и календарь постов, заказ-наряды, осмотр и диагностика, нормы времени, склад/запчасти, CRM, оплаты/документы, отчёты, филиалы, клиентский web и далее mobile. По функциональному охвату ориентируемся на публично описанные возможности AutoDealer Online, без копирования чужих материалов.
 
-> **Состояние:** подготовка разработки; реальные клиенты, персональные данные, платежи и публичный запуск пока не допускаются. Этот репозиторий публичный.
+> **Состояние на 28.10.2026: разработка, не готовый автосервис для production.** В коде всё ещё присутствует исторический робототехнический домен ROBOport, отдельные legacy UI/API/таблицы. Они **не входят в целевой продукт** и подлежат контролируемой миграции и отключению в [#165](https://github.com/askarahodov/roboport/issues/165). До подтверждённого backup/restore, сохранения прав и политики данных удалять legacy таблицы запрещено. Текущие автомобильные экраны/API работают только в ограниченном synthetic/dev-режиме.
 
-ROBOport — единая система независимого мультибрендового сервиса домашних роботов: публичный сайт и каталог, **обязательный личный кабинет клиента**, рабочее место сотрудников (CRM), заявки, диагностика, сметы, контроль совместимости деталей, склад, контроль качества, документы и аудит.
+## Источники истины о продукте
 
-## Локальный портал документации (dev)
+- [Продуктовая концепция и 9 сквозных сценариев](docs/auto/PRODUCT.md) — какой автомобильный бизнес-процесс строим.
+- [Полная функциональная матрица AutoDealer → Airmatik](docs/auto/FUNCTIONAL_MATRIX.md) — 50+ функций и фактические статусы `current-dev` / `legacy` / `planned`.
+- [Дорожная карта по зависимостям](docs/auto/FEATURE_ROADMAP.md) — модули и порядок работы, критерии закрытия и окончательный вывод роботов.
+- [Архитектура](docs/auto/ARCHITECTURE.md) и [ADR-AUTO-001](docs/auto/ADR-001.md) — отдельные автомобильные bounded contexts и стратегия migration/cutover.
+- [Эпик #107](https://github.com/askarahodov/roboport/issues/107) и [задача аудита #174](https://github.com/askarahodov/roboport/issues/174) — статус backlog. [Security/release gate #119](https://github.com/askarahodov/roboport/issues/119) — безопасность перед реальным запуском.
 
-[Инструкция запуска Docsify 5.0.0](docs/PORTAL_SETUP.md) — браузерные разделы по ролям, поиск, code blocks и проверка переходов через Playwright. Запуск в localhost, реальных пользовательских данных нет; клиентские инструкции со статусом planned не являются готовыми функциями.
+## Целевые разделы системы
 
-## С чего начинать
+| Модуль | Содержимое | Статус |
+|---|---|---|
+| Организации / филиалы | Предприятия, посты, пользователи, объекты и разграничение доступов | `planned`; часть branch ACL только `current-dev` |
+| Клиенты / автомобили | Карточка, VIN, подтверждение владения, история конкретного клиента | `current-dev` частично, full product `planned` |
+| Запись / календарь | Визиты, посты, смены, перенос и защита от накладок | `planned` |
+| Заказ-наряды | Приёмка, осмотр, фото, дефектовка, работы, нормы, сметы, согласие, QC, выдача | `planned` |
+| Запчасти / склад | OEM/аналоги, остатки, резерв, закупка, выдача, инвентаризация, возвраты | `planned` |
+| CRM / связь | Сделки, воронка, напоминания, телефония/мессенджеры по consent | `planned` |
+| Деньги / документы | Кассы, оплата, авансы, возвраты, первичка, СБП/ЭДО после legal gate | `planned` |
+| Отчёты | Загрузка, эффективность, маржа, остатки, ABC/XYZ и зарплата | `planned` |
+| Клиентский кабинет | Автомобили, запись, заказ, документы, история; позже mobile | `current-dev` список машин, остальное `planned` |
 
-1. [Карта документации](docs/INDEX.md), [политика актуальности](docs/DOCUMENTATION_POLICY.md), [результаты аудита](docs/auto/DOCUMENTATION_AUDIT.md).
-2. **Автосервис Airmatik (planned):** [продукт](docs/auto/PRODUCT.md), [функции](docs/auto/FUNCTIONAL_MATRIX.md), [архитектура](docs/auto/ARCHITECTURE.md), [ADR](docs/auto/ADR-001.md), [каталог](docs/auto/PARTS_CATALOG.md).
-3. **Текущий robot domain (legacy):** [историческое ТЗ](TECHNICAL_SPEC.md), [модель данных](docs/data/DATA_MODEL.md), [состояния заявок](docs/domain/TICKET_FSM.md).
-4. [Технологический стек](docs/TECH_STACK.md), [окружение](docs/operations/DEV_ENVIRONMENT.md), [локальный стенд](infra/dev/LOCAL_STACK.md).
-5. [Роли и будущие пользовательские руководства](docs/guides/INDEX.md), [AGENTS.md](AGENTS.md), [шаблон задач](docs/implementation/ISSUE_STANDARD.md).
-6. [Главный эпик Airmatik #107](https://github.com/askarahodov/roboport/issues/107) и [эпик документации #121](https://github.com/askarahodov/roboport/issues/121) — актуальный backlog.
+**Не считать роботов и их старые `service_ticket` / `inventory` реализованным автомобильным нарядом или складом.** Их можно переиспользовать лишь на уровне доказанно безопасной инфраструктуры: PostgreSQL 17/Alembic, auth/ACL, audit, транзакционные принципы, FastAPI/React, тестовая инфраструктура.
 
-## Текущее состояние исходников (проверено 26.10.2026)
+## Локальная документация и разработка
 
-- **Backend:** FastAPI, PostgreSQL 17, миграции Alembic 0001–0021, серверные локальные сессии/OIDC, RBAC/ACL, заявки роботов, сметы, склад, документы и outbox. Это не готовая автомобильная CRM.
-- **Автомобили:** только аддитивные таблицы `auto_vehicle` и `auto_vehicle_customer_link` с обязательной проверкой связи; автомобильный REST/UI ещё не реализован.
-- **Frontend:** React 19, TypeScript 5, **Vite 7.1.12**, React Router 7, существующие public/customer/staff интерфейсы для робототехники. `apps/web/package-lock.json` присутствует.
-- **Контракты:** `contracts/openapi.yaml` и сгенерированные типы. Наличие схемы не означает, что каждый маршрут существует.
-- **Dev:** PostgreSQL/MinIO/Keycloak и synthetic fixtures; тесты API, PostgreSQL, web и Playwright проходят в GitHub Actions (например [PR #120](https://github.com/askarahodov/roboport/pull/120)).
-- **Новая цель:** модели автомобиля, онлайн-запись, посты, заказ-наряды, лицензированные OEM-справочники и клиентский mobile API согласно #107–#119.
+[Docsify 5.0.0 (только локальный dev)](docs/PORTAL_SETUP.md) предоставляет русские руководства и поиск по документации; [карта документации](docs/INDEX.md), [пользовательские роли](docs/guides/INDEX.md), [политика актуальности](docs/DOCUMENTATION_POLICY.md). Для отсутствующих функций указано `planned`; legacy сохраняется только отдельно для миграции.
 
-## Технический стек
+Стек: Python 3.13, FastAPI, PostgreSQL 17, Alembic, React 19, TypeScript 5, Vite, Node.js 24, Playwright, Docsify. Версии сверять по [проверенному стеку](docs/TECH_STACK.md) и lockfile, не по тексту README.
 
-Python 3.13 · FastAPI · PostgreSQL 17 · Alembic · React 19 · TypeScript 5 · Vite **7.1.12** · Node.js 24 · pytest · Playwright · GitHub Actions. Версии сверять с lockfile, а ограничения — с [docs/TECH_STACK.md](docs/TECH_STACK.md). Это синтетическая разработка, не production release.
-
-## Воспроизводимое локальное развёртывание
-
-Для PostgreSQL 17, Keycloak и MinIO используйте [локальный dev-стенд](infra/dev/LOCAL_STACK.md): `infra/dev/compose.local.yml` и `infra/dev/bootstrap-local.sh`. Стенд проверяется реальным CI `ROBOport local stack smoke`; API и frontend запускаются на хосте для сохранения loopback-only защитных проверок. Полный HTTPS reverse proxy для объединённого браузерного интерфейса — отдельный следующий этап. Не использовать реальные данные.
-
-## Запуск проверяемой части
+Dev PostgreSQL/Keycloak/MinIO: [локальный стенд](infra/dev/LOCAL_STACK.md). Для Windows CMD и Docker Compose использовать [руководство окружения](docs/operations/DEV_ENVIRONMENT.md). Выполнять только на синтетических данных.
 
 ```bash
-python -m pip install -r apps/api/requirements-dev.txt
+python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
 PYTHONPATH=apps/api python -m pytest -q tests/bootstrap
 python scripts/check_contract.py
-PYTHONPATH=apps/api uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000
+cd apps/web && npm ci && npm run build
 ```
 
-Frontend: `cd apps/web && npm ci && npm run build`. Lockfile уже отслеживается Git; CI действительно проверяет build и браузерные E2E. Для полного PostgreSQL/Keycloak dev setup читайте `infra/dev/LOCAL_STACK.md`.
+Полный PostgreSQL17 и Playwright E2E запускаются в CI; локальный запуск требует отдельного тестового Postgres с миграциями. Финальная проверка PR и post-merge main: 5 обязательных job (PG/API/Web/Linux browser/Windows CMD), независимое ревью и актуальная документация на русском.
 
-## Запреты текущего этапа
+## Безопасность и границы релиза
 
-Никаких секретов, реальных персональных данных, внутренних адресов, сертификатов или ключей в Git. Нельзя подменять проверки реального PostgreSQL тестами SQLite, а настоящую локальную аутентификацию и ACL — synthetic fixtures. Изменения только через небольшие PR с исполняемыми тестами, журналом результатов и ссылками на Issues.
+Никаких реальных VIN, ПДн, чеков, ключей поставщиков, клиентов, платежей или публичного сбора форм до [#119](https://github.com/askarahodov/roboport/issues/119). Клиентские документы и история принадлежат заказчику **конкретного автомобильного заказа**, VIN сам по себе не является доказательством владения. Не переносить legacy роли и ticket ACL в автомобильный домен без новой проверки. Лицензируемые OEM/aftermarket/нормочасы — только по договорам с провайдерами.
 
+**Исторические технические материалы** [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md), [legacy FSM](docs/domain/TICKET_FSM.md), [legacy schema](docs/data/DATA_MODEL.md) нужны только для контроля совместимости и безопасного decommission; **не** являются требованиями нового автомобильного продукта. `db/legacy_drafts/*.sql` не запускать: это не миграции.
 
-## Проверяемые ограничения модели данных (Issue #17)
-
-Единая матрица `SQL → OpenAPI → ACL → статус` размещена в `docs/data/SCHEMA_FIELD_MATRIX.json`, архитектурные решения — ADR-032, согласованная карта FSM — `docs/domain/TICKET_TRANSITIONS.json`. SQL-поля со статусом `planned` **отсутствуют в реальной миграционной схеме** и не означают готовые API handlers. Основные договорённости: 20 состояний Ticket/FSM, право клиента на заявку фиксируется `service_ticket.customer_id`, версии SENT-смет и копейки immutable, совместимость OEM требует доказательства #18.
-
-`db/legacy_drafts/*.sql` — шесть пустых исторических файлов, их **нельзя** выполнять как миграции. Для проверки используются `python scripts/check_contract.py`, `PYTHONPATH=apps/api python -m pytest -q tests/contract` и независимый PostgreSQL 17 CI. Публичный production release и реальные данные остаются заблокированы.
+Планируется завершённая автомобильная система, а не бессрочно функционирующая «автомобильная вкладка» в старом ROBOport.
