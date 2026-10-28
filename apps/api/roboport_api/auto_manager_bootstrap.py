@@ -134,7 +134,7 @@ def propose_manager(
 def approve_manager(
     conn: psycopg.Connection, admin_token: str, request: UUID,
 ) -> UUID:
-    """Второй независимый ADMIN выдаёт три scope-гранта одной транзакцией."""
+    """Второй ADMIN выдаёт объектный и филиальный grants без legacy-роли."""
     _dev_only(conn)
     if not isinstance(request, UUID):
         raise ManagerBootstrapRejected("bad identifier")
@@ -177,21 +177,13 @@ def approve_manager(
             raise ManagerBootstrapRejected("initiator revoked")
         if _active_location(conn, vehicle) != location:
             raise ManagerBootstrapRejected("branch changed")
-        # Эксклюзивный lock target не позволяет двум параллельным выдачам
-        # на разных автомобилях создать две активные глобальные роли.
+        # Эксклюзивная блокировка target сериализует независимые выдачи
+        # и деактивацию учётной записи до конца транзакции.
         _target(conn, target, lock=True)
         _not_assigned(conn, vehicle, target)
-        if conn.execute(
-            """SELECT 1 FROM user_role WHERE user_id=%s
-               AND role_code='MANAGER' AND revoked_at IS NULL
-               AND (expires_at IS NULL OR expires_at>now())""",
-            (target,),
-        ).fetchone() is None:
-            conn.execute(
-                """INSERT INTO user_role(id,user_id,role_code)
-                   VALUES(%s,%s,'MANAGER')""",
-                (uuid4(), target),
-            )
+        # Нельзя писать глобальный user_role MANAGER: он открывает
+        # права на legacy guest-claims и ticket.manage вне автомобильного
+        # филиала. Одобренная заявка сама является auto-specific authority.
         assignment = uuid4()
         conn.execute(
             """INSERT INTO auto_vehicle_staff_assignment
