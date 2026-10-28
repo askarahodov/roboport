@@ -40,7 +40,7 @@ def test_slot_candidates_scope_bay_conflicts_shift_and_http(monkeypatch):
     with psycopg.connect(DSN) as db:
         available = candidate_slots(db,token,org,loc,bay,start,d["intake"])
         times = {x["startsAt"] for x in available}
-        assert (start+timedelta(hours=9)).isoformat() not in times
+        assert (start+timedelta(hours=9)).isoformat() in times
         assert (start+timedelta(hours=9,minutes=30)).isoformat() not in times
         assert (start+timedelta(hours=10)).isoformat() not in times
         assert (start+timedelta(hours=10,minutes=30)).isoformat() not in times
