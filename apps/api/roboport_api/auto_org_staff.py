@@ -119,3 +119,25 @@ def revoke_staff(conn: psycopg.Connection, token: str, organization_id: UUID,
             (uuid4(), grant_id, organization_id, actor),
         )
         return "REVOKED"
+
+
+def list_staff(conn: psycopg.Connection, token: str, organization_id: UUID) -> list[dict]:
+    """Bounded active grants, only to a live ADMIN of the exact tenant."""
+    if not isinstance(organization_id, UUID):
+        raise OrgStaffDenied("invalid organization")
+    with conn.transaction():
+        _admin(conn, token, organization_id)
+        rows = conn.execute(
+            """SELECT g.id,g.user_id,g.role_code,g.location_id
+               FROM auto_organization_role_grant g
+               JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
+               WHERE g.organization_id=%s AND g.revoked_at IS NULL
+                 AND g.role_code <> 'ADMIN'
+                 AND (g.location_id IS NULL OR EXISTS
+                   (SELECT 1 FROM auto_service_location l
+                    WHERE l.id=g.location_id AND l.organization_id=g.organization_id
+                      AND l.disabled_at IS NULL))
+               ORDER BY g.created_at,g.id LIMIT 100""", (organization_id,),
+        ).fetchall()
+        return [{"grantId":str(g),"userId":str(u),"role":role,
+                 "locationId":str(loc) if loc else None} for g,u,role,loc in rows]
