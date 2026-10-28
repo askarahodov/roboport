@@ -190,8 +190,6 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                        VALUES(%s,%s,%s,%s,%s,%s)""",
                     (fresh,organization,a[0],bay,starts,ends),
                 )
-                if assigned is not None:
-                    _reserve_employee(conn, fresh, organization, a[0], assigned, starts, ends)
                 from .session_lookup import session_subject
                 actor = session_subject(conn,token,for_mutation=True)
                 if actor is None:
@@ -207,6 +205,8 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                     "UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",
                     (old,),
                 )
+                if assigned is not None:
+                    _reserve_employee(conn, fresh, organization, a[0], assigned, starts, ends)
         except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException) as exc:
             raise AppointmentConflict("bay already reserved") from exc
         return fresh
