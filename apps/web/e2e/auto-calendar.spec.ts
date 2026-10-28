@@ -33,7 +33,7 @@ test('calendar creates, reschedules and cancels via exact tenant paths',async({p
     const req=route.request();
     if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',
       body:JSON.stringify({hasMore:false,items:current?[{appointmentId:appointment,bookingId:bay,bayId:bay,
-      startsAt:'2030-01-01T10:00:00+00:00',endsAt:'2030-01-01T11:00:00+00:00',workOrderId:work}]:[]})});
+      startsAt:'2030-01-01T10:00:00+00:00',endsAt:'2030-01-01T11:00:00+00:00',workOrderId:work,employeeId:appointment}]:[]})});
     expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
     calls.push({path:new URL(req.url()).pathname,body:req.postDataJSON()});
     if(req.url().endsWith('/cancel')){current=null;return route.fulfill({status:200,contentType:'application/json',body:'{"status":"CANCELED"}'});}
@@ -51,7 +51,9 @@ test('calendar creates, reschedules and cancels via exact tenant paths',async({p
   await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
   await page.getByRole('button',{name:'Создать запись'}).click();
   await expect(page.getByText('Appointment '+appointment+' · WorkOrder '+work)).toBeVisible();
+  await expect(page.getByText('Специалист: '+appointment)).toBeVisible();
   await page.getByRole('button',{name:'Перенести'}).click();
+  await expect(page.getByRole('textbox',{name:'UUID специалиста'})).toHaveValue(appointment);
   await page.getByRole('checkbox',{name:'Снять назначение специалиста'}).check();
   await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T12:00:00Z');
   await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T13:00:00Z');
