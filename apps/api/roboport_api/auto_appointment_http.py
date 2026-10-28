@@ -95,3 +95,24 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
             return _response(request,409,"BAY_BUSY")
     return JSONResponse(content={"status":"RESCHEDULED","bookingId":str(booking)},
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/calendar")
+def read_calendar(org_id: str, request: Request, locationId: str,
+                  startsAt: str, endsAt: str):
+    from .auto_calendar import calendar_items, CalendarDenied
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,location=UUID(org_id),UUID(locationId)
+        start,end=datetime.fromisoformat(startsAt),datetime.fromisoformat(endsAt)
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            items=calendar_items(db,request.cookies.get("rp_session",""),
+                                 org,location,start,end)
+        except CalendarDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(content={"items":items},headers={"Cache-Control":"no-store"})

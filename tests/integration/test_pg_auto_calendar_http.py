@@ -1,0 +1,46 @@
+"""PG17 calendar reads current scoped booking only."""
+from datetime import datetime,timedelta,timezone
+from uuid import uuid4
+import psycopg
+from fastapi.testclient import TestClient
+from roboport_api.main import app
+from roboport_api.auto_appointment_service import create_appointment,reschedule_appointment
+from test_pg_auto_vehicle_claim_http import _scenario
+from test_pg_auto_bay_booking import _org_and_bay
+from test_pg_baseline import DSN
+
+def test_calendar_tenant_active_booking_and_limited_window(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,bay=_org_and_bay(db)
+        other,other_loc,_=_org_and_bay(db)
+        db.execute("UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+                   (d["manager"],d["link"]))
+        db.execute("INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) VALUES(%s,%s)",(d["vehicle"],loc))
+        db.execute("""INSERT INTO auto_organization_role_grant
+           (id,organization_id,location_id,user_id,role_code)
+           VALUES(%s,%s,%s,%s,'INTAKE')""",(uuid4(),org,loc,d["intake"]))
+    start=datetime.now(timezone.utc)+timedelta(days=2)
+    with psycopg.connect(DSN) as db:
+        a,old,w=create_appointment(db,d["tokens"][d["intake"]],org,loc,bay,d["link"],start,start+timedelta(hours=1))
+        fresh=reschedule_appointment(db,d["tokens"][d["intake"]],org,a,bay,
+                                      start+timedelta(hours=2),start+timedelta(hours=3))
+    client=TestClient(app,base_url="https://127.0.0.1")
+    url=f"/api/v1/dev/auto/organizations/{org}/calendar"
+    args={"locationId":str(loc),"startsAt":start.isoformat(),
+          "endsAt":(start+timedelta(days=1)).isoformat()}
+    assert client.get(url,params=args).status_code==403
+    client.cookies.set("rp_session",d["tokens"][d["intake"]])
+    response=client.get(url,params=args)
+    assert response.status_code==200,response.text
+    assert response.json()["items"]==[{"appointmentId":str(a),"bookingId":str(fresh),
+         "bayId":str(bay),"startsAt":(start+timedelta(hours=2)).isoformat(),
+         "endsAt":(start+timedelta(hours=3)).isoformat(),"workOrderId":str(w)}]
+    assert "customerId" not in response.text and "vehicleId" not in response.text
+    wrong=f"/api/v1/dev/auto/organizations/{other}/calendar"
+    assert client.get(wrong,params=args).status_code==403
+    assert client.get(url,params={**args,"locationId":str(other_loc)}).status_code==403
+    assert client.get(url,params={**args,"endsAt":(start+timedelta(days=10)).isoformat()}).status_code==403
