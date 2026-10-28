@@ -1,11 +1,11 @@
 """Idempotent synthetic appointment request ledger.
 
-Revision ID: 0050_auto_appointment_idempotency
+Revision ID: 0050_auto_appt_idempotency
 Revises: 0049_auto_employee_reservation
 """
 from alembic import op
 
-revision = "0050_auto_appointment_idempotency"
+revision = "0050_auto_appt_idempotency"
 down_revision = "0049_auto_employee_reservation"
 branch_labels = None
 depends_on = None
