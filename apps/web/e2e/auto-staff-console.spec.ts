@@ -43,7 +43,6 @@ test('admin console creates and revokes only the selected tenant grant', async (
     return route.fulfill({ status: 201, contentType: 'application/json',
       body: JSON.stringify({ grantId: grant }) });
   });
-  page.on('dialog', dialog => void dialog.accept());
   await page.goto('/staff/auto-admin');
   await page.getByRole('textbox', { name: 'UUID организации' }).fill(org);
   await expect(page.getByText('Активных назначений нет.')).toBeVisible();
@@ -52,7 +51,10 @@ test('admin console creates and revokes only the selected tenant grant', async (
   await page.getByRole('button', { name: 'Назначить' }).click();
   await expect(page.getByText('Назначение создано.')).toBeVisible();
   await expect(page.getByText(user)).toBeVisible();
-  await page.getByRole('button', { name: 'Отозвать' }).click();
+  await page.getByRole('button', { name: 'Отозвать', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Подтвердить отзыв' })).toBeVisible();
+  expect(posts).toHaveLength(1);
+  await page.getByRole('button', { name: 'Подтвердить отзыв' }).click();
   await expect(page.getByText('Доступ сотрудника отозван.')).toBeVisible();
   await expect(page.getByText('Активных назначений нет.')).toBeVisible();
   expect(posts).toHaveLength(2);
