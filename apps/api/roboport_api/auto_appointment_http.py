@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_appointment_service import (
-    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict,
+    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict,
 )
 router=APIRouter(include_in_schema=False)
 
@@ -29,6 +29,8 @@ async def create(org_id: str, request: Request):
     try:
         org=UUID(org_id)
         body=CreateAppointment.model_validate(await request.json())
+        idempotency_header=request.headers.get('Idempotency-Key')
+        request_key=UUID(idempotency_header) if idempotency_header is not None else None
     except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as db:
@@ -38,9 +40,12 @@ async def create(org_id: str, request: Request):
             appointment,booking,work_order=create_appointment(
                 db,request.cookies.get("rp_session",""),org,body.locationId,
                 body.bayId,body.customerLinkId,body.startsAt,body.endsAt,body.employeeId,
+                request_key,
             )
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
+        except AppointmentKeyConflict:
+            return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
         except AppointmentConflict:
             return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(status_code=201,content={
