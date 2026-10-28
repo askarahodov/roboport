@@ -138,11 +138,11 @@ export function AutoCalendar() {
         onChange={e=>{resetSlots();setClearEmployee(e.target.checked);}}/> Снять назначение специалиста</label>}
       <button type="button" disabled={slotsBusy||!valid||!uuid.test(form.bay.trim())||
         (!(target&&clearEmployee)&&!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
-        onClick={()=>void findSlots()}>Найти окна записи</button>
+        onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
       {slotsMessage&&<p role="status">{slotsMessage}</p>}
-      {slots.length>0&&<div aria-label="Кандидаты времени"><p>Окна предварительные: окончательная бронь может вернуть 409.</p><ul>
+      {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><ul>
         {slots.map(slot=><li key={slot.startsAt}><button type="button" onClick={()=>{setForm(v=>({...v,starts:slot.startsAt,ends:slot.endsAt}));resetSlots();}}>
-          Выбрать {slot.startsAt} — {slot.endsAt}</button></li>)}
+          {slot.startsAt} — {slot.endsAt}</button></li>)}
       </ul></div>}
       <label>Начало (ISO 8601 с часовым поясом) <input aria-label="Начало ISO" value={form.starts}
         onChange={e=>setForm(s=>({...s,starts:e.target.value}))}
