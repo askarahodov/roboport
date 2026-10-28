@@ -33,6 +33,9 @@ export function AutoCalendar() {
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [form,setForm]=React.useState<Form>(empty);
   const [busy,setBusy]=React.useState(false);
+  const [slots,setSlots]=React.useState<Array<{startsAt:string;endsAt:string}>>([]);
+  const [slotsMessage,setSlotsMessage]=React.useState('');
+  const [slotsBusy,setSlotsBusy]=React.useState(false);
   const [clearEmployee,setClearEmployee]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [revision,setRevision]=React.useState(0);
@@ -70,7 +73,27 @@ export function AutoCalendar() {
       }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
   },[org,location,day,revision,valid,cursor]);
-  function resetPage(){setCursor(null);setHistory([]);}
+  function resetPage(){setCursor(null);setHistory([]);setSlots([]);setSlotsMessage('');}
+  async function findSlots(){
+    if(!valid||!uuid.test(form.bay.trim())||
+       (form.employee.trim()&&!uuid.test(form.employee.trim())))return;
+    setSlotsBusy(true);setSlots([]);setSlotsMessage('');
+    const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),day});
+    if(form.employee.trim())query.set('employeeId',form.employee.trim());
+    try{
+      const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
+        '/slot-candidates?'+query,{credentials:'include',cache:'no-store'});
+      if(!response.ok)throw new Error();
+      const data:unknown=await response.json();
+      if(!data||typeof data!=='object'||!('items' in data)||!Array.isArray(data.items)||
+        !data.items.every((x:unknown)=>x&&typeof x==='object'&&
+          'startsAt' in x&&typeof x.startsAt==='string'&&
+          'endsAt' in x&&typeof x.endsAt==='string'))throw new Error();
+      setSlots(data.items as Array<{startsAt:string;endsAt:string}>);
+      if(data.items.length===0)setSlotsMessage('Подходящих окон не найдено.');
+    }catch{setSlotsMessage('Не удалось проверить окна или нет доступа.');}
+    finally{setSlotsBusy(false);}
+  }
 
   async function action(path:string,payload:unknown,success:string){
     if(busy||!valid)return;
@@ -100,6 +123,14 @@ export function AutoCalendar() {
         onChange={e=>setForm(s=>({...s,employee:e.target.value}))}/></label>
       {target&&<label><input type="checkbox" aria-label="Снять назначение специалиста" checked={clearEmployee}
         onChange={e=>setClearEmployee(e.target.checked)}/> Снять назначение специалиста</label>}
+      <button type="button" disabled={slotsBusy||!valid||!uuid.test(form.bay.trim())||
+        (!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
+        onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
+      {slotsMessage&&<p role="status">{slotsMessage}</p>}
+      {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><ul>
+        {slots.map(slot=><li key={slot.startsAt}><button type="button" onClick={()=>setForm(v=>({...v,starts:slot.startsAt,ends:slot.endsAt}))}>
+          {slot.startsAt} — {slot.endsAt}</button></li>)}
+      </ul></div>}
       <label>Начало (ISO 8601 с часовым поясом) <input aria-label="Начало ISO" value={form.starts}
         onChange={e=>setForm(s=>({...s,starts:e.target.value}))}
         placeholder="2030-01-01T10:00:00+03:00"/></label>
