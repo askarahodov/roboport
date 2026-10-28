@@ -24,13 +24,29 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             or (request_key is not None and not isinstance(request_key, UUID))
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
-            or starts <= datetime.now(timezone.utc)
             or ends <= starts or (ends-starts).total_seconds() > 86400):
         raise AppointmentDenied("invalid appointment scope or interval")
     with conn.transaction():
         if not organization_role_allows(conn, token, organization, "INTAKE",
                                         location, for_mutation=True):
             raise AppointmentDenied("organization intake required")
+        # Guard current ownership with row locks; no legacy roles are inherited.
+        row = conn.execute(
+            """SELECT link.vehicle_id FROM auto_vehicle_customer_link link
+               JOIN auto_vehicle_location_binding binding
+                 ON binding.vehicle_id=link.vehicle_id
+               WHERE link.id=%s AND link.verified_at IS NOT NULL
+                 AND link.revoked_at IS NULL AND binding.location_id=%s
+               FOR SHARE OF link, binding""", (link,location),
+        ).fetchone()
+        if row is None:
+            raise AppointmentDenied("verified scoped vehicle link required")
+        if conn.execute(
+            """SELECT id FROM auto_work_bay WHERE id=%s AND organization_id=%s
+               AND location_id=%s AND disabled_at IS NULL FOR SHARE""",
+            (bay,organization,location),
+        ).fetchone() is None:
+            raise AppointmentDenied("bay unavailable")
         # The unique ledger index serializes concurrent requests with the same
         # actor/key. Its insert and the booking commit or roll back together.
         booking, appointment, order = uuid4(),uuid4(),uuid4()
@@ -60,23 +76,8 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                 if existing is None or existing[0] != fingerprint:
                     raise AppointmentKeyConflict("idempotency key used for different request")
                 return existing[1],existing[2],existing[3]
-        # Guard current ownership with row locks; no legacy roles are inherited.
-        row = conn.execute(
-            """SELECT link.vehicle_id FROM auto_vehicle_customer_link link
-               JOIN auto_vehicle_location_binding binding
-                 ON binding.vehicle_id=link.vehicle_id
-               WHERE link.id=%s AND link.verified_at IS NOT NULL
-                 AND link.revoked_at IS NULL AND binding.location_id=%s
-               FOR SHARE OF link, binding""", (link,location),
-        ).fetchone()
-        if row is None:
-            raise AppointmentDenied("verified scoped vehicle link required")
-        if conn.execute(
-            """SELECT id FROM auto_work_bay WHERE id=%s AND organization_id=%s
-               AND location_id=%s AND disabled_at IS NULL FOR SHARE""",
-            (bay,organization,location),
-        ).fetchone() is None:
-            raise AppointmentDenied("bay unavailable")
+        if starts <= datetime.now(timezone.utc):
+            raise AppointmentDenied("appointment must begin in future")
         try:
             with conn.transaction():
                 conn.execute(
