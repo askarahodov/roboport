@@ -23,9 +23,11 @@ export function AutoStaffAdmin() {
   const [items, setItems] = React.useState<Grant[]>([]);
   const [state, setState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [busy, setBusy] = React.useState(false);
+  const [confirmId, setConfirmId] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState('');
   const [refresh, setRefresh] = React.useState(0);
   const validOrg = uuid.test(organization.trim());
+  React.useEffect(() => { setConfirmId(null); }, [organization]);
 
   React.useEffect(() => {
     if (!validOrg) { setItems([]); setState('idle'); return; }
@@ -82,11 +84,15 @@ export function AutoStaffAdmin() {
     {state === 'ready' && <><h2>Активные назначения</h2>
       {items.length ? <ul>{items.map(g => <li key={g.grantId}>
         <strong>{g.role}</strong> · {g.userId} · {g.locationId ?? 'Все филиалы'}
-        <button type="button" disabled={busy} onClick={() => {
-          if (window.confirm('Отозвать доступ для этого назначения?')) {
+        {confirmId === g.grantId ? <span>
+          <button type="button" disabled={busy} onClick={() => {
+            setConfirmId(null);
             void execute(base + '/' + encodeURIComponent(g.grantId) + '/revoke', {}, 'revoke');
-          }
-        }}>Отозвать</button></li>)}</ul> : <p>Активных назначений нет.</p>}
+          }}>Подтвердить отзыв</button>
+          <button type="button" disabled={busy} onClick={() => setConfirmId(null)}>Отмена</button>
+        </span> : <button type="button" disabled={busy} onClick={() => setConfirmId(g.grantId)}>
+          Отозвать
+        </button>}</li>)}</ul> : <p>Активных назначений нет.</p>}
       <form onSubmit={e => {
         e.preventDefault();
         if (!uuid.test(user.trim()) || location.trim() && !uuid.test(location.trim())) return;
