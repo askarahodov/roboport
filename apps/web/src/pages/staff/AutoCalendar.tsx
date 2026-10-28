@@ -40,6 +40,8 @@ export function AutoCalendar() {
   const [clearEmployee,setClearEmployee]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [pending,setPending]=React.useState<{path:string;body:string;key:string;success:string;org:string;location:string}|null>(null);
+  const requestScope=React.useRef({org:'',location:''});
+  requestScope.current={org:org.trim(),location:location.trim()};
   const [revision,setRevision]=React.useState(0);
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
@@ -119,6 +121,9 @@ export function AutoCalendar() {
       org:org.trim(),location:location.trim(),
     }:null);
     if(retry&&(retry.org!==org.trim()||retry.location!==location.trim()))return;
+    const submittedScope={org:org.trim(),location:location.trim()};
+    const scopeIsCurrent=()=>requestScope.current.org===submittedScope.org&&
+      requestScope.current.location===submittedScope.location;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
@@ -129,10 +134,13 @@ export function AutoCalendar() {
         headers:{'Content-Type':'application/json','X-CSRF-Token':data.csrfToken,
           ...(snapshot?{'Idempotency-Key':snapshot.key}:{})},
         body:snapshot?snapshot.body:JSON.stringify(payload)});
+      if(!scopeIsCurrent())return;
+      if(response.status>=500)throw new Error('uncertain server outcome');
       if(!response.ok){setPending(null);setMessage(response.status===409?'Пост или специалист занят / ключ запроса использован (409).':
         [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
       setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);resetPage();setRevision(n=>n+1);
     }catch{
+      if(!scopeIsCurrent())return;
       if(snapshot){setPending(snapshot);setMessage('Результат запроса неизвестен. Повторите с прежним ключом или обновите календарь перед новой операцией.');}
       else setMessage('Не удалось выполнить запрос. Проверьте сессию.');
     }finally{setBusy(false);}
