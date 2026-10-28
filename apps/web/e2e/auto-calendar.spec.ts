@@ -332,3 +332,5 @@ test('calendar mobile layout remains in viewport',async({page})=>{
   await expect(page.getByText('Записей нет.')).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+

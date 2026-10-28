@@ -89,16 +89,22 @@ export function AutoCalendar() {
     try{
       const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
         '/slot-candidates?'+query,{credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(response.status)){
+        if(requestId===slotRequest.current)setSlotsMessage('Нет доступа к окнам записи.');
+        return;
+      }
       if(!response.ok)throw new Error();
       const data:unknown=await response.json();
-      if(!data||typeof data!=='object'||!('items' in data)||!Array.isArray(data.items)||
+      if(!data||typeof data!=='object'||!('guaranteed' in data)||data.guaranteed!==false||
+        !('items' in data)||!Array.isArray(data.items)||data.items.length>48||
         !data.items.every((x:unknown)=>x&&typeof x==='object'&&
-          'startsAt' in x&&typeof x.startsAt==='string'&&
-          'endsAt' in x&&typeof x.endsAt==='string'))throw new Error();
+          'startsAt' in x&&typeof x.startsAt==='string'&&validIsoInstant(x.startsAt)&&
+          'endsAt' in x&&typeof x.endsAt==='string'&&validIsoInstant(x.endsAt)&&
+          Date.parse(x.endsAt)>Date.parse(x.startsAt)))throw new Error();
       if(requestId!==slotRequest.current)return;
       setSlots(data.items as Array<{startsAt:string;endsAt:string}>);
-      if(data.items.length===0)setSlotsMessage('Подходящих окон не найдено.');
-    }catch{if(requestId===slotRequest.current)setSlotsMessage('Не удалось проверить окна или нет доступа.');}
+      if(data.items.length===0)setSlotsMessage('Подходящих окон нет.');
+    }catch{if(requestId===slotRequest.current)setSlotsMessage('Не удалось получить окна записи.');}
     finally{if(requestId===slotRequest.current)setSlotsBusy(false);}
   }
 
@@ -135,7 +141,7 @@ export function AutoCalendar() {
         onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
       {slotsMessage&&<p role="status">{slotsMessage}</p>}
       {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><ul>
-        {slots.map(slot=><li key={slot.startsAt}><button type="button" onClick={()=>setForm(v=>({...v,starts:slot.startsAt,ends:slot.endsAt}))}>
+        {slots.map(slot=><li key={slot.startsAt}><button type="button" onClick={()=>{setForm(v=>({...v,starts:slot.startsAt,ends:slot.endsAt}));resetSlots();}}>
           {slot.startsAt} — {slot.endsAt}</button></li>)}
       </ul></div>}
       <label>Начало (ISO 8601 с часовым поясом) <input aria-label="Начало ISO" value={form.starts}
