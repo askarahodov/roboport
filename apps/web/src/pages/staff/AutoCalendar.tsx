@@ -9,7 +9,7 @@ const empty:Form={bay:'',link:'',starts:'',ends:''};
 export function AutoCalendar() {
   const [org,setOrg]=React.useState('');
   const [location,setLocation]=React.useState('');
-  const [day,setDay]=React.useState('2030-01-01');
+  const [day,setDay]=React.useState(()=>new Date().toISOString().slice(0,10));
   const [items,setItems]=React.useState<Entry[]>([]);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [form,setForm]=React.useState<Form>(empty);
