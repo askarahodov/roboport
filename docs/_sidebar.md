@@ -18,6 +18,7 @@
   - [Продукт и функции](/auto/PRODUCT.md)
   - [Архитектура и безопасность](/auto/ARCHITECTURE.md)
   - [Функциональная матрица](/auto/FUNCTIONAL_MATRIX.md)
+  - [Дорожная карта полного автосервиса](/auto/FEATURE_ROADMAP.md)
   - [Каталоги запчастей](/auto/PARTS_CATALOG.md)
   - [Технологии](/TECH_STACK.md)
   - [Локальная разработка](/operations/DEV_ENVIRONMENT.md)
