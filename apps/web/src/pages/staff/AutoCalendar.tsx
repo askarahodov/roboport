@@ -78,11 +78,11 @@ export function AutoCalendar() {
   function resetPage(){setCursor(null);setHistory([]);resetSlots();}
   async function findSlots(){
     if(!valid||!uuid.test(form.bay.trim())||
-       (form.employee.trim()&&!uuid.test(form.employee.trim())))return;
+       (!clearEmployee&&form.employee.trim()&&!uuid.test(form.employee.trim())))return;
     const requestId=++slotRequest.current;
     setSlotsBusy(true);setSlots([]);setSlotsMessage('');
     const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),day});
-    if(form.employee.trim())query.set('employeeId',form.employee.trim());
+    if(!clearEmployee&&form.employee.trim())query.set('employeeId',form.employee.trim());
     try{
       const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
         '/slot-candidates?'+query,{credentials:'include',cache:'no-store'});
@@ -128,7 +128,7 @@ export function AutoCalendar() {
       {target&&<label><input type="checkbox" aria-label="Снять назначение специалиста" checked={clearEmployee}
         onChange={e=>{resetSlots();setClearEmployee(e.target.checked);}}/> Снять назначение специалиста</label>}
       <button type="button" disabled={slotsBusy||!valid||!uuid.test(form.bay.trim())||
-        (!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
+        (!clearEmployee&&!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
         onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
       {slotsMessage&&<p role="status">{slotsMessage}</p>}
       {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><ul>
@@ -163,9 +163,9 @@ export function AutoCalendar() {
         <strong>{entry.startsAt} — {entry.endsAt}</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
         <p>Специалист: {entry.employeeId??'не назначен'}</p>
-        <button type="button" disabled={busy} onClick={()=>{setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId,employee:entry.employeeId??''});}}>
+        <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId,employee:entry.employeeId??''});}}>
           Перенести</button>
-        <button type="button" disabled={busy} onClick={()=>setTarget('cancel:'+entry.appointmentId)}>Отменить запись</button>
+        <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget('cancel:'+entry.appointmentId);}}>Отменить запись</button>
       </li>)}</ul>}
       <nav aria-label="Страницы календаря">
         <span>Страница {history.length+1}</span>
