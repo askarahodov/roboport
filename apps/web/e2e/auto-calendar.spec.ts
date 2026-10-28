@@ -123,6 +123,38 @@ test('candidate response for previous bay is ignored after switching bay',async(
   await expect(page.getByText('Кандидаты, не гарантия брони:')).toHaveCount(0);
 });
 
+test('transfer clears old candidates and removed employee is excluded from lookup',async({page})=>{
+  const another='77777777-7777-4777-8777-777777777777';
+  const queries:string[]=[];
+  await page.route(base,route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname.endsWith('/slot-candidates')){
+      queries.push(url.search);
+      return route.fulfill({status:200,contentType:'application/json',
+        body:'{"items":[{"startsAt":"2030-01-01T10:00:00Z","endsAt":"2030-01-01T11:00:00Z"}],"guaranteed":false}'});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({hasMore:false,items:[{appointmentId:appointment,bookingId:bay,
+        bayId:another,startsAt:'2030-01-01T12:00:00Z',endsAt:'2030-01-01T13:00:00Z',
+        workOrderId:work,employeeId:appointment}]})});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByRole('button',{name:'Перенести'})).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
+  await page.getByRole('button',{name:'Перенести'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toHaveCount(0);
+  await expect(page.getByRole('textbox',{name:'UUID поста'})).toHaveValue(another);
+  await page.getByRole('checkbox',{name:'Снять назначение специалиста'}).check();
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
+  expect(new URLSearchParams(queries[queries.length-1]).has('employeeId')).toBe(false);
+  expect(new URLSearchParams(queries[queries.length-1]).get('bayId')).toBe(another);
+});
+
 test('calendar blocks zero and reverse intervals before posting',async({page})=>{
   let posts=0;
   await page.route(base,route=>{
