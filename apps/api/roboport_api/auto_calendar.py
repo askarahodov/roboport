@@ -8,11 +8,16 @@ class CalendarDenied(ValueError):
     pass
 
 def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UUID,
-                   start: datetime, end: datetime) -> list[dict]:
+                   start: datetime, end: datetime, after_start: datetime | None = None,
+                   after_appointment: UUID | None = None) -> list[dict]:
     if (not isinstance(org, UUID) or not isinstance(location, UUID)
         or not all(isinstance(t,datetime) and t.tzinfo is not None and
                    t.utcoffset() is not None for t in (start,end))
-        or end<=start or end-start>timedelta(days=7)):
+        or end<=start or end-start>timedelta(days=7)
+        or (after_start is None) != (after_appointment is None)
+        or (after_start is not None and
+            (not isinstance(after_start,datetime) or after_start.tzinfo is None
+             or after_start.utcoffset() is None or not isinstance(after_appointment,UUID)))):
         raise CalendarDenied("invalid calendar window")
     with conn.transaction():
         if not organization_role_allows(conn,token,org,"INTAKE",location,
@@ -34,8 +39,10 @@ def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UU
             AND b.organization_id=a.organization_id
             AND b.location_id=a.location_id AND b.canceled_at IS NULL
             AND b.starts_at < %s AND b.ends_at > %s
+            AND (%s::timestamptz IS NULL OR
+                 (b.starts_at,a.id)>(%s::timestamptz,%s::uuid))
           ORDER BY b.starts_at,a.id LIMIT 101
-        """,(org,location,end,start)).fetchall()
+        """,(org,location,end,start,after_start,after_start,after_appointment)).fetchall()
         return [{"appointmentId":str(a),"bookingId":str(b),"bayId":str(bay),
                  "startsAt":s.isoformat(),"endsAt":e.isoformat(),
                  "workOrderId":str(w)} for a,b,bay,s,e,w in rows]

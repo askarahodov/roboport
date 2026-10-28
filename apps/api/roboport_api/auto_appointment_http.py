@@ -99,7 +99,8 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/calendar")
 def read_calendar(org_id: str, request: Request, locationId: str,
-                  startsAt: str, endsAt: str):
+                  startsAt: str, endsAt: str, afterStartsAt: str | None = None,
+                  afterAppointmentId: str | None = None):
     from .auto_calendar import calendar_items, CalendarDenied
     dsn=_request_dsn(request)
     if isinstance(dsn,JSONResponse):
@@ -107,12 +108,19 @@ def read_calendar(org_id: str, request: Request, locationId: str,
     try:
         org,location=UUID(org_id),UUID(locationId)
         start,end=datetime.fromisoformat(startsAt),datetime.fromisoformat(endsAt)
+        after_start=datetime.fromisoformat(afterStartsAt) if afterStartsAt is not None else None
+        after_appointment=UUID(afterAppointmentId) if afterAppointmentId is not None else None
     except (ValueError,TypeError):
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
             items=calendar_items(db,request.cookies.get("rp_session",""),
-                                 org,location,start,end)
+                                 org,location,start,end,after_start,after_appointment)
         except CalendarDenied:
             return _response(request,403,"FORBIDDEN")
-    return JSONResponse(content={"items":items[:100],"hasMore":len(items)>100},headers={"Cache-Control":"no-store"})
+    page=items[:100]
+    more=len(items)>100
+    cursor=({"nextStartsAt":page[-1]["startsAt"],
+             "nextAppointmentId":page[-1]["appointmentId"]} if more else {})
+    return JSONResponse(content={"items":page,"hasMore":more,**cursor},
+                        headers={"Cache-Control":"no-store"})
