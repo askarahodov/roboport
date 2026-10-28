@@ -267,6 +267,8 @@ test('calendar navigates all pages and resets cursor on tenant switch',async({pa
   await page.route(base,route=>{
     const req=route.request();
     const url=new URL(req.url());
+    if(url.pathname.endsWith('/slot-candidates'))return route.fulfill({status:200,contentType:'application/json',
+      body:'{"items":[{"startsAt":"2030-01-01T10:00:00Z","endsAt":"2030-01-01T11:00:00Z"}],"guaranteed":false}'});
     queries.push(url.search);
     const second=url.searchParams.has('afterStartsAt');
     const oldTenant=url.pathname.includes(org);
@@ -279,7 +281,11 @@ test('calendar navigates all pages and resets cursor on tenant switch',async({pa
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
   await expect(page.getByRole('button',{name:'Следующая страница'})).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
   await page.getByRole('button',{name:'Следующая страница'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toHaveCount(0);
   await expect(page.getByText('Страница 2')).toBeVisible();
   expect(queries.some(q=>new URLSearchParams(q).get('afterAppointmentId')===appointment)).toBe(true);
   await page.getByRole('button',{name:'Предыдущая страница'}).click();
