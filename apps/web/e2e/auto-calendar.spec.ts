@@ -359,9 +359,9 @@ test('calendar fetches scoped candidate windows and fills interval without booki
   await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
   await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
   await page.getByRole('textbox',{name:'UUID специалиста'}).fill(appointment);
-  await page.getByRole('button',{name:'Найти окна записи'}).click();
-  await expect(page.getByText('Окна предварительные: окончательная бронь может вернуть 409.')).toBeVisible();
-  await page.getByRole('button',{name:/Выбрать 2030-01-01T10:00:00/}).click();
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
+  await page.getByRole('button',{name:/2030-01-01T10:00:00/}).click();
   await expect(page.getByRole('textbox',{name:'Начало ISO'})).toHaveValue('2030-01-01T10:00:00+00:00');
   await expect(page.getByRole('textbox',{name:'Конец ISO'})).toHaveValue('2030-01-01T11:00:00+00:00');
   expect(candidateRequests).toBe(1);
@@ -385,9 +385,9 @@ test('calendar slot finder denies access and clears stale tenant candidates',asy
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
   await expect(page.getByText('Записей нет.')).toBeVisible();
   await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
-  await page.getByRole('button',{name:'Найти окна записи'}).click();
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
   await seen;
   await page.getByRole('textbox',{name:'UUID организации'}).fill('77777777-7777-4777-8777-777777777777');
   await page.waitForTimeout(250);
-  await expect(page.getByLabel('Кандидатные окна записи')).toHaveCount(0);
+  await expect(page.getByLabel('Кандидаты времени')).toHaveCount(0);
 });
