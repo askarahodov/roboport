@@ -16,8 +16,10 @@ def test_signed_state_integrity_and_short_ttl(monkeypatch):
     state={"verifier":"synthetic","nonce":"synthetic-nonce","state":"synthetic-state","at":int(time.time())}
     good=_sign(state,key)
     assert _read(good,key)==state
+    # Always change the signature; a valid SHA256 hex digest may already end in "ab".
+    corrupted = good[:-1] + ("0" if good[-1] != "0" else "1")
     with pytest.raises(OIDCRejected):
-        _read(good[:-2]+"ab",key)
+        _read(corrupted,key)
     with pytest.raises(OIDCRejected):
         _read(good,"different-secret-at-least-32-characters")
     expired=_sign({**state,"at":int(time.time())-301},key)
