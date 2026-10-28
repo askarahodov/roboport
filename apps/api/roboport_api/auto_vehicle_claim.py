@@ -13,6 +13,7 @@ import psycopg
 
 from .session_lookup import session_subject
 from .auto_location_scope import location_scope_allows
+from .auto_manager_authority import manager_assignment
 from .auto_proof_throttle import consume_attempt
 from .auto_claim_retry import lookup as retry_lookup, remember as retry_remember, AutoClaimRetryConflict
 
@@ -30,17 +31,20 @@ def _role_scoped(
         raise VehicleClaimRejected("unauthorized")
     # Сериализация успешной авторизации с отзывом роли/назначения:
     # concurrent UPDATE revoked_at ждёт завершения защищённой операции.
-    granted = conn.execute(
-        """SELECT 1 FROM user_role ur
-           JOIN auto_vehicle_staff_assignment a ON a.user_id=ur.user_id
-             AND a.vehicle_id=%s AND a.role_code=%s AND a.revoked_at IS NULL
-           WHERE ur.user_id=%s AND ur.role_code=%s
-             AND ur.revoked_at IS NULL
-             AND (ur.expires_at IS NULL OR ur.expires_at>now())
-           LIMIT 1 FOR SHARE OF ur,a""",
-        (vehicle, role, actor, role),
-    ).fetchone()
-    if granted is None or not location_scope_allows(conn, actor, role, vehicle):
+    if role == "MANAGER":
+        granted = manager_assignment(conn, actor, vehicle)
+    else:
+        granted = conn.execute(
+            """SELECT 1 FROM user_role ur
+               JOIN auto_vehicle_staff_assignment a ON a.user_id=ur.user_id
+                 AND a.vehicle_id=%s AND a.role_code=%s AND a.revoked_at IS NULL
+               WHERE ur.user_id=%s AND ur.role_code=%s
+                 AND ur.revoked_at IS NULL
+                 AND (ur.expires_at IS NULL OR ur.expires_at>now())
+               LIMIT 1 FOR SHARE OF ur,a""",
+            (vehicle, role, actor, role),
+        ).fetchone() is not None
+    if not granted or not location_scope_allows(conn, actor, role, vehicle):
         raise VehicleClaimRejected("scope denied")
     return actor
 
