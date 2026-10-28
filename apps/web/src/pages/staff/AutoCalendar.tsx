@@ -39,6 +39,9 @@ export function AutoCalendar() {
   const slotRequest=React.useRef(0);
   const [clearEmployee,setClearEmployee]=React.useState(false);
   const [message,setMessage]=React.useState('');
+  const [slots,setSlots]=React.useState<Array<{startsAt:string;endsAt:string}>>([]);
+  const [slotStatus,setSlotStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
+  const slotRequest=React.useRef(0);
   const [revision,setRevision]=React.useState(0);
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
@@ -138,6 +141,18 @@ export function AutoCalendar() {
         {slots.map(slot=><li key={slot.startsAt}><button type="button" onClick={()=>setForm(v=>({...v,starts:slot.startsAt,ends:slot.endsAt}))}>
           {slot.startsAt} — {slot.endsAt}</button></li>)}
       </ul></div>}
+      <button type="button" disabled={busy||!valid||!uuid.test(form.bay.trim())||
+        (!clearEmployee&&!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
+        onClick={()=>void findSlots()}>Найти окна записи</button>
+      {slotStatus==='loading'&&<p role="status">Поиск окон…</p>}
+      {slotStatus==='denied'&&<p role="alert">Нет доступа к окнам записи.</p>}
+      {slotStatus==='error'&&<p role="alert">Не удалось получить окна записи.</p>}
+      {slotStatus==='ready'&&<div aria-label="Кандидатные окна записи">
+        <p>Окна предварительные: окончательная бронь может вернуть 409.</p>
+        {slots.length===0?<p>Подходящих окон нет.</p>:<ul>{slots.map(slot=><li key={slot.startsAt}>
+          <button type="button" onClick={()=>{setForm(previous=>({...previous,starts:slot.startsAt,ends:slot.endsAt}));resetSlots();}}>
+            Выбрать {slot.startsAt} — {slot.endsAt}</button></li>)}</ul>}
+      </div>}
       <label>Начало (ISO 8601 с часовым поясом) <input aria-label="Начало ISO" value={form.starts}
         onChange={e=>setForm(s=>({...s,starts:e.target.value}))}
         placeholder="2030-01-01T10:00:00+03:00"/></label>
