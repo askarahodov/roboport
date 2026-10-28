@@ -185,19 +185,26 @@ def test_revocation_disabled_and_expired_requests_fail_closed(monkeypatch):
         ).fetchone() == (0,)
 
     d4, loc4, a4, b4, target4, tokens4 = _setup()
-    request4 = _propose(d4,a4,tokens4,target4)
-    # Сдвиг срока тестового запроса допустим только на disposable PG17,
-    # проверка неизменяемости в продуктивном приложении запрещает UPDATE.
+    # Срок задаётся при первоначальном INSERT на одноразовом PG17; изменение
+    # уже записанной заявки запрещено SQL-триггером.
+    expired = uuid4()
     with psycopg.connect(DSN) as db:
-        with pytest.raises(psycopg.errors.RaiseException):
-            with db.transaction():
-                db.execute(
-                    """UPDATE auto_manager_approval_request
-                       SET expires_at=now()-interval '1 minute' WHERE id=%s""",
-                    (request4,),
-                )
-    # Обходим clock mutation: используем серверный clock через отдельную
-    # короткую фикстуру, устанавливая исходный timestamp только при INSERT.
+        db.execute(
+            """INSERT INTO auto_manager_approval_request
+               (id,vehicle_id,location_id,target_id,initiated_by,
+                created_at,expires_at)
+               VALUES(%s,%s,%s,%s,%s,now()-interval '35 minutes',
+                      now()-interval '5 minutes')""",
+            (expired,d4["vehicle"],loc4,target4,a4),
+        )
+        db.execute(
+            """INSERT INTO auto_manager_approval_audit
+               (id,request_id,actor_id,action)
+               VALUES(%s,%s,%s,'PROPOSED')""",
+            (uuid4(),expired,a4),
+        )
+    with pytest.raises(ManagerBootstrapRejected):
+        _approve(b4,tokens4,expired)
 
 
 def test_concurrent_approval_commits_only_once_and_audit_is_append_only(monkeypatch):
