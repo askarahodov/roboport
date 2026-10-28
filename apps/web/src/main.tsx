@@ -7,6 +7,7 @@ import { CustomerAccount } from './pages/customer/CustomerAccount';
 import { CustomerLogin } from './pages/customer/CustomerLogin';
 import { GuestIntake, ClaimProof } from './pages/customer/GuestIntake';
 import { StaffPortal } from './pages/staff/StaffPortal';
+import { AutoStaffAdmin } from './pages/staff/AutoStaffAdmin';
 import { PublicCatalog, PublicModelDetails } from './pages/public/PublicCatalog';
 
 type Brands = paths['/api/v1/catalog/brands']['get']['responses']['200']['content']['application/json'];
@@ -133,6 +134,7 @@ function App() {
       <Route path="/account/claim" element={<ClaimProof />} />
       <Route path="/account/login" element={<CustomerLogin />} />
       <Route path="/account/*" element={<CustomerAccount />} />
+      <Route path="/staff/auto-admin" element={<AutoStaffAdmin />} />
       <Route path="/staff/*" element={<StaffPortal />} />
       <Route path="*" element={<section><h1>Страница не найдена</h1><p>Такого раздела пока нет.</p><Link to="/">Вернуться на главную</Link></section>} />
     </Routes>
