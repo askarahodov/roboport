@@ -35,7 +35,9 @@ def return_work_order_to_lot(conn: psycopg.Connection, token: str,
                 # protected transaction. Otherwise the outer HTTP connection
                 # commit would raise a 500 instead of a stable conflict (409).
                 conn.execute("SET CONSTRAINTS auto_stock_serial_return_outstanding IMMEDIATE")
+                conn.execute("SET CONSTRAINTS auto_stock_serial_sku_return_guard IMMEDIATE")
                 conn.execute("SET CONSTRAINTS auto_stock_serial_return_outstanding DEFERRED")
+                conn.execute("SET CONSTRAINTS auto_stock_serial_sku_return_guard DEFERRED")
             return result[0]
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
