@@ -1,7 +1,7 @@
 import React from 'react';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-type Kind='draft'|'accept';
+type Kind='draft'|'accept'|'valuation';
 type Pending={kind:Kind;path:string;key:string;body:string;org:string;location:string};
 type Item={lotId:string;article:string;batchCode:string;binCode:string;allocated:number;onHand:number;reserved:number};
 
@@ -13,6 +13,12 @@ export function WarehouseReceiving(){
   const [reference,setReference]=React.useState('');
   const [documentId,setDocumentId]=React.useState('');
   const [acceptanceId,setAcceptanceId]=React.useState('');
+  const [valuationId,setValuationId]=React.useState('');
+  const [currency,setCurrency]=React.useState('RUB');
+  const [unitCost,setUnitCost]=React.useState('0');
+  const [vatTotal,setVatTotal]=React.useState('0');
+  const [priceRevision,setPriceRevision]=React.useState('');
+  const [quotedAt,setQuotedAt]=React.useState(()=>new Date().toISOString());
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
@@ -21,11 +27,17 @@ export function WarehouseReceiving(){
   const context=React.useRef({org:'',location:''});
   context.current={org:org.trim(),location:location.trim()};
   React.useEffect(()=>{setPending(null);setMessage('');setLots([]);
-    setListState('idle');setDocumentId('');setAcceptanceId('');},[org,location]);
+    setListState('idle');setDocumentId('');setAcceptanceId('');setValuationId('');},[org,location]);
   const validScope=uuid.test(org.trim())&&uuid.test(location.trim());
   const validDraft=validScope&&uuid.test(lot.trim())&&
     /^(0|[1-9][0-9]*)$/.test(quantity)&&Number(quantity)>0&&
     Number(quantity)<=1_000_000_000&&reference.trim().length>=3&&reference.trim().length<=160;
+  const validValuation=validScope&&uuid.test(documentId.trim())&&
+    /^[A-Z]{3}$/.test(currency)&&/^(0|[1-9][0-9]*)$/.test(unitCost)&&
+    /^(0|[1-9][0-9]*)$/.test(vatTotal)&&Number(unitCost)<=1_000_000_000&&
+    Number(vatTotal)<=1_000_000_000_000_000_000&&
+    priceRevision.trim().length>=3&&priceRevision.trim().length<=160&&
+    !Number.isNaN(Date.parse(quotedAt));
   async function getLots(){
     if(!validScope||listState==='loading')return;
     const scope={...context.current};
@@ -56,16 +68,20 @@ export function WarehouseReceiving(){
   }
   async function submit(kind:Kind,retry?:Pending){
     if(busy||(!retry&&pending))return;
-    if(!retry&&!(kind==='draft'?validDraft:validScope&&uuid.test(documentId.trim())))return;
+    if(!retry&&!(kind==='draft'?validDraft:kind==='accept'?
+      validScope&&uuid.test(documentId.trim()):validValuation))return;
     const snap=retry??{
       kind,org:org.trim(),location:location.trim(),
       path:'/api/v1/dev/auto/organizations/'+org.trim()+'/warehouse/receipts'+
-        (kind==='accept'?'/accept':''),
+        (kind==='accept'?'/accept':kind==='valuation'?'/valuation':''),
       key:crypto.randomUUID(),
       body:JSON.stringify(kind==='draft'?{
         locationId:location.trim(),lotId:lot.trim(),
         quantity:Number(quantity),sourceReference:reference.trim(),
-      }:{locationId:location.trim(),documentId:documentId.trim()}),
+      }:kind==='accept'?{locationId:location.trim(),documentId:documentId.trim()}:
+      {locationId:location.trim(),documentId:documentId.trim(),currency,
+       unitNetMinor:Number(unitCost),vatTotalMinor:Number(vatTotal),
+       supplierPriceRevision:priceRevision.trim(),supplierQuotedAt:quotedAt}),
     };
     if(snap.org!==context.current.org||snap.location!==context.current.location)return;
     setBusy(true);setMessage('');
@@ -91,15 +107,17 @@ export function WarehouseReceiving(){
         return;
       }
       const body:unknown=await response.json();
-      const field=snap.kind==='draft'?'documentId':'acceptanceId';
+      const field=snap.kind==='draft'?'documentId':snap.kind==='accept'?'acceptanceId':'valuationId';
       if(!body||typeof body!=='object'||!(field in body)||
           typeof (body as Record<string,unknown>)[field]!=='string'||
           !uuid.test((body as Record<string,string>)[field]))throw new Error('invalid response');
       if(snap.kind==='draft')setDocumentId((body as Record<string,string>)[field]);
-      else setAcceptanceId((body as Record<string,string>)[field]);
+      else if(snap.kind==='accept')setAcceptanceId((body as Record<string,string>)[field]);
+      else setValuationId((body as Record<string,string>)[field]);
       setPending(null);
       setMessage(snap.kind==='draft'?'Документ создан. Остатки пока не изменены.':
-        'Приёмка подтверждена другим сотрудником. Остатки обновлены.');
+        snap.kind==='accept'?'Приёмка подтверждена другим сотрудником. Остатки обновлены.':
+        'Закупочная стоимость и НДС зафиксированы отдельно от остатков и цены продажи.');
     }catch{
       if(snap.org===context.current.org&&snap.location===context.current.location){
         setPending(snap);
@@ -141,9 +159,26 @@ export function WarehouseReceiving(){
       <button type="button" disabled={!validScope||!uuid.test(documentId.trim())||busy||!!pending}
         onClick={()=>void submit('accept')}>Подтвердить приёмку</button>
     </section>
+    <section aria-label="Закупочная стоимость и НДС">
+      <h2>3. Зафиксировать закупочную стоимость (MANAGER)</h2>
+      <p>Суммы вводятся в минимальных единицах валюты, НДС отдельно. Это не цена продажи и не расчёт налоговой ставки.</p>
+      <label>Валюта ISO <input aria-label="Валюта ISO" maxLength={3} value={currency}
+        onChange={e=>setCurrency(e.target.value.toUpperCase())}/></label>
+      <label>Закупочная цена за единицу (minor units) <input type="number" min="0" max="1000000000" step="1"
+        aria-label="Закупочная цена за единицу" value={unitCost} onChange={e=>setUnitCost(e.target.value)}/></label>
+      <label>НДС по документу (minor units) <input type="number" min="0" step="1"
+        aria-label="НДС по документу" value={vatTotal} onChange={e=>setVatTotal(e.target.value)}/></label>
+      <label>Ревизия цены поставщика <input aria-label="Ревизия цены поставщика" maxLength={160}
+        value={priceRevision} onChange={e=>setPriceRevision(e.target.value)}/></label>
+      <label>Время цены поставщика ISO UTC <input aria-label="Время цены поставщика ISO UTC"
+        value={quotedAt} onChange={e=>setQuotedAt(e.target.value)}/></label>
+      <button type="button" disabled={!validValuation||busy||!!pending}
+        onClick={()=>void submit('valuation')}>Сохранить закупочную стоимость</button>
+    </section>
     {pending&&<button type="button" disabled={busy}
       onClick={()=>void submit(pending.kind,pending)}>Повторить с прежним ключом</button>}
     {message&&<p role="status">{message}</p>}
     {acceptanceId&&<p>Идентификатор подтверждения: <code>{acceptanceId}</code></p>}
+    {valuationId&&<p>Идентификатор оценки: <code>{valuationId}</code></p>}}
   </section>;
 }
