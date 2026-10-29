@@ -211,6 +211,7 @@ def upgrade():
       RETURNS trigger LANGUAGE plpgsql AS $fn$
       DECLARE inspected uuid; active_count bigint; available bigint;
               issued_count bigint; issued_physical bigint;
+              sku_issued_count bigint; sku_issued_physical bigint;
       BEGIN
         FOR inspected IN SELECT DISTINCT v.id FROM
             (VALUES (NEW.source_lot_id),(NEW.destination_lot_id)) v(id)
@@ -236,6 +237,18 @@ def upgrade():
           ) events;
           IF issued_count>issued_physical THEN
             RAISE EXCEPTION 'serial issue exceeds physical outstanding quantity';
+          END IF;
+          SELECT count(*) INTO sku_issued_count FROM auto_stock_serial_current
+            WHERE work_order_id=NEW.work_order_id AND sku_id=(
+              SELECT sku_id FROM auto_stock_lot WHERE id=NEW.source_lot_id)
+              AND state='ISSUED';
+          SELECT COALESCE(SUM(CASE WHEN action='ISSUE' THEN quantity
+                    WHEN action='RETURN' THEN -quantity ELSE 0 END),0)::bigint
+            INTO sku_issued_physical FROM auto_work_order_stock_event
+            WHERE work_order_id=NEW.work_order_id AND sku_id=(
+              SELECT sku_id FROM auto_stock_lot WHERE id=NEW.source_lot_id);
+          IF sku_issued_count>sku_issued_physical THEN
+            RAISE EXCEPTION 'serial issue exceeds SKU outstanding quantity';
           END IF;
         END IF;
         RETURN NULL;
