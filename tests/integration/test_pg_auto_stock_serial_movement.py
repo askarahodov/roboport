@@ -79,6 +79,11 @@ def test_serial_interbranch_moves_identity_and_returns_to_origin():
         with pytest.raises(AutoStockDenied):
             move(db,d,org,serial,"TRANSFER",dest=lot2)
         move(db,d,org,serial,"TRANSFER",dest=lot1)
+        history=db.execute("""SELECT action,movement_sequence
+          FROM auto_stock_serial_movement WHERE serial_id=%s
+          ORDER BY created_at,movement_sequence""",(serial,)).fetchall()
+        assert [row[0] for row in history]==["TRANSFER","TRANSFER"]
+        assert history[0][1]<history[1][1]
         assert db.execute("""SELECT lot_id,location_id FROM auto_stock_serial_current
           WHERE serial_id=%s""",(serial,)).fetchone()==(lot1,loc1)
         db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
