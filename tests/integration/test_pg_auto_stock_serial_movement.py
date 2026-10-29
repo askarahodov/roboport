@@ -14,9 +14,10 @@ from test_pg_auto_stock_ledger import balance
 from test_pg_auto_stock_lot_allocation import allocated
 
 
-def move(db,d,org,serial,action,order=None,dest=None,key=None,actor=None):
+def move(db,d,org,serial,action,order=None,dest=None,key=None,actor=None,scope=None):
+    location=scope or db.execute("SELECT location_id FROM auto_stock_serial_current WHERE serial_id=%s",(serial,)).fetchone()[0]
     return move_lot_serial(db,d["tokens"][actor or d["intake"]],
-           org,serial,key or uuid4(),action,order,dest)
+           org,location,serial,key or uuid4(),action,order,dest)
 
 
 def test_serial_issue_return_reissue_and_idempotency_preserve_ledger():
@@ -43,8 +44,7 @@ def test_serial_issue_return_reissue_and_idempotency_preserve_ledger():
              WHERE serial_id=%s""",(serial,)).fetchone()[0]==2
         move(db,d,org,serial,"ISSUE",order=order)
         assert balance(db,sku)==(2,1)
-        with pytest.raises(AutoStockConflict):
-            move(db,d,org,serial,"ISSUE",order=order,key=first_key)
+        assert move(db,d,org,serial,"ISSUE",order=order,key=first_key)==issued
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
                 db.execute("DELETE FROM auto_stock_serial_movement WHERE id=%s",(issued,))
@@ -63,13 +63,13 @@ def test_serial_interbranch_moves_identity_and_returns_to_origin():
                            org,loc1,lot1,uuid4(),"TRACKED-MOVED")
         key=uuid4()
         transferred=move(db,d,org,serial,"TRANSFER",dest=lot2,key=key)
-        assert move(db,d,org,serial,"TRANSFER",dest=lot2,key=key)==transferred
+        assert move(db,d,org,serial,"TRANSFER",dest=lot2,key=key,scope=loc1)==transferred
         assert balance(db,sku1)==(1,0) and balance(db,sku2)==(1,0)
         assert allocated(db,lot1)==1 and allocated(db,lot2)==1
         assert db.execute("""SELECT state,lot_id,location_id,sku_id
             FROM auto_stock_serial_current WHERE serial_id=%s""",(serial,)).fetchone()==(
                 "IN_STOCK",lot2,loc2,sku2)
-        with pytest.raises(AutoStockConflict):
+        with pytest.raises(AutoStockDenied):
             move(db,d,org,serial,"TRANSFER",dest=lot2)
         move(db,d,org,serial,"TRANSFER",dest=lot1)
         assert db.execute("""SELECT lot_id,location_id FROM auto_stock_serial_current
