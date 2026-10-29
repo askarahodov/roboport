@@ -14,6 +14,7 @@ depends_on=None
 def upgrade():
     op.execute("""CREATE TABLE auto_stock_serial_movement (
       id uuid PRIMARY KEY,
+      movement_sequence bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
       request_id uuid NOT NULL UNIQUE,
       serial_id uuid NOT NULL REFERENCES auto_stock_serial(id),
       action text NOT NULL CHECK(action IN ('ISSUE','RETURN','TRANSFER')),
@@ -47,7 +48,7 @@ def upgrade():
       FROM auto_stock_serial s
       LEFT JOIN LATERAL (
         SELECT e.* FROM auto_stock_serial_movement e WHERE e.serial_id=s.id
-        ORDER BY e.created_at DESC,e.id DESC LIMIT 1
+        ORDER BY e.movement_sequence DESC LIMIT 1
       ) m ON true
       JOIN auto_stock_lot l
         ON l.id=COALESCE(m.destination_lot_id,m.source_lot_id,s.lot_id)""")
