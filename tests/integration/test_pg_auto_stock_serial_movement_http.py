@@ -23,7 +23,7 @@ def test_http_serial_issue_return_scope_csrf_replay_revoke(monkeypatch):
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
     d=_scenario()
     with psycopg.connect(DSN) as db:
-        org,loc,order,sku,lot,grant=work_order_setup(db,d,2)
+        org,loc,order,sku,lot,grant=work_order_setup(db,d,1)
         serial=register_lot_serial(db,d["tokens"][d["intake"]],
                                   org,loc,lot,uuid4(),"HTTP-TRACKED-001")
     base=f"/api/v1/dev/auto/organizations/{org}/warehouse/serial-movements"
