@@ -295,3 +295,29 @@ def test_sku_only_return_does_not_strand_issued_serial():
                           (serial,)).fetchone()==("ISSUED",)
         move(db,d,org,serial,"RETURN",order=order)
         assert balance(db,sku)==(1,0)
+
+
+def test_lot_return_checks_sku_serial_outstanding_before_http_commit():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,order,sku,lot,_=work_order_setup(db,d,2)
+        serial=register_lot_serial(db,d["tokens"][d["intake"]],
+                                  org,loc,lot,uuid4(),"TRACKED-LOT-SKU-MIX")
+        # First use the ordinary quantitative path for the nonserialized unit.
+        issue_work_order_from_lot(db,d["tokens"][d["intake"]],
+                                  org,loc,order,lot,uuid4(),1)
+        return_work_order_stock(db,d["tokens"][d["intake"]],
+                                org,loc,order,sku,uuid4(),1)
+        # The tracked serial is then issued with its dedicated lifecycle.
+        move(db,d,org,serial,"ISSUE",order=order)
+        db.commit()
+        # A lot-level return would pass the lot-only check (2 issued minus 1)
+        # but would leave the SKU-level net issued below its tracked serial count.
+        with pytest.raises(AutoStockConflict):
+            return_work_order_to_lot(db,d["tokens"][d["intake"]],
+                                     org,loc,order,lot,uuid4(),1)
+        assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",
+                          (serial,)).fetchone()==("ISSUED",)
+        assert balance(db,sku)==(1,0)
+        move(db,d,org,serial,"RETURN",order=order)
+        assert balance(db,sku)==(2,0)
