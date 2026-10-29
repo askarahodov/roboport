@@ -78,3 +78,26 @@ test('warehouse denied response cannot be presented as successful recount',async
   await expect(page.getByRole('status')).toContainText('Доступ запрещён');
   await expect(page.getByRole('textbox',{name:'UUID подсчёта'})).toHaveValue('');
 });
+
+
+test('warehouse chooses scoped lot from real-shaped balance list and handles revoked grants',async({page})=>{
+  const first='33333333-3333-4333-8333-333333333333';
+  let denied=false;
+  await page.route('**/api/v1/dev/auto/organizations/**/stocktake/lots?*',route=>{
+    if(denied)return route.fulfill({status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:[{lotId:first,article:'SYN-33',batchCode:'LOT-1',
+        binCode:'BIN-A',allocated:3,onHand:5,reserved:1}],nextLotId:null})});
+  });
+  await page.goto('/staff/warehouse-stocktake');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(location);
+  await page.getByRole('button',{name:'Показать партии'}).click();
+  await expect(page.getByText('SYN-33')).toBeVisible();
+  await page.getByRole('button',{name:'Выбрать партию LOT-1'}).click();
+  await expect(page.getByRole('textbox',{name:'UUID партии'})).toHaveValue(first);
+  denied=true;
+  await page.getByRole('button',{name:'Показать партии'}).click();
+  await expect(page.getByRole('alert')).toContainText('Нет доступа');
+  await expect(page.getByText('SYN-33')).toHaveCount(0);
+});
