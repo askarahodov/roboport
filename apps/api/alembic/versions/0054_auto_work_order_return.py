@@ -29,8 +29,8 @@ def upgrade():
         FROM auto_stock_sku sku LEFT JOIN auto_stock_event e ON e.sku_id=sku.id
        GROUP BY sku.id,sku.organization_id,sku.location_id
     """)
-    # Restrict new RETURN writes to the atomic SQL function; direct DB owner INSERT
-    # is not a permitted pathway even in synthetic/dev.
+    # RETURN must have a linked work-order event; direct owner writes are not
+    # a supported security boundary. Application roles must not own tables.
     op.execute("""
       CREATE OR REPLACE FUNCTION guard_auto_stock_event_insert()
       RETURNS trigger LANGUAGE plpgsql AS $fn$
@@ -42,10 +42,7 @@ def upgrade():
             IS DISTINCT FROM (scope.organization_id,scope.location_id) THEN
           RAISE EXCEPTION 'foreign stock scope';
         END IF;
-        IF NEW.action='RETURN' AND current_setting('roboport.stock_return_guard',true)
-             IS DISTINCT FROM 'allow' THEN
-          RAISE EXCEPTION 'direct stock return forbidden';
-        END IF;
+
         SELECT on_hand,reserved INTO stock FROM auto_stock_balance WHERE sku_id=NEW.sku_id;
         IF (NEW.action='RESERVE' AND stock.on_hand-stock.reserved < NEW.quantity)
            OR (NEW.action IN ('RELEASE','ISSUE') AND stock.reserved < NEW.quantity) THEN
@@ -102,12 +99,10 @@ def upgrade():
           RAISE EXCEPTION 'return exceeds previously issued quantity';
         END IF;
         new_id := gen_random_uuid();
-        PERFORM set_config('roboport.stock_return_guard','allow',true);
         INSERT INTO auto_stock_event
           (id,request_id,sku_id,organization_id,location_id,action,quantity)
           VALUES(new_id,p_request,p_sku,sku_row.organization_id,
                  sku_row.location_id,'RETURN',p_quantity);
-        PERFORM set_config('roboport.stock_return_guard','',true);
         INSERT INTO auto_work_order_stock_event
           (stock_event_id,work_order_id,sku_id,action,quantity)
           VALUES(new_id,p_order,p_sku,'RETURN',p_quantity);
