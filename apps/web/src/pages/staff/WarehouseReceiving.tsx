@@ -38,7 +38,7 @@ export function WarehouseReceiving(){
     Number.isSafeInteger(Number(unitCost))&&Number.isSafeInteger(Number(vatTotal))&&
     Number(vatTotal)<=1_000_000_000_000_000_000&&
     priceRevision.trim().length>=3&&priceRevision.trim().length<=160&&
-    /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(quotedAt)&&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(quotedAt)&&
     !Number.isNaN(Date.parse(quotedAt));
   async function getLots(){
     if(!validScope||listState==='loading')return;
