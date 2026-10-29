@@ -22,6 +22,28 @@ def move_lot_serial(conn: psycopg.Connection, token: str,
             not isinstance(destination_lot_id,UUID) or work_order_id is not None))):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
+        # A transfer changes the current branch. Replays must still verify original
+        # branch and both live grants, without attempting a second physical transfer.
+        prior=conn.execute("""SELECT m.id,m.serial_id,m.action,m.work_order_id,
+                   m.destination_lot_id,m.performed_by,src.organization_id,
+                   src.location_id,dst.location_id
+                FROM auto_stock_serial_movement m
+                JOIN auto_stock_lot src ON src.id=m.source_lot_id
+                LEFT JOIN auto_stock_lot dst ON dst.id=m.destination_lot_id
+                WHERE m.request_id=%s""",(request_id,)).fetchone()
+        if prior is not None:
+            if prior[6]!=organization_id or prior[7]!=location_id:
+                raise AutoStockDenied("FORBIDDEN")
+            if (prior[1]!=serial_id or prior[2]!=action
+                or prior[3]!=work_order_id or prior[4]!=destination_lot_id):
+                raise AutoStockConflict("CONFLICT")
+            for loc in (prior[7],) if prior[8] is None else (prior[7],prior[8]):
+                if not organization_role_allows(conn,token,organization_id,
+                     "WAREHOUSE",loc,for_mutation=True):
+                    raise AutoStockDenied("FORBIDDEN")
+            if session_subject(conn,token,for_mutation=True)!=prior[5]:
+                raise AutoStockDenied("FORBIDDEN")
+            return prior[0]
         source=conn.execute("""SELECT lot_id,sku_id,location_id,state
            FROM auto_stock_serial_current WHERE serial_id=%s AND organization_id=%s""",
            (serial_id,organization_id)).fetchone()
