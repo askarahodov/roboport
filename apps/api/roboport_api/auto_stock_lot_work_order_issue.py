@@ -31,6 +31,11 @@ def issue_work_order_from_lot(conn: psycopg.Connection, token: str,
                 result=conn.execute(
                     "SELECT record_auto_stock_lot_work_order_issue(%s,%s,%s,%s)",
                     (work_order_id,lot_id,request_id,quantity)).fetchone()
+                # Registered serials may only be consumed by a linked serial
+                # movement. Force the deferred allocation guard here, so HTTP
+                # rejects an ordinary issue as 409 instead of raising on commit.
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard IMMEDIATE")
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard DEFERRED")
             return result[0]
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):

@@ -30,9 +30,12 @@ def dispose_stock_lot(conn: psycopg.Connection, token: str,
             raise AutoStockDenied("FORBIDDEN")
         try:
             with conn.transaction():
-                return conn.execute("""
+                result=conn.execute("""
                     SELECT record_auto_stock_lot_disposition(%s,%s,%s,%s,%s,%s)
                 """,(lot_id,request_id,action,quantity,reason,supplier_reference)).fetchone()[0]
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard IMMEDIATE")
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard DEFERRED")
+                return result
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoStockConflict("CONFLICT") from None

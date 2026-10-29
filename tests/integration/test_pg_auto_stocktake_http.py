@@ -7,7 +7,8 @@ from roboport_api.main import app
 from roboport_api.session_tokens import token_digest
 from test_pg_baseline import DSN
 from test_pg_auto_vehicle_claim_http import _scenario
-from test_pg_auto_stock_lot_allocation import setup, allocated
+from test_pg_auto_stock_lot_allocation import setup, allocated, act as lot_action
+from roboport_api.auto_stock_serial import register_lot_serial
 from test_pg_auto_stock_ledger import balance
 from test_pg_auto_stock_service import grant
 
@@ -90,3 +91,28 @@ def test_http_disabled_missing_csrf_and_input_fail_closed(monkeypatch):
         assert post(client,d,d["intake"],url,
                     {**payload,"locationId":str(uuid4())}).status_code==403
         assert post(client,d,d["intake"],url,payload).status_code==201
+
+
+
+def test_stocktake_cannot_approve_loss_of_registered_serial_as_http_500(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,item,lot,_=setup(db,d,1)
+        lot_action(db,d,org,loc,lot,"ALLOCATE",1)
+        grant(db,d["manager"],org,loc,"MANAGER")
+        register_lot_serial(db,d["tokens"][d["intake"]],
+                            org,loc,lot,uuid4(),"STOCKTAKE-SERIAL-001")
+    base=f"/api/v1/dev/auto/organizations/{org}/stocktake"
+    with TestClient(app,base_url="https://127.0.0.1") as client:
+        counted=post(client,d,d["intake"],base+"/counts",
+           {"locationId":str(loc),"lotId":str(lot),"actual":0,
+            "reason":"Контрольный пересчёт серийной детали"})
+        assert counted.status_code==201,counted.text
+        approved=post(client,d,d["manager"],base+"/approvals",
+           {"locationId":str(loc),"countId":counted.json()["countId"]})
+        assert approved.status_code==409,approved.text
+        with psycopg.connect(DSN) as db:
+            assert allocated(db,lot)==1 and balance(db,item)==(1,0)

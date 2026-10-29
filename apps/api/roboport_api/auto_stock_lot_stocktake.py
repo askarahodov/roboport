@@ -71,9 +71,12 @@ def approve_stock_lot_count(conn, token: str, organization_id: UUID,
         try:
             with conn.transaction():
                 conn.execute("SELECT set_config(\'roboport.stocktake_actor\',%s,true)", (str(actor),))
-                return conn.execute(
+                result=conn.execute(
                     "SELECT approve_auto_stock_lot_count(%s,%s)",
                     (count_id,request_id)).fetchone()[0]
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard IMMEDIATE")
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard DEFERRED")
+                return result
         except (psycopg.errors.RaiseException, psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoStockConflict("CONFLICT") from None

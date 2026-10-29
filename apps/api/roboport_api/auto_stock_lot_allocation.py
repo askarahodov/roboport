@@ -28,6 +28,8 @@ def mutate_stock_lot_allocation(conn: psycopg.Connection, token: str,
                 row=conn.execute(
                     "SELECT record_auto_stock_lot_allocation(%s,%s,%s,%s)",
                     (lot_id,request_id,action,quantity)).fetchone()
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard IMMEDIATE")
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard DEFERRED")
             return row[0]
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
