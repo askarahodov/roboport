@@ -5,6 +5,7 @@ const loc='22222222-2222-4222-8222-222222222222';
 const lot='33333333-3333-4333-8333-333333333333';
 const receipt='44444444-4444-4444-8444-444444444444';
 const accepted='55555555-5555-4555-8555-555555555555';
+const valuation='66666666-6666-4666-8666-666666666666';
 
 test('warehouse receipt draft and independent acceptance use exact scope and distinct keys',async({page})=>{
   const seen:{url:string;key:string;body:any}[]=[];
@@ -16,8 +17,9 @@ test('warehouse receipt draft and independent acceptance use exact scope and dis
     seen.push({url:new URL(req.url()).pathname,key:req.headers()['idempotency-key'],
       body:req.postDataJSON()});
     const approve=req.url().endsWith('/accept');
+    const quote=req.url().endsWith('/valuation');
     return route.fulfill({status:201,contentType:'application/json',
-      body:JSON.stringify(approve?{acceptanceId:accepted}:{documentId:receipt})});
+      body:JSON.stringify(quote?{valuationId:valuation}:approve?{acceptanceId:accepted}:{documentId:receipt})});
   });
   await page.goto('/staff/warehouse-receiving');
   await expect(page.getByRole('heading',{name:'Приход запчастей (dev)'})).toBeVisible();
@@ -31,12 +33,23 @@ test('warehouse receipt draft and independent acceptance use exact scope and dis
   await expect(page.getByRole('textbox',{name:'UUID приходного документа'})).toHaveValue(receipt);
   await page.getByRole('button',{name:'Подтвердить приёмку'}).click();
   await expect(page.getByRole('status')).toContainText('Остатки обновлены');
-  expect(seen).toHaveLength(2);
+  await page.getByRole('spinbutton',{name:'Закупочная цена за единицу'}).fill('1250');
+  await page.getByRole('spinbutton',{name:'НДС по документу'}).fill('600');
+  await page.getByRole('textbox',{name:'Ревизия цены поставщика'}).fill('QUOTE-REV-1');
+  await page.getByRole('textbox',{name:'Время цены поставщика ISO UTC'}).fill('2026-10-28T12:00:00Z');
+  await page.getByRole('button',{name:'Сохранить закупочную стоимость'}).click();
+  await expect(page.getByRole('status')).toContainText('НДС зафиксированы отдельно');
+  expect(seen).toHaveLength(3);
   expect(seen[0].url).toBe('/api/v1/dev/auto/organizations/'+org+'/warehouse/receipts');
   expect(seen[1].url).toBe('/api/v1/dev/auto/organizations/'+org+'/warehouse/receipts/accept');
   expect(seen[0].body).toEqual({locationId:loc,lotId:lot,quantity:4,sourceReference:'SUP-REF-4'});
   expect(seen[1].body).toEqual({locationId:loc,documentId:receipt});
   expect(seen[0].key).not.toBe(seen[1].key);
+  expect(seen[1].key).not.toBe(seen[2].key);
+  expect(seen[2].url).toBe('/api/v1/dev/auto/organizations/'+org+'/warehouse/receipts/valuation');
+  expect(seen[2].body).toEqual({locationId:loc,documentId:receipt,currency:'RUB',
+    unitNetMinor:1250,vatTotalMinor:600,supplierPriceRevision:'QUOTE-REV-1',
+    supplierQuotedAt:'2026-10-28T12:00:00Z'});
 });
 
 test('warehouse receiving retries uncertain response using original idempotency key',async({page})=>{
