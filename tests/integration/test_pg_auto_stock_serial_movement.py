@@ -89,10 +89,16 @@ def test_untracked_lot_deallocation_cannot_strand_registered_serial():
         org,loc,order,sku,lot,_=work_order_setup(db,d,1)
         serial=register_lot_serial(db,d["tokens"][d["intake"]],
                                   org,loc,lot,uuid4(),"TRACKED-STRAND")
+        db.commit()
+        with pytest.raises(AutoStockConflict):
+            issue_work_order_from_lot(db,d["tokens"][d["intake"]],
+                                      org,loc,order,lot,uuid4(),1)
+        # The owner-only SQL function remains protected independently of
+        # the Python service and must fail at deferred-constraint checking.
         with pytest.raises(psycopg.errors.RaiseException,match="strands registered"):
             with db.transaction():
-                issue_work_order_from_lot(db,d["tokens"][d["intake"]],
-                                          org,loc,order,lot,uuid4(),1)
+                db.execute("SELECT record_auto_stock_lot_work_order_issue(%s,%s,%s,1)",
+                           (order,lot,uuid4()))
                 db.execute("SET CONSTRAINTS ALL IMMEDIATE")
         assert allocated(db,lot)==1 and balance(db,sku)==(1,1)
         assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",
