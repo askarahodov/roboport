@@ -11,6 +11,7 @@ from roboport_api.auto_stock_lot_allocation import mutate_stock_lot_allocation
 from roboport_api.auto_stock_lot_transfer import transfer_stock_lot
 from roboport_api.auto_stock_disposition import dispose_stock_lot
 from roboport_api.auto_stock_service import AutoStockDenied,AutoStockConflict
+from roboport_api.auto_work_order_return import return_work_order_stock
 from test_pg_baseline import DSN
 from test_pg_auto_vehicle_claim_http import _scenario
 from test_pg_auto_stock_lot_work_order_issue import setup as work_order_setup
@@ -270,3 +271,27 @@ def test_untracked_interbranch_transfer_of_fully_serialized_lot_is_conflict():
                 org,a,b,la,lb,uuid4(),1)
         assert allocated(db,la)==1 and allocated(db,lb)==0
         assert balance(db,sa)==(1,0) and balance(db,sb)==(0,0)
+
+
+def test_sku_only_return_does_not_strand_issued_serial():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,order,sku,lot,_=work_order_setup(db,d,1)
+        serial=register_lot_serial(db,d["tokens"][d["intake"]],
+                                  org,loc,lot,uuid4(),"TRACKED-SKU-RETURN")
+        move(db,d,org,serial,"ISSUE",order=order)
+        db.commit()
+        with pytest.raises(AutoStockConflict):
+            return_work_order_stock(db,d["tokens"][d["intake"]],
+                                     org,loc,order,sku,uuid4(),1)
+        with pytest.raises(psycopg.errors.RaiseException,
+                           match="SKU return strands issued serial identity"):
+            with db.transaction():
+                db.execute("SELECT record_auto_work_order_return(%s,%s,%s,1)",
+                           (order,sku,uuid4()))
+                db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        assert balance(db,sku)==(0,0)
+        assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",
+                          (serial,)).fetchone()==("ISSUED",)
+        move(db,d,org,serial,"RETURN",order=order)
+        assert balance(db,sku)==(1,0)
