@@ -115,3 +115,8 @@ PG17: `PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_st
 ## Интерфейс инвентаризации (current-dev, часть #168)
 
 `apps/web/src/pages/staff/WarehouseStocktake.tsx` подключён в `/staff/warehouse-stocktake` с навигацией «Инвентаризация (dev)»; два защищённых HTTP шага выполняются с session+CSRF и отдельными UUID Idempotency-Key. На неопределённый HTTP/сетевой исход форма блокирует новый запрос до безопасного повтора с **прежним UUID**, а при смене org/location очищает отложенный запрос. Успешный подсчёт показывает countId; отдельный MANAGER утверждает корректировку. Playwright: `apps/web/e2e/warehouse-stocktake.spec.ts`. Подробная русская инструкция: [Кладовщик и закупщик](../guides/warehouse.md). Это **только synthetic dev**, остальные объекты и сценарии полного #168 остаются planned.
+
+
+## Просмотр партий для выбора инвентаризируемой позиции (current-dev, часть #168)
+
+Внутренний `auto_stock_lot_read.list_stocktake_lots` и закрытый GET `/api/v1/dev/auto/organizations/{org_id}/stocktake/lots` возвращают ограниченную страницу (1–50) только партий указанного филиала и организации с live WAREHOUSE/MANAGER authorization, scoped SQL joins и keyset UUID cursor. Ответ: `lotId,article,batchCode,binCode,allocated,onHand,reserved`; цены, поставщики и персональные данные не раскрываются. Веб-форма может выбрать партию из списка, не требует ручного UUID. PG17 HTTP тесты: `tests/integration/test_pg_auto_stock_lot_read_http.py`; Playwright: `apps/web/e2e/warehouse-stocktake.spec.ts`. Повтор после отзыва прав не возвращает старый список. Только synthetic dev, production DB access/UI не заявлены.
