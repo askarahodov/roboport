@@ -52,8 +52,10 @@ def test_allocate_deallocate_replay_and_unallocated_issue_invariant():
         record(db,item,"RESERVE",2)
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
-                db.execute("SELECT record_auto_work_order_stock(%s,%s,%s,%s,%s)",
-                    (uuid4(),item,uuid4(),"ISSUE",2))
+                db.execute("""INSERT INTO auto_stock_event
+                    (id,request_id,sku_id,organization_id,location_id,action,quantity)
+                    VALUES(%s,%s,%s,%s,%s,'ISSUE',2)""",
+                    (uuid4(),uuid4(),item,org,loc))
         act(db,d,org,loc,lot,"DEALLOCATE",2)
         assert allocated(db,lot)==2
         assert balance(db,item)==(5,2)
