@@ -43,7 +43,7 @@ test('пользовательские разделы явно разделяю�
     // и явно запрещать работу с реальными данными; production ещё planned.
     if (path === 'warehouse') {
       await expect(page.locator('.markdown-section')).toContainText('Статус: current-dev synthetic');
-      await expect(page.locator('.markdown-section')).toContainText('инвентаризации, прихода и выдачи/возврата');
+      await expect(page.locator('.markdown-section')).toContainText('инвентаризации, прихода, выдачи/возврата и пересортицы');
       await expect(page.locator('.markdown-section')).toContainText('Запрещены реальные складские данные');
       await expect(page.locator('.markdown-section')).toContainText('/staff/warehouse-work-orders');
     } else {
