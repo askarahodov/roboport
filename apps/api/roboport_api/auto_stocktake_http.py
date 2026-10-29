@@ -215,3 +215,49 @@ async def value_receipt(org_id: str,request: Request):
             return _response(request,409,"CONFLICT")
     return JSONResponse(status_code=201,content={"valuationId":str(ident)},
                         headers={"Cache-Control":"no-store"})
+
+
+class WorkOrderLotBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    workOrderId: UUID
+    lotId: UUID
+    quantity: StrictInt = Field(ge=1,le=1000000000)
+
+
+async def _mutate_work_order_lot(org_id: str,request: Request,action: str):
+    from .auto_stock_lot_work_order_issue import issue_work_order_from_lot
+    from .auto_stock_lot_work_order_return import return_work_order_to_lot
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        data=WorkOrderLotBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            handler=issue_work_order_from_lot if action=="issue" else return_work_order_to_lot
+            ident=handler(db,request.cookies.get("rp_session",""),org,
+                data.locationId,data.workOrderId,data.lotId,key,data.quantity)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,
+        content={("issueId" if action=="issue" else "returnId"):str(ident)},
+        headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/work-orders/issue")
+async def issue_work_order_lot_http(org_id: str,request: Request):
+    return await _mutate_work_order_lot(org_id,request,"issue")
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/work-orders/return")
+async def return_work_order_lot_http(org_id: str,request: Request):
+    return await _mutate_work_order_lot(org_id,request,"return")
