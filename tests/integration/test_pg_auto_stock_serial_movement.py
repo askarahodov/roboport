@@ -6,6 +6,7 @@ from roboport_api.auto_stock_serial import register_lot_serial
 from roboport_api.auto_stock_serial_movement import move_lot_serial
 from roboport_api.auto_stock_lot_work_order_issue import issue_work_order_from_lot
 from roboport_api.auto_stock_lot_work_order_return import return_work_order_to_lot
+from roboport_api.auto_stock_interbranch_transfer import transfer_interbranch_stock
 from roboport_api.auto_stock_service import AutoStockDenied,AutoStockConflict
 from test_pg_baseline import DSN
 from test_pg_auto_vehicle_claim_http import _scenario
@@ -134,10 +135,16 @@ def test_quantitative_return_cannot_strand_an_issued_serial():
         serial=register_lot_serial(db,d["tokens"][d["intake"]],
                                   org,loc,lot,uuid4(),"STRAND-RETURN")
         move(db,d,org,serial,"ISSUE",order=order)
+        # The Python service must return a conflict, not leak a deferred SQL
+        # error at HTTP connection close.
+        with pytest.raises(AutoStockConflict):
+            return_work_order_to_lot(db,d["tokens"][d["intake"]],
+                                     org,loc,order,lot,uuid4(),1)
+        # Direct SQL cannot bypass the same constraint.
         with pytest.raises(psycopg.errors.RaiseException,match="strands issued serial"):
             with db.transaction():
-                return_work_order_to_lot(db,d["tokens"][d["intake"]],
-                                         org,loc,order,lot,uuid4(),1)
+                db.execute("SELECT record_auto_stock_lot_work_order_return(%s,%s,%s,1)",
+                           (order,lot,uuid4()))
                 db.execute("SET CONSTRAINTS ALL IMMEDIATE")
         assert balance(db,sku)==(0,0) and allocated(db,lot)==0
         assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",
@@ -185,3 +192,32 @@ def test_registration_after_transfer_checks_dynamic_lot_capacity_and_sku():
                                org,b,lb,uuid4(),"DIFFERENT-NUMBER")
         assert new!=origin
         assert allocated(db,lb)==2
+
+
+
+def test_direct_late_serial_transfer_cannot_use_historical_physical_ledger():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        ctx=transfer_setup(db,d,2)
+        org,src_loc,dst_loc,src_sku,dst_sku,src_lot,dst_lot,_,_=ctx
+        serial=register_lot_serial(db,d["tokens"][d["intake"]],
+                                  org,src_loc,src_lot,uuid4(),"LATE-MOVE-001")
+        physical=transfer_interbranch_stock(
+            db,d["tokens"][d["intake"]],org,src_loc,dst_loc,
+            src_lot,dst_lot,uuid4(),1)
+        transfer_interbranch_stock(db,d["tokens"][d["intake"]],org,
+                 dst_loc,src_loc,dst_lot,src_lot,uuid4(),1)
+        assert allocated(db,dst_lot)==0 and allocated(db,src_lot)==2
+        with pytest.raises(psycopg.errors.RaiseException,match="exceeds physical lot capacity"):
+            with db.transaction():
+                db.execute("SELECT set_config('roboport.serial_actor',%s,true)",
+                           (str(d["intake"]),))
+                db.execute("""INSERT INTO auto_stock_serial_movement(
+                    id,request_id,serial_id,action,source_lot_id,
+                    destination_lot_id,interbranch_id,performed_by)
+                    VALUES(%s,%s,%s,'TRANSFER',%s,%s,%s,%s)""",
+                    (uuid4(),uuid4(),serial,src_lot,dst_lot,physical,d["intake"]))
+                db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        assert db.execute("SELECT lot_id FROM auto_stock_serial_current WHERE serial_id=%s",
+                          (serial,)).fetchone()[0]==src_lot
+        assert balance(db,src_sku)==(2,0) and balance(db,dst_sku)==(0,0)
