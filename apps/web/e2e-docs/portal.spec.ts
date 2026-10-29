@@ -39,14 +39,20 @@ test('пользовательские разделы явно разделяю�
   for (const [path, heading] of routes) {
     await page.locator('.sidebar-nav a[href*="guides/' + path + '"]').click();
     await expect(page.locator('.markdown-section h1')).toContainText(heading);
-    // Кладовщик также получил ограниченный синтетический UI инвентаризации.
-    // Остальные роли по-прежнему не являются production-ready.
-    await expect(page.locator('.markdown-section')).toContainText(
-      path === 'warehouse' ? 'Статус: current-dev только для инвентаризации' :
+    // Складская инструкция должна перечислять реализованные dev-операции
+    // и явно запрещать работу с реальными данными; production ещё planned.
+    if (path === 'warehouse') {
+      await expect(page.locator('.markdown-section')).toContainText('Статус: current-dev synthetic');
+      await expect(page.locator('.markdown-section')).toContainText('инвентаризации, прихода и выдачи/возврата');
+      await expect(page.locator('.markdown-section')).toContainText('Запрещены реальные складские данные');
+      await expect(page.locator('.markdown-section')).toContainText('/staff/warehouse-work-orders');
+    } else {
+      await expect(page.locator('.markdown-section')).toContainText(
         ['client', 'intake', 'manager'].includes(path)
           ? 'Статус: частично current в синтетическом dev'
           : 'Статус: planned',
-    );
+      );
+    }
     await expect(page.locator('.markdown-section')).not.toContainText(
       '404 - Not found',
     );
