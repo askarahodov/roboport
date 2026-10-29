@@ -395,3 +395,57 @@ async def approve_reclassification_http(org_id: str, request: Request):
             return _response(request,409,"CONFLICT")
     return JSONResponse(status_code=201,content={"approvalId":str(ident)},
                         headers={"Cache-Control":"no-store"})
+
+
+class SerialMovementBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    serialId: UUID
+    workOrderId: UUID | None = None
+    destinationLotId: UUID | None = None
+
+
+async def _serial_movement_http(org_id: str,request: Request,action: str):
+    from .auto_stock_serial_movement import move_lot_serial
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        data=SerialMovementBody.model_validate(await request.json())
+        key=_key(request)
+        if (action in ("ISSUE","RETURN") and (
+            data.workOrderId is None or data.destinationLotId is not None)
+            or action=="TRANSFER" and (
+            data.destinationLotId is None or data.workOrderId is not None)):
+            raise ValueError("invalid serial transition")
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            ident=move_lot_serial(db,request.cookies.get("rp_session",""),
+                org,data.locationId,data.serialId,key,action,
+                data.workOrderId,data.destinationLotId)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"movementId":str(ident)},
+                        headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/serial-movements/issue")
+async def serial_issue_http(org_id: str,request: Request):
+    return await _serial_movement_http(org_id,request,"ISSUE")
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/serial-movements/return")
+async def serial_return_http(org_id: str,request: Request):
+    return await _serial_movement_http(org_id,request,"RETURN")
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/serial-movements/transfer")
+async def serial_transfer_http(org_id: str,request: Request):
+    return await _serial_movement_http(org_id,request,"TRANSFER")
