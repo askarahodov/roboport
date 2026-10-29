@@ -81,3 +81,30 @@ async def approve_count(org_id: str, request: Request):
             return _response(request,409,"CONFLICT")
     return JSONResponse(status_code=201,content={"approvalId":str(ident)},
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/stocktake/lots")
+def get_lots(org_id: str, request: Request, locationId: str,
+             limit: int = 30, afterLotId: str | None = None):
+    from .auto_stock_lot_read import list_stocktake_lots
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        organization=UUID(org_id)
+        location=UUID(locationId)
+        cursor=UUID(afterLotId) if afterLotId is not None else None
+        if not 1<=limit<=50:
+            raise ValueError("invalid page size")
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            items,next_id=list_stocktake_lots(
+                db,request.cookies.get("rp_session",""),organization,location,
+                limit,cursor)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(content={
+        "items":items,"nextLotId":str(next_id) if next_id else None,
+    },headers={"Cache-Control":"no-store"})
