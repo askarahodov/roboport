@@ -103,7 +103,7 @@ def test_tenant_self_approval_bad_scope_and_rollback():
             propose(db,d,uuid4(),loc,src,dst,1)
         with pytest.raises(AutoStockDenied):
             propose(db,d,org,uuid4(),src,dst,1)
-        with pytest.raises(AutoStockConflict):
+        with pytest.raises(AutoStockDenied):
             propose(db,d,org,loc,src,src,1)
         doc=propose(db,d,org,loc,src,dst,1)
         with pytest.raises(AutoStockConflict):
