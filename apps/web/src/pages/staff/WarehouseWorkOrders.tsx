@@ -79,7 +79,7 @@ export function WarehouseWorkOrders(){
       body:JSON.stringify({locationId:location.trim(),lotId:lot.trim(),serialNumber}),
       key:crypto.randomUUID()};
     if(snap.org!==context.current.org||snap.location!==context.current.location)return;
-    setBusy(true);setMessage('');
+    setSerialPending(snap);setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
       if(!csrf.ok)throw new Error('csrf');
@@ -90,7 +90,6 @@ export function WarehouseWorkOrders(){
         '/warehouse/serials',{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':token.csrfToken,
           'Idempotency-Key':snap.key},body:snap.body});
-      if(snap.org!==context.current.org||snap.location!==context.current.location)return;
       if(result.status>=500)throw new Error('unknown');
       if(!result.ok){
         setSerialPending(null);setMessage(result.status===409?
@@ -103,10 +102,8 @@ export function WarehouseWorkOrders(){
       setSerialPending(null);setEventId(body.serialId);
       setMessage('Серийный номер зарегистрирован за партией.');
     }catch{
-      if(snap.org===context.current.org&&snap.location===context.current.location){
-        setSerialPending(snap);
-        setMessage('Результат регистрации неизвестен. Повторите с исходным ключом.');
-      }
+      setSerialPending(snap);
+      setMessage('Результат регистрации неизвестен. Верните исходные организацию и филиал и повторите с прежним ключом.');
     }finally{setBusy(false);}
   }
   return <section className="ui-page" aria-label="Выдача и возврат деталей">
