@@ -181,6 +181,45 @@ def upgrade():
       AFTER INSERT ON auto_stock_lot_work_order_return
       DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
       EXECUTE FUNCTION check_auto_stock_serial_return_outstanding()""")
+    # Physical movements can precede serial linking; reject a late serial
+    # INSERT that would overfill a lot or orphan an outstanding WorkOrder issue.
+    op.execute("""CREATE FUNCTION check_auto_stock_serial_movement_balance()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      DECLARE inspected uuid; active_count bigint; available bigint;
+              issued_count bigint; issued_physical bigint;
+      BEGIN
+        FOR inspected IN SELECT DISTINCT v.id FROM
+            (VALUES (NEW.source_lot_id),(NEW.destination_lot_id)) v(id)
+            WHERE v.id IS NOT NULL LOOP
+          SELECT count(*) INTO active_count FROM auto_stock_serial_current
+            WHERE lot_id=inspected AND state='IN_STOCK';
+          SELECT allocated INTO available FROM auto_stock_lot_balance
+            WHERE lot_id=inspected;
+          IF active_count>COALESCE(available,0) THEN
+            RAISE EXCEPTION 'serial movement exceeds physical lot capacity';
+          END IF;
+        END LOOP;
+        IF NEW.work_order_id IS NOT NULL THEN
+          SELECT count(*) INTO issued_count FROM auto_stock_serial_current
+             WHERE lot_id=NEW.source_lot_id
+               AND work_order_id=NEW.work_order_id AND state='ISSUED';
+          SELECT COALESCE(SUM(q),0)::bigint INTO issued_physical FROM (
+            SELECT quantity q FROM auto_stock_lot_work_order_issue
+              WHERE work_order_id=NEW.work_order_id AND lot_id=NEW.source_lot_id
+            UNION ALL
+            SELECT -quantity q FROM auto_stock_lot_work_order_return
+              WHERE work_order_id=NEW.work_order_id AND lot_id=NEW.source_lot_id
+          ) events;
+          IF issued_count>issued_physical THEN
+            RAISE EXCEPTION 'serial issue exceeds physical outstanding quantity';
+          END IF;
+        END IF;
+        RETURN NULL;
+      END $fn$""")
+    op.execute("""CREATE CONSTRAINT TRIGGER auto_stock_serial_movement_balance
+      AFTER INSERT ON auto_stock_serial_movement
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+      EXECUTE FUNCTION check_auto_stock_serial_movement_balance()""")
     op.execute("""CREATE FUNCTION record_auto_stock_serial_movement(
       p_serial uuid,p_request uuid,p_action text,p_order uuid,p_destination uuid
     ) RETURNS uuid LANGUAGE plpgsql AS $fn$
@@ -242,6 +281,8 @@ def upgrade():
 
 def downgrade():
     op.execute("DROP FUNCTION record_auto_stock_serial_movement(uuid,uuid,text,uuid,uuid)")
+    op.execute("DROP TRIGGER auto_stock_serial_movement_balance ON auto_stock_serial_movement")
+    op.execute("DROP FUNCTION check_auto_stock_serial_movement_balance()")
     op.execute("""DROP TRIGGER auto_stock_serial_return_outstanding
       ON auto_stock_lot_work_order_return""")
     op.execute("DROP FUNCTION check_auto_stock_serial_return_outstanding()")
