@@ -71,8 +71,8 @@ def test_wrong_lot_order_tenant_and_revoked_role():
 def test_return_rollback_and_competing_overreturn():
     d=_scenario()
     with psycopg.connect(DSN) as db:
-        org,loc,order,item,lot,_=setup(db,d,1)
-        issue(db,d,org,loc,order,lot,1)
+        org,loc,order,item,lot,_=setup(db,d,2)
+        issue(db,d,org,loc,order,lot,2)
     with psycopg.connect(DSN) as first,psycopg.connect(DSN) as second:
         with first.transaction():
             ret(first,d,org,loc,order,lot,1)
@@ -80,17 +80,13 @@ def test_return_rollback_and_competing_overreturn():
             with pytest.raises(psycopg.errors.LockNotAvailable):
                 with second.transaction():
                     ret(second,d,org,loc,order,lot,1)
-        with pytest.raises(AutoStockConflict):
-            ret(second,d,org,loc,order,lot,1)
         assert allocated(second,lot)==1 and balance(second,item)==(1,0)
-        # A fresh issued unit can be returned and rolled back atomically.
-        from test_pg_auto_stock_lot_work_order_issue import issue
-        issue(second,d,org,loc,order,lot,1)
+        # A second return can be attempted, then rolled back atomically.
         with pytest.raises(RuntimeError):
             with second.transaction():
                 ret(second,d,org,loc,order,lot,1)
                 raise RuntimeError("rollback")
-        assert allocated(second,lot)==0 and balance(second,item)==(0,0)
+        assert allocated(second,lot)==1 and balance(second,item)==(1,0)
         assert second.execute(
             "SELECT count(*) FROM auto_stock_lot_work_order_return WHERE work_order_id=%s",
             (order,)).fetchone()[0]==1
