@@ -321,3 +321,30 @@ def test_lot_return_checks_sku_serial_outstanding_before_http_commit():
         assert balance(db,sku)==(1,0)
         move(db,d,org,serial,"RETURN",order=order)
         assert balance(db,sku)==(2,0)
+
+
+def test_direct_late_serial_issue_needs_sku_outstanding_not_just_lot():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,order,sku,lot,_=work_order_setup(db,d,2)
+        serial=register_lot_serial(db,d["tokens"][d["intake"]],
+                                  org,loc,lot,uuid4(),"LATE-ISSUE-SKU-001")
+        old_issue=issue_work_order_from_lot(
+            db,d["tokens"][d["intake"]],org,loc,order,lot,uuid4(),1)
+        return_work_order_stock(db,d["tokens"][d["intake"]],
+                                org,loc,order,sku,uuid4(),1)
+        db.commit()
+        with pytest.raises(psycopg.errors.RaiseException,
+                           match="exceeds SKU outstanding"):
+            with db.transaction():
+                db.execute("SELECT set_config('roboport.serial_actor',%s,true)",
+                           (str(d["intake"]),))
+                db.execute("""INSERT INTO auto_stock_serial_movement(
+                   id,request_id,serial_id,action,source_lot_id,
+                   work_order_id,issue_id,performed_by)
+                   VALUES(%s,%s,%s,'ISSUE',%s,%s,%s,%s)""",
+                   (uuid4(),uuid4(),serial,lot,order,old_issue,d["intake"]))
+                db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        assert db.execute("""SELECT state FROM auto_stock_serial_current
+                   WHERE serial_id=%s""",(serial,)).fetchone()==("IN_STOCK",)
+        assert balance(db,sku)==(2,1)
