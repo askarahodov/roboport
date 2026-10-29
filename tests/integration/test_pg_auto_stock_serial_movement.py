@@ -135,6 +135,7 @@ def test_quantitative_return_cannot_strand_an_issued_serial():
         serial=register_lot_serial(db,d["tokens"][d["intake"]],
                                   org,loc,lot,uuid4(),"STRAND-RETURN")
         move(db,d,org,serial,"ISSUE",order=order)
+        db.commit()  # Isolate the attempted ordinary return from prior deferred events.
         # The Python service must return a conflict, not leak a deferred SQL
         # error at HTTP connection close.
         with pytest.raises(AutoStockConflict):
@@ -208,6 +209,7 @@ def test_direct_late_serial_transfer_cannot_use_historical_physical_ledger():
         transfer_interbranch_stock(db,d["tokens"][d["intake"]],org,
                  dst_loc,src_loc,dst_lot,src_lot,uuid4(),1)
         assert allocated(db,dst_lot)==0 and allocated(db,src_lot)==2
+        db.commit()  # Old physical transfer checks have already committed.
         with pytest.raises(psycopg.errors.RaiseException,match="exceeds physical lot capacity"):
             with db.transaction():
                 db.execute("SELECT set_config('roboport.serial_actor',%s,true)",
