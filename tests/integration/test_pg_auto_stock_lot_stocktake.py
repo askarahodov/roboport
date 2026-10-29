@@ -9,6 +9,7 @@ from test_pg_auto_vehicle_claim_http import _scenario
 from test_pg_auto_stock_lot_allocation import setup,allocated,act
 from test_pg_auto_stock_ledger import balance,record
 from test_pg_auto_bay_booking import _org_and_bay
+from test_pg_auto_stock_service import grant
 
 
 def count(db,d,org,loc,lot,actual,key=None):
@@ -17,7 +18,7 @@ def count(db,d,org,loc,lot,actual,key=None):
 
 
 def approve(db,d,org,loc,count_id,key=None):
-    return approve_stock_lot_count(db,d["tokens"][d["intake"]],
+    return approve_stock_lot_count(db,d["tokens"][d["manager"]],
                                    org,loc,count_id,key or uuid4())
 
 
@@ -25,6 +26,7 @@ def test_stocktake_gain_and_loss_preserve_lot_sku_parity():
     d=_scenario()
     with psycopg.connect(DSN) as db:
         org,loc,item,lot,_=setup(db,d,5)
+        grant(db,d["manager"],org,loc,"MANAGER")
         act(db,d,org,loc,lot,"ALLOCATE",3)
         gain=count(db,d,org,loc,lot,5)
         assert db.execute("SELECT expected,actual FROM auto_stock_lot_count WHERE id=%s",(gain,)).fetchone()==(3,5)
@@ -50,6 +52,7 @@ def test_stale_count_rollbacks_and_invalid_scope():
     d=_scenario()
     with psycopg.connect(DSN) as db:
         org,loc,item,lot,role=setup(db,d,5)
+        manager_grant=grant(db,d["manager"],org,loc,"MANAGER")
         count_id=count(db,d,org,loc,lot,3)
         act(db,d,org,loc,lot,"ALLOCATE",1)
         with pytest.raises(AutoStockConflict):
@@ -59,7 +62,7 @@ def test_stale_count_rollbacks_and_invalid_scope():
         with pytest.raises(AutoStockDenied):
             approve(db,d,other,foreign,count_id)
         with pytest.raises(AutoStockDenied):
-            count_stock_lot(db,d["tokens"][d["manager"]],org,loc,lot,uuid4(),1,"test")
+            count_stock_lot(db,d["tokens"][d["other"]],org,loc,lot,uuid4(),1,"test")
         new_count=count(db,d,org,loc,lot,2)
         with pytest.raises(RuntimeError):
             with db.transaction():
@@ -68,7 +71,7 @@ def test_stale_count_rollbacks_and_invalid_scope():
         assert balance(db,item)==(5,0) and allocated(db,lot)==1
         approve(db,d,org,loc,new_count)
         assert balance(db,item)==(6,0) and allocated(db,lot)==2
-        db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(role,))
+        db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(manager_grant,))
         with pytest.raises(AutoStockDenied):
             approve(db,d,org,loc,new_count)
 
@@ -77,6 +80,7 @@ def test_count_loss_blocked_if_would_violate_reserved_physical_stock():
     d=_scenario()
     with psycopg.connect(DSN) as db:
         org,loc,item,lot,_=setup(db,d,5)
+        grant(db,d["manager"],org,loc,"MANAGER")
         act(db,d,org,loc,lot,"ALLOCATE",4)
         record(db,item,"RESERVE",5)
         count_id=count(db,d,org,loc,lot,3)
@@ -89,6 +93,7 @@ def test_concurrent_approval_serializes_on_sku():
     d=_scenario()
     with psycopg.connect(DSN) as db:
         org,loc,item,lot,_=setup(db,d,3)
+        grant(db,d["manager"],org,loc,"MANAGER")
         count_id=count(db,d,org,loc,lot,2)
     with psycopg.connect(DSN) as first,psycopg.connect(DSN) as second:
         with first.transaction():
