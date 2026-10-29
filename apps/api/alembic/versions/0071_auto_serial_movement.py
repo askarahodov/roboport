@@ -52,6 +52,32 @@ def upgrade():
       ) m ON true
       JOIN auto_stock_lot l
         ON l.id=COALESCE(m.destination_lot_id,m.source_lot_id,s.lot_id)""")
+    # Registration must count CURRENT inventory, including serials transferred
+    # from another branch, rather than their immutable original registration lot.
+    op.execute("""CREATE OR REPLACE FUNCTION guard_auto_stock_serial()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      DECLARE actor uuid; lot_row record; qty bigint;
+      BEGIN
+        actor:=NULLIF(current_setting('roboport.serial_actor',true),'')::uuid;
+        IF actor IS NULL THEN RAISE EXCEPTION 'serial actor required'; END IF;
+        SELECT l.sku_id,l.organization_id,l.location_id INTO lot_row
+          FROM auto_stock_lot l WHERE l.id=NEW.lot_id;
+        IF NOT FOUND OR (lot_row.sku_id,lot_row.organization_id,lot_row.location_id)
+             IS DISTINCT FROM (NEW.sku_id,NEW.organization_id,NEW.location_id)
+        THEN RAISE EXCEPTION 'serial lot foreign scope'; END IF;
+        PERFORM 1 FROM auto_stock_sku WHERE id=NEW.sku_id FOR UPDATE;
+        SELECT allocated INTO qty FROM auto_stock_lot_balance WHERE lot_id=NEW.lot_id;
+        IF (SELECT count(*) FROM auto_stock_serial_current
+            WHERE lot_id=NEW.lot_id AND state='IN_STOCK')>=COALESCE(qty,0)
+        THEN RAISE EXCEPTION 'serial registrations exceed placed lot stock'; END IF;
+        IF EXISTS(
+          SELECT 1 FROM auto_stock_serial_current
+          WHERE sku_id=NEW.sku_id AND organization_id=NEW.organization_id
+            AND serial_number=NEW.serial_number
+        ) THEN RAISE EXCEPTION 'serial number already present in current SKU'; END IF;
+        NEW.registered_by:=actor;
+        RETURN NEW;
+      END $fn$""")
     op.execute("""CREATE FUNCTION guard_auto_stock_serial_movement()
       RETURNS trigger LANGUAGE plpgsql AS $fn$
       DECLARE actor uuid; state_row record; src record; dst record; linked record;
@@ -103,9 +129,8 @@ def upgrade():
           IF EXISTS(
             SELECT 1 FROM auto_stock_serial_current other
             WHERE other.serial_id<>NEW.serial_id AND other.organization_id=src.organization_id
-              AND other.lot_id=NEW.destination_lot_id
+              AND other.sku_id=dst.sku_id
               AND other.serial_number=state_row.serial_number
-              AND other.state='IN_STOCK'
           ) THEN RAISE EXCEPTION 'serial duplicate at destination'; END IF;
         END IF;
         NEW.performed_by:=actor;
@@ -131,6 +156,31 @@ def upgrade():
       AFTER INSERT ON auto_stock_lot_allocation
       DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
       EXECUTE FUNCTION check_auto_stock_serial_allocation()""")
+    # A plain quantitative WorkOrder RETURN must not consume outstanding
+    # issues whose individual serial identities are still in ISSUED state.
+    op.execute("""CREATE FUNCTION check_auto_stock_serial_return_outstanding()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      DECLARE physical_outstanding bigint; serialized_outstanding bigint;
+      BEGIN
+        SELECT COALESCE(SUM(q),0) INTO physical_outstanding FROM (
+          SELECT quantity q FROM auto_stock_lot_work_order_issue
+            WHERE work_order_id=NEW.work_order_id AND lot_id=NEW.lot_id
+          UNION ALL
+          SELECT -quantity q FROM auto_stock_lot_work_order_return
+            WHERE work_order_id=NEW.work_order_id AND lot_id=NEW.lot_id
+        ) amounts;
+        SELECT count(*) INTO serialized_outstanding FROM auto_stock_serial_current
+          WHERE lot_id=NEW.lot_id AND work_order_id=NEW.work_order_id
+            AND state='ISSUED';
+        IF serialized_outstanding>physical_outstanding THEN
+          RAISE EXCEPTION 'quantitative return strands issued serial identity';
+        END IF;
+        RETURN NULL;
+      END $fn$""")
+    op.execute("""CREATE CONSTRAINT TRIGGER auto_stock_serial_return_outstanding
+      AFTER INSERT ON auto_stock_lot_work_order_return
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+      EXECUTE FUNCTION check_auto_stock_serial_return_outstanding()""")
     op.execute("""CREATE FUNCTION record_auto_stock_serial_movement(
       p_serial uuid,p_request uuid,p_action text,p_order uuid,p_destination uuid
     ) RETURNS uuid LANGUAGE plpgsql AS $fn$
@@ -192,6 +242,27 @@ def upgrade():
 
 def downgrade():
     op.execute("DROP FUNCTION record_auto_stock_serial_movement(uuid,uuid,text,uuid,uuid)")
+    op.execute("""DROP TRIGGER auto_stock_serial_return_outstanding
+      ON auto_stock_lot_work_order_return""")
+    op.execute("DROP FUNCTION check_auto_stock_serial_return_outstanding()")
+    op.execute("""CREATE OR REPLACE FUNCTION guard_auto_stock_serial()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      DECLARE actor uuid; lot_row record; qty bigint;
+      BEGIN
+        actor:=NULLIF(current_setting('roboport.serial_actor',true),'')::uuid;
+        IF actor IS NULL THEN RAISE EXCEPTION 'serial actor required'; END IF;
+        SELECT l.sku_id,l.organization_id,l.location_id INTO lot_row
+          FROM auto_stock_lot l WHERE l.id=NEW.lot_id;
+        IF NOT FOUND OR (lot_row.sku_id,lot_row.organization_id,lot_row.location_id)
+             IS DISTINCT FROM (NEW.sku_id,NEW.organization_id,NEW.location_id)
+        THEN RAISE EXCEPTION 'serial lot foreign scope'; END IF;
+        PERFORM 1 FROM auto_stock_sku WHERE id=NEW.sku_id FOR UPDATE;
+        SELECT allocated INTO qty FROM auto_stock_lot_balance WHERE lot_id=NEW.lot_id;
+        IF (SELECT count(*) FROM auto_stock_serial WHERE lot_id=NEW.lot_id)>=qty
+        THEN RAISE EXCEPTION 'serial registrations exceed placed lot stock'; END IF;
+        NEW.registered_by:=actor;
+        RETURN NEW;
+      END $fn$""")
     op.execute("DROP TRIGGER auto_stock_serial_allocation_guard ON auto_stock_lot_allocation")
     op.execute("DROP FUNCTION check_auto_stock_serial_allocation()")
     op.execute("DROP VIEW auto_stock_serial_current")
