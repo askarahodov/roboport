@@ -181,6 +181,6 @@ export function WarehouseReceiving(){
       onClick={()=>void submit(pending.kind,pending)}>Повторить с прежним ключом</button>}
     {message&&<p role="status">{message}</p>}
     {acceptanceId&&<p>Идентификатор подтверждения: <code>{acceptanceId}</code></p>}
-    {valuationId&&<p>Идентификатор оценки: <code>{valuationId}</code></p>}}
+    {valuationId&&<p>Идентификатор оценки: <code>{valuationId}</code></p>}
   </section>;
 }
