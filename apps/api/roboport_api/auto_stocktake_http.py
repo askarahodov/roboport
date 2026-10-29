@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt, Field, ValidationError
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_stock_lot_stocktake import count_stock_lot, approve_stock_lot_count
+from .auto_stock_receipt_document import create_receipt_document,accept_receipt_document
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 
 router = APIRouter(include_in_schema=False)
@@ -108,3 +109,69 @@ def get_lots(org_id: str, request: Request, locationId: str,
     return JSONResponse(content={
         "items":items,"nextLotId":str(next_id) if next_id else None,
     },headers={"Cache-Control":"no-store"})
+
+
+class ReceiptDraftBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    lotId: UUID
+    quantity: StrictInt = Field(ge=1,le=1000000000)
+    sourceReference: str = Field(min_length=3,max_length=160)
+
+
+class ReceiptAcceptBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    documentId: UUID
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/receipts")
+async def create_receipt(org_id: str,request: Request):
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        data=ReceiptDraftBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            document_id=create_receipt_document(
+                db,request.cookies.get("rp_session",""),org,
+                data.locationId,data.lotId,key,data.quantity,data.sourceReference)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"documentId":str(document_id)},
+                        headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/receipts/accept")
+async def accept_receipt(org_id: str,request: Request):
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        data=ReceiptAcceptBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            acceptance_id=accept_receipt_document(
+                db,request.cookies.get("rp_session",""),org,data.locationId,
+                data.documentId,key)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"acceptanceId":str(acceptance_id)},
+                        headers={"Cache-Control":"no-store"})
