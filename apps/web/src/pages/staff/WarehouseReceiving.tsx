@@ -1,6 +1,6 @@
 import React from 'react';
 
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Kind='draft'|'accept';
 type Pending={kind:Kind;path:string;key:string;body:string;org:string;location:string};
 type Item={lotId:string;article:string;batchCode:string;binCode:string;allocated:number;onHand:number;reserved:number};
