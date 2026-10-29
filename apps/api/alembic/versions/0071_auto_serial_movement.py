@@ -181,6 +181,30 @@ def upgrade():
       AFTER INSERT ON auto_stock_lot_work_order_return
       DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
       EXECUTE FUNCTION check_auto_stock_serial_return_outstanding()""")
+    # Both lot-level and SKU-only returns consume the same physical
+    # outstanding balance. A deferred check on the common order ledger
+    # prevents the SKU-only API from returning a still-issued serial.
+    op.execute("""CREATE FUNCTION check_auto_stock_serial_sku_return()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      DECLARE outstanding bigint; tracked bigint;
+      BEGIN
+        SELECT COALESCE(SUM(CASE WHEN action='ISSUE' THEN quantity
+                 WHEN action='RETURN' THEN -quantity ELSE 0 END),0)::bigint
+          INTO outstanding FROM auto_work_order_stock_event
+          WHERE work_order_id=NEW.work_order_id AND sku_id=NEW.sku_id;
+        SELECT count(*) INTO tracked FROM auto_stock_serial_current
+          WHERE work_order_id=NEW.work_order_id AND sku_id=NEW.sku_id
+            AND state='ISSUED';
+        IF tracked>outstanding THEN
+          RAISE EXCEPTION 'SKU return strands issued serial identity';
+        END IF;
+        RETURN NULL;
+      END $fn$""")
+    op.execute("""CREATE CONSTRAINT TRIGGER auto_stock_serial_sku_return_guard
+      AFTER INSERT ON auto_work_order_stock_event
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+      WHEN (NEW.action='RETURN')
+      EXECUTE FUNCTION check_auto_stock_serial_sku_return()""")
     # Physical movements can precede serial linking; reject a late serial
     # INSERT that would overfill a lot or orphan an outstanding WorkOrder issue.
     op.execute("""CREATE FUNCTION check_auto_stock_serial_movement_balance()
@@ -283,6 +307,8 @@ def downgrade():
     op.execute("DROP FUNCTION record_auto_stock_serial_movement(uuid,uuid,text,uuid,uuid)")
     op.execute("DROP TRIGGER auto_stock_serial_movement_balance ON auto_stock_serial_movement")
     op.execute("DROP FUNCTION check_auto_stock_serial_movement_balance()")
+    op.execute("DROP TRIGGER auto_stock_serial_sku_return_guard ON auto_work_order_stock_event")
+    op.execute("DROP FUNCTION check_auto_stock_serial_sku_return()")
     op.execute("""DROP TRIGGER auto_stock_serial_return_outstanding
       ON auto_stock_lot_work_order_return""")
     op.execute("DROP FUNCTION check_auto_stock_serial_return_outstanding()")
