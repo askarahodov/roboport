@@ -51,6 +51,28 @@ def upgrade():
         RETURN NEW;
       END $fn$
     """)
+    # A direct RETURN INSERT without a matching immutable order event cannot
+    # commit, even when inserted as DB owner during synthetic verification.
+    op.execute("""
+      CREATE FUNCTION check_auto_stock_return_link()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF NEW.action='RETURN' AND NOT EXISTS (
+          SELECT 1 FROM auto_work_order_stock_event wo
+          WHERE wo.stock_event_id=NEW.id AND wo.sku_id=NEW.sku_id
+            AND wo.action='RETURN' AND wo.quantity=NEW.quantity
+        ) THEN
+          RAISE EXCEPTION 'return requires matching work order event';
+        END IF;
+        RETURN NULL;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE CONSTRAINT TRIGGER auto_stock_return_link
+      AFTER INSERT ON auto_stock_event
+      DEFERRABLE INITIALLY DEFERRED
+      FOR EACH ROW EXECUTE FUNCTION check_auto_stock_return_link()
+    """)
     op.execute("""
       CREATE FUNCTION record_auto_work_order_return(
         p_order uuid, p_sku uuid, p_request uuid, p_quantity bigint
@@ -115,6 +137,8 @@ def upgrade():
 def downgrade():
     # Synthetic disposable PG17 only; all return history must be absent.
     op.execute("DROP FUNCTION record_auto_work_order_return(uuid,uuid,uuid,bigint)")
+    op.execute("DROP TRIGGER auto_stock_return_link ON auto_stock_event")
+    op.execute("DROP FUNCTION check_auto_stock_return_link()")
     op.execute("DROP VIEW auto_stock_balance")
     op.execute("""CREATE VIEW auto_stock_balance AS
       SELECT sku.id AS sku_id,sku.organization_id,sku.location_id,
