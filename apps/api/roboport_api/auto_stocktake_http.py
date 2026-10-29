@@ -294,3 +294,36 @@ async def acknowledge_work_order_lot_http(org_id: str,request: Request):
             return _response(request,409,"CONFLICT")
     return JSONResponse(status_code=201,content={"handoffId":str(result)},
                         headers={"Cache-Control":"no-store"})
+
+
+class SerialRegisterBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    lotId: UUID
+    serialNumber: str = Field(min_length=3,max_length=120)
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/serials")
+async def register_serial_http(org_id: str,request: Request):
+    from .auto_stock_serial import register_lot_serial
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        data=SerialRegisterBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            result=register_lot_serial(db,request.cookies.get("rp_session",""),
+                org,data.locationId,data.lotId,key,data.serialNumber)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"serialId":str(result)},
+                        headers={"Cache-Control":"no-store"})

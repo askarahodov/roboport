@@ -10,6 +10,8 @@ export function WarehouseWorkOrders(){
   const [lot,setLot]=React.useState('');
   const [quantity,setQuantity]=React.useState('1');
   const [issueId,setIssueId]=React.useState('');
+  const [serialNumber,setSerialNumber]=React.useState('');
+  const [serialPending,setSerialPending]=React.useState<{org:string;location:string;body:string;key:string}|null>(null);
   const [busy,setBusy]=React.useState(false);
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [message,setMessage]=React.useState('');
@@ -71,6 +73,39 @@ export function WarehouseWorkOrders(){
       }
     }finally{setBusy(false);}
   }
+  async function registerSerial(retry?:{org:string;location:string;body:string;key:string}){
+    if(busy||(!retry&&serialPending))return;
+    const snap=retry??{org:org.trim(),location:location.trim(),
+      body:JSON.stringify({locationId:location.trim(),lotId:lot.trim(),serialNumber}),
+      key:crypto.randomUUID()};
+    if(snap.org!==context.current.org||snap.location!==context.current.location)return;
+    setSerialPending(snap);setBusy(true);setMessage('');
+    try{
+      const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
+      if(!csrf.ok)throw new Error('csrf');
+      const token:unknown=await csrf.json();
+      if(!token||typeof token!=='object'||!('csrfToken' in token)||
+        typeof token.csrfToken!=='string')throw new Error('csrf');
+      const result=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(snap.org)+
+        '/warehouse/serials',{method:'POST',credentials:'include',cache:'no-store',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':token.csrfToken,
+          'Idempotency-Key':snap.key},body:snap.body});
+      if(result.status>=500)throw new Error('unknown');
+      if(!result.ok){
+        setSerialPending(null);setMessage(result.status===409?
+          'Серийный номер уже зарегистрирован или превышен остаток партии.':
+          'Регистрация отклонена ('+result.status+').');return;
+      }
+      const body:unknown=await result.json();
+      if(!body||typeof body!=='object'||!('serialId' in body)||
+        typeof body.serialId!=='string'||!uuid.test(body.serialId))throw new Error('response');
+      setSerialPending(null);setEventId(body.serialId);
+      setMessage('Серийный номер зарегистрирован за партией.');
+    }catch{
+      setSerialPending(snap);
+      setMessage('Результат регистрации неизвестен. Верните исходные организацию и филиал и повторите с прежним ключом.');
+    }finally{setBusy(false);}
+  }
   return <section className="ui-page" aria-label="Выдача и возврат деталей">
     <h1>Выдача и возврат по наряду (dev)</h1>
     <p>Только синтетический склад. Для обеих операций нужна действующая роль WAREHOUSE филиала.
@@ -93,6 +128,20 @@ export function WarehouseWorkOrders(){
       <button type="button" disabled={busy||!!pending||!uuid.test(org.trim())||
         !uuid.test(location.trim())||!uuid.test(issueId.trim())}
         onClick={()=>void submit('acknowledge')}>Подтвердить получение</button>
+    </section>
+    <section aria-label="Регистрация серийного номера">
+      <h2>Серийный номер партии (dev)</h2>
+      <p>Регистрация уникального номера за партией; движения отдельных экземпляров пока не реализованы.</p>
+      <label>Серийный номер <input aria-label="Серийный номер" value={serialNumber}
+        disabled={busy||!!serialPending} onChange={e=>setSerialNumber(e.target.value)}/></label>
+      <button type="button" disabled={busy||!!serialPending||!!pending||
+        !uuid.test(org.trim())||!uuid.test(location.trim())||!uuid.test(lot.trim())||
+        serialNumber.trim()!==serialNumber||serialNumber.length<3||serialNumber.length>120}
+        onClick={()=>void registerSerial()}>Зарегистрировать серийный номер</button>
+      {serialPending&&<p role="alert">Результат регистрации не определён; новый ключ запрещён.</p>}
+      {serialPending&&<button type="button" disabled={busy||serialPending.org!==org.trim()||
+        serialPending.location!==location.trim()} onClick={()=>void registerSerial(serialPending)}>
+        Повторить регистрацию с прежним ключом</button>}
     </section>
     {busy&&<p role="status">Выполняется складская операция…</p>}
     {pending&&<p role="alert">Результат операции неизвестен. Исходный ключ сохранён. Верните исходные UUID организации и филиала для повтора; новую операцию запускать нельзя.</p>}
