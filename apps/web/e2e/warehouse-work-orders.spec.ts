@@ -67,3 +67,27 @@ test('denied warehouse issue does not announce success',async({page})=>{
   await expect(page.getByRole('status')).toContainText('Нет доступа');
   await expect(page.getByText('Идентификатор события:')).toHaveCount(0);
 });
+
+test('pending issue survives whitespace and scope changes without a new key',async({page})=>{
+  const keys:string[]=[];let requests=0;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"csrf"}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**/warehouse/work-orders/issue',route=>{
+    keys.push(route.request().headers()['idempotency-key']);requests++;
+    return route.fulfill(requests===1?{status:503,body:'unavailable'}:
+      {status:201,contentType:'application/json',body:JSON.stringify({issueId:issued})});
+  });
+  await fill(page);
+  await page.getByRole('button',{name:'Выдать из партии'}).click();
+  await expect(page.getByRole('button',{name:'Выдать из партии'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org+' ');
+  await expect(page.getByRole('button',{name:'Выдать из партии'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'UUID организации'}).fill('77777777-7777-4777-8777-777777777777');
+  await expect(page.getByRole('button',{name:'Повторить с прежним ключом'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Вернуть в партию'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('button',{name:'Повторить с прежним ключом'}).click();
+  await expect(page.getByRole('status')).toContainText('Выдача из партии проведена');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
