@@ -153,7 +153,7 @@ test('in-flight serial scope edit retains original request key for retry',async(
   await requested;
   await page.getByRole('textbox',{name:'UUID организации'}).fill('88888888-8888-4888-8888-888888888888');
   resume();
-  await expect(page.getByRole('alert')).toContainText('Результат регистрации неизвестен');
+  await expect(page.getByRole('alert')).toContainText('Результат регистрации не определён');
   await expect(page.getByRole('button',{name:'Зарегистрировать серийный номер'})).toBeDisabled();
   await expect(page.getByRole('button',{name:'Повторить регистрацию с прежним ключом'})).toBeDisabled();
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
