@@ -72,9 +72,9 @@ export function WarehouseWorkOrders(){
       Выдача требует ранее созданного резерва по наряду; документ передачи механику пока не реализован.</p>
     <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>setOrg(e.target.value)}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>setLocation(e.target.value)}/></label>
-    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" value={order} onChange={e=>setOrder(e.target.value)}/></label>
-    <label>UUID партии <input aria-label="UUID партии" value={lot} onChange={e=>setLot(e.target.value)}/></label>
-    <label>Количество <input aria-label="Количество" type="number" min="1" max="1000000000"
+    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" disabled={!!pending||busy} value={order} onChange={e=>setOrder(e.target.value)}/></label>
+    <label>UUID партии <input aria-label="UUID партии" disabled={!!pending||busy} value={lot} onChange={e=>setLot(e.target.value)}/></label>
+    <label>Количество <input aria-label="Количество" disabled={!!pending||busy} type="number" min="1" max="1000000000"
       step="1" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label>
     <div>
       <button type="button" disabled={!valid||busy||!!pending} onClick={()=>void submit('issue')}>Выдать из партии</button>
