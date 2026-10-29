@@ -103,6 +103,10 @@ def test_mutation_locks_grant_against_concurrent_revocation():
             "UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
             (grant_id,),
         )
+        # Commit the competing revocation before checking the next mutation:
+        # otherwise its row-level UPDATE lock stays open and deadlocks this
+        # sequential test against the other connection.
+        revoking.commit()
         with pytest.raises(AutoStockDenied):
             action(checking, d, d["intake"], org, loc, item)
 
