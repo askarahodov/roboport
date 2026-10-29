@@ -131,3 +131,51 @@ def test_concurrent_reclassification_serializes_on_both_skus():
         with pytest.raises(AutoStockConflict):
             approve(second,d,org,loc,doc)
         assert balance(second,ss)==(0,0) and balance(second,ds)==(1,0)
+
+
+def test_direct_orphan_reclass_events_rejected_at_commit():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,ss,src,ds,dst,_,_=seeded(db,d,2)
+        record(db,ds,"RECEIPT",1)  # Outbound leg otherwise blocked by stock guard.
+        db.commit()
+        for action,item in (("RECLASS_IN",ds),("RECLASS_OUT",ds)):
+            with pytest.raises(psycopg.errors.RaiseException,match="orphan reclassification"):
+                with db.transaction():
+                    db.execute("""INSERT INTO auto_stock_event
+                      (id,request_id,sku_id,organization_id,location_id,action,quantity)
+                      VALUES(%s,%s,%s,%s,%s,%s,1)""",
+                      (uuid4(),uuid4(),item,org,loc,action))
+        assert balance(db,ss)==(2,0) and balance(db,ds)==(1,0)
+
+
+def test_direct_approval_cannot_reclassify_serialized_lot():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,ss,src,ds,dst,_,_=seeded(db,d,2)
+        register_lot_serial(db,d["tokens"][d["intake"]],
+                            org,loc,src,uuid4(),"SERIAL-TRACK-001")
+        doc=propose(db,d,org,loc,src,dst,1)
+        db.commit()
+        with pytest.raises(psycopg.errors.RaiseException,match="serialized lot"):
+            with db.transaction():
+                db.execute("SELECT set_config('roboport.reclassification_actor',%s,true)",
+                           (str(d["manager"]),))
+                debit=db.execute("""SELECT record_auto_stock_lot_allocation(
+                   %s,%s,'DEALLOCATE',1)""",(src,uuid4())).fetchone()[0]
+                out_id,in_id=uuid4(),uuid4()
+                for item,action,ident in (
+                    (ss,"RECLASS_OUT",out_id),(ds,"RECLASS_IN",in_id)):
+                    db.execute("""INSERT INTO auto_stock_event
+                       (id,request_id,sku_id,organization_id,location_id,action,quantity)
+                       VALUES(%s,%s,%s,%s,%s,%s,1)""",
+                       (ident,uuid4(),item,org,loc,action))
+                credit=db.execute("""SELECT record_auto_stock_lot_allocation(
+                   %s,%s,'ALLOCATE',1)""",(dst,uuid4())).fetchone()[0]
+                db.execute("""INSERT INTO auto_stock_reclassification_acceptance
+                  (id,request_id,document_id,accepted_by,debit_allocation_id,
+                   credit_allocation_id,debit_stock_id,credit_stock_id)
+                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
+                  (uuid4(),uuid4(),doc,d["manager"],debit,credit,out_id,in_id))
+        assert balance(db,ss)==(2,0) and balance(db,ds)==(0,0)
+        assert allocated(db,src)==2 and allocated(db,dst)==0
