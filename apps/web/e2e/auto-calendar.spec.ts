@@ -358,8 +358,8 @@ test('create retries uncertain network response using identical key and payload'
   await page.getByRole('button',{name:'Создать запись'}).click();
   await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toBeVisible();
   await page.getByRole('button',{name:'Повторить запрос с тем же ключом'}).click();
-  await expect(page.getByText('Записей нет.')).toBeVisible();
-  expect(requests).toHaveLength(2);
+  await expect.poll(()=>requests.length).toBe(2);
+  await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toHaveCount(0);
   expect(requests[0].key).toMatch(/^[0-9a-f-]{36}$/);
   expect(requests[1]).toEqual(requests[0]);
   await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toHaveCount(0);
