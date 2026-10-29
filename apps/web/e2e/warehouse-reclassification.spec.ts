@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import type {Page} from '@playwright/test';
 
 const org='11111111-1111-4111-8111-111111111111';
 const loc='22222222-2222-4222-8222-222222222222';
@@ -7,7 +8,7 @@ const dst='44444444-4444-4444-8444-444444444444';
 const doc='55555555-5555-4555-8555-555555555555';
 const approval='66666666-6666-4666-8666-666666666666';
 
-async function setup(page:any){
+async function setup(page:Page){
   await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
     status:200,contentType:'application/json',body:'{"csrfToken":"csrf"}'}));
   await page.goto('/staff/warehouse-reclassification');
