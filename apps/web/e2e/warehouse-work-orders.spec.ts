@@ -91,3 +91,24 @@ test('pending issue survives whitespace and scope changes without a new key',asy
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
+
+test('mechanic acknowledges posted issue with own idempotency key',async({page})=>{
+  const keys:string[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"csrf"}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**/warehouse/work-orders/**',route=>{
+    const request=route.request();
+    expect(request.headers()['x-csrf-token']).toBe('csrf');
+    keys.push(request.headers()['idempotency-key']);
+    return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify(
+      request.url().endsWith('/issue')?{issueId:issued}:
+        {handoffId:'77777777-7777-4777-8777-777777777777'})});
+  });
+  await fill(page);
+  await page.getByRole('button',{name:'Выдать из партии'}).click();
+  await expect(page.getByRole('textbox',{name:'UUID выдачи'})).toHaveValue(issued);
+  await page.getByRole('button',{name:'Подтвердить получение'}).click();
+  await expect(page.getByRole('status')).toContainText('Механик подтвердил получение');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).not.toBe(keys[1]);
+});
