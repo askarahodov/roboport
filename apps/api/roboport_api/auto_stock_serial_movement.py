@@ -11,10 +11,10 @@ from .auto_stock_service import AutoStockDenied,AutoStockConflict
 
 
 def move_lot_serial(conn: psycopg.Connection, token: str,
-        organization_id: UUID, serial_id: UUID, request_id: UUID, action: str,
+        organization_id: UUID, location_id: UUID, serial_id: UUID, request_id: UUID, action: str,
         work_order_id: UUID | None = None, destination_lot_id: UUID | None = None) -> UUID:
     if (type(token) is not str or not token
-        or not all(isinstance(v,UUID) for v in (organization_id,serial_id,request_id))
+        or not all(isinstance(v,UUID) for v in (organization_id,location_id,serial_id,request_id))
         or action not in ("ISSUE","RETURN","TRANSFER")
         or (action in ("ISSUE","RETURN") and (
             not isinstance(work_order_id,UUID) or destination_lot_id is not None))
@@ -25,7 +25,7 @@ def move_lot_serial(conn: psycopg.Connection, token: str,
         source=conn.execute("""SELECT lot_id,sku_id,location_id,state
            FROM auto_stock_serial_current WHERE serial_id=%s AND organization_id=%s""",
            (serial_id,organization_id)).fetchone()
-        if source is None:
+        if source is None or source[2]!=location_id:
             raise AutoStockDenied("FORBIDDEN")
         dest=None
         if action=="TRANSFER":
