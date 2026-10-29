@@ -73,13 +73,19 @@ def upgrade():
     # DB owner remains privileged; future application DB role must be minimally scoped.
     op.execute("""
       CREATE FUNCTION guard_auto_stock_event_insert() RETURNS trigger LANGUAGE plpgsql AS $fn$
-      DECLARE sku record;
+      DECLARE sku record; available_qty bigint; reserved_qty bigint;
       BEGIN
         SELECT organization_id,location_id INTO sku
           FROM auto_stock_sku WHERE id=NEW.sku_id FOR UPDATE;
         IF NOT FOUND OR (NEW.organization_id, NEW.location_id)
                         IS DISTINCT FROM (sku.organization_id,sku.location_id) THEN
           RAISE EXCEPTION 'foreign stock scope';
+        END IF;
+        SELECT on_hand, reserved INTO available_qty, reserved_qty
+          FROM auto_stock_balance WHERE sku_id=NEW.sku_id;
+        IF (NEW.action='RESERVE' AND available_qty-reserved_qty < NEW.quantity)
+           OR (NEW.action='RELEASE' AND reserved_qty < NEW.quantity) THEN
+          RAISE EXCEPTION 'insufficient stock or reservation';
         END IF;
         RETURN NEW;
       END $fn$
