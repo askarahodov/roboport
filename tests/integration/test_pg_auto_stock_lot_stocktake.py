@@ -99,4 +99,4 @@ def test_concurrent_approval_serializes_on_sku():
                     approve(second,d,org,loc,count_id)
         with pytest.raises(AutoStockConflict):
             approve(second,d,org,loc,count_id)
-        assert allocated(second,lot)==2 and balance(second,item)==5 if False else True
+        assert allocated(second,lot)==2 and balance(second,item)==(5,0)
