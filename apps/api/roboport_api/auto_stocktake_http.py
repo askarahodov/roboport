@@ -327,3 +327,71 @@ async def register_serial_http(org_id: str,request: Request):
             return _response(request,409,"CONFLICT")
     return JSONResponse(status_code=201,content={"serialId":str(result)},
                         headers={"Cache-Control":"no-store"})
+
+
+class ReclassificationDraftBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    sourceLotId: UUID
+    destinationLotId: UUID
+    quantity: StrictInt = Field(ge=1,le=1000000000)
+    reason: str = Field(min_length=3,max_length=240)
+
+
+class ReclassificationApprovalBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    documentId: UUID
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/reclassifications")
+async def create_reclassification_http(org_id: str, request: Request):
+    from .auto_stock_reclassification import propose_reclassification
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        data=ReclassificationDraftBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            ident=propose_reclassification(db,request.cookies.get("rp_session",""),
+                org,data.locationId,data.sourceLotId,data.destinationLotId,
+                key,data.quantity,data.reason)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"documentId":str(ident)},
+                        headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/reclassifications/approvals")
+async def approve_reclassification_http(org_id: str, request: Request):
+    from .auto_stock_reclassification import approve_reclassification
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        data=ReclassificationApprovalBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            ident=approve_reclassification(db,request.cookies.get("rp_session",""),
+                org,data.locationId,data.documentId,key)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"approvalId":str(ident)},
+                        headers={"Cache-Control":"no-store"})
