@@ -3,6 +3,7 @@ from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
+from .session_lookup import session_subject
 
 
 def _run(conn, token, organization_id, location_id, lot_id, sql, args):
@@ -18,12 +19,18 @@ def _run(conn, token, organization_id, location_id, lot_id, sql, args):
             (lot_id, organization_id, location_id),
         ).fetchone() is None:
             raise AutoStockDenied("FORBIDDEN")
+        actor = session_subject(conn, token, for_mutation=True)
+        if actor is None:
+            raise AutoStockDenied('FORBIDDEN')
         try:
             with conn.transaction():
+                conn.execute("SELECT set_config('roboport.stocktake_actor',%s,true)", (str(actor),))
                 return conn.execute(sql, args).fetchone()[0]
         except (psycopg.errors.RaiseException, psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoStockConflict("CONFLICT") from None
+        finally:
+            conn.execute("SELECT set_config(\'roboport.stocktake_actor\',\'\',true)")
 
 
 def count_stock_lot(conn, token: str, organization_id: UUID,
@@ -48,7 +55,7 @@ def approve_stock_lot_count(conn, token: str, organization_id: UUID,
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
         if not organization_role_allows(
-            conn,token,organization_id,"WAREHOUSE",location_id,for_mutation=True
+            conn,token,organization_id,"MANAGER",location_id,for_mutation=True
         ):
             raise AutoStockDenied("FORBIDDEN")
         row=conn.execute("""SELECT l.id FROM auto_stock_lot_count c
@@ -58,11 +65,17 @@ def approve_stock_lot_count(conn, token: str, organization_id: UUID,
             (count_id,organization_id,location_id)).fetchone()
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
+        actor = session_subject(conn, token, for_mutation=True)
+        if actor is None:
+            raise AutoStockDenied("FORBIDDEN")
         try:
             with conn.transaction():
+                conn.execute("SELECT set_config(\'roboport.stocktake_actor\',%s,true)", (str(actor),))
                 return conn.execute(
                     "SELECT approve_auto_stock_lot_count(%s,%s)",
                     (count_id,request_id)).fetchone()[0]
         except (psycopg.errors.RaiseException, psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoStockConflict("CONFLICT") from None
+        finally:
+            conn.execute("SELECT set_config(\'roboport.stocktake_actor\',\'\',true)")
