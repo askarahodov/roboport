@@ -14,7 +14,7 @@ def _args(token, *ids):
         raise AutoStockDenied("INVALID_INPUT")
 
 
-def _run(conn, token, organization_id, location_id, role, lot_ids, sql, args):
+def _run(conn, token, organization_id, location_id, role, lot_ids, sql, args, check_serial=False):
     with conn.transaction():
         if not organization_role_allows(conn, token, organization_id, role,
                  location_id, for_mutation=True):
@@ -34,7 +34,11 @@ def _run(conn, token, organization_id, location_id, role, lot_ids, sql, args):
                 conn.execute(
                     "SELECT set_config('roboport.reclassification_actor',%s,true)",
                     (str(actor),))
-                return conn.execute(sql, args).fetchone()[0]
+                result=conn.execute(sql, args).fetchone()[0]
+                if check_serial:
+                    conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard IMMEDIATE")
+                    conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard DEFERRED")
+                return result
         except (psycopg.errors.RaiseException, psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation, psycopg.errors.ForeignKeyViolation):
             raise AutoStockConflict("CONFLICT") from None
@@ -74,4 +78,4 @@ def approve_reclassification(conn: psycopg.Connection, token: str,
             raise AutoStockDenied("FORBIDDEN")
         return _run(conn, token, organization_id, location_id, "MANAGER",
             doc, "SELECT accept_auto_stock_reclassification_document(%s,%s)",
-            (document_id, request_id))
+            (document_id, request_id), check_serial=True)
