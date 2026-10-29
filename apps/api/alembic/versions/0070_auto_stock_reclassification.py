@@ -96,7 +96,7 @@ def upgrade():
           ON {table} FOR EACH ROW EXECUTE FUNCTION immutable_auto_stock_event()""")
     op.execute("""CREATE FUNCTION guard_auto_stock_reclassification_actor()
       RETURNS trigger LANGUAGE plpgsql AS $fn$
-      DECLARE actor uuid; creator uuid;
+      DECLARE actor uuid; creator uuid; source_lot uuid; source_sku uuid;
       BEGIN
         actor:=NULLIF(current_setting('roboport.reclassification_actor',true),'')::uuid;
         IF actor IS NULL THEN RAISE EXCEPTION 'reclassification actor required'; END IF;
@@ -115,10 +115,16 @@ def upgrade():
           ) THEN RAISE EXCEPTION 'reclassification foreign scope'; END IF;
           NEW.created_by:=actor;
         ELSE
-          SELECT created_by INTO creator FROM auto_stock_reclassification_document
-             WHERE id=NEW.document_id FOR SHARE;
+          SELECT created_by,source_lot_id,source_sku_id
+            INTO creator,source_lot,source_sku
+            FROM auto_stock_reclassification_document
+            WHERE id=NEW.document_id FOR SHARE;
           IF NOT FOUND OR creator=actor THEN
             RAISE EXCEPTION 'independent reclassification acceptance required'; END IF;
+          -- Direct SQL writers may not bypass the service-level serial embargo.
+          PERFORM 1 FROM auto_stock_sku WHERE id=source_sku FOR UPDATE;
+          IF EXISTS(SELECT 1 FROM auto_stock_serial WHERE lot_id=source_lot) THEN
+            RAISE EXCEPTION 'serialized lot reclassification prohibited'; END IF;
           NEW.accepted_by:=actor;
         END IF;
         RETURN NEW;
@@ -152,6 +158,25 @@ def upgrade():
        AFTER INSERT ON auto_stock_reclassification_acceptance
        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
        EXECUTE FUNCTION check_auto_stock_reclassification_pair()""")
+    # A paired acceptance trigger alone cannot prevent orphan RECLASS stock events.
+    # The reverse deferred constraint rejects owner-level INSERT of one physical leg.
+    op.execute("""CREATE FUNCTION check_auto_stock_reclassification_stock_event()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF NOT EXISTS(
+          SELECT 1 FROM auto_stock_reclassification_acceptance a
+          JOIN auto_stock_reclassification_document d ON d.id=a.document_id
+          WHERE (NEW.action='RECLASS_OUT' AND a.debit_stock_id=NEW.id
+             AND d.source_sku_id=NEW.sku_id)
+             OR (NEW.action='RECLASS_IN' AND a.credit_stock_id=NEW.id
+             AND d.destination_sku_id=NEW.sku_id)
+        ) THEN RAISE EXCEPTION 'orphan reclassification stock event'; END IF;
+        RETURN NULL;
+      END $fn$""")
+    op.execute("""CREATE CONSTRAINT TRIGGER auto_stock_reclassification_event_pair
+      AFTER INSERT ON auto_stock_event DEFERRABLE INITIALLY DEFERRED
+      FOR EACH ROW WHEN (NEW.action IN ('RECLASS_IN','RECLASS_OUT'))
+      EXECUTE FUNCTION check_auto_stock_reclassification_stock_event()""")
     op.execute("""CREATE FUNCTION record_auto_stock_reclassification_document(
       p_source uuid,p_destination uuid,p_request uuid,p_quantity bigint,p_reason text
     ) RETURNS uuid LANGUAGE plpgsql AS $fn$
@@ -264,6 +289,8 @@ def upgrade():
 def downgrade():
     op.execute("DROP FUNCTION accept_auto_stock_reclassification_document(uuid,uuid)")
     op.execute("DROP FUNCTION record_auto_stock_reclassification_document(uuid,uuid,uuid,bigint,text)")
+    op.execute("DROP TRIGGER auto_stock_reclassification_event_pair ON auto_stock_event")
+    op.execute("DROP FUNCTION check_auto_stock_reclassification_stock_event()")
     op.execute("DROP TABLE auto_stock_reclassification_acceptance")
     op.execute("DROP TABLE auto_stock_reclassification_document")
     op.execute("DROP FUNCTION check_auto_stock_reclassification_pair()")
