@@ -29,6 +29,8 @@ def transfer_stock_lot(conn: psycopg.Connection, token: str,
                 row=conn.execute(
                     "SELECT record_auto_stock_lot_transfer(%s,%s,%s,%s)",
                     (source_lot_id,destination_lot_id,request_id,quantity)).fetchone()
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard IMMEDIATE")
+                conn.execute("SET CONSTRAINTS auto_stock_serial_allocation_guard DEFERRED")
             return row[0]
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
