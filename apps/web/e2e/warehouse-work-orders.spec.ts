@@ -112,3 +112,24 @@ test('mechanic acknowledges posted issue with own idempotency key',async({page})
   expect(keys).toHaveLength(2);
   expect(keys[0]).not.toBe(keys[1]);
 });
+
+test('warehouse serial registration preserves key after server error',async({page})=>{
+  const keys:string[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"csrf"}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**/warehouse/serials',route=>{
+    keys.push(route.request().headers()['idempotency-key']);
+    return route.fulfill(keys.length===1?{status:503,body:'down'}:
+      {status:201,contentType:'application/json',
+        body:'{"serialId":"77777777-7777-4777-8777-777777777777"}'});
+  });
+  await fill(page);
+  await page.getByRole('textbox',{name:'Серийный номер'}).fill('SERIAL-UNIT-001');
+  await page.getByRole('button',{name:'Зарегистрировать серийный номер'}).click();
+  await expect(page.getByRole('button',{name:'Зарегистрировать серийный номер'})).toBeDisabled();
+  await expect(page.getByRole('alert')).toContainText('Результат регистрации не определён');
+  await page.getByRole('button',{name:'Повторить регистрацию с прежним ключом'}).click();
+  await expect(page.getByRole('status')).toContainText('Серийный номер зарегистрирован');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
