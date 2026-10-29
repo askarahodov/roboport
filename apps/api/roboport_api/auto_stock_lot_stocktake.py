@@ -29,6 +29,8 @@ def _run(conn, token, organization_id, location_id, lot_id, sql, args):
         except (psycopg.errors.RaiseException, psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoStockConflict("CONFLICT") from None
+        finally:
+            conn.execute("SELECT set_config(\'roboport.stocktake_actor\',\'\',true)")
 
 
 def count_stock_lot(conn, token: str, organization_id: UUID,
@@ -75,3 +77,5 @@ def approve_stock_lot_count(conn, token: str, organization_id: UUID,
         except (psycopg.errors.RaiseException, psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoStockConflict("CONFLICT") from None
+        finally:
+            conn.execute("SELECT set_config(\'roboport.stocktake_actor\',\'\',true)")
