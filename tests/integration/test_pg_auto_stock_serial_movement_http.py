@@ -29,6 +29,10 @@ def test_http_serial_issue_return_scope_csrf_replay_revoke(monkeypatch):
     base=f"/api/v1/dev/auto/organizations/{org}/warehouse/serial-movements"
     body={"locationId":str(loc),"serialId":str(serial),"workOrderId":str(order)}
     with TestClient(app,base_url="https://127.0.0.1") as client:
+        ordinary_issue=f"/api/v1/dev/auto/organizations/{org}/warehouse/work-orders/issue"
+        untracked_issue={"locationId":str(loc),"workOrderId":str(order),
+                         "lotId":str(lot),"quantity":1}
+        assert post(client,d,d["intake"],ordinary_issue,untracked_issue).status_code==409
         assert post(client,d,d["intake"],base+"/issue",body,csrf=False).status_code==403
         assert post(client,d,d["manager"],base+"/issue",body).status_code==403
         assert post(client,d,d["intake"],base+"/issue",
