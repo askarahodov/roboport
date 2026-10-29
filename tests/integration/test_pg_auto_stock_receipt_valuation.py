@@ -102,7 +102,7 @@ def test_valuation_revoke_and_rollback():
                           (doc,)).fetchone()[0]==0
         grant_id=db.execute("""SELECT id FROM auto_organization_role_grant
           WHERE user_id=%s AND organization_id=%s AND location_id=%s
-            AND role='MANAGER' AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1""",
+            AND role_code='MANAGER' AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1""",
             (d["manager"],org,loc)).fetchone()[0]
         db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(grant_id,))
         with pytest.raises(AutoStockDenied):
