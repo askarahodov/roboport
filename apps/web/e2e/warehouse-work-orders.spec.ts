@@ -133,3 +133,32 @@ test('warehouse serial registration preserves key after server error',async({pag
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
+
+test('in-flight serial scope edit retains original request key for retry',async({page})=>{
+  let resume!:()=>void;
+  const gate=new Promise<void>(resolve=>{resume=resolve;});
+  const keys:string[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"csrf"}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**/warehouse/serials',async route=>{
+    keys.push(route.request().headers()['idempotency-key']);
+    if(keys.length===1){await gate;return route.fulfill({status:503,body:'unavailable'});}
+    return route.fulfill({status:201,contentType:'application/json',
+      body:'{"serialId":"77777777-7777-4777-8777-777777777777"}'});
+  });
+  await fill(page);
+  await page.getByRole('textbox',{name:'Серийный номер'}).fill('SERIAL-SCOPE-001');
+  const requested=page.waitForRequest('**/api/v1/dev/auto/organizations/**/warehouse/serials');
+  await page.getByRole('button',{name:'Зарегистрировать серийный номер'}).click();
+  await requested;
+  await page.getByRole('textbox',{name:'UUID организации'}).fill('88888888-8888-4888-8888-888888888888');
+  resume();
+  await expect(page.getByRole('alert')).toContainText('Результат регистрации неизвестен');
+  await expect(page.getByRole('button',{name:'Зарегистрировать серийный номер'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Повторить регистрацию с прежним ключом'})).toBeDisabled();
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('button',{name:'Повторить регистрацию с прежним ключом'}).click();
+  await expect(page.getByRole('status')).toContainText('Серийный номер зарегистрирован');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
