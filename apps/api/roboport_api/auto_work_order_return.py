@@ -38,6 +38,10 @@ def return_work_order_stock(
                     "SELECT record_auto_work_order_return(%s,%s,%s,%s)",
                     (work_order_id, sku_id, request_id, quantity),
                 ).fetchone()
+                # Force deferred serial conservation inside the savepoint so
+                # a normal conflict is translated to 409, not HTTP 500 at COMMIT.
+                conn.execute("SET CONSTRAINTS auto_stock_serial_sku_return_guard IMMEDIATE")
+                conn.execute("SET CONSTRAINTS auto_stock_serial_sku_return_guard DEFERRED")
             return result[0]
         except (psycopg.errors.RaiseException, psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
