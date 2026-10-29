@@ -5,13 +5,15 @@ import pytest
 from roboport_api.auto_stock_serial import register_lot_serial
 from roboport_api.auto_stock_serial_movement import move_lot_serial
 from roboport_api.auto_stock_lot_work_order_issue import issue_work_order_from_lot
+from roboport_api.auto_stock_lot_work_order_return import return_work_order_to_lot
 from roboport_api.auto_stock_service import AutoStockDenied,AutoStockConflict
 from test_pg_baseline import DSN
 from test_pg_auto_vehicle_claim_http import _scenario
 from test_pg_auto_stock_lot_work_order_issue import setup as work_order_setup
 from test_pg_auto_stock_interbranch_transfer import setup as transfer_setup
-from test_pg_auto_stock_ledger import balance
-from test_pg_auto_stock_lot_allocation import allocated
+from test_pg_auto_stock_bin_lot import add_lot
+from test_pg_auto_stock_ledger import balance,record
+from test_pg_auto_stock_lot_allocation import allocated,act as lot_action
 
 
 def move(db,d,org,serial,action,order=None,dest=None,key=None,actor=None,scope=None):
@@ -122,3 +124,64 @@ def test_invalid_actor_and_wrong_tenant_serial_never_moved():
                  work_order_id,issue_id,performed_by)
                  VALUES(%s,%s,%s,'ISSUE',%s,%s,%s,%s)""",
                  (uuid4(),uuid4(),serial,lot,order,uuid4(),d["intake"]))
+
+
+
+def test_quantitative_return_cannot_strand_an_issued_serial():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,order,sku,lot,_=work_order_setup(db,d,1)
+        serial=register_lot_serial(db,d["tokens"][d["intake"]],
+                                  org,loc,lot,uuid4(),"STRAND-RETURN")
+        move(db,d,org,serial,"ISSUE",order=order)
+        with pytest.raises(psycopg.errors.RaiseException,match="strands issued serial"):
+            with db.transaction():
+                return_work_order_to_lot(db,d["tokens"][d["intake"]],
+                                         org,loc,order,lot,uuid4(),1)
+                db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        assert balance(db,sku)==(0,0) and allocated(db,lot)==0
+        assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",
+                          (serial,)).fetchone()==("ISSUED",)
+        move(db,d,org,serial,"RETURN",order=order)
+        assert balance(db,sku)==(1,0) and allocated(db,lot)==1
+
+
+def test_transfer_rejects_duplicate_serial_in_another_lot_of_target_sku():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        ctx=transfer_setup(db,d,2)
+        org,a,b,sa,sb,la,lb,_,_=ctx
+        origin=register_lot_serial(db,d["tokens"][d["intake"]],
+                                  org,a,la,uuid4(),"DUPLICATE-TRACK")
+        bin_id=db.execute("SELECT bin_id FROM auto_stock_lot WHERE id=%s",(lb,)).fetchone()[0]
+        separate_lot=add_lot(db,org,b,sb,bin_id,"SECOND-BATCH")
+        record(db,sb,"RECEIPT",1)
+        lot_action(db,d,org,b,separate_lot,"ALLOCATE",1)
+        register_lot_serial(db,d["tokens"][d["intake"]],
+                            org,b,separate_lot,uuid4(),"DUPLICATE-TRACK")
+        with pytest.raises(AutoStockConflict):
+            move(db,d,org,origin,"TRANSFER",dest=lb)
+        assert allocated(db,la)==2 and allocated(db,lb)==0
+        assert balance(db,sa)==(2,0) and balance(db,sb)==(1,0)
+
+
+def test_registration_after_transfer_checks_dynamic_lot_capacity_and_sku():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        ctx=transfer_setup(db,d,2)
+        org,a,b,sa,sb,la,lb,_,_=ctx
+        origin=register_lot_serial(db,d["tokens"][d["intake"]],
+                                  org,a,la,uuid4(),"DYNAMIC-TRACK")
+        move(db,d,org,origin,"TRANSFER",dest=lb)
+        with pytest.raises(AutoStockConflict):
+            register_lot_serial(db,d["tokens"][d["intake"]],
+                                org,b,lb,uuid4(),"DIFFERENT-NUMBER")
+        record(db,sb,"RECEIPT",1)
+        lot_action(db,d,org,b,lb,"ALLOCATE",1)
+        with pytest.raises(AutoStockConflict):
+            register_lot_serial(db,d["tokens"][d["intake"]],
+                                org,b,lb,uuid4(),"DYNAMIC-TRACK")
+        new=register_lot_serial(db,d["tokens"][d["intake"]],
+                               org,b,lb,uuid4(),"DIFFERENT-NUMBER")
+        assert new!=origin
+        assert allocated(db,lb)==2
