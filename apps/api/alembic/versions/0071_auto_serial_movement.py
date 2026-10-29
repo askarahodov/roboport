@@ -12,9 +12,10 @@ depends_on=None
 
 
 def upgrade():
+    op.execute("CREATE SEQUENCE auto_stock_serial_movement_seq")
     op.execute("""CREATE TABLE auto_stock_serial_movement (
       id uuid PRIMARY KEY,
-      movement_sequence bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
+      movement_sequence bigint NOT NULL UNIQUE,
       request_id uuid NOT NULL UNIQUE,
       serial_id uuid NOT NULL REFERENCES auto_stock_serial(id),
       action text NOT NULL CHECK(action IN ('ISSUE','RETURN','TRANSFER')),
@@ -133,6 +134,8 @@ def upgrade():
               AND other.serial_number=state_row.serial_number
           ) THEN RAISE EXCEPTION 'serial duplicate at destination'; END IF;
         END IF;
+        -- Sequence allocated only after the SKU lock and transition check.
+        NEW.movement_sequence:=nextval('auto_stock_serial_movement_seq');
         NEW.performed_by:=actor;
         RETURN NEW;
       END $fn$""")
@@ -347,4 +350,5 @@ def downgrade():
     op.execute("DROP FUNCTION check_auto_stock_serial_allocation()")
     op.execute("DROP VIEW auto_stock_serial_current")
     op.execute("DROP TABLE auto_stock_serial_movement")
+    op.execute("DROP SEQUENCE auto_stock_serial_movement_seq")
     op.execute("DROP FUNCTION guard_auto_stock_serial_movement()")
