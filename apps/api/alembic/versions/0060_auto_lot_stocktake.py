@@ -25,7 +25,7 @@ def upgrade():
       GROUP BY sku.id,sku.organization_id,sku.location_id""")
     op.execute("""CREATE OR REPLACE FUNCTION guard_auto_stock_event_insert()
       RETURNS trigger LANGUAGE plpgsql AS $fn$
-      DECLARE scope record; stock record; allocated bigint;
+      DECLARE scope record; stock record; allocated_total bigint;
       BEGIN
         SELECT organization_id,location_id INTO scope FROM auto_stock_sku
           WHERE id=NEW.sku_id FOR UPDATE;
@@ -40,9 +40,9 @@ def upgrade():
           RAISE EXCEPTION 'insufficient physical or reserved stock';
         END IF;
         IF NEW.action IN ('ISSUE','COUNT_LOSS') THEN
-          SELECT COALESCE(SUM(allocated),0)::bigint INTO allocated
-            FROM auto_stock_lot_balance WHERE sku_id=NEW.sku_id;
-          IF stock.on_hand-allocated<NEW.quantity THEN
+          SELECT COALESCE(SUM(lb.allocated),0)::bigint INTO allocated_total
+            FROM auto_stock_lot_balance lb WHERE lb.sku_id=NEW.sku_id;
+          IF stock.on_hand-allocated_total<NEW.quantity THEN
             RAISE EXCEPTION 'physical stock is allocated to lots';
           END IF;
         END IF;
@@ -104,7 +104,7 @@ def upgrade():
       p_count uuid,p_request uuid
     ) RETURNS uuid LANGUAGE plpgsql AS $fn$
     DECLARE cnt record; previous record; qty bigint; delta bigint;
-            event_id uuid; lot_event uuid; approval_id uuid; physical record; allocated bigint;
+            event_id uuid; lot_event uuid; approval_id uuid; physical record; allocated_total bigint;
     BEGIN
       IF p_count IS NULL OR p_request IS NULL THEN RAISE EXCEPTION 'invalid approval'; END IF;
       SELECT c.*,l.organization_id,l.location_id INTO cnt FROM auto_stock_lot_count c
@@ -122,15 +122,15 @@ def upgrade():
       END IF;
       IF EXISTS(SELECT 1 FROM auto_stock_lot_count_approval WHERE count_id=p_count)
         THEN RAISE EXCEPTION 'count already approved'; END IF;
-      SELECT allocated INTO qty FROM auto_stock_lot_balance WHERE lot_id=cnt.lot_id;
+      SELECT lb.allocated INTO qty FROM auto_stock_lot_balance lb WHERE lb.lot_id=cnt.lot_id;
       IF qty<>cnt.expected THEN RAISE EXCEPTION 'stale lot count'; END IF;
       delta:=cnt.actual-cnt.expected;
       event_id:=NULL; lot_event:=NULL;
       IF delta<0 THEN
         SELECT on_hand,reserved INTO physical FROM auto_stock_balance WHERE sku_id=cnt.sku_id;
-        SELECT COALESCE(SUM(allocated),0)::bigint INTO allocated
-          FROM auto_stock_lot_balance WHERE sku_id=cnt.sku_id;
-        IF physical.on_hand+delta<physical.reserved OR physical.on_hand+delta<allocated+delta
+        SELECT COALESCE(SUM(lb.allocated),0)::bigint INTO allocated_total
+          FROM auto_stock_lot_balance lb WHERE lb.sku_id=cnt.sku_id;
+        IF physical.on_hand+delta<physical.reserved OR physical.on_hand+delta<allocated_total+delta
           THEN RAISE EXCEPTION 'count loss would violate reserves or allocation'; END IF;
         lot_event:=record_auto_stock_lot_allocation(cnt.lot_id,gen_random_uuid(),'DEALLOCATE',-delta);
         event_id:=gen_random_uuid();
@@ -159,7 +159,7 @@ def downgrade():
     op.execute("DROP TABLE auto_stock_lot_count")
     op.execute("""CREATE OR REPLACE FUNCTION guard_auto_stock_event_insert()
       RETURNS trigger LANGUAGE plpgsql AS $fn$
-      DECLARE scope record; stock record; allocated bigint;
+      DECLARE scope record; stock record; allocated_total bigint;
       BEGIN
         SELECT organization_id,location_id INTO scope FROM auto_stock_sku WHERE id=NEW.sku_id FOR UPDATE;
         IF NOT FOUND OR (NEW.organization_id,NEW.location_id)
@@ -169,9 +169,9 @@ def downgrade():
           OR (NEW.action IN ('RELEASE','ISSUE') AND stock.reserved<NEW.quantity)
           THEN RAISE EXCEPTION 'insufficient stock or reservation'; END IF;
         IF NEW.action='ISSUE' THEN
-          SELECT COALESCE(SUM(allocated),0)::bigint INTO allocated
-            FROM auto_stock_lot_balance WHERE sku_id=NEW.sku_id;
-          IF stock.on_hand-allocated<NEW.quantity THEN RAISE EXCEPTION 'issued quantity is allocated to lots'; END IF;
+          SELECT COALESCE(SUM(lb.allocated),0)::bigint INTO allocated_total
+            FROM auto_stock_lot_balance lb WHERE lb.sku_id=NEW.sku_id;
+          IF stock.on_hand-allocated_total<NEW.quantity THEN RAISE EXCEPTION 'issued quantity is allocated to lots'; END IF;
         END IF;
         RETURN NEW;
       END $fn$""")
