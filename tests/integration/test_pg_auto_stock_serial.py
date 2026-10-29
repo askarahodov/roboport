@@ -6,13 +6,14 @@ from roboport_api.auto_stock_serial import register_lot_serial
 from roboport_api.auto_stock_service import AutoStockDenied,AutoStockConflict
 from test_pg_baseline import DSN
 from test_pg_auto_vehicle_claim_http import _scenario
-from test_pg_auto_stock_lot_allocation import setup
+from test_pg_auto_stock_lot_allocation import setup,act
 
 
 def test_serial_scoped_unique_capacity_replay_and_immutable():
     d=_scenario()
     with psycopg.connect(DSN) as db:
         org,loc,sku,lot,role=setup(db,d,2)
+        act(db,d,org,loc,lot,'ALLOCATE',2)
         key=uuid4()
         serial=register_lot_serial(db,d["tokens"][d["intake"]],
              org,loc,lot,key,"SN-UNIT-001")
