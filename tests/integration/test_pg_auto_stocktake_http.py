@@ -72,6 +72,7 @@ def test_http_disabled_missing_csrf_and_input_fail_closed(monkeypatch):
     with TestClient(app,base_url="https://127.0.0.1") as client:
         assert client.post(url,json={}).status_code==404
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
     d=_scenario()
     with psycopg.connect(DSN) as db:
         org,loc,item,lot,_=setup(db,d,2)
