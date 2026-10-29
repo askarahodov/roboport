@@ -83,8 +83,14 @@ def test_return_rollback_and_competing_overreturn():
         with pytest.raises(AutoStockConflict):
             ret(second,d,org,loc,order,lot,1)
         assert allocated(second,lot)==1 and balance(second,item)==(1,0)
+        # A fresh issued unit can be returned and rolled back atomically.
+        from test_pg_auto_stock_lot_work_order_issue import issue
+        issue(second,d,org,loc,order,lot,1)
         with pytest.raises(RuntimeError):
             with second.transaction():
-                issue(second,d,org,loc,order,lot,1) if False else None
+                ret(second,d,org,loc,order,lot,1)
                 raise RuntimeError("rollback")
-        assert allocated(second,lot)==1 and balance(second,item)==(1,0)
+        assert allocated(second,lot)==0 and balance(second,item)==(0,0)
+        assert second.execute(
+            "SELECT count(*) FROM auto_stock_lot_work_order_return WHERE work_order_id=%s",
+            (order,)).fetchone()[0]==1
