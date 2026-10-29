@@ -7,6 +7,9 @@ from roboport_api.auto_stock_serial_movement import move_lot_serial
 from roboport_api.auto_stock_lot_work_order_issue import issue_work_order_from_lot
 from roboport_api.auto_stock_lot_work_order_return import return_work_order_to_lot
 from roboport_api.auto_stock_interbranch_transfer import transfer_interbranch_stock
+from roboport_api.auto_stock_lot_allocation import mutate_stock_lot_allocation
+from roboport_api.auto_stock_lot_transfer import transfer_stock_lot
+from roboport_api.auto_stock_disposition import dispose_stock_lot
 from roboport_api.auto_stock_service import AutoStockDenied,AutoStockConflict
 from test_pg_baseline import DSN
 from test_pg_auto_vehicle_claim_http import _scenario
@@ -14,7 +17,7 @@ from test_pg_auto_stock_lot_work_order_issue import setup as work_order_setup
 from test_pg_auto_stock_interbranch_transfer import setup as transfer_setup
 from test_pg_auto_stock_bin_lot import add_lot
 from test_pg_auto_stock_ledger import balance,record
-from test_pg_auto_stock_lot_allocation import allocated,act as lot_action
+from test_pg_auto_stock_lot_allocation import allocated,act as lot_action,setup as lot_setup
 
 
 def move(db,d,org,serial,action,order=None,dest=None,key=None,actor=None,scope=None):
@@ -229,3 +232,41 @@ def test_direct_late_serial_transfer_cannot_use_historical_physical_ledger():
         assert db.execute("SELECT lot_id FROM auto_stock_serial_current WHERE serial_id=%s",
                           (serial,)).fetchone()[0]==src_lot
         assert balance(db,src_sku)==(2,0) and balance(db,dst_sku)==(0,0)
+
+
+
+def test_all_other_lot_debits_return_conflict_for_tracked_unit():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,sku,lot,_=lot_setup(db,d,1)
+        lot_action(db,d,org,loc,lot,"ALLOCATE",1)
+        register_lot_serial(db,d["tokens"][d["intake"]],
+                            org,loc,lot,uuid4(),"PROTECTED-DEBIT")
+        bin_id=db.execute("SELECT bin_id FROM auto_stock_lot WHERE id=%s",(lot,)).fetchone()[0]
+        second=add_lot(db,org,loc,sku,bin_id,"SECOND-TRACKED-LOT")
+        db.commit()
+        with pytest.raises(AutoStockConflict):
+            mutate_stock_lot_allocation(db,d["tokens"][d["intake"]],
+                org,loc,lot,uuid4(),"DEALLOCATE",1)
+        with pytest.raises(AutoStockConflict):
+            transfer_stock_lot(db,d["tokens"][d["intake"]],
+                org,loc,lot,second,uuid4(),1)
+        with pytest.raises(AutoStockConflict):
+            dispose_stock_lot(db,d["tokens"][d["intake"]],
+                org,loc,lot,uuid4(),"WRITE_OFF",1,"Заблокировано серией")
+        assert allocated(db,lot)==1 and allocated(db,second)==0
+
+
+def test_untracked_interbranch_transfer_of_fully_serialized_lot_is_conflict():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        ctx=transfer_setup(db,d,1)
+        org,a,b,sa,sb,la,lb,_,_=ctx
+        register_lot_serial(db,d["tokens"][d["intake"]],
+                            org,a,la,uuid4(),"PROTECTED-BRANCH")
+        db.commit()
+        with pytest.raises(AutoStockConflict):
+            transfer_interbranch_stock(db,d["tokens"][d["intake"]],
+                org,a,b,la,lb,uuid4(),1)
+        assert allocated(db,la)==1 and allocated(db,lb)==0
+        assert balance(db,sa)==(1,0) and balance(db,sb)==(0,0)
