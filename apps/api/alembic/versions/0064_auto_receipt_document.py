@@ -46,7 +46,7 @@ def upgrade():
         actor_id:=NULLIF(current_setting('roboport.receipt_actor',true),'')::uuid;
         IF actor_id IS NULL THEN RAISE EXCEPTION 'receipt actor required'; END IF;
         IF TG_TABLE_NAME='auto_stock_receipt_document' THEN
-          SELECT 1 INTO maker_id FROM auto_stock_lot l
+          PERFORM 1 FROM auto_stock_lot l
             JOIN auto_stock_sku s ON s.id=l.sku_id
             WHERE l.id=NEW.lot_id AND s.id=NEW.sku_id
               AND l.organization_id=NEW.organization_id
