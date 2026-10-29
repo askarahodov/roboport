@@ -35,8 +35,10 @@ export function WarehouseReceiving(){
   const validValuation=validScope&&uuid.test(documentId.trim())&&
     /^[A-Z]{3}$/.test(currency)&&/^(0|[1-9][0-9]*)$/.test(unitCost)&&
     /^(0|[1-9][0-9]*)$/.test(vatTotal)&&Number(unitCost)<=1_000_000_000&&
+    Number.isSafeInteger(Number(unitCost))&&Number.isSafeInteger(Number(vatTotal))&&
     Number(vatTotal)<=1_000_000_000_000_000_000&&
     priceRevision.trim().length>=3&&priceRevision.trim().length<=160&&
+    /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(quotedAt)&&
     !Number.isNaN(Date.parse(quotedAt));
   async function getLots(){
     if(!validScope||listState==='loading')return;
