@@ -39,12 +39,13 @@ test('пользовательские разделы явно разделяю�
   for (const [path, heading] of routes) {
     await page.locator('.sidebar-nav a[href*="guides/' + path + '"]').click();
     await expect(page.locator('.markdown-section h1')).toContainText(heading);
-    // Клиент, мастер-приёмщик и менеджер теперь имеют ограниченный dev-сценарий.
-    // Остальные роли всё ещё содержат только planned-функции.
+    // Кладовщик также получил ограниченный синтетический UI инвентаризации.
+    // Остальные роли по-прежнему не являются production-ready.
     await expect(page.locator('.markdown-section')).toContainText(
-      ['client', 'intake', 'manager'].includes(path)
-        ? 'Статус: частично current в синтетическом dev'
-        : 'Статус: planned',
+      path === 'warehouse' ? 'Статус: current-dev только для инвентаризации' :
+        ['client', 'intake', 'manager'].includes(path)
+          ? 'Статус: частично current в синтетическом dev'
+          : 'Статус: planned',
     );
     await expect(page.locator('.markdown-section')).not.toContainText(
       '404 - Not found',
