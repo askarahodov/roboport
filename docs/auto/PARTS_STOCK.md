@@ -160,3 +160,8 @@ PG17: `PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_st
 Синтетические маршруты: `POST /api/v1/dev/auto/organizations/{org_id}/warehouse/serial-movements/{issue|return|transfer}`. Для issue/return JSON `{locationId,serialId,workOrderId}`, для transfer `{locationId,serialId,destinationLotId}`; обязательны CSRF, активная cookie сессии, `Idempotency-Key`. Интерфейс `/staff/warehouse-serial-movements`. Указанные dev-маршруты скрыты из публичного OpenAPI и не подтверждают production readiness.
 
 Не реализованы customer/supplier serial returns с юр. документами, отслеживание маркированных SKU в procurement, полная production tenant DB ACL, себестоимость выдачи и legal gate #119. Issue #168 остаётся OPEN.
+
+
+### Принудительные инварианты после SQL-review (#168)
+
+Проверка количества зарегистрированных серий в партии выполняется **при каждой регистрации** по `auto_stock_serial_current` и при каждом партионном изменении отложенным SQL constraint trigger. Таким образом, серийный номер, перемещённый из другого филиала, учитывается в целевой партии, а обычное списание не может «удалить» его физически без серийного события. Дубликаты блокируются для текущего SKU **во всех его партиях** как при перемещении, так и при новой регистрации, включая номера, сейчас выданные по наряду. Отдельный deferred trigger запрещает количественный возврат по WorkOrder, который оставил бы необеспеченные физическими выдачами серийные единицы в статусе `ISSUED`. Отрицательные тесты создают конкурирующие ситуации через прямой SQL и обходят сервисные проверки, чтобы тестировать именно БД.
