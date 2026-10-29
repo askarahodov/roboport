@@ -1,7 +1,7 @@
 import React from 'react';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-type Action='issue'|'return';
+type Action='issue'|'return'|'acknowledge';
 type Pending={action:Action;org:string;location:string;url:string;body:string;key:string};
 export function WarehouseWorkOrders(){
   const [org,setOrg]=React.useState('');
@@ -9,6 +9,7 @@ export function WarehouseWorkOrders(){
   const [order,setOrder]=React.useState('');
   const [lot,setLot]=React.useState('');
   const [quantity,setQuantity]=React.useState('1');
+  const [issueId,setIssueId]=React.useState('');
   const [busy,setBusy]=React.useState(false);
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [message,setMessage]=React.useState('');
@@ -20,13 +21,15 @@ export function WarehouseWorkOrders(){
     /^[1-9][0-9]*$/.test(quantity)&&Number.isSafeInteger(Number(quantity))&&
     Number(quantity)<=1_000_000_000;
   async function submit(action:Action,retry?:Pending){
-    if(busy||(!retry&&(!valid||pending)))return;
+    if(busy||(!retry&&(!(action==='acknowledge'?uuid.test(org.trim())&&uuid.test(location.trim())&&uuid.test(issueId.trim()):valid)||pending)))return;
     const snap=retry??{
       action,org:org.trim(),location:location.trim(),
       url:'/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
         '/warehouse/work-orders/'+action,
       key:crypto.randomUUID(),
-      body:JSON.stringify({locationId:location.trim(),workOrderId:order.trim(),
+      body:JSON.stringify(action==='acknowledge'?
+        {locationId:location.trim(),issueId:issueId.trim()}:
+        {locationId:location.trim(),workOrderId:order.trim(),
         lotId:lot.trim(),quantity:Number(quantity)}),
     };
     if(snap.org!==context.current.org||snap.location!==context.current.location)return;
@@ -51,14 +54,16 @@ export function WarehouseWorkOrders(){
         return;
       }
       const result:unknown=await response.json();
-      const field=snap.action==='issue'?'issueId':'returnId';
+      const field=snap.action==='issue'?'issueId':snap.action==='return'?'returnId':'handoffId';
       if(!result||typeof result!=='object'||!(field in result)||
         typeof (result as Record<string,unknown>)[field]!=='string'||
         !uuid.test((result as Record<string,string>)[field]))throw new Error('invalid response');
       setEventId((result as Record<string,string>)[field]);
+      if(snap.action==='issue')setIssueId((result as Record<string,string>)[field]);
       setPending(null);
       setMessage(snap.action==='issue'?'Выдача из партии проведена в складском журнале.':
-        'Возврат в исходную партию проведён в складском журнале.');
+        snap.action==='return'?'Возврат в исходную партию проведён в складском журнале.':
+        'Механик подтвердил получение ранее выданной партии.');
     }catch{
       if(snap.org===context.current.org&&snap.location===context.current.location){
         setPending(snap);
@@ -69,7 +74,7 @@ export function WarehouseWorkOrders(){
   return <section className="ui-page" aria-label="Выдача и возврат деталей">
     <h1>Выдача и возврат по наряду (dev)</h1>
     <p>Только синтетический склад. Для обеих операций нужна действующая роль WAREHOUSE филиала.
-      Выдача требует ранее созданного резерва по наряду; документ передачи механику пока не реализован.</p>
+      Выдача требует ранее созданного резерва по наряду; электронная подпись и юридически значимый акт передачи пока не реализованы.</p>
     <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>setOrg(e.target.value)}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>setLocation(e.target.value)}/></label>
     <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" disabled={!!pending||busy} value={order} onChange={e=>setOrder(e.target.value)}/></label>
@@ -80,6 +85,15 @@ export function WarehouseWorkOrders(){
       <button type="button" disabled={!valid||busy||!!pending} onClick={()=>void submit('issue')}>Выдать из партии</button>
       <button type="button" disabled={!valid||busy||!!pending} onClick={()=>void submit('return')}>Вернуть в партию</button>
     </div>
+    <section aria-label="Подтверждение механиком">
+      <h2>Подтверждение получения (MECHANIC)</h2>
+      <p>Механик входит под собственной сессией и подтверждает уже проведённую выдачу по её UUID.</p>
+      <label>UUID выдачи <input aria-label="UUID выдачи" disabled={!!pending||busy}
+        value={issueId} onChange={e=>setIssueId(e.target.value)}/></label>
+      <button type="button" disabled={busy||!!pending||!uuid.test(org.trim())||
+        !uuid.test(location.trim())||!uuid.test(issueId.trim())}
+        onClick={()=>void submit('acknowledge')}>Подтвердить получение</button>
+    </section>
     {busy&&<p role="status">Выполняется складская операция…</p>}
     {pending&&<p role="alert">Результат операции неизвестен. Исходный ключ сохранён. Верните исходные UUID организации и филиала для повтора; новую операцию запускать нельзя.</p>}
     {pending&&<button type="button" disabled={busy||pending.org!==org.trim()||pending.location!==location.trim()} onClick={()=>void submit(pending.action,pending)}>

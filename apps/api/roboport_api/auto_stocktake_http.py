@@ -261,3 +261,36 @@ async def issue_work_order_lot_http(org_id: str,request: Request):
 @router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/work-orders/return")
 async def return_work_order_lot_http(org_id: str,request: Request):
     return await _mutate_work_order_lot(org_id,request,"return")
+
+
+class MechanicHandoffBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    issueId: UUID
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/work-orders/acknowledge")
+async def acknowledge_work_order_lot_http(org_id: str,request: Request):
+    from .auto_stock_mechanic_handoff import acknowledge_mechanic_handoff
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        data=MechanicHandoffBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            result=acknowledge_mechanic_handoff(
+                db,request.cookies.get("rp_session",""),org,data.locationId,
+                data.issueId,key)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"handoffId":str(result)},
+                        headers={"Cache-Control":"no-store"})
