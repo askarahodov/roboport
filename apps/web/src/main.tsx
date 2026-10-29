@@ -12,6 +12,7 @@ import { AutoCalendar } from './pages/staff/AutoCalendar';
 import { WarehouseStocktake } from './pages/staff/WarehouseStocktake';
 import { WarehouseReceiving } from './pages/staff/WarehouseReceiving';
 import { WarehouseWorkOrders } from './pages/staff/WarehouseWorkOrders';
+import { WarehouseReclassification } from './pages/staff/WarehouseReclassification';
 import { PublicCatalog, PublicModelDetails } from './pages/public/PublicCatalog';
 
 type Brands = paths['/api/v1/catalog/brands']['get']['responses']['200']['content']['application/json'];
@@ -96,6 +97,7 @@ function App() {
         <NavLink to="/staff/warehouse-stocktake" end>Инвентаризация (dev)</NavLink>
         <NavLink to="/staff/warehouse-receiving" end>Приход (dev)</NavLink>
         <NavLink to="/staff/warehouse-work-orders" end>Выдача (dev)</NavLink>
+        <NavLink to="/staff/warehouse-reclassification" end>Пересортица (dev)</NavLink>
       </nav>
       <label>Тема <select aria-label="Тема оформления" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="auto">Авто</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
     </header>
@@ -148,6 +150,7 @@ function App() {
       <Route path="/staff/warehouse-stocktake" element={<WarehouseStocktake />} />
       <Route path="/staff/warehouse-receiving" element={<WarehouseReceiving />} />
       <Route path="/staff/warehouse-work-orders" element={<WarehouseWorkOrders />} />
+      <Route path="/staff/warehouse-reclassification" element={<WarehouseReclassification />} />
       <Route path="/staff/*" element={<StaffPortal />} />
       <Route path="*" element={<section><h1>Страница не найдена</h1><p>Такого раздела пока нет.</p><Link to="/">Вернуться на главную</Link></section>} />
     </Routes>
