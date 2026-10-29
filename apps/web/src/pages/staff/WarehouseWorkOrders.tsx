@@ -15,7 +15,7 @@ export function WarehouseWorkOrders(){
   const [eventId,setEventId]=React.useState('');
   const context=React.useRef({org:'',location:''});
   context.current={org:org.trim(),location:location.trim()};
-  React.useEffect(()=>{setPending(null);setMessage('');setEventId('');},[org,location]);
+  React.useEffect(()=>{setMessage('');setEventId('');},[org,location]);
   const valid=[org,location,order,lot].every(x=>uuid.test(x.trim()))&&
     /^[1-9][0-9]*$/.test(quantity)&&Number.isSafeInteger(Number(quantity))&&
     Number(quantity)<=1_000_000_000;
@@ -81,7 +81,8 @@ export function WarehouseWorkOrders(){
       <button type="button" disabled={!valid||busy||!!pending} onClick={()=>void submit('return')}>Вернуть в партию</button>
     </div>
     {busy&&<p role="status">Выполняется складская операция…</p>}
-    {pending&&<button type="button" disabled={busy} onClick={()=>void submit(pending.action,pending)}>
+    {pending&&<p role="alert">Результат операции неизвестен. Исходный ключ сохранён. Верните исходные UUID организации и филиала для повтора; новую операцию запускать нельзя.</p>}
+    {pending&&<button type="button" disabled={busy||pending.org!==org.trim()||pending.location!==location.trim()} onClick={()=>void submit(pending.action,pending)}>
       Повторить с прежним ключом</button>}
     {message&&<p role="status">{message}</p>}
     {eventId&&<p>Идентификатор события: <code>{eventId}</code></p>}
