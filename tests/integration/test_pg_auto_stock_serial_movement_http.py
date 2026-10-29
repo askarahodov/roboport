@@ -43,6 +43,12 @@ def test_http_serial_issue_return_scope_csrf_replay_revoke(monkeypatch):
         assert created.headers["cache-control"]=="no-store"
         assert post(client,d,d["intake"],base+"/issue",body,key).json()==created.json()
         assert post(client,d,d["intake"],base+"/issue",body).status_code==409
+        # Plain quantity return cannot silently clear the physical issue while
+        # a serialized item remains ISSUED: stable HTTP 409, never a 500.
+        ordinary=f"/api/v1/dev/auto/organizations/{org}/warehouse/work-orders/return"
+        untracked={"locationId":str(loc),"workOrderId":str(order),
+                   "lotId":str(lot),"quantity":1}
+        assert post(client,d,d["intake"],ordinary,untracked).status_code==409
         result=post(client,d,d["intake"],base+"/return",body)
         assert result.status_code==201,result.text
         assert post(client,d,d["intake"],base+"/return",body).status_code==409
