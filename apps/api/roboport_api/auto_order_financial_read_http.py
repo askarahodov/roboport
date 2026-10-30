@@ -47,3 +47,44 @@ def read_work_order_financial_history(org_id: str, loc_id: str, order_id: str,
         except AutoStockDenied as exc:
             return _response(request, 422 if str(exc) == "INVALID_INPUT" else 403, str(exc))
     return JSONResponse(content=result, headers={"Cache-Control": "no-store"})
+
+
+
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
+from .auth_http import _mutation_ok
+from .auto_order_financial_post import post_work_order_financial
+from .auto_stock_service import AutoStockConflict
+
+
+class FinancialPosting(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(pattern="^(CHARGE|CREDIT)$")
+    amountMinor: StrictInt = Field(ge=1, le=1000000000000)
+    reason: str = Field(min_length=3, max_length=160)
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/financial-events")
+async def post_financial_event(org_id: str, loc_id: str, order_id: str, request: Request):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        org, loc, order = UUID(org_id), UUID(loc_id), UUID(order_id)
+        body = FinancialPosting.model_validate(await request.json())
+        key = UUID(request.headers["Idempotency-Key"])
+    except (KeyError, ValueError, ValidationError, TypeError, UnicodeDecodeError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request, db):
+            return _response(request, 403, "FORBIDDEN")
+        try:
+            event_id = post_work_order_financial(
+                db, request.cookies.get("rp_session", ""), org, loc, order,
+                key, body.action, body.amountMinor, body.reason,
+            )
+        except AutoStockDenied as exc:
+            return _response(request, 422 if str(exc) == "INVALID_INPUT" else 403, str(exc))
+        except AutoStockConflict:
+            return _response(request, 409, "CONFLICT")
+    return JSONResponse(status_code=201, content={"eventId": str(event_id), "syntheticOnly": True},
+                        headers={"Cache-Control": "no-store"})
