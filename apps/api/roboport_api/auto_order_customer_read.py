@@ -12,7 +12,7 @@ from .auto_stock_service import AutoStockDenied
 def get_order_customer_summary(conn: psycopg.Connection, token: str,
                                organization_id: UUID, location_id: UUID,
                                order_id: UUID) -> dict:
-    if type(token) is not str or not token:
+    if type(token) is not str or not token.strip():
         raise AutoStockDenied("FORBIDDEN")
     if any(type(x) is not UUID for x in (organization_id, location_id, order_id)):
         raise AutoStockDenied("INVALID_INPUT")

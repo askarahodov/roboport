@@ -76,3 +76,25 @@ def test_invalid_scope_denied_before_database():
         get_order_customer_summary(None,"test",uuid4(),uuid4(),"wrong")
     with pytest.raises(AutoStockDenied,match="FORBIDDEN"):
         get_order_customer_summary(None,"",uuid4(),uuid4(),uuid4())
+
+
+def test_customer_read_rejects_whitespace_token_without_db():
+    with pytest.raises(AutoStockDenied, match="FORBIDDEN"):
+        get_order_customer_summary(None, "   ", uuid4(), uuid4(), uuid4())
+
+
+def test_http_customer_read_denies_revoked_staff_grant(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d, org, loc, order, _, _ = prepare()
+    client = TestClient(app, base_url="https://127.0.0.1")
+    client.cookies.set("rp_session", d["tokens"][d["intake"]])
+    path = f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/customer"
+    assert client.get(path).status_code == 200
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+                      WHERE organization_id=%s AND location_id=%s AND user_id=%s
+                        AND role_code='INTAKE' AND revoked_at IS NULL""",
+                   (org, loc, d["intake"]))
+    assert client.get(path).status_code == 403

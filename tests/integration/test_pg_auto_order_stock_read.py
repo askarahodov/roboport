@@ -78,3 +78,8 @@ def test_http_order_stock_route_requires_session_and_exact_scope(monkeypatch):
     assert client.get(path + "?limit=1").status_code == 200
     monkeypatch.delenv("ROBOport_SYNTHETIC_AUTO_API")
     assert client.get(path).status_code == 404
+
+
+def test_stock_read_rejects_whitespace_token_without_db():
+    with pytest.raises(AutoStockDenied, match="FORBIDDEN"):
+        list_work_order_stock(None, "  ", uuid4(), uuid4(), uuid4())
