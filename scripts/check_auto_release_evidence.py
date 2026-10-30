@@ -32,7 +32,8 @@ def _safe_evidence_url(raw: object) -> bool:
     try:
         url = urlsplit(raw)
         host = url.hostname
-        if (url.scheme != "https" or not host or url.username is not None
+        if (url.scheme != "https" or not host or url.fragment
+                or url.username is not None
                 or url.password is not None or url.port not in (None, 443)
                 or not url.path or url.path == "/"):
             return False
@@ -41,7 +42,11 @@ def _safe_evidence_url(raw: object) -> bool:
         try:
             return ipaddress.ip_address(host).is_global
         except ValueError:
-            return "." in host and all(part for part in host.split("."))
+            labels = host.split(".")
+            return (len(labels) >= 2 and all(part and part.isascii() and
+                    all(ch.isalnum() or ch == "-" for ch in part) and
+                    not part.startswith("-") and not part.endswith("-")
+                    for part in labels))
     except ValueError:
         return False
 
@@ -53,7 +58,9 @@ def _valid_approval_time(raw: object) -> bool:
         stamp = datetime.fromisoformat(raw)
     except ValueError:
         return False
-    return stamp.tzinfo is not None and stamp.utcoffset() == timezone.utc.utcoffset(stamp)
+    return (stamp.tzinfo is not None
+            and stamp.utcoffset() == timezone.utc.utcoffset(stamp)
+            and stamp <= datetime.now(timezone.utc))
 
 
 def validate_evidence(raw: object) -> tuple[str, ...]:

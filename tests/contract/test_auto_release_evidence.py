@@ -64,3 +64,18 @@ def test_unsafe_urls_and_invalid_timestamps_block():
         item = complete()
         item["approved_at"] = date
         assert "APPROVAL_TIMESTAMP" in validate_evidence(item), date
+
+
+def test_future_approval_and_malformed_dns_block():
+    for stamp in ("2999-01-01T00:00:00Z", "9999-12-31T23:59:59Z"):
+        item = complete()
+        item["approved_at"] = stamp
+        assert "APPROVAL_TIMESTAMP" in validate_evidence(item)
+    for url in ("https://-example.com/review",
+                "https://example..com/review",
+                "https://example.com./review",
+                "https://github.com/review#fragment",
+                "https://bad_host.example/review"):
+        item = complete()
+        item["gates"]["ci_main"]["evidence_url"] = url
+        assert "ci_main" in validate_evidence(item), url
