@@ -79,3 +79,33 @@ def test_nonempty_invalid_csv_does_not_get_misclassified_as_empty(tmp_path):
     result = inspect_csv(path)
     assert result["ok"] is False
     assert result["errors"] == [{"row": 2, "code": "QUANTITY"}]
+
+
+def test_stock_aggregate_cannot_exceed_limit_within_one_location(tmp_path):
+    org, loc = str(uuid4()), str(uuid4())
+    path = tmp_path / "overflow.csv"
+    write(path, [
+        ("SKU", "SKU-1", org, loc, "FILTER-001", "0"),
+        ("STOCK", "STOCK-1", org, loc, "FILTER-001", "999999999"),
+        ("STOCK", "STOCK-2", org, loc, "FILTER-001", "2"),
+    ])
+    result = inspect_csv(path)
+    assert result["ok"] is False
+    assert result["counts"] == {"SKU": 1, "STOCK": 1}
+    assert result["errors"] == [{"row": 4, "code": "STOCK_TOTAL_LIMIT"}]
+    assert org not in str(result) and loc not in str(result)
+
+
+def test_stock_aggregate_separated_by_location_and_article(tmp_path):
+    org, loc1, loc2 = str(uuid4()), str(uuid4()), str(uuid4())
+    path = tmp_path / "scoped.csv"
+    write(path, [
+        ("SKU", "SKU-1", org, loc1, "FILTER-001", "0"),
+        ("SKU", "SKU-2", org, loc2, "FILTER-001", "0"),
+        ("SKU", "SKU-3", org, loc1, "FILTER-002", "0"),
+        ("STOCK", "STOCK-1", org, loc1, "FILTER-001", "1000000000"),
+        ("STOCK", "STOCK-2", org, loc2, "FILTER-001", "1000000000"),
+        ("STOCK", "STOCK-3", org, loc1, "FILTER-002", "1000000000"),
+    ])
+    assert inspect_csv(path) == {"ok": True, "counts": {"SKU": 3, "STOCK": 3},
+                                 "errors": [], "mode": "DRY_RUN_ONLY", "writes": 0}
