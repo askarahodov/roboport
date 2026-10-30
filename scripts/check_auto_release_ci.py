@@ -36,7 +36,7 @@ def validate_run(run: object, jobs: object, expected_sha: str,
     if type(repository) is not dict or repository.get("full_name") != REPO:
         problems.append("REPOSITORY_MISMATCH")
     workflow = run.get("path")
-    if (type(workflow) is not str or not
+    if (type(workflow) is not str or
             workflow.split("@", 1)[0] != ".github/workflows/ci.yml"):
         problems.append("UNEXPECTED_WORKFLOW")
     pages = jobs.get("total_count")
