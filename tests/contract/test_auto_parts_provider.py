@@ -76,3 +76,13 @@ def test_malformed_provider_record_fails_closed():
         CatalogPart(**(args | {"retrieved_at": datetime(2026, 1, 1)}))
     with pytest.raises(ValueError):
         CatalogPart(**(args | {"applicability": "guess"}))
+
+
+@pytest.mark.parametrize("field", ["provider", "source_revision", "brand", "article"])
+@pytest.mark.parametrize("invalid", [None, 42, True, ["TEST"], "   ", "x" * 161])
+def test_catalog_part_rejects_invalid_provenance_types_and_bounds(field, invalid):
+    args = dict(provider="fixture", source_revision="rev-1",
+                retrieved_at=datetime.now(timezone.utc), brand="TEST",
+                article="SYN-001", applicability=Applicability.UNKNOWN)
+    with pytest.raises(ValueError, match="Каталожная запись неполна"):
+        CatalogPart(**(args | {field: invalid}))

@@ -40,7 +40,8 @@ class CatalogPart:
     applicability: Applicability
 
     def __post_init__(self) -> None:
-        if not all((self.provider, self.source_revision, self.brand, self.article)):
+        if any(type(value) is not str or not value.strip() or len(value) > 160
+               for value in (self.provider, self.source_revision, self.brand, self.article)):
             raise ValueError("Каталожная запись неполна")
         if not isinstance(self.applicability, Applicability):
             raise ValueError("Неизвестный статус применяемости")
