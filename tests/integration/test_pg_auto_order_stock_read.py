@@ -45,3 +45,36 @@ def test_scoped_work_order_ledger_and_revocation():
 def test_invalid_limit_before_db(limit):
     with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
         list_work_order_stock(None, "test", uuid4(), uuid4(), uuid4(), limit=limit)
+
+
+def test_http_order_stock_route_requires_session_and_exact_scope(monkeypatch):
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d = _scenario()
+    with psycopg.connect(DSN) as db:
+        org, loc, bay = _org_and_bay(db)
+        other, foreign_loc, _ = _org_and_bay(db)
+        order, _ = work_order(db, d, org, loc, bay)
+        item = sku(db, org, loc)
+        record(db, item, "RECEIPT", 3)
+        grant(db, d["intake"], org, loc)
+        act(db, d, org, loc, order, item, "RESERVE", 2)
+    client = TestClient(app, base_url="https://127.0.0.1")
+    path = f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/stock"
+    assert client.get(path).status_code == 403
+    client.cookies.set("rp_session", d["tokens"][d["intake"]])
+    allowed = client.get(path)
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.headers["cache-control"] == "no-store"
+    assert len(allowed.json()["items"]) == 1
+    assert allowed.json()["items"][0]["action"] == "RESERVE"
+    for invalid in (f"/api/v1/dev/auto/organizations/{other}/locations/{foreign_loc}/orders/{order}/stock",
+                    f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{uuid4()}/stock"):
+        assert client.get(invalid).status_code == 403
+    assert client.get(path + "?limit=101").status_code == 422
+    assert client.get(path + "?limit=1").status_code == 200
+    monkeypatch.delenv("ROBOport_SYNTHETIC_AUTO_API")
+    assert client.get(path).status_code == 404
