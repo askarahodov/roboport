@@ -63,3 +63,33 @@ def test_changed_types_and_removed_parameters_are_breaking():
     after = deepcopy(old)
     after["components"]["schemas"]["Health"]["properties"]["status"]["type"] = "integer"
     assert "CHANGED_PROPERTY_TYPE:Health.status" in regressions(old, after)
+
+
+def test_path_level_parameter_upgrade_and_removal_fail_closed():
+    old = sample()
+    old["paths"]["/health"]["parameters"] = [
+        {"name": "region", "in": "query", "required": False}]
+    upgraded = deepcopy(old)
+    upgraded["paths"]["/health"]["parameters"][0]["required"] = True
+    assert any("NEW_REQUIRED_PARAMETER:GET:/health:" in x
+               for x in regressions(old, upgraded))
+    removed = deepcopy(old)
+    removed["paths"]["/health"]["parameters"] = []
+    assert any("REMOVED_PARAMETER:GET:/health:" in x
+               for x in regressions(old, removed))
+
+
+def test_operation_overrides_path_parameter_and_addition():
+    old = sample()
+    old["paths"]["/health"]["parameters"] = [
+        {"name": "region", "in": "query", "required": False}]
+    after = deepcopy(old)
+    after["paths"]["/health"]["get"]["parameters"] = [
+        {"name": "region", "in": "query", "required": True}]
+    assert any(x.startswith("NEW_REQUIRED_PARAMETER:")
+               for x in regressions(old, after))
+    after = deepcopy(old)
+    after["paths"]["/health"]["parameters"].append(
+        {"name": "organization", "in": "header", "required": True})
+    assert any(x.startswith("NEW_REQUIRED_PARAMETER:")
+               for x in regressions(old, after))
