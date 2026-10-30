@@ -64,13 +64,21 @@ def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
         """, (batch_id,)).fetchone()
         if stored != (organization_id, expected_sha256, *expected):
             raise SyntheticImportRejected("staging batch conflicts with existing data")
-        existing = conn.execute(
-            "SELECT count(*) FROM auto_migration_staging_line WHERE batch_id=%s",
-            (batch_id,),
-        ).fetchone()[0]
+        existing = conn.execute("""
+            SELECT line_number,organization_id,location_id,record_type,
+                   source_id,article,quantity
+            FROM auto_migration_staging_line WHERE batch_id=%s
+            ORDER BY line_number
+        """, (batch_id,)).fetchall()
         if existing:
-            if existing != expected[0]:
+            if len(existing) != expected[0]:
                 raise SyntheticImportRejected("incomplete existing staging batch")
+            for index, (record, row) in enumerate(zip(existing, rows), start=2):
+                required = (index, organization_id, UUID(row["location_id"]),
+                            row["record_type"], row["source_id"], row["article"],
+                            int(row["quantity"]))
+                if record != required:
+                    raise SyntheticImportRejected("existing staging lines mismatch")
             return {"ok": True, "replayed": True, "counts": report["counts"],
                     "rows": expected[0], "writes": 0, "mode": "SYNTHETIC_STAGING"}
 
