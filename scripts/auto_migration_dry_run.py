@@ -26,6 +26,7 @@ def inspect_csv(path: Path) -> dict:
     seen: set[tuple[str, str, str]] = set()
     sku_keys: set[tuple[str, str, str]] = set()
     stock_keys: set[tuple[str, str, str]] = set()
+    stock_totals: dict[tuple[str, str, str], int] = {}
     physical = 0
     if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
         return {"ok": False, "counts": stats, "errors": [{"row": 0, "code": "UNAVAILABLE"}]}
@@ -82,6 +83,11 @@ def inspect_csv(path: Path) -> dict:
                     continue
                 sku_keys.add(sku_key)
             else:
+                new_total = stock_totals.get(sku_key, 0) + qty
+                if new_total > 1_000_000_000:
+                    errors.append({"row": row_no, "code": "STOCK_TOTAL_LIMIT"})
+                    continue
+                stock_totals[sku_key] = new_total
                 stock_keys.add(sku_key)
             stats[kind] += 1
     for key in sorted(stock_keys - sku_keys):
