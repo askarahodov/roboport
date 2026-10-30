@@ -9,7 +9,8 @@ SHA = "a" * 40
 def sample():
     run = {"head_sha": SHA, "head_branch": "main", "event": "push",
            "status": "completed", "conclusion": "success",
-           "path": "askarahodov/roboport/.github/workflows/ci.yml"}
+           "path": ".github/workflows/ci.yml",
+           "id": 41045503073, "repository": {"full_name": "askarahodov/roboport"}}
     jobs = [{"name": name, "status": "completed", "conclusion": "success"}
             for name in sorted(REQUIRED_JOBS)]
     return run, {"total_count": len(jobs), "jobs": jobs}
@@ -48,3 +49,16 @@ def test_fail_closed_on_wrong_run_or_untrusted_job_status():
 def test_cli_rejects_invalid_args_before_remote_access():
     assert main(["--sha", "bad", "--run-id", "7"]) == 2
     assert main(["--sha", SHA, "--run-id", "0"]) == 2
+
+
+def test_real_github_run_identity_and_workflow_path():
+    run, jobs = sample()
+    assert validate_run(run, jobs, SHA, 41045503073) == ()
+    for field, value, reason in (
+        ("id", 41045503074, "RUN_ID_MISMATCH"),
+        ("repository", {"full_name": "someone/other"}, "REPOSITORY_MISMATCH"),
+        ("path", "fork/.github/workflows/ci.yml", "UNEXPECTED_WORKFLOW"),
+    ):
+        altered = deepcopy(run)
+        altered[field] = value
+        assert reason in validate_run(altered, jobs, SHA, 41045503073)
