@@ -68,6 +68,26 @@ def test_integrated_scoped_appointment_work_order_stock_and_rollback():
         ).fetchone()[0] == 1
         move(org,loc,item,"RELEASE",2)
         assert balance(db,item)==(4,0)
+        # Synthetic financial entries belong to this exact automotive WorkOrder.
+        key = uuid4()
+        charge = db.execute(
+            "SELECT record_auto_work_order_financial(%s,%s,'CHARGE',%s,%s)",
+            (order,key,12000,"synthetic labor estimate"),
+        ).fetchone()[0]
+        assert db.execute(
+            "SELECT record_auto_work_order_financial(%s,%s,'CHARGE',%s,%s)",
+            (order,key,12000,"synthetic labor estimate"),
+        ).fetchone()[0] == charge
+        db.execute("SELECT record_auto_work_order_financial(%s,%s,'CREDIT',%s,%s)",
+                   (order,uuid4(),2000,"synthetic correction"))
+        assert db.execute(
+            "SELECT balance_minor FROM auto_work_order_financial_balance WHERE work_order_id=%s",
+            (order,),
+        ).fetchone() == (10000,)
+        assert db.execute(
+            "SELECT count(*) FROM auto_work_order_financial_event WHERE work_order_id=%s",
+            (order,),
+        ).fetchone() == (2,)
         overview = get_order_overview(db,token,org,loc,order)
         assert overview["customer"]["orderId"] == str(order)
         assert [event["action"] for event in overview["stock"]["items"]]
