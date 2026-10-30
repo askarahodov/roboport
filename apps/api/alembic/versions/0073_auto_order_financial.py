@@ -54,7 +54,7 @@ def upgrade():
     op.execute("""CREATE FUNCTION record_auto_work_order_financial(
       p_order uuid,p_request uuid,p_action text,p_amount bigint,p_reason text
     ) RETURNS uuid LANGUAGE plpgsql AS $fn$
-    DECLARE identity record; existing record; new_id uuid;
+    DECLARE identity record; existing record; new_id uuid; running_balance bigint;
     BEGIN
       IF p_order IS NULL OR p_request IS NULL OR p_action IS NULL
         OR p_action NOT IN ('CHARGE','CREDIT')
@@ -70,8 +70,17 @@ def upgrade():
         RETURN existing.id;
       END IF;
       SELECT organization_id,location_id INTO identity
-        FROM auto_work_order WHERE id=p_order FOR SHARE;
+        FROM auto_work_order WHERE id=p_order FOR UPDATE;
       IF NOT FOUND THEN RAISE EXCEPTION 'work order unavailable'; END IF;
+      IF p_action='CREDIT' THEN
+        SELECT COALESCE(SUM(CASE WHEN action='CHARGE' THEN amount_minor
+                                 ELSE -amount_minor END),0)::bigint
+          INTO running_balance FROM auto_work_order_financial_event
+          WHERE work_order_id=p_order;
+        IF running_balance < p_amount THEN
+          RAISE EXCEPTION 'credit exceeds outstanding synthetic balance';
+        END IF;
+      END IF;
       new_id:=gen_random_uuid();
       INSERT INTO auto_work_order_financial_event
         (id,request_id,work_order_id,organization_id,location_id,action,amount_minor,reason)
