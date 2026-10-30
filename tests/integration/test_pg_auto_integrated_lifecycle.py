@@ -11,6 +11,7 @@ import pytest
 
 from roboport_api.auto_appointment_service import create_appointment, AppointmentDenied
 from roboport_api.auto_stock_service import AutoStockDenied
+from roboport_api.auto_order_overview import get_order_overview
 from roboport_api.auto_work_order_stock import mutate_work_order_stock
 from test_pg_auto_vehicle_claim_http import _scenario
 from test_pg_auto_bay_booking import _org_and_bay
@@ -43,7 +44,7 @@ def test_integrated_scoped_appointment_work_order_stock_and_rollback():
                           (order,)).fetchone() == (appt,org,loc)
         item = sku(db,org,loc)
         other_item = sku(db,foreign_org,foreign_loc)
-        grant(db,d["intake"],org,loc)
+        warehouse_role = grant(db,d["intake"],org,loc)
         record(db,item,"RECEIPT",6)
         def move(organization, location, article, action, qty):
             return mutate_work_order_stock(db,token,organization,location,order,
@@ -67,5 +68,17 @@ def test_integrated_scoped_appointment_work_order_stock_and_rollback():
         ).fetchone()[0] == 1
         move(org,loc,item,"RELEASE",2)
         assert balance(db,item)==(4,0)
+        overview = get_order_overview(db,token,org,loc,order)
+        assert overview["customer"]["orderId"] == str(order)
+        assert [event["action"] for event in overview["stock"]["items"]]
+        assert len(overview["stock"]["items"]) == 3
+        with pytest.raises(AutoStockDenied):
+            get_order_overview(db,token,foreign_org,foreign_loc,order)
+        db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
+                   (warehouse_role,))
+        with pytest.raises(AutoStockDenied):
+            get_order_overview(db,token,org,loc,order)
+        with pytest.raises(AutoStockDenied):
+            move(org,loc,item,"RESERVE",1)
         assert db.execute("SELECT canceled_at FROM auto_bay_booking WHERE id=%s",
                           (booking,)).fetchone()[0] is None
