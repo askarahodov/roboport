@@ -146,3 +146,60 @@ test('switching organizations clears previous success and active staff data', as
   await expect(page.getByText(user)).toHaveCount(0);
   await expect(page.getByRole('status').filter({ hasText: 'Назначение создано.' })).toHaveCount(0);
 });
+
+
+test('ADMIN sees tenant-scoped grant and revoke audit and clears data on tenant switch', async ({ page }) => {
+  const other = '55555555-5555-4555-8555-555555555555';
+  const actor = '66666666-6666-4666-8666-666666666666';
+  const eventA = '77777777-7777-4777-8777-777777777777';
+  const eventB = '88888888-8888-4888-8888-888888888888';
+  await page.route(endpoint, route => {
+    const url = route.request().url();
+    if (url.includes(other)) return route.fulfill({
+      status: 403, contentType: 'application/json', body: '{"code":"FORBIDDEN"}',
+    });
+    if (url.includes('/audit')) return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({items: [
+        {eventId:eventA, grantId:grant, actorId:actor, userId:user,
+          action:'GRANTED', role:'INTAKE', locationId:loc, createdAt:'2026-10-30T10:00:00Z'},
+        {eventId:eventB, grantId:grant, actorId:actor, userId:user,
+          action:'REVOKED', role:'INTAKE', locationId:loc, createdAt:'2026-10-30T10:01:00Z'},
+      ]}),
+    });
+    return route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"items":[]}',
+    });
+  });
+  await page.goto('/staff/auto-admin');
+  await page.getByRole('textbox', {name:'UUID организации'}).fill(org);
+  await expect(page.getByRole('button', {name:'Показать журнал'})).toBeVisible();
+  await page.getByRole('button', {name:'Показать журнал'}).click();
+  const audit = page.getByRole('region', {name:'Журнал действий сотрудников'});
+  await expect(audit.getByText('Назначение', {exact:false})).toBeVisible();
+  await expect(audit.getByText('Отзыв', {exact:false})).toBeVisible();
+  await expect(audit.getByText(actor, {exact:false}).first()).toBeVisible();
+  await page.getByRole('textbox', {name:'UUID организации'}).fill(other);
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(audit).toHaveCount(0);
+  await expect(page.getByText(actor)).toHaveCount(0);
+});
+
+test('ADMIN audit rejects remote 403 and malformed rows without showing identifiers', async ({ page }) => {
+  let malformed = false;
+  await page.route(endpoint, route => {
+    if (route.request().url().includes('/audit')) return route.fulfill({
+      status: malformed ? 200 : 403, contentType: 'application/json',
+      body: malformed ? '{"items":[{"userId":"private"}]}' : '{"code":"FORBIDDEN"}',
+    });
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+  });
+  await page.goto('/staff/auto-admin');
+  await page.getByRole('textbox', {name:'UUID организации'}).fill(org);
+  await page.getByRole('button', {name:'Показать журнал'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ к журналу запрещён');
+  malformed = true;
+  await page.getByRole('button', {name:'Показать журнал'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить журнал');
+  await expect(page.getByText('private')).toHaveCount(0);
+});
