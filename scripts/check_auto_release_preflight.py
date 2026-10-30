@@ -59,7 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     result = evaluate(evidence, run, jobs, issues, args.sha, args.run_id)
     print(json.dumps(result, sort_keys=True))
-    return 1 if result["reasons"] else 0
+    # Even technical PASS is not an authorized production release.
+    return 1
 
 
 if __name__ == "__main__":
