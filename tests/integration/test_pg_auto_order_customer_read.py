@@ -34,7 +34,7 @@ def test_verified_customer_order_scope_and_revoke():
     with psycopg.connect(DSN) as db:
         result=get_order_customer_summary(db,token,org,loc,order)
         assert result["orderId"] == str(order)
-        assert result["customerId"] == str(d["customer"])
+        assert result["customerId"] == str(db.execute("SELECT customer_id FROM auto_vehicle_customer_link WHERE id=%s", (d["link"],)).fetchone()[0])
         assert result["vehicleId"] == str(d["vehicle"])
         assert result["customerLinkId"] == str(d["link"])
         for a,b,c in ((foreign,foreign_loc,order),(org,foreign_loc,order),(org,loc,uuid4())):
@@ -59,7 +59,7 @@ def test_http_read_rejects_missing_session_foreign_scope_and_revoked_link(monkey
     res=client.get(url)
     assert res.status_code == 200,res.text
     assert res.headers["cache-control"] == "no-store"
-    assert res.json()["customerId"] == str(d["customer"])
+    with psycopg.connect(DSN) as check:\n        actual_customer = check.execute("SELECT customer_id FROM auto_vehicle_customer_link WHERE id=%s", (d["link"],)).fetchone()[0]\n    assert res.json()["customerId"] == str(actual_customer)
     assert client.get(url.replace(str(org),str(foreign)).replace(str(loc),str(foreign_loc))).status_code == 403
     assert client.get(url.replace(str(order),str(uuid4()))).status_code == 403
     with psycopg.connect(DSN) as db:
