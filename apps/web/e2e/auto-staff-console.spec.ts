@@ -176,8 +176,8 @@ test('ADMIN sees tenant-scoped grant and revoke audit and clears data on tenant 
   await expect(page.getByRole('button', {name:'Показать журнал'})).toBeVisible();
   await page.getByRole('button', {name:'Показать журнал'}).click();
   const audit = page.getByRole('region', {name:'Журнал действий сотрудников'});
-  await expect(audit.getByText('Назначение', {exact:false})).toBeVisible();
-  await expect(audit.getByText('Отзыв', {exact:false})).toBeVisible();
+  await expect(audit.locator('li').filter({hasText:'Назначение'})).toBeVisible();
+  await expect(audit.locator('li').filter({hasText:'Отзыв'})).toBeVisible();
   await expect(audit.getByText(actor, {exact:false}).first()).toBeVisible();
   await page.getByRole('textbox', {name:'UUID организации'}).fill(other);
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
