@@ -11,7 +11,8 @@ def sample():
            "status": "completed", "conclusion": "success",
            "path": ".github/workflows/ci.yml",
            "id": 41045503073, "run_attempt": 1, "repository": {"full_name": "askarahodov/roboport"}}
-    jobs = [{"name": name, "status": "completed", "conclusion": "success",\n             "head_sha": SHA, "run_id": 41045503073, "run_attempt": 1}
+    jobs = [{"name": name, "status": "completed", "conclusion": "success",
+             "head_sha": SHA, "run_id": 41045503073, "run_attempt": 1}
             for name in sorted(REQUIRED_JOBS)]
     return run, {"total_count": len(jobs), "jobs": jobs}
 
