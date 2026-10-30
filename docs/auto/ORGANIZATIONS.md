@@ -194,3 +194,10 @@
 Добавлен `GET /api/v1/dev/auto/organizations/{org_id}/staff/audit?limit=100` для чтения **уже существующего неизменяемого журнала** `auto_org_staff_action`. При валидной активной сессии ADMIN именно запрошенной организации метод выдаёт до 100 событий выдачи/отзыва прав (`GRANTED`/`REVOKED`) с `eventId`, `grantId`, `actorId`, `userId`, `role`, `locationId`, `createdAt`. События отозванных прав остаются видимы. Tenant B не видит события A, отсутствующий ADMIN получает 403. Результат `Cache-Control: no-store`; неправильный `limit` отвергается с 422. Для полноценного интерфейса более 100 событий потребуются cursor pagination и retention policy (planned).
 
 Это **закрытый synthetic loopback HTTPS API**, включаемый только явным dev flag. Он не раскрывает и не регистрирует production персональные данные; production bootstrap, внешние права, финансы/склад, audit export, независимая оценка и #119 всё ещё не готовы. PG17 тест `tests/integration/test_pg_auto_org_staff_http.py` выполняет полный сценарий ADMIN: назначить → посмотреть список → отозвать → получить два события аудита, а также проверяет чужой tenant, limit и выключенный route.
+
+
+## Изоляция истории склада по заказ-наряду — current-dev (#166)
+
+Добавлен закрытый synthetic `GET /api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/stock?limit=50`. Только активный сотрудник `WAREHOUSE` или `MANAGER`, которому разрешены конкретные организация и филиал, видит ограниченную историю движений `RESERVE`, `ISSUE`, `RELEASE` именно заказ-наряда этого филиала. Ответ содержит `eventId`, `skuId`, `article`, `action`, `quantity`, `createdAt`. Сессия, tenant и scope проверяются в транзакции; чужие идентификаторы/отозванные гранты → 403, некорректный limit → 422. Кэширование запрещено. PG17: `tests/integration/test_pg_auto_order_stock_read.py`.
+
+Это read-only внутренняя ручка без новых прав и без новых таблиц, закрыта dev loopback HTTPS и explicit flag. Никаких production данных/складских прав она не создаёт. Не заявлять, что обеспечена tenant-изоляция всех клиентов и финансов: #166 и #119 остаются OPEN.
