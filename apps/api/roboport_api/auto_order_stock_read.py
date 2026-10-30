@@ -8,8 +8,9 @@ from .auto_stock_service import AutoStockDenied
 def list_work_order_stock(conn: psycopg.Connection, token: str,
                           organization_id: UUID, location_id: UUID,
                           work_order_id: UUID, *, limit: int = 50) -> list[dict]:
-    if (type(token) is not str or not token
-            or any(type(v) is not UUID for v in (organization_id, location_id, work_order_id))
+    if type(token) is not str or not token:
+        raise AutoStockDenied("FORBIDDEN")
+    if (any(type(v) is not UUID for v in (organization_id, location_id, work_order_id))
             or type(limit) is not int or not 1 <= limit <= 100):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
