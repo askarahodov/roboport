@@ -158,3 +158,34 @@ def test_owner_sql_pairing_rejects_unrelated_disposition():
                 db.execute("SET CONSTRAINTS ALL IMMEDIATE")
         assert db.execute("""SELECT count(*) FROM auto_stock_supplier_return_acceptance
             WHERE document_id=%s""",(doc,)).fetchone()[0]==0
+
+
+def test_supplier_return_rejects_malformed_inputs_before_db_access():
+    """Bad payloads must not reach privileged warehouse SQL or authorization queries."""
+    class NoDatabaseAccess:
+        def transaction(self):
+            raise AssertionError("invalid input reached database")
+
+    db = NoDatabaseAccess()
+    token = "synthetic-session"
+    org, loc, receipt, request = (uuid4() for _ in range(4))
+    for quantity in (True, 0, -1, 1_000_000_001, 1.5, "1", None):
+        with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
+            draft_supplier_return(db, token, org, loc, receipt, request,
+                                  quantity, "Возврат по браку", "RMA-123")
+    for reason in ("", " x ", "ab", "x" * 241, None, 123):
+        with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
+            draft_supplier_return(db, token, org, loc, receipt, request,
+                                  1, reason, "RMA-123")
+    for reference in ("", " x ", "ab", "x" * 161, None, 123):
+        with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
+            draft_supplier_return(db, token, org, loc, receipt, request,
+                                  1, "Возврат по браку", reference)
+    for invalid_token in (None, "", 123):
+        with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
+            approve_supplier_return(db, invalid_token, org, loc, uuid4(), request)
+    with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
+        draft_supplier_return(db, token, org, loc, str(receipt), request,
+                              1, "Возврат по браку", "RMA-123")
+    with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
+        approve_supplier_return(db, token, org, loc, str(receipt), request)
