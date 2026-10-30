@@ -46,3 +46,8 @@ Issue #119 и production release можно рассматривать к зак
 `python scripts/check_auto_release_ci.py --sha <40-hex-main-commit> --run-id <github-actions-run-id>` проверяет через GitHub API, что указанный прогон относится ровно к нужному SHA, событию `push` основной ветки `main`, стандартному `.github/workflows/ci.yml`, завершился `success`, а все пять jobs (`postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`) присутствуют и завершились `success`. Неполная страница job API (в том числе больше 100 jobs), пропущенные/отменённые проверки, ошибки сети или неверный SHA блокируют результат. Для ограничений GitHub API можно задать `GITHUB_TOKEN` из секретов окружения; значение не логируется.
 
 Это только независимая от self-reported JSON проверка *технического* CI run; она не является юридическим/безопасностным одобрением, не подтверждает подпись артефактов и не снимает остальные BLOCKED строки матрицы. `tests/contract/test_auto_release_ci.py` выполняет негативные проверки без сетевых вызовов.
+
+
+### Сверка реального формата GitHub Actions
+
+Проверка `check_auto_release_ci.py` принимает ровно `path=.github/workflows/ci.yml`, как возвращает GitHub Actions API; дополнительно сверяет `repository.full_name=askarahodov/roboport` и `id` прогона из CLI. Случайная или умышленная подмена репозитория/прогона блокируется. Это не заменяет независимое approval и не доказывает production readiness.
