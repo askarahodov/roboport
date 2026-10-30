@@ -98,3 +98,17 @@ def test_http_customer_read_denies_revoked_staff_grant(monkeypatch):
                         AND role_code='INTAKE' AND revoked_at IS NULL""",
                    (org, loc, d["intake"]))
     assert client.get(path).status_code == 403
+
+
+def test_http_customer_read_denies_disabled_organization(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d, org, loc, order, _, _ = prepare()
+    client = TestClient(app, base_url="https://127.0.0.1")
+    client.cookies.set("rp_session", d["tokens"][d["intake"]])
+    path = f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/customer"
+    assert client.get(path).status_code == 200
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_organization SET disabled_at=now() WHERE id=%s", (org,))
+    assert client.get(path).status_code == 403
