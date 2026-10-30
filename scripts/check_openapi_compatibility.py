@@ -35,6 +35,13 @@ def regressions(before: object, after: object) -> list[str]:
             if not isinstance(op_old, dict) or not isinstance(op_new, dict):
                 errors.append(f"INVALID_OPERATION:{verb.upper()}:{path}")
                 continue
+            old_params = {(p.get("in"), p.get("name")): p for p in op_old.get("parameters", []) if isinstance(p, dict)}
+            new_params = {(p.get("in"), p.get("name")): p for p in op_new.get("parameters", []) if isinstance(p, dict)}
+            for key, param in new_params.items():
+                if param.get("required") is True and (key not in old_params or old_params[key].get("required") is not True):
+                    errors.append(f"NEW_REQUIRED_PARAMETER:{verb.upper()}:{path}:{key}")
+            for key in old_params.keys() - new_params.keys():
+                errors.append(f"REMOVED_PARAMETER:{verb.upper()}:{path}:{key}")
             responses_old, responses_new = op_old.get("responses", {}), op_new.get("responses", {})
             if not isinstance(responses_old, dict) or not isinstance(responses_new, dict):
                 errors.append(f"INVALID_RESPONSES:{verb.upper()}:{path}")
@@ -53,10 +60,22 @@ def regressions(before: object, after: object) -> list[str]:
         if not isinstance(old, dict) or not isinstance(current, dict):
             errors.append(f"INVALID_SCHEMA:{name}")
             continue
+        old_required, new_required = old.get("required", []), current.get("required", [])
+        if isinstance(old_required, list) and isinstance(new_required, list):
+            for prop in set(new_required) - set(old_required):
+                errors.append(f"NEW_REQUIRED_PROPERTY:{name}.{prop}")
+        else:
+            errors.append(f"INVALID_REQUIRED:{name}")
+        if old.get("type") != current.get("type"):
+            errors.append(f"CHANGED_TYPE:{name}")
         old_props, new_props = old.get("properties", {}), current.get("properties", {})
         if isinstance(old_props, dict) and isinstance(new_props, dict):
             for prop in set(old_props) - set(new_props):
                 errors.append(f"REMOVED_PROPERTY:{name}.{prop}")
+            for prop in set(old_props) & set(new_props):
+                earlier, later = old_props[prop], new_props[prop]
+                if isinstance(earlier, dict) and isinstance(later, dict) and earlier.get("type") != later.get("type"):
+                    errors.append(f"CHANGED_PROPERTY_TYPE:{name}.{prop}")
         else:
             errors.append(f"INVALID_PROPERTIES:{name}")
     return sorted(errors)
