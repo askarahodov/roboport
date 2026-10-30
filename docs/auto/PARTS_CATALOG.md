@@ -65,3 +65,16 @@
 `INVALID_INPUT` отклоняется до вызова провайдера; 429 → `RATE_LIMITED`, 401/403 → `LICENSE_REQUIRED`, timeout/5xx и неверный batch → `UNAVAILABLE`. Внешние URL, bodies и secrets не попадут в сообщения доменных ошибок. Проверка: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_oem_sandbox.py`.
 
 **Остаётся planned:** согласовать лицензию и тарифы PartsAPI.ru/plan.parts, реализовать реальный авторизованный HTTP transport с tenant ACL/rate-limit, sandbox-контрактные тесты с доступом провайдера, UI и legal gate #119. Это не production OEM-поиск.
+
+
+## PartsAPI.ru: тестовый лимит 50 запросов в сутки (#111, 30.10.2026)
+
+Владелец продукта получил тестовый ключ и сообщил лимит **50 запросов в сутки**. Имя GitHub Actions Secret: `PARTSAPI_TEST_KEY` (значение не хранить в коде/Issues/логах). **Обычные CI PR/push, offline tests и сборки не обращаются к PartsAPI и не тратят квоту.** Никакого автоматического ежедневного расписания или retry внешнего API.
+
+Официальный [getCrosses](https://partsapi.ru/method/doc/getCrosses) описывает поля `brand`, `partNumber`, `crossBrand`, `crossNumber`; [getApplicability](https://partsapi.ru/method/doc/getApplicability) требует `sku` и `brand`. Описанные на публичных страницах подписки платные; тестовый доступ не является правом на production или массовое копирование. Правила сервиса запрещают парсинг.
+
+**Реализовано (offline):** `auto_partsapi.py` нормализует `getCrosses` без выдуманных данных, фиксирует `source_revision` и timezone-aware `retrieved_at`, назначает кроссам `UNVERIFIED`. `DailyRequestBudget` даёт атомарный локальный предел до 50 операций (или меньший для ручного smoke). Этот объект **не является суточным счётчиком между процессами, CI runs или перезапусками**. Его нельзя подключать к реальному HTTP без общего персистентного счётчика и fail-closed резервирования, учитывающего все запуски и уже потраченные запросы в кабинете. До готовности такого механизма live API вызовы из приложения и CI **отключены**.
+
+Тесты: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_partsapi.py`. Никакие токены или реальные VIN не нужны.
+
+**Далее:** проверить в кабинете фактическую форму запроса (endpoint, параметры авторизации, JSON envelope), условия хранения данных и текущий остаток лимита; по возможности оформить письменное подтверждение от PartsAPI. Только после этого реализовать отдельный явно разрешаемый single-call smoke со счётчиком; полноценный tenant-scoped HTTP/UI, лицензию и release gate #119 не считать завершёнными.
