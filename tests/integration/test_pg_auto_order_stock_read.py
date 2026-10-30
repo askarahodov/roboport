@@ -83,3 +83,35 @@ def test_http_order_stock_route_requires_session_and_exact_scope(monkeypatch):
 def test_stock_read_rejects_whitespace_token_without_db():
     with pytest.raises(AutoStockDenied, match="FORBIDDEN"):
         list_work_order_stock(None, "  ", uuid4(), uuid4(), uuid4())
+
+
+def test_http_order_stock_denies_revoked_warehouse_grant(monkeypatch):
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d = _scenario()
+    with psycopg.connect(DSN) as db:
+        org, loc, bay = _org_and_bay(db)
+        order, _ = work_order(db, d, org, loc, bay)
+        item = sku(db, org, loc)
+        record(db, item, "RECEIPT", 2)
+        role = grant(db, d["intake"], org, loc)
+        act(db, d, org, loc, order, item, "RESERVE", 1)
+
+    client = TestClient(app, base_url="https://127.0.0.1")
+    client.cookies.set("rp_session", d["tokens"][d["intake"]])
+    path = f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/stock"
+    initial = client.get(path)
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["items"][0]["action"] == "RESERVE"
+
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
+            (role,),
+        )
+    assert client.get(path).status_code == 403
+    assert client.get(path + "?limit=1").status_code == 403
