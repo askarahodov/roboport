@@ -31,7 +31,7 @@ def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
     # O_NOFOLLOW guards against a file being replaced by a symlink after checks.
     # fstat validates the opened descriptor, not an earlier path lookup.
     try:
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_BINARY", 0)
         if not hasattr(os, "O_NOFOLLOW"):
             raise SyntheticImportRejected("secure source open unavailable")
         descriptor = os.open(path, flags | os.O_NOFOLLOW)
