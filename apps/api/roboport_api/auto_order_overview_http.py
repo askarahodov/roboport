@@ -12,7 +12,7 @@ router = APIRouter(include_in_schema=False)
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/overview")
 def read_order_overview(org_id: str, loc_id: str, order_id: str,
-                        request: Request, limit: int = 50):
+                        request: Request, limit: int = 50, cursor: str | None = None):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
@@ -24,7 +24,7 @@ def read_order_overview(org_id: str, loc_id: str, order_id: str,
         try:
             result = get_order_overview(
                 db, request.cookies.get("rp_session", ""), org, loc, order,
-                limit=limit,
+                limit=limit, cursor=cursor,
             )
         except AutoStockDenied as exc:
             return _response(request, 422 if str(exc) == "INVALID_INPUT" else 403,
