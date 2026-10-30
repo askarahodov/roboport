@@ -19,9 +19,11 @@ def organization_role_allows(conn: psycopg.Connection, token: str,
     organization, location and grant are locked to serialize with revocations.
     This deliberately does not consult the legacy user_role table.
     """
-    if (not isinstance(organization_id, UUID)
-            or (location_id is not None and not isinstance(location_id, UUID))
-            or role not in ROLE_CODES or not isinstance(token, str)):
+    if (type(organization_id) is not UUID
+            or (location_id is not None and type(location_id) is not UUID)
+            or type(role) is not str or role not in ROLE_CODES
+            or type(token) is not str or not token
+            or type(for_mutation) is not bool):
         return False
     actor = session_subject(conn, token, for_mutation=for_mutation)
     if actor is None:
