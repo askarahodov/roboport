@@ -1,11 +1,11 @@
 """Independently approved supplier return with physical and source cost attribution.
 
-Revision ID: 0072_auto_supplier_return_document
+Revision ID: 0072_auto_supplier_return
 Revises: 0071_auto_serial_movement
 """
 from alembic import op
 
-revision = "0072_auto_supplier_return_document"
+revision = "0072_auto_supplier_return"
 down_revision = "0071_auto_serial_movement"
 branch_labels = None
 depends_on = None
