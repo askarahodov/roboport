@@ -118,3 +118,8 @@ Compatibility gate объединяет параметры, заданные н�
 ### Синтетический HTTP read финансового баланса
 
 Добавлен GET `/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/financial-balance`. Срабатывает только при `ROBOport_SYNTHETIC_AUTO_API=1` и `ROBOport_SYNTHETIC_AUTH_API=1`, прямом HTTPS loopback без прокси и действительной cookie `rp_session`; нужен действующий MANAGER доступ к организации/филиалу и подтверждённая связь автомобиля с клиентом. Ответ `{orderId,balanceMinor,currency:null,syntheticOnly:true}` с `Cache-Control: no-store`. Ошибки: 403 для отсутствия полномочий или чужого объекта, 404 вне dev-контура, 422 для некорректных UUID. Нет оплаты, фискализации, бухгалтерского учёта или production API. Проверки HTTP: `tests/integration/test_pg_auto_order_financial_http.py`.
+
+
+### Внутренняя финансовая история WorkOrder
+
+GET `/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/financial-history?limit=50` (максимум 100) возвращает внутреннюю синтетическую историю начислений и корректировок (`items` с `id`, `action`, `amountMinor`, `reason`, `createdAt`) и `balanceMinor`. Маршрут доступен только через прямой HTTPS loopback с dev-флагами, ролью MANAGER нужного tenant/филиала, действующим клиентским подтверждением; `Cache-Control: no-store`. Неправильный scope, отозванная роль, отозванная связь клиента дают 403, некорректный limit — 422, отключённый dev-контур — 404. Это не платёжная история, чек, полноценный финансовый документ или public/prod endpoint. Сценарий проверяется `tests/integration/test_pg_auto_order_financial_history_http.py`; release #119 остаётся заблокированным.

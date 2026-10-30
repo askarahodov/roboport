@@ -29,3 +29,31 @@ def get_work_order_balance(conn: psycopg.Connection, token: str,
             raise AutoStockDenied("FORBIDDEN")
         return {"orderId": str(order_id), "balanceMinor": row[0],
                 "currency": None, "syntheticOnly": True}
+
+
+def list_work_order_financial_events(conn: psycopg.Connection, token: str,
+                                     organization_id: UUID, location_id: UUID,
+                                     order_id: UUID, *, limit: int = 50) -> dict:
+    """Read bounded append-only financial history after live MANAGER/ownership proof."""
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise AutoStockDenied("INVALID_INPUT")
+    with conn.transaction():
+        balance = get_work_order_balance(conn, token, organization_id, location_id, order_id)
+        rows = conn.execute(
+            """SELECT id,action,amount_minor,reason,created_at
+               FROM auto_work_order_financial_event
+               WHERE work_order_id=%s AND organization_id=%s AND location_id=%s
+               ORDER BY created_at DESC,id DESC LIMIT %s""",
+            (order_id, organization_id, location_id, limit),
+        ).fetchall()
+        return {
+            "orderId": balance["orderId"],
+            "balanceMinor": balance["balanceMinor"],
+            "currency": None,
+            "syntheticOnly": True,
+            "items": [
+                {"id": str(identifier), "action": action, "amountMinor": amount,
+                 "reason": reason, "createdAt": stamp.isoformat()}
+                for identifier, action, amount, reason, stamp in rows
+            ],
+        }
