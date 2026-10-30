@@ -18,7 +18,8 @@ REPO = "askarahodov/roboport"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def validate_run(run: object, jobs: object, expected_sha: str,\n                 expected_run_id: int | None = None) -> tuple[str, ...]:
+def validate_run(run: object, jobs: object, expected_sha: str,
+                 expected_run_id: int | None = None) -> tuple[str, ...]:
     if type(expected_sha) is not str or not SHA_RE.fullmatch(expected_sha):
         return ("INVALID_SHA",)
     if type(run) is not dict or type(jobs) is not dict:
@@ -28,7 +29,13 @@ def validate_run(run: object, jobs: object, expected_sha: str,\n                
             or run.get("event") != "push" or run.get("status") != "completed"
             or run.get("conclusion") != "success"):
         problems.append("RUN_NOT_VERIFIED")
-    if (expected_run_id is not None and\n            (type(expected_run_id) is not int or run.get("id") != expected_run_id)):\n        problems.append("RUN_ID_MISMATCH")\n    repository = run.get("repository")\n    if type(repository) is not dict or repository.get("full_name") != REPO:\n        problems.append("REPOSITORY_MISMATCH")\n    workflow = run.get("path")
+    if (expected_run_id is not None and
+            (type(expected_run_id) is not int or run.get("id") != expected_run_id)):
+        problems.append("RUN_ID_MISMATCH")
+    repository = run.get("repository")
+    if type(repository) is not dict or repository.get("full_name") != REPO:
+        problems.append("REPOSITORY_MISMATCH")
+    workflow = run.get("path")
     if (type(workflow) is not str or not
             workflow.split("@", 1)[0].endswith("/.github/workflows/ci.yml")):
         problems.append("UNEXPECTED_WORKFLOW")
