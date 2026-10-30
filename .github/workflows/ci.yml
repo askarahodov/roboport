@@ -101,6 +101,17 @@ jobs:
       - run: python -m pip check
       - run: PYTHONPATH=apps/api python -m pytest -q -ra tests/bootstrap
       - run: PYTHONPATH=apps/api python -m pytest -q -ra tests/contract
+      - name: Check OpenAPI compatibility against main on PR
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          mkdir -p /tmp/roboport-openapi-base
+          git show "${{ github.event.pull_request.base.sha }}:contracts/openapi.yaml" > /tmp/roboport-openapi-base/public.yaml
+          git show "${{ github.event.pull_request.base.sha }}:contracts/auto-dev-openapi.yaml" > /tmp/roboport-openapi-base/auto-dev.yaml
+          python scripts/check_openapi_compatibility.py --before /tmp/roboport-openapi-base/public.yaml --after contracts/openapi.yaml
+          python scripts/check_openapi_compatibility.py --before /tmp/roboport-openapi-base/auto-dev.yaml --after contracts/auto-dev-openapi.yaml
       - run: python scripts/check_contract.py
       - name: Validate Markdown local links and heading anchors
         run: python scripts/check_docs_links.py
