@@ -180,9 +180,11 @@ def test_staging_refuses_non_regular_input_without_stalling(tmp_path):
         pipe = tmp_path / "in.fifo"
         os.mkfifo(pipe)
         assert stat.S_ISFIFO(pipe.stat().st_mode)
-        # O_NONBLOCK is intentionally not required: regular-file validation
-        # must happen before reading and the staging path must fail closed.
-        # A symlink to the FIFO is rejected by O_NOFOLLOW.
+        # Nonblocking open prevents waiting indefinitely on a named pipe.
+        with pytest.raises(SyntheticImportRejected, match="source unavailable"):
+            stage_synthetic_csv(db, pipe, organization_id=org, batch_id=uuid4(),
+                                expected_sha256="0" * 64)
+        # A symlink to the FIFO is also rejected by O_NOFOLLOW.
         link = tmp_path / "to-fifo.csv"
         link.symlink_to(pipe)
         with pytest.raises(SyntheticImportRejected, match="source unavailable"):
