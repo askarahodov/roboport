@@ -41,3 +41,26 @@ def test_invalid_signoff_blocks():
 
 def test_structurally_complete_document_only_passes_schema():
     assert validate_evidence(complete()) == ()
+
+
+def test_unsafe_urls_and_invalid_timestamps_block():
+    for url in (
+        "https://localhost/review",
+        "https://127.0.0.1/approval",
+        "https://192.168.1.10/approval",
+        "https://user:password@github.com/example/review",
+        "https://github.com:444/example/review",
+        "https://github.com/",
+        "https://github.com/has space",
+        "http://github.com/example/review",
+        "https://[::1]/review",
+    ):
+        item = complete()
+        item["gates"]["ci_main"]["evidence_url"] = url
+        assert "ci_main" in validate_evidence(item), url
+
+    for date in ("not-a-date", "2026-10-30", "2026-10-30T10:00:00",
+                 "2026-10-30T11:00:00+01:00", "2026-13-30T10:00:00Z"):
+        item = complete()
+        item["approved_at"] = date
+        assert "APPROVAL_TIMESTAMP" in validate_evidence(item), date
