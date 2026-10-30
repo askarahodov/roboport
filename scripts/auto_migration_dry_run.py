@@ -19,7 +19,7 @@ TYPES = frozenset({"SKU", "STOCK"})
 SAFE_ARTICLE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
 
 
-def inspect_csv(path: Path) -> dict:
+def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None) -> dict:
     """Deterministic report without echoing any source data."""
     errors: list[dict] = []
     stats = {"SKU": 0, "STOCK": 0}
@@ -95,6 +95,10 @@ def inspect_csv(path: Path) -> dict:
         errors.append({"row": 0, "code": "STOCK_WITHOUT_SKU"})
     if physical == 0:
         errors.append({"row": 0, "code": "EMPTY_INPUT"})
+    if expected_counts is not None:
+        for field, actual in (("rows", physical), ("SKU", stats["SKU"]), ("STOCK", stats["STOCK"])):
+            if actual != expected_counts[field]:
+                errors.append({"row": 0, "code": "RECONCILIATION_" + field.upper()})
     return {"ok": not errors, "counts": stats, "errors": errors,
             "mode": "DRY_RUN_ONLY", "writes": 0}
 
@@ -103,9 +107,18 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("csv", type=Path)
     p.add_argument("--synthetic-only", action="store_true", required=True)
+    p.add_argument("--expect-rows", type=int)
+    p.add_argument("--expect-sku", type=int)
+    p.add_argument("--expect-stock", type=int)
     options = p.parse_args()
+    supplied = (options.expect_rows, options.expect_sku, options.expect_stock)
+    if any(x is not None for x in supplied) and any(x is None or x < 0 for x in supplied):
+        p.error("all three non-negative --expect-* counts are required together")
+    expected = None if all(x is None for x in supplied) else {
+        "rows": options.expect_rows, "SKU": options.expect_sku, "STOCK": options.expect_stock,
+    }
     try:
-        report = inspect_csv(options.csv)
+        report = inspect_csv(options.csv, expected_counts=expected)
     except (OSError, UnicodeError, csv.Error):
         report = {"ok": False, "counts": {"SKU": 0, "STOCK": 0},
                   "errors": [{"row": 0, "code": "UNREADABLE"}], "mode": "DRY_RUN_ONLY", "writes": 0}
