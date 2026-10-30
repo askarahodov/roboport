@@ -449,3 +449,69 @@ async def serial_return_http(org_id: str,request: Request):
 @router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/serial-movements/transfer")
 async def serial_transfer_http(org_id: str,request: Request):
     return await _serial_movement_http(org_id,request,"TRANSFER")
+
+
+class SupplierReturnDraftBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    sourceReceiptId: UUID
+    quantity: StrictInt = Field(ge=1,le=1000000000)
+    reason: str = Field(min_length=3,max_length=240)
+    supplierReference: str = Field(min_length=3,max_length=160)
+
+
+class SupplierReturnAcceptBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId: UUID
+    documentId: UUID
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns")
+async def draft_supplier_return_http(org_id:str,request:Request):
+    from .auto_stock_supplier_return_document import draft_supplier_return
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse): return dsn
+    try:
+        org=UUID(org_id)
+        data=SupplierReturnDraftBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            ident=draft_supplier_return(db,request.cookies.get("rp_session",""),
+                org,data.locationId,data.sourceReceiptId,key,data.quantity,
+                data.reason,data.supplierReference)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"documentId":str(ident)},
+                        headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns/approvals")
+async def approve_supplier_return_http(org_id:str,request:Request):
+    from .auto_stock_supplier_return_document import approve_supplier_return
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse): return dsn
+    try:
+        org=UUID(org_id)
+        data=SupplierReturnAcceptBody.model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            ident=approve_supplier_return(db,request.cookies.get("rp_session",""),
+                org,data.locationId,data.documentId,key)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"approvalId":str(ident)},
+                        headers={"Cache-Control":"no-store"})
