@@ -201,3 +201,10 @@
 Добавлен закрытый synthetic `GET /api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/stock?limit=50`. Только активный сотрудник `WAREHOUSE` или `MANAGER`, которому разрешены конкретные организация и филиал, видит ограниченную историю движений `RESERVE`, `ISSUE`, `RELEASE` именно заказ-наряда этого филиала. Ответ содержит `eventId`, `skuId`, `article`, `action`, `quantity`, `createdAt`. Сессия, tenant и scope проверяются в транзакции; чужие идентификаторы/отозванные гранты → 403, некорректный limit → 422. Кэширование запрещено. PG17: `tests/integration/test_pg_auto_order_stock_read.py`.
 
 Это read-only внутренняя ручка без новых прав и без новых таблиц, закрыта dev loopback HTTPS и explicit flag. Никаких production данных/складских прав она не создаёт. Не заявлять, что обеспечена tenant-изоляция всех клиентов и финансов: #166 и #119 остаются OPEN.
+
+
+## Customer → Vehicle → Appointment → WorkOrder: scoped read (#166, current-dev)
+
+Закрытый synthetic `GET /api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/customer` возвращает только идентификаторы `orderId`, `appointmentId`, `vehicleId`, `customerId`, `customerLinkId`, без VIN/контактов/PII. Обязательно активная tenant+branch роль `INTAKE` или `MANAGER`, живой session token, действующие организация и филиал, совпадение tenant в WorkOrder→Appointment, подтверждённая и **не отозванная** связь Customer↔Vehicle, а также неизменяемая привязка авто к этому филиалу. Чужая организация, иной филиал или отозванное подтверждение → 403; `Cache-Control: no-store`. После отзыва proof доступ к этому endpoint закрывается, исторические записи не удаляются.
+
+PG17+HTTP негативные/положительные тесты: `tests/integration/test_pg_auto_order_customer_read.py`. API доступен только через dev localhost HTTPS с включённым `ROBOport_SYNTHETIC_AUTO_API=1`; реальных данных или публичного API здесь нет. Это не полная production tenant isolation, не подтверждение клиента по одному VIN, и не release permission #119.
