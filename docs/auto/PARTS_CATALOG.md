@@ -56,3 +56,12 @@
 При невалидном VIN возвращается `INVALID_INPUT` до сети; частичный результат NHTSA — `NOT_FOUND`, timeout/некорректный JSON/5xx — `UNAVAILABLE`, 429 — `RATE_LIMITED`. Ответ ограничен по размеру, сетевой timeout ограничен 10 секундами. Нельзя выдавать результат американского vPIC за гарантированную идентификацию автомобиля для РФ, подтверждение владельца или совместимость запчастей.
 
 Официальная документация: https://vpic.nhtsa.dot.gov/api/ и https://vpic.nhtsa.dot.gov/api/home/index/faq . Сервис публичный и бесплатный без регистрации; возможны автоматические ограничения трафика, массовые выгрузки не выполнять. Проверка: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_nhtsa_vin.py`. Для production tenant ACL, consent, rate limiting, UX и gate #119 ещё не выполнены.
+
+
+## Универсальная OEM sandbox boundary (#111, current-dev)
+
+`apps/api/roboport_api/auto_oem_sandbox.py` содержит `OemSandboxAdapter` с внедряемой функцией `transport(kind, article)`. Это проверяемая **граница для тестового ответа**, но не реальный HTTP-клиент и не договор с PartsAPI.ru или plan.parts. Без credentials и проверенных условий поставщика реальные запросы не выполняются. Каталожные ответы обрабатываются через `parse_provider_parts`; при `alternatives` даже входной `VERIFIED` понижается до `UNVERIFIED`. Пустая выдача не превращается в доказательство отсутствия или совместимости детали.
+
+`INVALID_INPUT` отклоняется до вызова провайдера; 429 → `RATE_LIMITED`, 401/403 → `LICENSE_REQUIRED`, timeout/5xx и неверный batch → `UNAVAILABLE`. Внешние URL, bodies и secrets не попадут в сообщения доменных ошибок. Проверка: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_oem_sandbox.py`.
+
+**Остаётся planned:** согласовать лицензию и тарифы PartsAPI.ru/plan.parts, реализовать реальный авторизованный HTTP transport с tenant ACL/rate-limit, sandbox-контрактные тесты с доступом провайдера, UI и legal gate #119. Это не production OEM-поиск.
