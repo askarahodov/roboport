@@ -1,5 +1,6 @@
 """Synthetic joint order summary with signed, tenant-bound stock pagination."""
 from uuid import UUID
+import hashlib
 import psycopg
 from .auto_order_customer_read import get_order_customer_summary
 from .auto_order_stock_read import list_work_order_stock
@@ -24,7 +25,9 @@ def get_order_overview(conn: psycopg.Connection, token: str,
             or (cursor is not None and (type(cursor) is not str or not cursor))):
         raise AutoStockDenied("INVALID_INPUT")
 
-    scope = f"auto-stock:{organization_id}:{location_id}:{order_id}"
+    scope_identity = f"auto-stock:{organization_id}:{location_id}:{order_id}"
+    # Keep the authenticated scope inside the signed cursor size bound (256).
+    scope = hashlib.sha256(scope_identity.encode("ascii")).hexdigest()[:32]
     position = None
     if cursor is not None:
         try:
