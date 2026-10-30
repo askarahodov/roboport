@@ -31,7 +31,7 @@ def read_work_order_financial_balance(org_id: str, loc_id: str, order_id: str, r
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/financial-history")
 def read_work_order_financial_history(org_id: str, loc_id: str, order_id: str,
-                                      request: Request, limit: int = 50):
+                                      request: Request, limit: int = 50, cursor: str | None = None):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
@@ -42,7 +42,7 @@ def read_work_order_financial_history(org_id: str, loc_id: str, order_id: str,
     with psycopg.connect(dsn) as db:
         try:
             result = list_work_order_financial_events(
-                db, request.cookies.get("rp_session", ""), org, loc, order, limit=limit,
+                db, request.cookies.get("rp_session", ""), org, loc, order, limit=limit, cursor=cursor,
             )
         except AutoStockDenied as exc:
             return _response(request, 422 if str(exc) == "INVALID_INPUT" else 403, str(exc))
