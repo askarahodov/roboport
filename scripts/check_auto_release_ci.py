@@ -29,7 +29,8 @@ def validate_run(run: object, jobs: object, expected_sha: str) -> tuple[str, ...
             or run.get("conclusion") != "success"):
         problems.append("RUN_NOT_VERIFIED")
     workflow = run.get("path")
-    if type(workflow) is not str or not workflow.endswith("/.github/workflows/ci.yml"):
+    if (type(workflow) is not str or not
+            workflow.split("@", 1)[0].endswith("/.github/workflows/ci.yml")):
         problems.append("UNEXPECTED_WORKFLOW")
     pages = jobs.get("total_count")
     data = jobs.get("jobs")
