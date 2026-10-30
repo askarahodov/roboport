@@ -10,8 +10,8 @@ def sample():
     run = {"head_sha": SHA, "head_branch": "main", "event": "push",
            "status": "completed", "conclusion": "success",
            "path": ".github/workflows/ci.yml",
-           "id": 41045503073, "repository": {"full_name": "askarahodov/roboport"}}
-    jobs = [{"name": name, "status": "completed", "conclusion": "success"}
+           "id": 41045503073, "run_attempt": 1, "repository": {"full_name": "askarahodov/roboport"}}
+    jobs = [{"name": name, "status": "completed", "conclusion": "success",\n             "head_sha": SHA, "run_id": 41045503073, "run_attempt": 1}
             for name in sorted(REQUIRED_JOBS)]
     return run, {"total_count": len(jobs), "jobs": jobs}
 
@@ -62,3 +62,17 @@ def test_real_github_run_identity_and_workflow_path():
         altered = deepcopy(run)
         altered[field] = value
         assert reason in validate_run(altered, jobs, SHA, 41045503073)
+
+
+def test_job_identity_must_match_run_and_attempt():
+    for field, wrong, expected in (
+        ("head_sha", "b" * 40, "JOB_SHA_MISMATCH"),
+        ("run_id", 42, "JOB_RUN_MISMATCH"),
+        ("run_attempt", 2, "JOB_RUN_MISMATCH"),
+    ):
+        run, jobs = sample()
+        jobs["jobs"][0][field] = wrong
+        assert expected in validate_run(run, jobs, SHA, 41045503073)
+    run, jobs = sample()
+    del jobs["jobs"][0]["head_sha"]
+    assert "JOB_SHA_MISMATCH" in validate_run(run, jobs, SHA)
