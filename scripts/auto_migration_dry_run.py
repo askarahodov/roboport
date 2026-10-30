@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import json
 from pathlib import Path
 
@@ -19,7 +20,8 @@ TYPES = frozenset({"SKU", "STOCK"})
 SAFE_ARTICLE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
 
 
-def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None) -> dict:
+def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None,
+                expected_sha256: str | None = None) -> dict:
     """Deterministic report without echoing any source data."""
     errors: list[dict] = []
     stats = {"SKU": 0, "STOCK": 0}
@@ -30,7 +32,16 @@ def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None) ->
     physical = 0
     if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
         return {"ok": False, "counts": stats, "errors": [{"row": 0, "code": "UNAVAILABLE"}]}
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+    # Parse exactly the bytes that are fingerprinted, not a second read of a mutable file.
+    with path.open("rb") as source:
+        data = source.read(MAX_FILE_BYTES + 1)
+    if len(data) > MAX_FILE_BYTES:
+        return {"ok": False, "counts": stats, "errors": [{"row": 0, "code": "UNAVAILABLE"}]}
+    if expected_sha256 is not None and hashlib.sha256(data).hexdigest() != expected_sha256:
+        return {"ok": False, "counts": stats,
+                "errors": [{"row": 0, "code": "SOURCE_CHECKSUM"}],
+                "mode": "DRY_RUN_ONLY", "writes": 0}
+    with io.StringIO(data.decode("utf-8-sig"), newline="") as handle:
         reader = csv.DictReader(handle, strict=True)
         if reader.fieldnames is None or tuple(reader.fieldnames) != COLUMNS:
             return {"ok": False, "counts": stats, "errors": [{"row": 1, "code": "SCHEMA"}]}
@@ -110,15 +121,22 @@ def main() -> int:
     p.add_argument("--expect-rows", type=int)
     p.add_argument("--expect-sku", type=int)
     p.add_argument("--expect-stock", type=int)
+    p.add_argument("--expect-sha256")
     options = p.parse_args()
     supplied = (options.expect_rows, options.expect_sku, options.expect_stock)
     if any(x is not None for x in supplied) and any(x is None or x < 0 for x in supplied):
         p.error("all three non-negative --expect-* counts are required together")
+    if options.expect_sha256 is not None and (
+        len(options.expect_sha256) != 64 or
+        any(char not in "0123456789abcdef" for char in options.expect_sha256)
+    ):
+        p.error("--expect-sha256 must be 64 lowercase hexadecimal characters")
     expected = None if all(x is None for x in supplied) else {
         "rows": options.expect_rows, "SKU": options.expect_sku, "STOCK": options.expect_stock,
     }
     try:
-        report = inspect_csv(options.csv, expected_counts=expected)
+        report = inspect_csv(options.csv, expected_counts=expected,
+                             expected_sha256=options.expect_sha256)
     except (OSError, UnicodeError, csv.Error):
         report = {"ok": False, "counts": {"SKU": 0, "STOCK": 0},
                   "errors": [{"row": 0, "code": "UNREADABLE"}], "mode": "DRY_RUN_ONLY", "writes": 0}
