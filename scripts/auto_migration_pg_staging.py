@@ -8,6 +8,8 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
+import stat
 import tempfile
 from pathlib import Path
 from uuid import UUID
@@ -26,12 +28,18 @@ def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
     if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
             or any(c not in "0123456789abcdef" for c in expected_sha256)):
         raise SyntheticImportRejected("invalid source fingerprint")
-    if path.is_symlink() or not path.is_file():
-        raise SyntheticImportRejected("source unavailable")
+    # O_NOFOLLOW guards against a file being replaced by a symlink after checks.
+    # fstat validates the opened descriptor, not an earlier path lookup.
     try:
-        with path.open("rb") as handle:
+        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_BINARY", 0)
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise SyntheticImportRejected("secure source open unavailable")
+        descriptor = os.open(path, flags | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise SyntheticImportRejected("source unavailable")
             snapshot = handle.read(MAX_FILE_BYTES + 1)
-    except OSError as exc:
+    except OSError:
         raise SyntheticImportRejected("source unavailable") from None
     if len(snapshot) > MAX_FILE_BYTES:
         raise SyntheticImportRejected("source unavailable")
