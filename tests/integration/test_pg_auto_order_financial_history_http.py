@@ -37,7 +37,14 @@ def test_financial_history_scoped_and_revoked(monkeypatch):
     assert data["balanceMinor"] == 4000 and data["syntheticOnly"] is True
     assert {x["action"] for x in data["items"]} == {"CHARGE","CREDIT"}
     assert len(data["items"]) == 2
-    assert len(client.get(url+"?limit=1").json()["items"]) == 1
+    first = client.get(url+"?limit=1").json()
+    assert len(first["items"]) == 1 and first["nextCursor"]
+    second = client.get(url,params={"limit":1,"cursor":first["nextCursor"]}).json()
+    assert len(second["items"]) == 1 and second["nextCursor"] is None
+    assert first["items"][0]["id"] != second["items"][0]["id"]
+    tampered = first["nextCursor"][:-1] + ("A" if first["nextCursor"][-1] != "A" else "B")
+    assert client.get(url,params={"cursor":tampered}).status_code == 422
+    assert client.get(url.replace(str(order),str(uuid4())),params={"cursor":first["nextCursor"]}).status_code == 422
     assert client.get(url+"?limit=101").status_code == 422
     assert client.get(url.replace(str(org),str(foreign)).replace(str(loc),str(foreign_loc))).status_code == 403
     assert client.get(url.replace(str(order),str(uuid4()))).status_code == 403
