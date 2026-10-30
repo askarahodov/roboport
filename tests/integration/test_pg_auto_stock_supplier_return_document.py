@@ -71,7 +71,6 @@ def test_pending_document_does_not_move_stock_and_overdraw_denied():
     d=_scenario()
     with psycopg.connect(DSN) as db:
         org,loc,sku,lot,receipt=setup_receipt(db,d,2)
-        doc=draft(db,d,org,loc,receipt,2) if False else None
         with pytest.raises(AutoStockConflict):
             draft(db,d,org,loc,receipt,2)
         value(db,d,org,loc,receipt,vat=101)
