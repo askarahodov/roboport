@@ -115,3 +115,27 @@ def test_http_order_stock_denies_revoked_warehouse_grant(monkeypatch):
         )
     assert client.get(path).status_code == 403
     assert client.get(path + "?limit=1").status_code == 403
+
+
+def test_http_stock_read_denies_disabled_location(monkeypatch):
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d = _scenario()
+    with psycopg.connect(DSN) as db:
+        org, loc, bay = _org_and_bay(db)
+        order, _ = work_order(db, d, org, loc, bay)
+        item = sku(db, org, loc)
+        record(db, item, "RECEIPT", 3)
+        grant(db, d["intake"], org, loc)
+        act(db, d, org, loc, order, item, "RESERVE", 1)
+    client = TestClient(app, base_url="https://127.0.0.1")
+    client.cookies.set("rp_session", d["tokens"][d["intake"]])
+    path = f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/stock"
+    assert client.get(path).status_code == 200
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_service_location SET disabled_at=now() WHERE id=%s", (loc,))
+    assert client.get(path).status_code == 403
