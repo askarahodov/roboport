@@ -2,6 +2,7 @@ import React from 'react';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Grant = { grantId: string; userId: string; role: string; locationId: string | null };
+type AuditEvent = { eventId: string; grantId: string; actorId: string; userId: string; action: 'GRANTED' | 'REVOKED'; role: string; locationId: string | null; createdAt: string };
 const roles = ['MANAGER', 'INTAKE', 'MECHANIC', 'WAREHOUSE'] as const;
 
 async function mutate(url: string, payload: unknown) {
@@ -21,13 +22,18 @@ export function AutoStaffAdmin() {
   const [location, setLocation] = React.useState('');
   const [role, setRole] = React.useState<typeof roles[number]>('INTAKE');
   const [items, setItems] = React.useState<Grant[]>([]);
+  const [audit, setAudit] = React.useState<AuditEvent[]>([]);
+  const [auditState, setAuditState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
+  const [auditLimit, setAuditLimit] = React.useState(30);
   const [state, setState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [busy, setBusy] = React.useState(false);
   const [confirmId, setConfirmId] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState('');
   const [refresh, setRefresh] = React.useState(0);
   const validOrg = uuid.test(organization.trim());
-  React.useEffect(() => { setConfirmId(null); }, [organization]);
+  const organizationRef = React.useRef(organization.trim());
+  organizationRef.current = organization.trim();
+  React.useEffect(() => { setConfirmId(null); setAudit([]); setAuditState('idle'); setMessage(''); }, [organization]);
 
   React.useEffect(() => {
     if (!validOrg) { setItems([]); setState('idle'); return; }
@@ -53,6 +59,34 @@ export function AutoStaffAdmin() {
     return () => controller.abort();
   }, [organization, refresh, validOrg]);
 
+  async function loadAudit() {
+    if (!validOrg) return;
+    const currentOrg = organization.trim();
+    setAudit([]); setAuditState('loading');
+    try {
+      const response = await fetch('/api/v1/dev/auto/organizations/' +
+        encodeURIComponent(currentOrg) + '/staff/audit?limit=' + auditLimit,
+        { credentials: 'include', cache: 'no-store' });
+      if (organizationRef.current !== currentOrg) return;
+      if ([401,403,404].includes(response.status)) { setAuditState('denied'); return; }
+      if (!response.ok) throw new Error();
+      const body: unknown = await response.json();
+      if (!body || typeof body !== 'object' || !('items' in body) || !Array.isArray(body.items) ||
+          body.items.length > auditLimit || !body.items.every((e: unknown) =>
+            !!e && typeof e === 'object' &&
+            'eventId' in e && typeof e.eventId === 'string' && uuid.test(e.eventId) &&
+            'grantId' in e && typeof e.grantId === 'string' && uuid.test(e.grantId) &&
+            'actorId' in e && typeof e.actorId === 'string' && uuid.test(e.actorId) &&
+            'userId' in e && typeof e.userId === 'string' && uuid.test(e.userId) &&
+            'action' in e && (e.action === 'GRANTED' || e.action === 'REVOKED') &&
+            'role' in e && typeof e.role === 'string' &&
+            'createdAt' in e && typeof e.createdAt === 'string' &&
+            'locationId' in e && (e.locationId === null ||
+              typeof e.locationId === 'string' && uuid.test(e.locationId)))) throw new Error();
+      setAudit(body.items as AuditEvent[]); setAuditState('ready');
+    } catch { if (organizationRef.current === currentOrg) setAuditState('error'); }
+  }
+
   async function execute(path: string, payload: unknown, action: 'grant'|'revoke') {
     if (busy || !validOrg) return;
     setBusy(true); setMessage('');
@@ -65,6 +99,7 @@ export function AutoStaffAdmin() {
         return;
       }
       setMessage(action === 'grant' ? 'Назначение создано.' : 'Доступ сотрудника отозван.');
+      setAudit([]); setAuditState('idle');
       setRefresh(n => n + 1);
     } catch { setMessage('Ошибка соединения. Проверьте локальный стенд и сессию.'); }
     finally { setBusy(false); }
@@ -107,6 +142,22 @@ export function AutoStaffAdmin() {
           Назначить</button>
       </form>
     </>}
+    {state === 'ready' && <section aria-label="Журнал действий сотрудников">
+      <h2>Журнал назначений и отзывов</h2>
+      <p>Только подтверждённые сервером события этой организации. Отозванные назначения остаются в истории.</p>
+      <label>Количество записей <select value={auditLimit} onChange={e => {setAuditLimit(Number(e.target.value)); setAudit([]); setAuditState('idle');}}>
+        <option value={10}>10</option><option value={30}>30</option><option value={100}>100</option>
+      </select></label>
+      <button type="button" onClick={() => void loadAudit()} disabled={auditState === 'loading'}>Показать журнал</button>
+      {auditState === 'loading' && <p role="status">Загрузка журнала…</p>}
+      {auditState === 'denied' && <p role="alert">Доступ к журналу запрещён.</p>}
+      {auditState === 'error' && <p role="alert">Не удалось загрузить журнал. Повторите запрос.</p>}
+      {auditState === 'ready' && (audit.length ? <ul>{audit.map(event =>
+        <li key={event.eventId}>{event.action === 'GRANTED' ? 'Назначение' : 'Отзыв'} ·
+          {event.createdAt} · {event.role} · сотрудник {event.userId} ·
+          исполнитель {event.actorId} · {event.locationId ?? 'Все филиалы'}
+        </li>)}</ul> : <p>В журнале нет записей.</p>)}
+    </section>}
     {message && <p role="status">{message}</p>}
   </section>;
 }
