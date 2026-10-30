@@ -44,6 +44,10 @@ def validate_run(run: object, jobs: object, expected_sha: str,
     if type(pages) is not int or type(data) is not list or pages != len(data):
         problems.append("INCOMPLETE_JOB_LIST")
         return tuple(problems)
+    run_id = run.get("id")
+    attempt = run.get("run_attempt")
+    if type(run_id) is not int or run_id <= 0 or type(attempt) is not int or attempt <= 0:
+        problems.append("INVALID_RUN_ATTEMPT")
     seen = {}
     for job in data:
         if type(job) is not dict or type(job.get("name")) is not str:
@@ -59,8 +63,10 @@ def validate_run(run: object, jobs: object, expected_sha: str,
         job = seen[name]
         if job.get("status") != "completed" or job.get("conclusion") != "success":
             problems.append("UNSUCCESSFUL_" + name)
-        if job.get("head_sha") not in (None, expected_sha):
+        if job.get("head_sha") != expected_sha:
             problems.append("JOB_SHA_MISMATCH")
+        if job.get("run_id") != run_id or job.get("run_attempt") != attempt:
+            problems.append("JOB_RUN_MISMATCH")
     return tuple(problems)
 
 
