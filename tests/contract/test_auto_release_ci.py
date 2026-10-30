@@ -9,7 +9,8 @@ SHA = "a" * 40
 def sample():
     run = {"head_sha": SHA, "head_branch": "main", "event": "push",
            "status": "completed", "conclusion": "success",
-           "path": ".github/workflows/ci.yml",\n           "id": 41045503073, "repository": {"full_name": "askarahodov/roboport"}}
+           "path": ".github/workflows/ci.yml",
+           "id": 41045503073, "repository": {"full_name": "askarahodov/roboport"}}
     jobs = [{"name": name, "status": "completed", "conclusion": "success"}
             for name in sorted(REQUIRED_JOBS)]
     return run, {"total_count": len(jobs), "jobs": jobs}
