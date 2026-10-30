@@ -208,3 +208,10 @@
 Закрытый synthetic `GET /api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/customer` возвращает только идентификаторы `orderId`, `appointmentId`, `vehicleId`, `customerId`, `customerLinkId`, без VIN/контактов/PII. Обязательно активная tenant+branch роль `INTAKE` или `MANAGER`, живой session token, действующие организация и филиал, совпадение tenant в WorkOrder→Appointment, подтверждённая и **не отозванная** связь Customer↔Vehicle, а также неизменяемая привязка авто к этому филиалу. Чужая организация, иной филиал или отозванное подтверждение → 403; `Cache-Control: no-store`. После отзыва proof доступ к этому endpoint закрывается, исторические записи не удаляются.
 
 PG17+HTTP негативные/положительные тесты: `tests/integration/test_pg_auto_order_customer_read.py`. API доступен только через dev localhost HTTPS с включённым `ROBOport_SYNTHETIC_AUTO_API=1`; реальных данных или публичного API здесь нет. Это не полная production tenant isolation, не подтверждение клиента по одному VIN, и не release permission #119.
+
+
+## Единый обзор заказ-наряда — current-dev (#166)
+
+Закрытый synthetic маршрут `GET /api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/overview?limit=50` читает **в одной транзакции** подтверждённую связь Customer–Vehicle–Appointment–WorkOrder и ограниченную историю склада именно этого заказа. Ответ состоит из `customer` (те же ID, что отдельный read, без VIN и контактов) и `stock.items` (журнал SKU, до 100 элементов). Не возвращает частичные данные: необходимы **одновременно** активные `INTAKE` или `MANAGER` и `WAREHOUSE` или `MANAGER` полномочия на один филиал. Проверки выполняются в общей транзакции с блокировками отзыва прав. Нет права на чужой tenant/филиал/наряд или после отзыва связи — 403. `limit` вне 1–100 — 422; `Cache-Control: no-store`. `tests/integration/test_pg_auto_order_overview.py` проверяет успешный и отрицательные HTTP/PG17 сценарии.
+
+Маршрут доступен только на synthetic HTTPS localhost с dev-флагами и не входит в публичный OpenAPI. Production identity, финансы, завершённый WorkOrder, #119 и полный #166 остаются незавершёнными.
