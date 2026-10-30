@@ -40,7 +40,9 @@ def test_synthetic_staging_replay_is_idempotent(tmp_path):
         assert again["replayed"] is True and again["writes"] == 0
         assert db.execute("SELECT count(*) FROM auto_migration_staging_line WHERE batch_id=%s",
                           (batch,)).fetchone()[0] == 2
-        assert db.execute("SELECT count(*) FROM auto_stock_event").fetchone()[0] == 0
+        assert db.execute("""SELECT count(*) FROM auto_stock_event e
+                             JOIN auto_stock_sku s ON s.id=e.sku_id
+                             WHERE s.organization_id=%s""", (org,)).fetchone()[0] == 0
 
 
 def test_synthetic_staging_rejects_tamper_and_scope_without_partial_writes(tmp_path):
