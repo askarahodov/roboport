@@ -113,3 +113,8 @@ Compatibility gate объединяет параметры, заданные н�
 ## Закрытый финансовый read-path для автомобильного заказ-наряда
 
 `auto_order_financial_read.get_work_order_balance()` возвращает внутренний синтетический баланс WorkOrder в minor units (`currency: null`, `syntheticOnly: true`) только при активной автомобильной MANAGER-роли нужной организации и филиала и действительной verified, unrevoked связи клиента с автомобилем. Отзыв роли или клиентского proof, чужой tenant, неизвестный order и некорректные параметры блокируют ответ. Реальный PostgreSQL integration test покрывает CHARGE/CREDIT, revoke и tenant isolation. Это **не** публичный API и не полномочие на платежи, налоговый учёт либо продовые данные; до release gate #119 всё остаётся dev-only.
+
+
+### Синтетический HTTP read финансового баланса
+
+Добавлен GET `/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/financial-balance`. Срабатывает только при `ROBOport_SYNTHETIC_AUTO_API=1` и `ROBOport_SYNTHETIC_AUTH_API=1`, прямом HTTPS loopback без прокси и действительной cookie `rp_session`; нужен действующий MANAGER доступ к организации/филиалу и подтверждённая связь автомобиля с клиентом. Ответ `{orderId,balanceMinor,currency:null,syntheticOnly:true}` с `Cache-Control: no-store`. Ошибки: 403 для отсутствия полномочий или чужого объекта, 404 вне dev-контура, 422 для некорректных UUID. Нет оплаты, фискализации, бухгалтерского учёта или production API. Проверки HTTP: `tests/integration/test_pg_auto_order_financial_http.py`.
