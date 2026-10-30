@@ -162,3 +162,35 @@ def test_cli_requires_all_expected_counts(monkeypatch, tmp_path, capsys):
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 2
+
+
+def test_source_checksum_binds_exact_parsed_bytes(tmp_path):
+    import hashlib
+    org, loc = str(uuid4()), str(uuid4())
+    path = tmp_path / "source.csv"
+    write(path, [
+        ("SKU", "SKU-1", org, loc, "FILTER-001", "0"),
+        ("STOCK", "STOCK-1", org, loc, "FILTER-001", "25"),
+    ])
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert inspect_csv(path, expected_sha256=digest)["ok"] is True
+    path.write_bytes(path.read_bytes().replace(b",25", b",26"))
+    result = inspect_csv(path, expected_sha256=digest)
+    assert result["ok"] is False
+    assert result["errors"] == [{"row": 0, "code": "SOURCE_CHECKSUM"}]
+    assert "SKU-1" not in str(result) and org not in str(result)
+
+
+def test_cli_rejects_invalid_source_digest(monkeypatch, tmp_path):
+    import pytest
+    import sys
+    from scripts.auto_migration_dry_run import main
+    path = tmp_path / "source.csv"
+    write(path, [])
+    for value in ("abc", "G" * 64, "-1" * 32):
+        monkeypatch.setattr(sys, "argv", [
+            "dry-run", "--synthetic-only", "--expect-sha256", value, str(path)
+        ])
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 2
