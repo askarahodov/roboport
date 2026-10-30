@@ -141,3 +141,32 @@ def list_staff(conn: psycopg.Connection, token: str, organization_id: UUID) -> l
         ).fetchall()
         return [{"grantId":str(g),"userId":str(u),"role":role,
                  "locationId":str(loc) if loc else None} for g,u,role,loc in rows]
+
+
+def list_staff_audit(conn: psycopg.Connection, token: str,
+                     organization_id: UUID, *, limit: int = 100) -> list[dict]:
+    """Tenant-scoped, bounded immutable action history for current ADMIN only.
+
+    Includes revoked grants; never reveals an organization via another tenant.
+    """
+    if (type(organization_id) is not UUID or type(limit) is not int
+            or not 1 <= limit <= 100):
+        raise OrgStaffDenied("invalid request")
+    with conn.transaction():
+        _admin(conn, token, organization_id)
+        rows = conn.execute(
+            """SELECT a.id,a.grant_id,a.actor_id,a.action,a.created_at,
+                      g.user_id,g.role_code,g.location_id
+               FROM auto_org_staff_action a
+               JOIN auto_organization_role_grant g
+                 ON g.id=a.grant_id AND g.organization_id=a.organization_id
+               WHERE a.organization_id=%s
+               ORDER BY a.created_at DESC,a.id DESC LIMIT %s""",
+            (organization_id, limit),
+        ).fetchall()
+        return [{
+            "eventId": str(eid), "grantId": str(grant), "actorId": str(actor),
+            "action": action, "createdAt": stamp.isoformat(),
+            "userId": str(target), "role": role,
+            "locationId": str(loc) if loc else None,
+        } for eid, grant, actor, action, stamp, target, role, loc in rows]
