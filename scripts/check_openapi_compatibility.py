@@ -35,10 +35,21 @@ def regressions(before: object, after: object) -> list[str]:
             if not isinstance(op_old, dict) or not isinstance(op_new, dict):
                 errors.append(f"INVALID_OPERATION:{verb.upper()}:{path}")
                 continue
-            old_params = {(p.get("in"), p.get("name")): p for p in op_old.get("parameters", []) if isinstance(p, dict)}
-            new_params = {(p.get("in"), p.get("name")): p for p in op_new.get("parameters", []) if isinstance(p, dict)}
+            def params_at(path_item, operation):
+                values = {}
+                for parameter in path_item.get("parameters", []) + operation.get("parameters", []):
+                    if not isinstance(parameter, dict):
+                        continue
+                    key = (parameter.get("in"), parameter.get("name"))
+                    values[key] = parameter
+                return values
+
+            old_params = params_at(old, op_old)
+            new_params = params_at(new, op_new)
             for key, param in new_params.items():
-                if param.get("required") is True and (key not in old_params or old_params[key].get("required") is not True):
+                if param.get("required") is True and (
+                    key not in old_params or old_params[key].get("required") is not True
+                ):
                     errors.append(f"NEW_REQUIRED_PARAMETER:{verb.upper()}:{path}:{key}")
             for key in old_params.keys() - new_params.keys():
                 errors.append(f"REMOVED_PARAMETER:{verb.upper()}:{path}:{key}")
