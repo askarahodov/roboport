@@ -87,6 +87,8 @@ def inspect_csv(path: Path) -> dict:
     for key in sorted(stock_keys - sku_keys):
         # Do not emit the SKU/tenant identifier, even from synthetic fixtures.
         errors.append({"row": 0, "code": "STOCK_WITHOUT_SKU"})
+    if physical == 0:
+        errors.append({"row": 0, "code": "EMPTY_INPUT"})
     return {"ok": not errors, "counts": stats, "errors": errors,
             "mode": "DRY_RUN_ONLY", "writes": 0}
 
