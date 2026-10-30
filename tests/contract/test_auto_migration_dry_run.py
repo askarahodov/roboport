@@ -109,3 +109,56 @@ def test_stock_aggregate_separated_by_location_and_article(tmp_path):
     ])
     assert inspect_csv(path) == {"ok": True, "counts": {"SKU": 3, "STOCK": 3},
                                  "errors": [], "mode": "DRY_RUN_ONLY", "writes": 0}
+
+
+def test_reconciliation_checks_physical_and_accepted_counts(tmp_path):
+    org, loc = str(uuid4()), str(uuid4())
+    path = tmp_path / "batch.csv"
+    write(path, [
+        ("SKU", "SKU-1", org, loc, "FILTER-001", "0"),
+        ("STOCK", "EVENT-1", org, loc, "FILTER-001", "12"),
+    ])
+    assert inspect_csv(path, expected_counts={"rows": 2, "SKU": 1, "STOCK": 1})["ok"]
+    result = inspect_csv(path, expected_counts={"rows": 3, "SKU": 2, "STOCK": 0})
+    assert not result["ok"]
+    assert {e["code"] for e in result["errors"]} == {
+        "RECONCILIATION_ROWS", "RECONCILIATION_SKU", "RECONCILIATION_STOCK"
+    }
+    assert org not in str(result) and loc not in str(result)
+
+
+def test_reconciliation_does_not_count_invalid_rows_as_accepted(tmp_path):
+    org, loc = str(uuid4()), str(uuid4())
+    path = tmp_path / "invalid.csv"
+    write(path, [("SKU", "SKU-1", org, loc, "FILTER-001", "-1")])
+    result = inspect_csv(path, expected_counts={"rows": 1, "SKU": 1, "STOCK": 0})
+    assert {e["code"] for e in result["errors"]} == {
+        "QUANTITY", "RECONCILIATION_SKU"
+    }
+
+
+def test_cli_requires_all_expected_counts(monkeypatch, tmp_path, capsys):
+    import json
+    import sys
+    import pytest
+    from scripts.auto_migration_dry_run import main
+
+    org, loc = str(uuid4()), str(uuid4())
+    path = tmp_path / "batch.csv"
+    write(path, [("SKU", "SKU-1", org, loc, "FILTER-001", "0")])
+    monkeypatch.setattr(sys, "argv", ["dry-run", "--synthetic-only",
+                                     "--expect-rows", "1", "--expect-sku", "1",
+                                     "--expect-stock", "0", str(path)])
+    assert main() == 0
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+    monkeypatch.setattr(sys, "argv", ["dry-run", "--synthetic-only",
+                                     "--expect-rows", "1", str(path)])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    monkeypatch.setattr(sys, "argv", ["dry-run", "--synthetic-only",
+                                     "--expect-rows", "-1", "--expect-sku", "1",
+                                     "--expect-stock", "0", str(path)])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
