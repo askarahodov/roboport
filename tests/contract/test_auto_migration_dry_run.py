@@ -60,3 +60,22 @@ def test_cross_branch_stock_does_not_reconcile(tmp_path):
         ("STOCK","STOCK-1",org,b,"FILTER-001","1"),
     ])
     assert "STOCK_WITHOUT_SKU" in {e["code"] for e in inspect_csv(path)["errors"]}
+
+
+def test_header_only_csv_is_rejected_without_source_leak(tmp_path):
+    path = tmp_path / "empty.csv"
+    write(path, [])
+    expected = {"ok": False, "counts": {"SKU": 0, "STOCK": 0},
+                "errors": [{"row": 0, "code": "EMPTY_INPUT"}],
+                "mode": "DRY_RUN_ONLY", "writes": 0}
+    assert inspect_csv(path) == expected
+    assert inspect_csv(path) == expected
+
+
+def test_nonempty_invalid_csv_does_not_get_misclassified_as_empty(tmp_path):
+    org, loc = str(uuid4()), str(uuid4())
+    path = tmp_path / "bad-quantity.csv"
+    write(path, [("SKU", "SKU-1", org, loc, "FILTER-001", "-1")])
+    result = inspect_csv(path)
+    assert result["ok"] is False
+    assert result["errors"] == [{"row": 2, "code": "QUANTITY"}]
