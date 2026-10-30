@@ -28,6 +28,8 @@ from .auto_order_stock_read_http import router as auto_order_stock_read_router
 app.include_router(auto_order_stock_read_router)
 from .auto_order_customer_read_http import router as auto_order_customer_read_router
 app.include_router(auto_order_customer_read_router)
+from .auto_order_overview_http import router as auto_order_overview_router
+app.include_router(auto_order_overview_router)
 
 
 @app.middleware("http")
