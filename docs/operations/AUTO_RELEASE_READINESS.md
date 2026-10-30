@@ -123,3 +123,8 @@ Compatibility gate объединяет параметры, заданные н�
 ### Внутренняя финансовая история WorkOrder
 
 GET `/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/financial-history?limit=50` (максимум 100) возвращает внутреннюю синтетическую историю начислений и корректировок (`items` с `id`, `action`, `amountMinor`, `reason`, `createdAt`) и `balanceMinor`. Маршрут доступен только через прямой HTTPS loopback с dev-флагами, ролью MANAGER нужного tenant/филиала, действующим клиентским подтверждением; `Cache-Control: no-store`. Неправильный scope, отозванная роль, отозванная связь клиента дают 403, некорректный limit — 422, отключённый dev-контур — 404. Это не платёжная история, чек, полноценный финансовый документ или public/prod endpoint. Сценарий проверяется `tests/integration/test_pg_auto_order_financial_history_http.py`; release #119 остаётся заблокированным.
+
+
+### Постраничная финансовая история (синтетическая)
+
+Маршрут `financial-history` поддерживает `cursor` и `limit` (1–100). Подписанный keyset-cursor привязан к cookie-сессии и конкретным организации, филиалу и WorkOrder; чужой заказ или изменённый cursor дают `422`. Ответ содержит `nextCursor` (`null` на последней странице). Права MANAGER и доказательство связи клиента перепроверяются для каждой страницы. Это не production-платёжная история.
