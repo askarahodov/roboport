@@ -187,3 +187,10 @@
 ## Защита входных аргументов tenant authority (#166)
 
 `organization_role_allows` отклоняет некорректные идентификаторы организации и филиала, пустой/нестроковый токен, неизвестную или нестроковую роль, а также неверный тип `for_mutation` **до** обращения к PostgreSQL. Это предотвращает `TypeError` на контейнерных значениях роли и не выдаёт доступ по сомнительным аргументам. Указанная защита не меняет разрешённые роли и SQL ACL. Контрактные negative tests: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_org_authority_input.py`. Production enforcement, ADMIN bootstrap и полный DoD #166 остаются невыполненными.
+
+
+## Журнал кадровых операций ADMIN — полный dev-срез #166
+
+Добавлен `GET /api/v1/dev/auto/organizations/{org_id}/staff/audit?limit=100` для чтения **уже существующего неизменяемого журнала** `auto_org_staff_action`. При валидной активной сессии ADMIN именно запрошенной организации метод выдаёт до 100 событий выдачи/отзыва прав (`GRANTED`/`REVOKED`) с `eventId`, `grantId`, `actorId`, `userId`, `role`, `locationId`, `createdAt`. События отозванных прав остаются видимы. Tenant B не видит события A, отсутствующий ADMIN получает 403. Результат `Cache-Control: no-store`; неправильный `limit` отвергается с 422. Для полноценного интерфейса более 100 событий потребуются cursor pagination и retention policy (planned).
+
+Это **закрытый synthetic loopback HTTPS API**, включаемый только явным dev flag. Он не раскрывает и не регистрирует production персональные данные; production bootstrap, внешние права, финансы/склад, audit export, независимая оценка и #119 всё ещё не готовы. PG17 тест `tests/integration/test_pg_auto_org_staff_http.py` выполняет полный сценарий ADMIN: назначить → посмотреть список → отозвать → получить два события аудита, а также проверяет чужой tenant, limit и выключенный route.
