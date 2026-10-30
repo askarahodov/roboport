@@ -59,7 +59,9 @@ def test_http_read_rejects_missing_session_foreign_scope_and_revoked_link(monkey
     res=client.get(url)
     assert res.status_code == 200,res.text
     assert res.headers["cache-control"] == "no-store"
-    with psycopg.connect(DSN) as check:\n        actual_customer = check.execute("SELECT customer_id FROM auto_vehicle_customer_link WHERE id=%s", (d["link"],)).fetchone()[0]\n    assert res.json()["customerId"] == str(actual_customer)
+    with psycopg.connect(DSN) as check:
+        actual_customer = check.execute("SELECT customer_id FROM auto_vehicle_customer_link WHERE id=%s", (d["link"],)).fetchone()[0]
+    assert res.json()["customerId"] == str(actual_customer)
     assert client.get(url.replace(str(org),str(foreign)).replace(str(loc),str(foreign_loc))).status_code == 403
     assert client.get(url.replace(str(order),str(uuid4()))).status_code == 403
     with psycopg.connect(DSN) as db:
