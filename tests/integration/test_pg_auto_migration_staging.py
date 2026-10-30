@@ -149,3 +149,42 @@ def test_replay_rejects_matching_count_when_line_order_changed(tmp_path):
         with pytest.raises(SyntheticImportRejected, match="existing staging lines mismatch"):
             stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
                                 expected_sha256=digest)
+
+
+def test_staging_rejects_symlinked_source_before_database_write(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        batch = uuid4()
+        original = tmp_path / "source.csv"
+        digest = _csv(original, [
+            ("SKU", "SKU-1", str(org), str(loc), "FILTER-001", "0"),
+        ])
+        link = tmp_path / "indirect.csv"
+        link.symlink_to(original)
+        with pytest.raises(SyntheticImportRejected, match="source unavailable"):
+            stage_synthetic_csv(db, link, organization_id=org, batch_id=batch,
+                                expected_sha256=digest)
+        assert db.execute(
+            "SELECT count(*) FROM auto_migration_staging_batch WHERE id=%s",
+            (batch,),
+        ).fetchone()[0] == 0
+
+
+def test_staging_refuses_non_regular_input_without_stalling(tmp_path):
+    import os
+    import stat
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("named pipes unavailable on this platform")
+    with psycopg.connect(DSN) as db:
+        org, _, _ = _org_and_bay(db)
+        pipe = tmp_path / "in.fifo"
+        os.mkfifo(pipe)
+        assert stat.S_ISFIFO(pipe.stat().st_mode)
+        # O_NONBLOCK is intentionally not required: regular-file validation
+        # must happen before reading and the staging path must fail closed.
+        # A symlink to the FIFO is rejected by O_NOFOLLOW.
+        link = tmp_path / "to-fifo.csv"
+        link.symlink_to(pipe)
+        with pytest.raises(SyntheticImportRejected, match="source unavailable"):
+            stage_synthetic_csv(db, link, organization_id=org, batch_id=uuid4(),
+                                expected_sha256="0" * 64)
