@@ -18,11 +18,21 @@ def add_synthetic_order_service(conn, token: str, *,
         if not organization_role_allows(conn, token, organization_id,
                                         "MANAGER", location_id, for_mutation=True):
             raise OrderServiceDenied("FORBIDDEN")
-        # Lock the order to serialize duplicate requests; SQL trigger independently
-        # validates the tenant+branch match even if a caller bypasses this service.
+        # Recheck proof and booking at every mutation, including replay, not just
+        # at appointment creation. The SQL trigger independently enforces this.
         work_order = conn.execute("""
-            SELECT id FROM auto_work_order WHERE id=%s
-            AND organization_id=%s AND location_id=%s FOR UPDATE
+            SELECT w.id FROM auto_work_order w
+            JOIN auto_appointment a ON a.id=w.appointment_id
+            JOIN auto_bay_booking b ON b.id=a.booking_id
+            JOIN auto_vehicle_customer_link proof
+              ON proof.id=a.customer_link_id AND proof.vehicle_id=a.vehicle_id
+            WHERE w.id=%s AND w.organization_id=%s AND w.location_id=%s
+              AND a.organization_id=w.organization_id
+              AND a.location_id=w.location_id
+              AND b.organization_id=w.organization_id
+              AND b.location_id=w.location_id AND b.canceled_at IS NULL
+              AND proof.verified_at IS NOT NULL AND proof.revoked_at IS NULL
+            FOR UPDATE OF w
         """, (work_order_id,organization_id,location_id)).fetchone()
         catalog = conn.execute("""
             SELECT id FROM auto_service_catalog WHERE id=%s
