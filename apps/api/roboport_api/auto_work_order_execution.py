@@ -89,12 +89,6 @@ def start_execution(conn,token,org,loc,order,request_key):
     with conn.transaction():
         actor=_scope(conn,token,org,loc,order,("MANAGER",))
         state=_state(conn,order)
-        if state["approvedVersion"] is None:
-            raise ExecutionConflict("APPROVAL_REQUIRED")
-        if _snapshot(conn,order)["inspection"] is None:
-            raise ExecutionConflict("INSPECTION_REQUIRED")
-        if state["qcStatus"]=="QC_PASSED":
-            raise ExecutionConflict("QC_ALREADY_PASSED")
         prior=conn.execute("""
           SELECT id,request_key,actor_id FROM auto_work_order_execution
           WHERE work_order_id=%s
@@ -103,6 +97,12 @@ def start_execution(conn,token,org,loc,order,request_key):
             if (prior[1],prior[2])!=(request_key,actor):
                 raise ExecutionConflict("ALREADY_STARTED")
             return {"ok":True,"replayed":True,**_state(conn,order)}
+        if state["approvedVersion"] is None:
+            raise ExecutionConflict("APPROVAL_REQUIRED")
+        if _snapshot(conn,order)["inspection"] is None:
+            raise ExecutionConflict("INSPECTION_REQUIRED")
+        if state["qcStatus"]=="QC_PASSED":
+            raise ExecutionConflict("QC_ALREADY_PASSED")
         revision=conn.execute("""
           SELECT r.id FROM auto_work_order_estimate_revision r
           JOIN auto_work_order_estimate_decision d ON d.revision_id=r.id
