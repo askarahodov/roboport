@@ -84,3 +84,24 @@ def test_extra_sensitive_columns_rejected(tmp_path):
     manifest["sources"][0]["customer_name"] = "someone"
     path.write_text(json.dumps(manifest))
     assert inspect_provenance_bundle(path)["code"] == "SCHEMA"
+
+
+def test_manifest_duplicate_keys_are_rejected_fail_closed(tmp_path):
+    path, _ = make_bundle(tmp_path)
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original.replace('"synthetic_only": true', '"synthetic_only": false, "synthetic_only": true'), encoding="utf-8")
+    assert inspect_provenance_bundle(path)["code"] == "SCHEMA"
+
+
+def test_nested_duplicate_keys_are_rejected_fail_closed(tmp_path):
+    path, _ = make_bundle(tmp_path)
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original.replace('"kind": "CUSTOMER"', '"kind": "DOCUMENT", "kind": "CUSTOMER"'), encoding="utf-8")
+    assert inspect_provenance_bundle(path)["code"] == "SCHEMA"
+
+
+def test_boolean_schema_version_is_not_integer_one(tmp_path):
+    path, manifest = make_bundle(tmp_path)
+    manifest["schema"] = True
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert inspect_provenance_bundle(path)["code"] == "APPROVAL_REQUIRED"
