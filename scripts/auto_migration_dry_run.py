@@ -127,8 +127,10 @@ def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None,
                 expected_sha256: str | None = None) -> dict:
     """Fail closed for malformed or inaccessible synthetic CSV in API and CLI use."""
     try:
-        return _inspect_csv(path, expected_counts=expected_counts,
-                            expected_sha256=expected_sha256)
+        report = _inspect_csv(path, expected_counts=expected_counts,
+                              expected_sha256=expected_sha256)
+        # Early failures must honor the same read-only response contract.
+        return {**report, "mode": "DRY_RUN_ONLY", "writes": 0}
     except (OSError, UnicodeError, csv.Error, KeyError, TypeError, ValueError):
         return {"ok": False, "counts": {"SKU": 0, "STOCK": 0},
                 "errors": [{"row": 0, "code": "UNREADABLE"}],

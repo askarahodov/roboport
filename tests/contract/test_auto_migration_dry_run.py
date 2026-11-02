@@ -251,3 +251,39 @@ def test_cli_uses_same_fail_closed_report(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["dry-run", "--synthetic-only", str(path)])
     assert main() == 1
     assert json.loads(capsys.readouterr().out) == inspect_csv(path)
+
+
+def test_all_early_failures_keep_the_complete_read_only_contract(tmp_path):
+    org, loc = str(uuid4()), str(uuid4())
+    missing = tmp_path / "missing.csv"
+    bad_header = tmp_path / "header.csv"
+    bad_header.write_text("unexpected,columns\\n", encoding="utf-8")
+    invalid_digest = tmp_path / "digest.csv"
+    write(invalid_digest, [("SKU", "SKU-1", org, loc, "FILTER-001", "0")])
+    cases = [
+        inspect_csv(missing),
+        inspect_csv(bad_header),
+        inspect_csv(invalid_digest, expected_sha256="0" * 64),
+        inspect_csv(invalid_digest, expected_counts={"rows": 1}),
+    ]
+    for result in cases:
+        assert result["ok"] is False
+        assert result["mode"] == "DRY_RUN_ONLY"
+        assert result["writes"] == 0
+        assert result["counts"] == {"SKU": 0, "STOCK": 0}
+        assert len(result["errors"]) == 1
+        assert set(result["errors"][0]) == {"row", "code"}
+
+
+def test_cli_and_library_report_identical_schema_failure(tmp_path, monkeypatch, capsys):
+    import json
+    import sys
+    from scripts.auto_migration_dry_run import main
+    path = tmp_path / "invalid-header.csv"
+    path.write_text("wrong,columns\\n", encoding="utf-8")
+    expected = inspect_csv(path)
+    monkeypatch.setattr(sys, "argv", ["dry-run", "--synthetic-only", str(path)])
+    assert main() == 1
+    assert json.loads(capsys.readouterr().out) == expected
+    assert expected["mode"] == "DRY_RUN_ONLY"
+    assert expected["writes"] == 0
