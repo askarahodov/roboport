@@ -62,7 +62,20 @@ def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
     if any(UUID(row["organization_id"]) != organization_id for row in rows):
         raise SyntheticImportRejected("staging tenant mismatch")
     expected = (len(rows), report["counts"]["SKU"], report["counts"]["STOCK"])
+    locations = sorted({UUID(row["location_id"]) for row in rows})
     with conn.transaction():
+        # Replay must not bypass the enabled tenant/branch guard used on INSERT.
+        # Shared locks serialize scope disabling against both new and replayed batches.
+        for location_id in locations:
+            active = conn.execute("""
+                SELECT 1 FROM auto_service_location l
+                JOIN auto_organization o ON o.id=l.organization_id
+                WHERE l.id=%s AND o.id=%s
+                  AND l.disabled_at IS NULL AND o.disabled_at IS NULL
+                FOR SHARE OF l,o
+            """, (location_id, organization_id)).fetchone()
+            if active is None:
+                raise SyntheticImportRejected("staging scope unavailable")
         conn.execute("""
             INSERT INTO auto_migration_staging_batch
               (id,organization_id,source_sha256,row_count,sku_count,stock_count)
