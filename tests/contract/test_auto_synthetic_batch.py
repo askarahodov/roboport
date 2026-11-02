@@ -243,7 +243,8 @@ def test_atomic_bundle_fails_closed_when_no_replace_primitive_missing(tmp_path, 
     sources, digests = fixtures(tmp_path)
     destination = tmp_path / "output"
     destination.mkdir()
-    monkeypatch.setattr("scripts.auto_synthetic_batch.sys.platform", "win32")
+    from types import SimpleNamespace
+    monkeypatch.setattr("scripts.auto_synthetic_batch.sys", SimpleNamespace(platform="win32"))
     report = inspect_atomic_bundle(sources, destination, expected_sha256=digests)
     assert report["code"] == "OUTPUT_UNAVAILABLE"
     assert not list(destination.iterdir())
