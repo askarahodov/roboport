@@ -13,6 +13,7 @@
   - [Мобильное приложение](/guides/mobile.md)
 - **Реализовано в dev**
   - [Связь клиента с автомобилем](/auto/VEHICLE_OWNERSHIP.md)
+  - [Услуги автомобильного заказ-наряда](/auto/WORKSHOP_OPERATIONS.md)
   - [Аудит актуальности](/auto/DOCUMENTATION_AUDIT.md)
 - **Разработчикам**
   - [Продукт и функции](/auto/PRODUCT.md)
