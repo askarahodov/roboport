@@ -47,7 +47,8 @@ def test_explicit_mapping_produces_canonical_staging_input(tmp_path):
     assert str(org) not in str(report)
     assert target.stat().st_mode & 0o777 == 0o600
     with pytest.raises(VehicleMappingRejected, match="OUTPUT_UNAVAILABLE"):
-        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
 
 
 def test_rejects_extra_owner_column_and_ambiguous_header_without_output(tmp_path):
@@ -55,12 +56,14 @@ def test_rejects_extra_owner_column_and_ambiguous_header_without_output(tmp_path
     source, target = tmp_path / "owner.csv", tmp_path / "canonical.csv"
     write_fixture(source, [*MAPPING, "владелец"], [(*values(org, loc), "person")])
     with pytest.raises(VehicleMappingRejected, match="SCHEMA"):
-        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not target.exists()
     write_fixture(source, ["тип", "тип", *list(MAPPING)[2:]],
                   [values(org, loc)])
     with pytest.raises(VehicleMappingRejected, match="SCHEMA"):
-        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not target.exists()
 
 
@@ -71,13 +74,15 @@ def test_rejects_malformed_vin_and_duplicate_vin_without_output(tmp_path):
     bad[4] = "=1+1"
     write_fixture(source, MAPPING, [bad])
     with pytest.raises(VehicleMappingRejected, match="PREFLIGHT"):
-        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not target.exists()
     second = list(values(org, loc))
     second[1] = "TEST-2"
     write_fixture(source, MAPPING, [values(org, loc), second])
     with pytest.raises(VehicleMappingRejected, match="PREFLIGHT"):
-        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not target.exists()
 
 
@@ -94,7 +99,8 @@ def test_rejects_symlink_source_and_output(tmp_path):
     target.symlink_to(source)
     before = source.read_bytes()
     with pytest.raises(VehicleMappingRejected, match="OUTPUT_UNAVAILABLE"):
-        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert source.read_bytes() == before
 
 
@@ -114,7 +120,8 @@ def test_failed_output_publish_never_exposes_partial_file(tmp_path, monkeypatch)
         raise OSError("synthetic publish failure")
     monkeypatch.setattr(os, "link", broken_link)
     with pytest.raises(VehicleMappingRejected, match="OUTPUT_UNAVAILABLE"):
-        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not target.exists()
     assert not list(tmp_path.glob(".vehicle-map-*.tmp"))
 
@@ -125,7 +132,8 @@ def test_existing_target_is_not_replaced_by_atomic_publish(tmp_path):
     write_fixture(source, MAPPING, [values(org, loc)])
     target.write_bytes(b"existing")
     with pytest.raises(VehicleMappingRejected, match="OUTPUT_UNAVAILABLE"):
-        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert target.read_bytes() == b"existing"
     assert not list(tmp_path.glob(".vehicle-map-*.tmp"))
 
