@@ -17,7 +17,7 @@
 | [ADR-AUTO-001](auto/ADR-001.md) | current decision | Решение о поэтапной миграции |
 | [PARTS_CATALOG.md](auto/PARTS_CATALOG.md) | planned | Лицензированные OEM/aftermarket провайдеры |
 | [DOCUMENTATION_AUDIT.md](auto/DOCUMENTATION_AUDIT.md) | current | Сверка фактической реализации и устаревших разделов |
-| [Руководства по ролям](guides/INDEX.md) | planned | Администратор, приёмщик, механик, склад, руководитель, бухгалтер, клиент |
+| [Руководства по ролям](guides/INDEX.md) | частично current-dev / частично planned | Администратор, приёмщик, механик, склад, руководитель, бухгалтер, клиент |
 | [Политика документации](DOCUMENTATION_POLICY.md) | current | Обязательное обновление руководств в том же PR |
 
 ## Для разработчика / эксплуатации
