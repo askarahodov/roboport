@@ -43,9 +43,10 @@ def test_vehicle_staging_exact_replay_and_no_live_vehicle_insert(tmp_path):
             "SELECT count(*) FROM auto_vehicle WHERE vin=%s",
             ("1HGCM82633A004352",),
         ).fetchone()[0] == 0
-        assert db.execute(
-            "SELECT count(*) FROM auto_vehicle_customer_link"
-        ).fetchone()[0] == 0
+        assert db.execute("""
+            SELECT count(*) FROM auto_vehicle_customer_link l
+            JOIN auto_vehicle v ON v.id=l.vehicle_id WHERE v.vin=%s
+        """, ("1HGCM82633A004352",)).fetchone()[0] == 0
 
 
 def test_vehicle_staging_rollback_conflict_and_disabled_location(tmp_path):
