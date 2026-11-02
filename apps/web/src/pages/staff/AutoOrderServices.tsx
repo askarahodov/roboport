@@ -11,7 +11,7 @@ function parseServices(value: unknown): Service[] {
         && 'id' in item && typeof item.id === 'string' && uuid.test(item.id)
         && 'code' in item && typeof item.code === 'string'
         && 'title' in item && typeof item.title === 'string'
-        && 'durationMinutes' in item && Number.isInteger(item.durationMinutes)
+        && 'durationMinutes' in item && typeof item.durationMinutes === 'number' && Number.isInteger(item.durationMinutes)
         && item.durationMinutes >= 5 && item.durationMinutes <= 1440)) {
     throw new Error('Invalid catalog response');
   }
