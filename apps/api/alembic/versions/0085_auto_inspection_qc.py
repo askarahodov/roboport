@@ -80,15 +80,17 @@ def upgrade():
             AND o.disabled_at IS NULL AND loc.disabled_at IS NULL
           FOR SHARE OF w,a,b,proof,binding,o,loc
         ) THEN RAISE EXCEPTION 'inspection scope or proof unavailable'; END IF;
-        IF TG_TABLE_NAME='auto_work_order_qc_event' AND NOT EXISTS (
-          SELECT 1 FROM auto_work_order_inspection i
-          WHERE i.id=NEW.inspection_id
-            AND i.work_order_id=NEW.work_order_id
-            AND i.organization_id=NEW.organization_id
-            AND i.location_id=NEW.location_id
-            AND i.actor_id<>NEW.actor_id
-          FOR SHARE
-        ) THEN RAISE EXCEPTION 'inspection or independent actor unavailable'; END IF;
+        IF TG_TABLE_NAME='auto_work_order_qc_event' THEN
+          IF NOT EXISTS (
+            SELECT 1 FROM auto_work_order_inspection i
+            WHERE i.id=NEW.inspection_id
+              AND i.work_order_id=NEW.work_order_id
+              AND i.organization_id=NEW.organization_id
+              AND i.location_id=NEW.location_id
+              AND i.actor_id<>NEW.actor_id
+            FOR SHARE
+          ) THEN RAISE EXCEPTION 'inspection or independent actor unavailable'; END IF;
+        END IF;
         RETURN NEW;
       END $fn$
     """)
