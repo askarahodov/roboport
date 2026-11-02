@@ -113,10 +113,28 @@ def main() -> int:
     parser.add_argument("--service", type=Path, required=True)
     parser.add_argument("--service-sha256", required=True)
     parser.add_argument("--destination", type=Path, required=True)
+    parser.add_argument("--vehicle-field", action="append", metavar="SOURCE=TARGET",
+                        help="Explicit full vehicle column mapping; repeat for each field.")
+    parser.add_argument("--service-field", action="append", metavar="SOURCE=TARGET",
+                        help="Explicit full service column mapping; repeat for each field.")
     args = parser.parse_args()
+    mappings = {}
+    for kind, fields in (("VEHICLE", args.vehicle_field), ("SERVICE", args.service_field)):
+        if fields is None:
+            continue
+        entries = {}
+        for field in fields:
+            if "=" not in field:
+                parser.error("each --vehicle-field/--service-field requires SOURCE=TARGET")
+            source, target = field.split("=", 1)
+            if not source or not target or source in entries:
+                parser.error("invalid or duplicate source field")
+            entries[source] = target
+        mappings[kind] = entries
     report = inspect_synthetic_batch(
         {"VEHICLE": args.vehicle, "SERVICE": args.service}, args.destination,
         expected_sha256={"VEHICLE": args.vehicle_sha256, "SERVICE": args.service_sha256},
+        mappings=mappings or None,
     )
     print(json.dumps(report, sort_keys=True))
     return 0 if report["ok"] else 1
