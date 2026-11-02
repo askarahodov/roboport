@@ -90,6 +90,51 @@ def prepare_synthetic_batch(
         raise
 
 
+def prepare_atomic_bundle(
+    sources: dict[str, Path], destination: Path, *,
+    expected_sha256: dict[str, str],
+    mappings: dict[str, dict[str, str]] | None = None,
+) -> dict:
+    """Publish VEHICLE and SERVICE as one visible directory entry.
+
+    Destination is an existing trusted parent. No concurrent writers are
+    permitted; stdlib rename does not provide no-replace across all OSes.
+    """
+    if destination.is_symlink() or not destination.is_dir():
+        raise BatchDenied("OUTPUT_UNAVAILABLE")
+    final = destination / "vehicle-service-bundle"
+    if os.path.lexists(final):
+        raise BatchDenied("OUTPUT_CONFLICT")
+    with tempfile.TemporaryDirectory(prefix=".auto-bundle-", dir=destination) as root:
+        staged = Path(root) / "vehicle-service-bundle"
+        staged.mkdir(mode=0o700)
+        report = prepare_synthetic_batch(
+            sources, staged, expected_sha256=expected_sha256, mappings=mappings
+        )
+        if os.path.lexists(final):
+            raise BatchDenied("OUTPUT_CONFLICT")
+        try:
+            os.rename(staged, final)
+        except OSError:
+            raise BatchDenied("OUTPUT_UNAVAILABLE") from None
+    return {**report, "mode": "SYNTHETIC_XLSX_ATOMIC_BUNDLE"}
+
+
+def inspect_atomic_bundle(sources: dict[str, Path], destination: Path, *,
+                          expected_sha256: dict[str, str],
+                          mappings: dict[str, dict[str, str]] | None = None) -> dict:
+    try:
+        return prepare_atomic_bundle(
+            sources, destination, expected_sha256=expected_sha256, mappings=mappings
+        )
+    except (BatchDenied, OSError, TypeError, ValueError) as error:
+        return {
+            "ok": False, "mode": "SYNTHETIC_XLSX_ATOMIC_BUNDLE", "writes": 0,
+            "code": str(error) if isinstance(error, BatchDenied) else "UNAVAILABLE",
+            "release_allowed": False,
+        }
+
+
 def inspect_synthetic_batch(sources: dict[str, Path], destination: Path, *,
                             expected_sha256: dict[str, str],
                             mappings: dict[str, dict[str, str]] | None = None) -> dict:
@@ -113,6 +158,8 @@ def main() -> int:
     parser.add_argument("--service", type=Path, required=True)
     parser.add_argument("--service-sha256", required=True)
     parser.add_argument("--destination", type=Path, required=True)
+    parser.add_argument("--atomic-bundle", action="store_true",
+                        help="Publish the two files as a single directory entry.")
     parser.add_argument("--vehicle-field", action="append", metavar="SOURCE=TARGET",
                         help="Explicit full vehicle column mapping; repeat for each field.")
     parser.add_argument("--service-field", action="append", metavar="SOURCE=TARGET",
@@ -131,7 +178,8 @@ def main() -> int:
                 parser.error("invalid or duplicate source field")
             entries[source] = target
         mappings[kind] = entries
-    report = inspect_synthetic_batch(
+    runner = inspect_atomic_bundle if args.atomic_bundle else inspect_synthetic_batch
+    report = runner(
         {"VEHICLE": args.vehicle, "SERVICE": args.service}, args.destination,
         expected_sha256={"VEHICLE": args.vehicle_sha256, "SERVICE": args.service_sha256},
         mappings=mappings or None,
