@@ -157,3 +157,29 @@ def test_qc_allowed_after_reschedule_but_not_after_cancellation(monkeypatch):
     assert client.get(read).status_code==403
     assert client.post(qc,headers=mechanic,json={"requestKey":str(uuid4()),
                  "result":"PASS","findingCode":"NONE"}).status_code==403
+
+
+def test_concurrent_independent_qc_pass_allows_only_one_final_decision(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    d,org,loc,_,order,*_=scenario()
+    client=client_setup(monkeypatch)
+    _,inspect,qc=target(org,loc,order)
+    intake=token_as(client,d,d["intake"])
+    assert client.post(inspect,headers=intake,json=inspection()).status_code==201
+    barrier=Barrier(2)
+    def submit(_):
+        own=TestClient(app,base_url="https://127.0.0.1")
+        own.cookies.set("rp_session",d["tokens"][d["manager"]])
+        headers={"Origin":"https://127.0.0.1",
+                 "X-CSRF-Token":d["csrf"][d["manager"]]}
+        barrier.wait(timeout=10)
+        return own.post(qc,headers=headers,json={
+            "requestKey":str(uuid4()),"result":"PASS","findingCode":"NONE"})
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=list(pool.map(submit,range(2)))
+    assert sorted(result.status_code for result in results)==[201,409]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT count(*) FROM auto_work_order_qc_event
+                             WHERE work_order_id=%s AND result='PASS'""",
+                          (order,)).fetchone()[0]==1
