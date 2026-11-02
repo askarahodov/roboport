@@ -59,7 +59,7 @@ def session(client,d,user):
     return {"Origin":"https://127.0.0.1","X-CSRF-Token":d["csrf"][user]}
 
 
-def post(client,path,headers,key=None,**kw):
+def post(client,path,headers=None,key=None,**kw):
     return client.post(path,headers=headers,json={"requestKey":str(key or uuid4()),**kw})
 
 
