@@ -206,3 +206,28 @@ test('typed SDK отклоняет незаявленный полный VIN д�
   await expect(page.getByRole('alert')).toContainText('Не удалось получить список автомобилей');
   await expect(page.getByText('Synthetic Car')).toHaveCount(0);
 });
+
+test('клиентская справка объясняет пустой список, отзыв и planned функции на мобильном и desktop', async ({ page }) => {
+  await authorized(page);
+  await page.route(vehiclesUrl, route => route.fulfill({
+    status: 200, contentType: 'application/json', body: '{"items":[]}',
+  }));
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto('/account/vehicles');
+    await expect(page.getByRole('heading', { name: 'Помощь по автомобилям (dev)' })).toBeVisible();
+    for (const [question, answer] of [
+      ['Почему я не вижу автомобиль?', 'Самостоятельное добавление автомобиля пока недоступно'],
+      ['Что делать, если доступ запрещён или отозван?', 'Не подменяйте UUID'],
+      ['Почему список не загружается?', 'Обновить автомобили'],
+      ['Где запись, история ремонта, сметы и документы?', 'функции пока планируются'],
+    ]) {
+      const panel = page.locator('details').filter({ has: page.getByText(question, { exact: true }) });
+      await panel.locator('summary').click();
+      await expect(panel).toContainText(answer, { ignoreCase: true });
+      await panel.locator('summary').focus();
+      await expect(panel.locator('summary')).toBeFocused();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+});
