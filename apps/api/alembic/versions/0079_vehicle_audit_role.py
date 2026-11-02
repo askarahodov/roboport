@@ -27,7 +27,7 @@ def upgrade():
     # The role intentionally has no INSERT/UPDATE/DELETE, no VIN access
     # and no privileges on the live automotive domain.
     op.execute("""
-      GRANT SELECT (id, organization_id, source_sha256, row_count, created_at)
+      GRANT SELECT (id, organization_id, row_count)
       ON auto_vehicle_migration_batch
       TO roboport_vehicle_migration_auditor
     """)
@@ -40,7 +40,7 @@ def upgrade():
 def downgrade():
     # Disposable synthetic database only. Roles are cluster-scoped.
     op.execute("""
-      REVOKE SELECT (id, organization_id, source_sha256, row_count, created_at)
+      REVOKE SELECT (id, organization_id, row_count)
       ON auto_vehicle_migration_batch
       FROM roboport_vehicle_migration_auditor
     """)
