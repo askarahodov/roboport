@@ -134,3 +134,44 @@ def test_replay_detects_new_conflicting_live_vehicle_without_mutations(tmp_path)
             "SELECT count(*) FROM auto_vehicle_migration_line WHERE batch_id=%s",
             (batch,),
         ).fetchone()[0] == 1
+
+
+def test_separate_batches_cannot_stage_same_vin_and_error_hides_vin(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        path = tmp_path / "one.csv"
+        digest = source(path, [vehicle(org, loc, vin="1HGCM82633A004355")])
+        first, second = uuid4(), uuid4()
+        stage_synthetic_vehicles(db, path, organization_id=org,
+                                 batch_id=first, expected_sha256=digest)
+        with pytest.raises(VehicleStagingRejected, match="vehicle staging identity conflict") as error:
+            stage_synthetic_vehicles(db, path, organization_id=org,
+                                     batch_id=second, expected_sha256=digest)
+        assert "1HGCM82633A004355" not in str(error.value)
+        assert db.execute("SELECT count(*) FROM auto_vehicle_migration_batch WHERE id=%s",
+                          (second,)).fetchone()[0] == 0
+        assert stage_synthetic_vehicles(db, path, organization_id=org,
+                                        batch_id=first, expected_sha256=digest)["replayed"]
+
+
+def test_competing_transactions_cannot_stage_same_vin(tmp_path):
+    with psycopg.connect(DSN) as setup:
+        org, loc, _ = _org_and_bay(setup)
+    path = tmp_path / "concurrent.csv"
+    digest = source(path, [vehicle(org, loc, vin="1HGCM82633A004356")])
+    first, second = uuid4(), uuid4()
+    with psycopg.connect(DSN) as writer, psycopg.connect(DSN) as contender:
+        with writer.transaction():
+            stage_synthetic_vehicles(writer, path, organization_id=org,
+                                     batch_id=first, expected_sha256=digest)
+            contender.execute("SET lock_timeout='200ms'")
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                with contender.transaction():
+                    stage_synthetic_vehicles(
+                        contender, path, organization_id=org, batch_id=second,
+                        expected_sha256=digest,
+                    )
+        contender.execute("SET lock_timeout='0'")
+        with pytest.raises(VehicleStagingRejected, match="vehicle staging identity conflict"):
+            stage_synthetic_vehicles(contender, path, organization_id=org,
+                                     batch_id=second, expected_sha256=digest)
