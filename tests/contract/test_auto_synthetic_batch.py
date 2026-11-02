@@ -167,3 +167,56 @@ def test_batch_cli_invalid_domain_mapping_denies_both_outputs(tmp_path, monkeypa
     assert result["ok"] is False and result["writes"] == 0
     assert result["code"] == "MAPPING"
     assert not list(dest.iterdir())
+
+
+def test_atomic_bundle_publishes_two_files_as_single_directory(tmp_path):
+    from scripts.auto_synthetic_batch import inspect_atomic_bundle
+    sources, digests = fixtures(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+    report = inspect_atomic_bundle(sources, output, expected_sha256=digests)
+    assert report["ok"] and report["writes"] == 0 and not report["release_allowed"]
+    assert report["mode"] == "SYNTHETIC_XLSX_ATOMIC_BUNDLE"
+    bundle = output / "vehicle-service-bundle"
+    assert sorted(path.name for path in bundle.iterdir()) == ["service.csv", "vehicle.csv"]
+    for kind in sources:
+        path = bundle / (kind.lower() + ".csv")
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == report["sha256"][kind]
+    assert not list(output.glob(".auto-bundle-*"))
+
+
+def test_atomic_bundle_refuses_tampered_second_source_without_publishing(tmp_path):
+    from scripts.auto_synthetic_batch import inspect_atomic_bundle
+    sources, digests = fixtures(tmp_path)
+    destination = tmp_path / "output"
+    destination.mkdir()
+    sources["SERVICE"].write_bytes(sources["SERVICE"].read_bytes() + b"corrupt")
+    result = inspect_atomic_bundle(sources, destination, expected_sha256=digests)
+    assert result["ok"] is False and result["code"] == "SOURCE_CHECKSUM"
+    assert not list(destination.iterdir())
+
+
+def test_atomic_bundle_refuses_existing_directory_even_when_empty(tmp_path):
+    from scripts.auto_synthetic_batch import inspect_atomic_bundle
+    sources, digests = fixtures(tmp_path)
+    destination = tmp_path / "output"
+    destination.mkdir()
+    prior = destination / "vehicle-service-bundle"
+    prior.mkdir()
+    result = inspect_atomic_bundle(sources, destination, expected_sha256=digests)
+    assert result["code"] == "OUTPUT_CONFLICT"
+    assert list(prior.iterdir()) == []
+    assert sorted(p.name for p in destination.iterdir()) == ["vehicle-service-bundle"]
+
+
+def test_atomic_bundle_rename_failure_removes_unpublished_files(tmp_path, monkeypatch):
+    from scripts.auto_synthetic_batch import inspect_atomic_bundle
+    sources, digests = fixtures(tmp_path)
+    destination = tmp_path / "output"
+    destination.mkdir()
+    def reject(*args, **kwargs):
+        raise OSError("simulated rename failure")
+    monkeypatch.setattr(os, "rename", reject)
+    result = inspect_atomic_bundle(sources, destination, expected_sha256=digests)
+    assert result["code"] == "OUTPUT_UNAVAILABLE"
+    assert not list(destination.iterdir())
