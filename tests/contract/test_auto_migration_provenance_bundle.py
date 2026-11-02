@@ -105,3 +105,14 @@ def test_boolean_schema_version_is_not_integer_one(tmp_path):
     manifest["schema"] = True
     path.write_text(json.dumps(manifest), encoding="utf-8")
     assert inspect_provenance_bundle(path)["code"] == "APPROVAL_REQUIRED"
+
+
+def test_nonfinite_json_constants_rejected_even_in_ignored_fields(tmp_path):
+    for constant in ("NaN", "Infinity", "-Infinity"):
+        path, _ = make_bundle(tmp_path)
+        raw = path.read_text(encoding="utf-8")
+        path.write_text(raw.replace('"schema": 1', '"schema": 1, "extra": ' + constant), encoding="utf-8")
+        result = inspect_provenance_bundle(path)
+        assert result["code"] == "SCHEMA"
+        assert result["writes"] == 0
+        assert result["release_allowed"] is False
