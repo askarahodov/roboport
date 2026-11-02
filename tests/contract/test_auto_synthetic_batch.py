@@ -101,3 +101,69 @@ def test_missing_input_and_missing_output_dir_are_safe(tmp_path):
     assert result["ok"] is False
     assert result["writes"] == 0
     assert not list(output.iterdir())
+
+
+def test_batch_cli_maps_both_reordered_xlsx_sources(tmp_path, monkeypatch, capsys):
+    import csv
+    import json
+    import sys
+    from scripts.auto_synthetic_batch import main
+    sources, _ = fixtures(tmp_path)
+    mappings = {}
+    specs = {
+        "VEHICLE": (COLUMNS, ("VEHICLE", "SRC-1", str(uuid4()), str(uuid4()),
+                              "1HGCM82633A004381", "SYNTHETIC", "TEST CAR", "DEMO")),
+        "SERVICE": (FIELDS, ("SERVICE", "DEMO", "SRC-1",
+                             "BRAKE-TEST", "SYNTHETIC", "30")),
+    }
+    for kind, (canonical, values) in specs.items():
+        indexed = list(reversed(range(len(canonical))))
+        workbook(sources[kind],
+                 ["CUSTOM_" + str(i) for i in indexed],
+                 [values[i] for i in indexed])
+        mappings[kind] = [
+            item for i, name in enumerate(canonical)
+            for item in ("--" + kind.lower() + "-field", "CUSTOM_" + str(i) + "=" + name)
+        ]
+    digests = {kind: hashlib.sha256(source.read_bytes()).hexdigest()
+               for kind, source in sources.items()}
+    dest = tmp_path / "converted"
+    dest.mkdir()
+    argv = ["batch", "--synthetic-only",
+            "--vehicle", str(sources["VEHICLE"]),
+            "--vehicle-sha256", digests["VEHICLE"],
+            "--service", str(sources["SERVICE"]),
+            "--service-sha256", digests["SERVICE"],
+            "--destination", str(dest),
+            *mappings["VEHICLE"], *mappings["SERVICE"]]
+    monkeypatch.setattr(sys, "argv", argv)
+    assert main() == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] and result["rows"] == {"VEHICLE": 1, "SERVICE": 1}
+    assert result["writes"] == 0 and result["release_allowed"] is False
+    for kind, (canonical, _) in specs.items():
+        with (dest / (kind.lower() + ".csv")).open(encoding="utf-8", newline="") as handle:
+            assert tuple(next(csv.reader(handle))) == canonical
+
+
+def test_batch_cli_invalid_domain_mapping_denies_both_outputs(tmp_path, monkeypatch, capsys):
+    import json
+    import sys
+    from scripts.auto_synthetic_batch import main
+    sources, digests = fixtures(tmp_path)
+    dest = tmp_path / "converted"
+    dest.mkdir()
+    monkeypatch.setattr(sys, "argv", [
+        "batch", "--synthetic-only",
+        "--vehicle", str(sources["VEHICLE"]),
+        "--vehicle-sha256", digests["VEHICLE"],
+        "--service", str(sources["SERVICE"]),
+        "--service-sha256", digests["SERVICE"],
+        "--destination", str(dest),
+        "--service-field", "only=record_type",
+    ])
+    assert main() == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is False and result["writes"] == 0
+    assert result["code"] == "MAPPING"
+    assert not list(dest.iterdir())
