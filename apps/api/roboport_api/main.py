@@ -38,6 +38,8 @@ from .auto_workshop_qc_http import router as auto_workshop_qc_router
 app.include_router(auto_workshop_qc_router)
 from .auto_work_order_estimate_http import router as auto_work_order_estimate_router
 app.include_router(auto_work_order_estimate_router)
+from .auto_work_order_execution_http import router as auto_work_order_execution_router
+app.include_router(auto_work_order_execution_router)
 
 
 @app.middleware("http")

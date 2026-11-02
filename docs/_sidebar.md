@@ -15,6 +15,7 @@
   - [Связь клиента с автомобилем](/auto/VEHICLE_OWNERSHIP.md)
   - [Услуги автомобильного заказ-наряда](/auto/WORKSHOP_OPERATIONS.md)
   - [Версии и согласование автомобильной сметы](/auto/ESTIMATES.md)
+  - [Работы, детали и независимый QC](/auto/EXECUTION.md)
   - [Аудит актуальности](/auto/DOCUMENTATION_AUDIT.md)
 - **Разработчикам**
   - [Продукт и функции](/auto/PRODUCT.md)
