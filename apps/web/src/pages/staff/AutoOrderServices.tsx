@@ -25,16 +25,19 @@ export function AutoOrderServices() {
   const [status, setStatus] = React.useState<State>('idle');
   const [catalog, setCatalog] = React.useState<Service[]>([]);
   const [selected, setSelected] = React.useState<Service[]>([]);
+  const [loadedScope, setLoadedScope] = React.useState('');
   const [revision, setRevision] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState('');
   const valid = [organization, location, order].every(value => uuid.test(value.trim()));
+  const scopeKey = [organization.trim(), location.trim(), order.trim()].join(':');
+  const readyForScope = status === 'ready' && loadedScope === scopeKey;
   const base = '/api/v1/dev/auto/organizations/' + encodeURIComponent(organization.trim())
     + '/locations/' + encodeURIComponent(location.trim());
   const orderPath = base + '/orders/' + encodeURIComponent(order.trim()) + '/services';
 
   React.useEffect(() => {
-    setCatalog([]); setSelected([]); setMessage('');
+    setCatalog([]); setSelected([]); setLoadedScope(''); setMessage('');
     if (!valid) { setStatus('idle'); return; }
     const controller = new AbortController();
     setStatus('loading');
@@ -53,7 +56,8 @@ export function AutoOrderServices() {
         const available = parseServices(data[0]);
         const assigned = parseServices(data[1]);
         if (controller.signal.aborted) return;
-        setCatalog(available); setSelected(assigned); setStatus('ready');
+        setCatalog(available); setSelected(assigned);
+        setLoadedScope(scopeKey); setStatus('ready');
       } catch {
         if (!controller.signal.aborted) setStatus('error');
       }
@@ -63,7 +67,7 @@ export function AutoOrderServices() {
   }, [organization, location, order, revision, valid]);
 
   async function add(serviceId: string) {
-    if (!valid || status !== 'ready' || busy || !catalog.some(x => x.id === serviceId)) return;
+    if (!valid || !readyForScope || busy || !catalog.some(x => x.id === serviceId)) return;
     setBusy(true); setMessage('');
     try {
       const csrf = await fetch('/api/v1/auth/csrf', {
@@ -102,11 +106,11 @@ export function AutoOrderServices() {
     <h1>Услуги заказ-наряда (dev)</h1>
     <p>Только синтетический стенд. Выбор услуги не означает согласование цены,
       выполнение ремонта или начисление оплаты.</p>
-    <label>UUID организации <input aria-label="UUID организации" value={organization}
+    <label>UUID организации <input aria-label="UUID организации" disabled={busy} value={organization}
       onChange={e => setOrganization(e.target.value)} /></label>
-    <label>UUID филиала <input aria-label="UUID филиала" value={location}
+    <label>UUID филиала <input aria-label="UUID филиала" disabled={busy} value={location}
       onChange={e => setLocation(e.target.value)} /></label>
-    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" value={order}
+    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" disabled={busy} value={order}
       onChange={e => setOrder(e.target.value)} /></label>
     {status === 'idle' && <p>Укажите организацию, филиал и заказ-наряд.</p>}
     {status === 'loading' && <p role="status">Загрузка услуг…</p>}
@@ -114,7 +118,7 @@ export function AutoOrderServices() {
       или связь с автомобилем больше не подтверждена.</p>}
     {status === 'error' && <div><p role="alert">Не удалось загрузить услуги. {message}</p>
       <button type="button" onClick={() => setRevision(n => n + 1)}>Повторить загрузку</button></div>}
-    {status === 'ready' && <>
+    {readyForScope && <>
       <h2>Уже выбранные услуги</h2>
       {selected.length === 0 ? <p>В заказ-наряде пока нет выбранных услуг.</p>
         : <ul>{selected.map(item => <li key={item.id}>
