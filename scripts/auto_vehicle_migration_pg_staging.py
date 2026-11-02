@@ -101,16 +101,16 @@ def stage_synthetic_vehicles(conn, path: Path, *, organization_id: UUID,
         # Do not expose PostgreSQL's DETAIL field (which includes the VIN).
         try:
             with conn.transaction():
-            for row_number, row in enumerate(records, start=2):
-                conn.execute("""
-                    INSERT INTO auto_vehicle_migration_line
-                    (batch_id,row_number,organization_id,location_id,source_id,
-                     source_system,vin,make,model)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (batch_id, row_number, organization_id, UUID(row["location_id"]),
-                      row["source_id"], row["source_system"], row["vin"],
-                      row["make"], row["model"]))
-            except psycopg.errors.UniqueViolation:
+                for row_number, row in enumerate(records, start=2):
+                    conn.execute("""
+                        INSERT INTO auto_vehicle_migration_line
+                        (batch_id,row_number,organization_id,location_id,source_id,
+                         source_system,vin,make,model)
+                        VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """, (batch_id, row_number, organization_id, UUID(row["location_id"]),
+                          row["source_id"], row["source_system"], row["vin"],
+                          row["make"], row["model"]))
+        except psycopg.errors.UniqueViolation:
             raise VehicleStagingRejected("vehicle staging identity conflict") from None
         if conn.execute("""
             SELECT count(*) FROM auto_vehicle_migration_line WHERE batch_id=%s
