@@ -22,7 +22,7 @@ TYPES = frozenset({"SKU", "STOCK"})
 SAFE_ARTICLE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
 
 
-def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None,
+def _inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None,
                 expected_sha256: str | None = None) -> dict:
     """Deterministic report without echoing any source data."""
     errors: list[dict] = []
@@ -121,6 +121,18 @@ def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None,
                 errors.append({"row": 0, "code": "RECONCILIATION_" + field.upper()})
     return {"ok": not errors, "counts": stats, "errors": errors,
             "mode": "DRY_RUN_ONLY", "writes": 0}
+
+
+def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None,
+                expected_sha256: str | None = None) -> dict:
+    """Fail closed for malformed or inaccessible synthetic CSV in API and CLI use."""
+    try:
+        return _inspect_csv(path, expected_counts=expected_counts,
+                            expected_sha256=expected_sha256)
+    except (OSError, UnicodeError, csv.Error, KeyError, TypeError, ValueError):
+        return {"ok": False, "counts": {"SKU": 0, "STOCK": 0},
+                "errors": [{"row": 0, "code": "UNREADABLE"}],
+                "mode": "DRY_RUN_ONLY", "writes": 0}
 
 
 def main() -> int:
