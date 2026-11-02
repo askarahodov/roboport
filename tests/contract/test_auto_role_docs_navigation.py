@@ -1,0 +1,36 @@
+"""Contract: Docsify role navigation reflects only available synthetic dev UI."""
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2] / "docs"
+
+
+def test_role_sidebar_separates_current_dev_from_planned():
+    sidebar = (ROOT / "_sidebar.md").read_text(encoding="utf-8")
+    current = sidebar.split("- **Роли: частично доступно в synthetic dev**", 1)[1].split(
+        "- **Роли: функциональность планируется**", 1)[0]
+    planned = sidebar.split("- **Роли: функциональность планируется**", 1)[1].split(
+        "- **Реализовано в dev**", 1)[0]
+    for page in ("client.md", "administrator.md", "intake.md", "warehouse.md", "manager.md"):
+        assert "/guides/" + page in current
+        assert "/guides/" + page not in planned
+    for page in ("mechanic.md", "finance.md", "mobile.md"):
+        assert "/guides/" + page in planned
+        assert "/guides/" + page not in current
+
+
+def test_role_matrix_links_are_real_and_scope_is_explicit():
+    index = (ROOT / "guides" / "INDEX.md").read_text(encoding="utf-8")
+    for page in ("administrator", "intake", "warehouse", "manager",
+                 "client", "mechanic", "finance", "mobile"):
+        assert f"({page}.md)" in index
+        assert (ROOT / "guides" / (page + ".md")).is_file()
+    for phrase in ("current-dev", "planned", "403", "409",
+                   "production gate #119", "synthetic"):
+        assert phrase in index
+
+
+def test_global_index_does_not_mark_all_role_guides_as_planned():
+    index = (ROOT / "INDEX.md").read_text(encoding="utf-8")
+    line = next(line for line in index.splitlines()
+                if "[Руководства по ролям](guides/INDEX.md)" in line)
+    assert "current-dev / частично planned" in line
