@@ -132,3 +132,13 @@ def test_total_declared_bundle_size_limit_before_reading_sources(tmp_path):
         "writes": 0, "mode": "PROVENANCE_PREFLIGHT_ONLY",
         "ok": False, "code": "BUNDLE_LIMIT", "release_allowed": False,
     }
+
+
+def test_deeply_nested_manifest_fails_closed_without_traceback(tmp_path):
+    path = tmp_path / "manifest.json"
+    path.write_text("[" * 1500 + "0" + "]" * 1500, encoding="utf-8")
+    result = inspect_provenance_bundle(path)
+    assert result == {
+        "writes": 0, "mode": "PROVENANCE_PREFLIGHT_ONLY",
+        "ok": False, "code": "SCHEMA", "release_allowed": False,
+    }
