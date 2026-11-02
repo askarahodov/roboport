@@ -66,7 +66,7 @@ test('approved -> labor -> lot issue -> handoff -> finish, responsive',async({pa
   await expect(page.getByText('получена',{exact:false})).toBeVisible();
   await page.getByRole('button',{name:'Завершить выполнение (MECHANIC)'}).click();
   await expect(page.getByRole('heading',{name:'Этап: READY_FOR_QC'})).toBeVisible();
-  await expect(page.getByRole('link',{name:'Осмотр и QC (dev)'})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Исполнение автомобильного заказ-наряда (dev)'}).getByRole('link',{name:'Осмотр и QC (dev)'})).toBeVisible();
   await expect(page.getByText('Выдача автомобиля по-прежнему запрещена.',{exact:false})).toBeVisible();
   await page.setViewportSize({width:1280,height:844});
   await page.reload();
