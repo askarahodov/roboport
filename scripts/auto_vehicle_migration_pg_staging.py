@@ -61,6 +61,14 @@ def stage_synthetic_vehicles(conn, path: Path, *, organization_id: UUID,
                 FOR SHARE OF l,o
             """, (location_id, organization_id)).fetchone() is None:
                 raise VehicleStagingRejected("scope unavailable")
+        # The current auto_vehicle table has globally unique VINs. Prevent
+        # staging a synthetic candidate that already belongs to an existing
+        # vehicle. Never expose the matching VIN or any owner/history fields.
+        if conn.execute("""
+            SELECT 1 FROM auto_vehicle
+            WHERE vin = ANY(%s::text[]) LIMIT 1
+        """, ([row["vin"] for row in records],)).fetchone() is not None:
+            raise VehicleStagingRejected("vehicle identity conflicts with existing data")
         conn.execute("""
             INSERT INTO auto_vehicle_migration_batch(id,organization_id,source_sha256,row_count)
             VALUES(%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING
