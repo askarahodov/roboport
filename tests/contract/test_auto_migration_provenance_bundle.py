@@ -13,7 +13,7 @@ def make_bundle(tmp_path, *, missing=(), altered=False):
     for kind in KINDS:
         if kind in missing:
             continue
-        name = kind + ".fixture"
+        name = kind + ".FIXTURE"
         data = ("SYNTHETIC " + kind + "\n").encode()
         (tmp_path / name).write_bytes(data)
         entries.append({
@@ -57,7 +57,7 @@ def test_missing_domain_and_digest_mismatch_fail_closed(tmp_path):
 def test_symlink_and_unapproved_real_data_fail_closed(tmp_path):
     path, manifest = make_bundle(tmp_path)
     source = tmp_path / manifest["sources"][0]["file"]
-    target = tmp_path / "backup.fixture"
+    target = tmp_path / "backup.FIXTURE"
     source.rename(target)
     source.symlink_to(target)
     assert inspect_provenance_bundle(path)["code"] == "UNAVAILABLE"
@@ -73,7 +73,7 @@ def test_unsafe_paths_and_unchecked_evidence_cannot_be_used(tmp_path):
     manifest["sources"][0]["file"] = "../secrets"
     path.write_text(json.dumps(manifest))
     assert inspect_provenance_bundle(path)["code"] == "SOURCE_NAME"
-    manifest["sources"][0]["file"] = "CUSTOMER.fixture"
+    manifest["sources"][0]["file"] = "CUSTOMER.FIXTURE"
     manifest["sources"][0]["owner_proof_ref"] = ""
     path.write_text(json.dumps(manifest))
     assert inspect_provenance_bundle(path)["code"] == "EVIDENCE_REQUIRED"
