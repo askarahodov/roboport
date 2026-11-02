@@ -58,6 +58,9 @@ def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
         raise SyntheticImportRejected("source validation failed")
 
     rows = list(csv.DictReader(io.StringIO(snapshot.decode("utf-8-sig"), newline="")))
+    # Every path, including idempotent replay, must enforce the caller tenant.
+    if any(UUID(row["organization_id"]) != organization_id for row in rows):
+        raise SyntheticImportRejected("staging tenant mismatch")
     expected = (len(rows), report["counts"]["SKU"], report["counts"]["STOCK"])
     with conn.transaction():
         conn.execute("""
@@ -91,8 +94,6 @@ def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
                     "rows": expected[0], "writes": 0, "mode": "SYNTHETIC_STAGING"}
 
         for line_number, row in enumerate(rows, start=2):
-            if UUID(row["organization_id"]) != organization_id:
-                raise SyntheticImportRejected("staging tenant mismatch")
             conn.execute("""
                 INSERT INTO auto_migration_staging_line
                   (batch_id,line_number,organization_id,location_id,

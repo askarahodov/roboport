@@ -190,3 +190,53 @@ def test_staging_refuses_non_regular_input_without_stalling(tmp_path):
         with pytest.raises(SyntheticImportRejected, match="source unavailable"):
             stage_synthetic_csv(db, link, organization_id=org, batch_id=uuid4(),
                                 expected_sha256="0" * 64)
+
+
+def test_replay_cannot_accept_source_from_another_tenant_even_if_staged_rows_match(tmp_path):
+    with psycopg.connect(DSN) as db:
+        source_org, _, _ = _org_and_bay(db)
+        target_org, target_loc, _ = _org_and_bay(db)
+        batch = uuid4()
+        path = tmp_path / "foreign.csv"
+        digest = _csv(path, [
+            ("SKU", "SKU-1", str(source_org), str(target_loc), "FILTER-001", "0"),
+        ])
+        # A synthetic privileged owner can seed a matching digest and target-tenant
+        # row. Staging must still reject the original CSV's foreign organization.
+        db.execute("""
+            INSERT INTO auto_migration_staging_batch
+              (id,organization_id,source_sha256,row_count,sku_count,stock_count)
+            VALUES (%s,%s,%s,1,1,0)
+        """, (batch, target_org, digest))
+        db.execute("""
+            INSERT INTO auto_migration_staging_line
+              (batch_id,line_number,organization_id,location_id,
+               record_type,source_id,article,quantity)
+            VALUES (%s,2,%s,%s,'SKU','SKU-1','FILTER-001',0)
+        """, (batch, target_org, target_loc))
+        with pytest.raises(SyntheticImportRejected, match="staging tenant mismatch"):
+            stage_synthetic_csv(db, path, organization_id=target_org, batch_id=batch,
+                                expected_sha256=digest)
+        assert db.execute(
+            "SELECT count(*) FROM auto_migration_staging_line WHERE batch_id=%s",
+            (batch,),
+        ).fetchone()[0] == 1
+
+
+def test_mixed_organization_source_rejected_before_staging_write(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        other, other_loc, _ = _org_and_bay(db)
+        batch = uuid4()
+        path = tmp_path / "mixed.csv"
+        digest = _csv(path, [
+            ("SKU", "SKU-1", str(org), str(loc), "FILTER-001", "0"),
+            ("SKU", "SKU-2", str(other), str(other_loc), "FILTER-002", "0"),
+        ])
+        with pytest.raises(SyntheticImportRejected, match="staging tenant mismatch"):
+            stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
+                                expected_sha256=digest)
+        assert db.execute(
+            "SELECT count(*) FROM auto_migration_staging_batch WHERE id=%s",
+            (batch,),
+        ).fetchone()[0] == 0
