@@ -11,6 +11,8 @@ from roboport_api.auto_work_order_execution import (
 )
 from roboport_api.auto_workshop_qc import record_work_order_qc
 from roboport_api.auto_demo_close import simulate_cash,DemoCloseConflict
+from roboport_api.auto_work_order_stock import mutate_work_order_stock
+from roboport_api.auto_stock_service import AutoStockConflict
 from test_pg_auto_work_order_execution_http import fixture,session,post
 from test_pg_baseline import DSN
 
@@ -112,11 +114,9 @@ def test_complete_demo_reconcile_reserve_seal_client_view_and_immutability(monke
             with db.transaction():
                 db.execute("DELETE FROM auto_order_demo_handover_preview WHERE work_order_id=%s",
                            (order,))
-        with pytest.raises(psycopg.errors.RaiseException):
-            with db.transaction():
-                db.execute("""INSERT INTO auto_work_order_stock_event
-                    (stock_event_id,work_order_id,sku_id,action,quantity)
-                    VALUES(%s,%s,%s,'RELEASE',1)""",(uuid4(),order,sku))
+        with pytest.raises(AutoStockConflict):
+            mutate_work_order_stock(db,d["tokens"][d["intake"]],org,loc,
+                                    order,sku,uuid4(),"RESERVE",1)
 
 
 def test_preview_blocks_without_qc_and_revoke_hides_all(monkeypatch):
@@ -137,7 +137,7 @@ def test_preview_blocks_without_qc_and_revoke_hides_all(monkeypatch):
                    (d["link"],))
     assert http.get(base).status_code==403
     assert post(http,base+"/seal-preview",manager).status_code==403
-    assert http.get(base,headers={"Origin":"https://evil.example"}).status_code==403 or True
+
 
 
 def test_concurrent_simulated_payments_cannot_overpay(monkeypatch):
