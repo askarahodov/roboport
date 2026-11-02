@@ -212,3 +212,42 @@ def test_broken_symlink_is_refused(tmp_path):
     path = tmp_path / "missing.csv"
     path.symlink_to(tmp_path / "nonexistent.csv")
     assert inspect_csv(path)["errors"] == [{"row": 0, "code": "UNAVAILABLE"}]
+
+
+def test_library_rejects_invalid_utf8_without_exception_or_data_leak(tmp_path):
+    path = tmp_path / "bad.csv"
+    path.write_bytes(b"secret-customer\xff\xfe")
+    report = inspect_csv(path)
+    assert report == {
+        "ok": False, "counts": {"SKU": 0, "STOCK": 0},
+        "errors": [{"row": 0, "code": "UNREADABLE"}],
+        "mode": "DRY_RUN_ONLY", "writes": 0,
+    }
+    assert "secret-customer" not in str(report)
+
+
+def test_library_rejects_malformed_quoted_csv(tmp_path):
+    path = tmp_path / "malformed.csv"
+    path.write_text(",".join(COLUMNS) + '\n"unterminated,field\n', encoding="utf-8")
+    assert inspect_csv(path)["errors"] == [{"row": 0, "code": "UNREADABLE"}]
+
+
+def test_library_rejects_invalid_reconciliation_shape(tmp_path):
+    path = tmp_path / "safe.csv"
+    org, loc = str(uuid4()), str(uuid4())
+    write(path, [("SKU", "SKU-1", org, loc, "FILTER-001", "0")])
+    report = inspect_csv(path, expected_counts={"rows": 1})
+    assert report["ok"] is False
+    assert report["errors"] == [{"row": 0, "code": "UNREADABLE"}]
+    assert report["writes"] == 0
+
+
+def test_cli_uses_same_fail_closed_report(tmp_path, monkeypatch, capsys):
+    import json
+    import sys
+    from scripts.auto_migration_dry_run import main
+    path = tmp_path / "invalid.csv"
+    path.write_bytes(b"\\xff".decode("unicode_escape").encode("latin-1"))
+    monkeypatch.setattr(sys, "argv", ["dry-run", "--synthetic-only", str(path)])
+    assert main() == 1
+    assert json.loads(capsys.readouterr().out) == inspect_csv(path)
