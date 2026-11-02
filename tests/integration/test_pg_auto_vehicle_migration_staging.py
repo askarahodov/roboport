@@ -120,12 +120,12 @@ def test_replay_detects_new_conflicting_live_vehicle_without_mutations(tmp_path)
     with psycopg.connect(DSN) as db:
         org, loc, _ = _org_and_bay(db)
         path, batch = tmp_path / "vehicles.csv", uuid4()
-        digest = source(path, [vehicle(org, loc)])
+        digest = source(path, [vehicle(org, loc, vin="1HGCM82633A004354")])
         stage_synthetic_vehicles(db, path, organization_id=org,
                                  batch_id=batch, expected_sha256=digest)
         db.execute(
             "INSERT INTO auto_vehicle(id,vin,make,model) VALUES (%s,%s,%s,%s)",
-            (uuid4(), "1HGCM82633A004352", "SYNTHETIC", "NEW CONFLICT"),
+            (uuid4(), "1HGCM82633A004354", "SYNTHETIC", "NEW CONFLICT"),
         )
         with pytest.raises(VehicleStagingRejected, match="vehicle identity conflicts"):
             stage_synthetic_vehicles(db, path, organization_id=org,
