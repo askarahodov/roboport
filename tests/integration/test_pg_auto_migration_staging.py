@@ -6,7 +6,8 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from scripts.auto_migration_pg_staging import SyntheticImportRejected, stage_synthetic_csv
+from scripts.auto_migration_pg_staging import (SyntheticImportRejected, stage_synthetic_csv,
+                                               reconcile_synthetic_staging)
 from scripts.auto_migration_dry_run import COLUMNS
 from test_pg_baseline import DSN
 from test_pg_auto_bay_booking import _org_and_bay
@@ -278,3 +279,67 @@ def test_replay_rejects_disabled_organization(tmp_path):
         with pytest.raises(SyntheticImportRejected, match="staging scope unavailable"):
             stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
                                 expected_sha256=digest)
+
+
+def test_independent_reconciliation_is_read_only_and_repeatable(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        batch = uuid4()
+        path = tmp_path / "reconcile.csv"
+        digest = _csv(path, [
+            ("SKU", "SKU-1", str(org), str(loc), "FILTER-001", "0"),
+            ("STOCK", "STOCK-1", str(org), str(loc), "FILTER-001", "7"),
+        ])
+        stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
+                            expected_sha256=digest)
+        first = reconcile_synthetic_staging(
+            db, path, organization_id=org, batch_id=batch, expected_sha256=digest
+        )
+        assert first == {"ok": True, "counts": {"SKU": 1, "STOCK": 1},
+                         "rows": 2, "writes": 0, "mode": "SYNTHETIC_RECONCILIATION"}
+        assert reconcile_synthetic_staging(
+            db, path, organization_id=org, batch_id=batch, expected_sha256=digest
+        ) == first
+        assert db.execute("SELECT count(*) FROM auto_migration_staging_line WHERE batch_id=%s",
+                          (batch,)).fetchone()[0] == 2
+
+
+def test_reconciliation_rejects_absent_batch_and_wrong_tenant(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        other, _, _ = _org_and_bay(db)
+        batch = uuid4()
+        path = tmp_path / "batch.csv"
+        digest = _csv(path, [("SKU", "SKU-1", str(org), str(loc), "FILTER-001", "0")])
+        with pytest.raises(SyntheticImportRejected, match="staging reconciliation mismatch"):
+            reconcile_synthetic_staging(db, path, organization_id=org, batch_id=batch,
+                                        expected_sha256=digest)
+        assert db.execute("SELECT count(*) FROM auto_migration_staging_batch WHERE id=%s",
+                          (batch,)).fetchone()[0] == 0
+        stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
+                            expected_sha256=digest)
+        with pytest.raises(SyntheticImportRejected, match="staging tenant mismatch"):
+            reconcile_synthetic_staging(db, path, organization_id=other, batch_id=batch,
+                                        expected_sha256=digest)
+
+
+def test_reconciliation_fails_closed_for_same_count_but_wrong_stored_row(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        batch = uuid4()
+        path = tmp_path / "batch.csv"
+        digest = _csv(path, [("SKU", "SKU-1", str(org), str(loc), "FILTER-001", "0")])
+        db.execute("""
+            INSERT INTO auto_migration_staging_batch
+              (id,organization_id,source_sha256,row_count,sku_count,stock_count)
+            VALUES (%s,%s,%s,1,1,0)
+        """, (batch, org, digest))
+        db.execute("""
+            INSERT INTO auto_migration_staging_line
+              (batch_id,line_number,organization_id,location_id,
+               record_type,source_id,article,quantity)
+            VALUES (%s,2,%s,%s,'SKU','DIFFERENT','FILTER-001',0)
+        """, (batch, org, loc))
+        with pytest.raises(SyntheticImportRejected, match="staging reconciliation mismatch"):
+            reconcile_synthetic_staging(db, path, organization_id=org, batch_id=batch,
+                                        expected_sha256=digest)
