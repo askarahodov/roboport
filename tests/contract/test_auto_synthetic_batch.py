@@ -216,7 +216,50 @@ def test_atomic_bundle_rename_failure_removes_unpublished_files(tmp_path, monkey
     destination.mkdir()
     def reject(*args, **kwargs):
         raise OSError("simulated rename failure")
-    monkeypatch.setattr(os, "rename", reject)
+    monkeypatch.setattr("scripts.auto_synthetic_batch._rename_directory_no_replace", reject)
     result = inspect_atomic_bundle(sources, destination, expected_sha256=digests)
     assert result["code"] == "OUTPUT_UNAVAILABLE"
     assert not list(destination.iterdir())
+
+
+def test_atomic_bundle_concurrent_collision_is_never_overwritten(tmp_path, monkeypatch):
+    from scripts.auto_synthetic_batch import inspect_atomic_bundle, _rename_directory_no_replace
+    sources, digests = fixtures(tmp_path)
+    destination = tmp_path / "output"
+    destination.mkdir()
+    def racing_writer(source, target):
+        target.mkdir()
+        (target / "another-process").write_bytes(b"untouched")
+        _rename_directory_no_replace(source, target)
+    monkeypatch.setattr("scripts.auto_synthetic_batch._rename_directory_no_replace", racing_writer)
+    report = inspect_atomic_bundle(sources, destination, expected_sha256=digests)
+    assert report["ok"] is False and report["code"] == "OUTPUT_CONFLICT"
+    assert (destination / "vehicle-service-bundle" / "another-process").read_bytes() == b"untouched"
+    assert not list(destination.glob(".auto-bundle-*"))
+
+
+def test_atomic_bundle_fails_closed_when_no_replace_primitive_missing(tmp_path, monkeypatch):
+    from scripts.auto_synthetic_batch import inspect_atomic_bundle
+    sources, digests = fixtures(tmp_path)
+    destination = tmp_path / "output"
+    destination.mkdir()
+    from types import SimpleNamespace
+    monkeypatch.setattr("scripts.auto_synthetic_batch.sys", SimpleNamespace(platform="win32"))
+    report = inspect_atomic_bundle(sources, destination, expected_sha256=digests)
+    assert report["code"] == "OUTPUT_UNAVAILABLE"
+    assert not list(destination.iterdir())
+
+
+def test_atomic_bundle_directory_sync_occurs_before_and_after_publish(tmp_path, monkeypatch):
+    from scripts.auto_synthetic_batch import inspect_atomic_bundle, _sync_directory
+    sources, digests = fixtures(tmp_path)
+    destination = tmp_path / "output"
+    destination.mkdir()
+    sync_order = []
+    def tracked_sync(path):
+        sync_order.append(path.name)
+        _sync_directory(path)
+    monkeypatch.setattr("scripts.auto_synthetic_batch._sync_directory", tracked_sync)
+    result = inspect_atomic_bundle(sources, destination, expected_sha256=digests)
+    assert result["ok"]
+    assert sync_order == ["vehicle-service-bundle", "output"]
