@@ -134,3 +134,19 @@ python scripts/auto_vehicle_migration_preflight.py --synthetic-only ./synthetic_
 ## Разделение прав на чтение отчёта миграции в PostgreSQL (#172)
 
 Миграция `0079_vehicle_audit_role` создаёт кластерную роль `roboport_vehicle_migration_auditor` с `NOLOGIN`, `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE` и `NOINHERIT`. Она получает **только** SELECT метаданных из `auto_vehicle_migration_batch` (ID пакета, организация и число записей). У неё нет прав читать SHA-256 источника или время создания, VIN из `auto_vehicle_migration_line`, таблицу продвижения или рабочие `auto_vehicle`/`auto_vehicle_customer_link`; нет прав записи в эти таблицы. PG17 integration явно переключает роль и проверяет невозможность чтения VIN, `SELECT *` и записи пакета. Эта роль не даёт клиентского доступа к UI и не используется для выполнения импорта. Перед предоставлением прав внешнему сотруднику нужны отдельные tenant-scoped views/RLS и аудит: **метаданные без RLS могут раскрыть существование чужого пакета**. Владельцу БД права остаются доступны; это не завершённый production DB grants gate #119.
+
+
+## Явный mapping колонок CSV автомобилей — synthetic-only (#172)
+
+Утилита `scripts/auto_vehicle_column_mapping.py` преобразует **только искусственный** CSV с произвольным порядком колонок и явно заданными именами полей в строгую схему `record_type,source_id,organization_id,location_id,vin,make,model,source_system` для уже существующих `inspect_vehicle_csv` и `stage_synthetic_vehicles`. Полное и однозначное сопоставление задаётся восьмью аргументами `--field SOURCE=TARGET`; неопознанные, повторные, лишние колонки (включая имя владельца и историю ремонтов) отклоняются, без угадывания значений и автопереименования. Перед созданием файла срабатывают ограничения по размеру/числу строк, строгий CSV-парсер и существующий VIN/source/tenant/dedupe preflight. Исходник читается без перехода по символьным ссылкам; результат не перезаписывается, создаётся с правами `0600`. CLI выводит лишь число строк и SHA-256 канонического файла, не VIN, source ID или организацию. Например:
+
+```bash
+python scripts/auto_vehicle_column_mapping.py --synthetic-only \
+  --field тип=record_type --field внешний_id=source_id \
+  --field организация=organization_id --field филиал=location_id \
+  --field номер=vin --field марка=make --field модель=model \
+  --field источник=source_system ./demo_vehicles.csv ./canonical_vehicles.csv
+python scripts/auto_vehicle_migration_preflight.py --synthetic-only ./canonical_vehicles.csv
+```
+
+Файл `canonical_vehicles.csv` содержит сами искусственные VIN и должен храниться только в изолированной тестовой среде. Это **не XLSX**, не mapping реальных клиентов/сервисов/документов, не сверка существующей базы или независимое подтверждение прав на историю; никаких production-данных до #119. Чтобы записать искусственный пакет в staging, использовать только авторизованную внутреннюю функцию с MANAGER grant и проверенным digest. Результат работы утилиты сам по себе не разрешает импорт.
