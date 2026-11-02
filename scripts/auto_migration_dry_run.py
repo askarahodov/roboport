@@ -10,6 +10,8 @@ import csv
 import hashlib
 import io
 import json
+import os
+import stat
 from pathlib import Path
 
 MAX_FILE_BYTES = 5_000_000
@@ -30,11 +32,18 @@ def inspect_csv(path: Path, *, expected_counts: dict[str, int] | None = None,
     stock_keys: set[tuple[str, str, str]] = set()
     stock_totals: dict[tuple[str, str, str], int] = {}
     physical = 0
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
+    if not hasattr(os, "O_NOFOLLOW"):
         return {"ok": False, "counts": stats, "errors": [{"row": 0, "code": "UNAVAILABLE"}]}
-    # Parse exactly the bytes that are fingerprinted, not a second read of a mutable file.
-    with path.open("rb") as source:
-        data = source.read(MAX_FILE_BYTES + 1)
+    # Open once with no symlink following and no FIFO blocking; inspect the descriptor.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_BYTES:
+                return {"ok": False, "counts": stats, "errors": [{"row": 0, "code": "UNAVAILABLE"}]}
+            data = source.read(MAX_FILE_BYTES + 1)
+    except OSError:
+        return {"ok": False, "counts": stats, "errors": [{"row": 0, "code": "UNAVAILABLE"}]}
     if len(data) > MAX_FILE_BYTES:
         return {"ok": False, "counts": stats, "errors": [{"row": 0, "code": "UNAVAILABLE"}]}
     if expected_sha256 is not None and hashlib.sha256(data).hexdigest() != expected_sha256:
