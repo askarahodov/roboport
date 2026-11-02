@@ -34,3 +34,14 @@ def test_global_index_does_not_mark_all_role_guides_as_planned():
     line = next(line for line in index.splitlines()
                 if "[Руководства по ролям](guides/INDEX.md)" in line)
     assert "current-dev / частично planned" in line
+
+
+def test_manager_guide_sidebar_link_and_estimate_guide():
+    sidebar=(ROOT / "_sidebar.md").read_text(encoding="utf-8")
+    assert "[Руководитель: связь и сметы (dev)](/guides/manager.md)" in sidebar
+    assert "[Механик: контроль качества (dev)](/guides/mechanic.md)" in sidebar
+    assert "[Версии и согласование автомобильной сметы](/auto/ESTIMATES.md)" in sidebar
+    guide=(ROOT / "auto" / "ESTIMATES.md").read_text(encoding="utf-8")
+    for expected in ("/staff/auto-estimates", "/account/auto-estimates",
+                     "APPROVED", "DECLINED", "releaseAllowed: false", "#119"):
+        assert expected in guide
