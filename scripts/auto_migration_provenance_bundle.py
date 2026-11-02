@@ -110,11 +110,13 @@ def inspect_provenance_bundle(manifest: Path) -> dict:
                 value = entry[evidence]
                 if type(value) is not str or not NAME.fullmatch(value):
                     raise ProvenanceDenied("EVIDENCE_REQUIRED")
-            file_bytes = _read_regular(manifest.parent / filename, MAX_BYTES)
+            counts[kind] += entry["records"]
+        # Validate every descriptor and the aggregate budget before opening payload files.
+        for entry in entries:
+            file_bytes = _read_regular(manifest.parent / entry["file"], MAX_BYTES)
             if (len(file_bytes) != entry["bytes"]
                     or hashlib.sha256(file_bytes).hexdigest() != entry["sha256"]):
                 raise ProvenanceDenied("SOURCE_MISMATCH")
-            counts[kind] += entry["records"]
         if any(counts[kind] == 0 for kind in KINDS):
             raise ProvenanceDenied("SCOPE_INCOMPLETE")
         # The presence of opaque evidence references cannot assert legal approval.
