@@ -194,3 +194,21 @@ def test_cli_rejects_invalid_source_digest(monkeypatch, tmp_path):
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 2
+
+
+def test_fifo_is_refused_without_blocking(tmp_path):
+    import os
+    import pytest
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("FIFO unavailable on this platform")
+    path = tmp_path / "named-pipe.csv"
+    os.mkfifo(path)
+    result = inspect_csv(path)
+    assert result["ok"] is False
+    assert result["errors"] == [{"row": 0, "code": "UNAVAILABLE"}]
+
+
+def test_broken_symlink_is_refused(tmp_path):
+    path = tmp_path / "missing.csv"
+    path.symlink_to(tmp_path / "nonexistent.csv")
+    assert inspect_csv(path)["errors"] == [{"row": 0, "code": "UNAVAILABLE"}]
