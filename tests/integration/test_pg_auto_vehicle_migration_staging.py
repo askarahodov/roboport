@@ -90,3 +90,47 @@ def test_vehicle_staging_rejects_mixed_tenants_without_writes(tmp_path):
             "SELECT count(*) FROM auto_vehicle_migration_batch WHERE id=%s",
             (batch,),
         ).fetchone()[0] == 0
+
+
+def test_existing_live_vehicle_vin_blocks_staging_without_writes(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        path, batch = tmp_path / "vehicles.csv", uuid4()
+        digest = source(path, [vehicle(org, loc)])
+        existing_vehicle = uuid4()
+        db.execute(
+            "INSERT INTO auto_vehicle(id,vin,make,model) VALUES (%s,%s,%s,%s)",
+            (existing_vehicle, "1HGCM82633A004352", "SYNTHETIC", "ALREADY EXISTS"),
+        )
+        with pytest.raises(VehicleStagingRejected, match="vehicle identity conflicts") as error:
+            stage_synthetic_vehicles(db, path, organization_id=org,
+                                     batch_id=batch, expected_sha256=digest)
+        assert "1HGCM82633A004352" not in str(error.value)
+        assert db.execute(
+            "SELECT count(*) FROM auto_vehicle_migration_batch WHERE id=%s",
+            (batch,),
+        ).fetchone()[0] == 0
+        assert db.execute(
+            "SELECT model FROM auto_vehicle WHERE id=%s",
+            (existing_vehicle,),
+        ).fetchone()[0] == "ALREADY EXISTS"
+
+
+def test_replay_detects_new_conflicting_live_vehicle_without_mutations(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        path, batch = tmp_path / "vehicles.csv", uuid4()
+        digest = source(path, [vehicle(org, loc)])
+        stage_synthetic_vehicles(db, path, organization_id=org,
+                                 batch_id=batch, expected_sha256=digest)
+        db.execute(
+            "INSERT INTO auto_vehicle(id,vin,make,model) VALUES (%s,%s,%s,%s)",
+            (uuid4(), "1HGCM82633A004352", "SYNTHETIC", "NEW CONFLICT"),
+        )
+        with pytest.raises(VehicleStagingRejected, match="vehicle identity conflicts"):
+            stage_synthetic_vehicles(db, path, organization_id=org,
+                                     batch_id=batch, expected_sha256=digest)
+        assert db.execute(
+            "SELECT count(*) FROM auto_vehicle_migration_line WHERE batch_id=%s",
+            (batch,),
+        ).fetchone()[0] == 1
