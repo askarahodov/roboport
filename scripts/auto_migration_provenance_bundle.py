@@ -21,6 +21,7 @@ NAME = re.compile(r"^[A-Z0-9][A-Z0-9_.-]{0,63}$")
 MAX_MANIFEST = 100_000
 MAX_FILES = 64
 MAX_BYTES = 10_000_000
+MAX_BUNDLE_BYTES = 40_000_000
 ALLOWED = frozenset({
     "schema", "synthetic_only", "organization_id", "location_id", "sources"
 })
@@ -80,6 +81,7 @@ def inspect_provenance_bundle(manifest: Path) -> dict:
             raise ProvenanceDenied("SCHEMA")
         counts = {kind: 0 for kind in KINDS}
         seen = set()
+        total_bytes = 0
         for entry in entries:
             if not isinstance(entry, dict) or set(entry) != SOURCE_FIELDS:
                 raise ProvenanceDenied("SCHEMA")
@@ -97,6 +99,9 @@ def inspect_provenance_bundle(manifest: Path) -> dict:
                     or type(entry["records"]) is not int
                     or not 1 <= entry["records"] <= 50000):
                 raise ProvenanceDenied("METADATA")
+            total_bytes += entry["bytes"]
+            if total_bytes > MAX_BUNDLE_BYTES:
+                raise ProvenanceDenied("BUNDLE_LIMIT")
             if type(entry["source_system"]) is not str or not NAME.fullmatch(entry["source_system"]):
                 raise ProvenanceDenied("PROVENANCE")
             # These are opaque identifiers for future independent evidence review.
@@ -105,11 +110,13 @@ def inspect_provenance_bundle(manifest: Path) -> dict:
                 value = entry[evidence]
                 if type(value) is not str or not NAME.fullmatch(value):
                     raise ProvenanceDenied("EVIDENCE_REQUIRED")
-            file_bytes = _read_regular(manifest.parent / filename, MAX_BYTES)
+            counts[kind] += entry["records"]
+        # Validate every descriptor and the aggregate budget before opening payload files.
+        for entry in entries:
+            file_bytes = _read_regular(manifest.parent / entry["file"], MAX_BYTES)
             if (len(file_bytes) != entry["bytes"]
                     or hashlib.sha256(file_bytes).hexdigest() != entry["sha256"]):
                 raise ProvenanceDenied("SOURCE_MISMATCH")
-            counts[kind] += entry["records"]
         if any(counts[kind] == 0 for kind in KINDS):
             raise ProvenanceDenied("SCOPE_INCOMPLETE")
         # The presence of opaque evidence references cannot assert legal approval.
