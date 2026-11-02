@@ -59,6 +59,9 @@ jobs:
           docker exec "$PG_CONTAINER" psql -U roboport -d roboport -v ON_ERROR_STOP=1 -c "INSERT INTO auto_service_location(id,code,organization_id) VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab','RESTORE_LOC','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')"
           docker exec "$PG_CONTAINER" psql -U roboport -d roboport -v ON_ERROR_STOP=1 -c "INSERT INTO auto_migration_staging_batch(id,organization_id,source_sha256,row_count,sku_count,stock_count) VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',repeat('a',64),2,1,1)"
           docker exec "$PG_CONTAINER" psql -U roboport -d roboport -v ON_ERROR_STOP=1 -c "INSERT INTO auto_migration_staging_line(batch_id,line_number,organization_id,location_id,record_type,source_id,article,quantity) VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac',2,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab','SKU','RESTORE-SKU','FILTER-001',0),('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac',3,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab','STOCK','RESTORE-STOCK','FILTER-001',9)"
+          # Vehicle migration is separate from the live auto_vehicle and owner links.
+          docker exec "$PG_CONTAINER" psql -U roboport -d roboport -v ON_ERROR_STOP=1 -c "INSERT INTO auto_vehicle_migration_batch(id,organization_id,source_sha256,row_count) VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaad','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',repeat('b',64),1)"
+          docker exec "$PG_CONTAINER" psql -U roboport -d roboport -v ON_ERROR_STOP=1 -c "INSERT INTO auto_vehicle_migration_line(batch_id,row_number,organization_id,location_id,source_id,source_system,vin,make,model) VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaad',2,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab','RESTORE-CAR','DEMO','1HGCM82633A004352','SYNTHETIC','TEST CAR')"
           docker exec "$PG_CONTAINER" pg_dump -U roboport -Fc -f /tmp/roboport-synthetic.dump roboport
           docker exec "$PG_CONTAINER" createdb -U roboport roboport_restored
           docker exec "$PG_CONTAINER" pg_restore -U roboport --exit-on-error -d roboport_restored /tmp/roboport-synthetic.dump
@@ -80,6 +83,22 @@ jobs:
             test "$(docker exec "$PG_CONTAINER" psql -U roboport -d "$database" -At -c "SELECT row_count || ':' || sku_count || ':' || stock_count FROM auto_migration_staging_batch WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac'")" = '2:1:1'
             test "$(docker exec "$PG_CONTAINER" psql -U roboport -d "$database" -At -c "SELECT count(*) || ':' || sum(quantity) FROM auto_migration_staging_line WHERE batch_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac'")" = '2:9'
           done
+          # The separate vehicle staging batch must restore without promoting a VIN
+          # to live vehicles or creating a customer ownership/history link.
+          for database in roboport roboport_restored; do
+            test "$(docker exec "$PG_CONTAINER" psql -U roboport -d "$database" -At -c "SELECT row_count FROM auto_vehicle_migration_batch WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaad'")" = 1
+            test "$(docker exec "$PG_CONTAINER" psql -U roboport -d "$database" -At -c "SELECT count(*) FROM auto_vehicle_migration_line WHERE batch_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaad' AND vin='1HGCM82633A004352'")" = 1
+            test "$(docker exec "$PG_CONTAINER" psql -U roboport -d "$database" -At -c "SELECT count(*) FROM auto_vehicle WHERE vin='1HGCM82633A004352'")" = 0
+          done
+          if docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -v ON_ERROR_STOP=1 -c "UPDATE auto_vehicle_migration_line SET source_id='TAMPERED' WHERE batch_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaad' AND row_number=2"; then
+            echo 'VEHICLE RESTORE FAILURE: immutable staged vehicle accepted update' >&2
+            exit 1
+          fi
+          if docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -v ON_ERROR_STOP=1 -c "INSERT INTO auto_vehicle_migration_line(batch_id,row_number,organization_id,location_id,source_id,source_system,vin,make,model) VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaad',3,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','99999999-9999-4999-8999-999999999999','BAD-CAR','DEMO','JH4KA7561PC008269','SYNTHETIC','TEST CAR')"; then
+            echo 'VEHICLE RESTORE FAILURE: out-of-scope branch accepted' >&2
+            exit 1
+          fi
+          echo 'VEHICLE STAGING RESTORE PASS: metadata, VIN, immutable rows, scope and zero promotion'
           # Restoration must retain immutable-line enforcement and branch scope.
           if docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -v ON_ERROR_STOP=1 -c "UPDATE auto_migration_staging_line SET quantity=10 WHERE batch_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac' AND line_number=3"; then
             echo 'STAGING RESTORE FAILURE: immutable imported line accepted update' >&2
