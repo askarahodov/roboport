@@ -49,14 +49,23 @@ def _read_regular(path: Path, cap: int) -> bytes:
     return data
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ProvenanceDenied("SCHEMA")
+        result[key] = value
+    return result
+
+
 def inspect_provenance_bundle(manifest: Path) -> dict:
     """Inspect metadata and SHA256 only; never return source identifiers."""
     try:
         raw = _read_regular(manifest, MAX_MANIFEST)
-        payload = json.loads(raw)
+        payload = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
         if not isinstance(payload, dict) or set(payload) != ALLOWED:
             raise ProvenanceDenied("SCHEMA")
-        if payload["schema"] != 1 or payload["synthetic_only"] is not True:
+        if type(payload["schema"]) is not int or payload["schema"] != 1 or payload["synthetic_only"] is not True:
             raise ProvenanceDenied("APPROVAL_REQUIRED")
         for key in ("organization_id", "location_id"):
             if type(payload[key]) is not str or str(UUID(payload[key])) != payload[key]:
