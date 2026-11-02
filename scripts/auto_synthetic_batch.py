@@ -6,10 +6,13 @@ Each input must be independently pinned by a trusted SHA-256 before any output.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import json
 import os
 import stat
+import sys
 import tempfile
 from pathlib import Path
 
@@ -90,15 +93,47 @@ def prepare_synthetic_batch(
         raise
 
 
+def _sync_directory(path: Path) -> None:
+    """Durably persist directory entries, or refuse to promise durability."""
+    if not all(hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW")):
+        raise BatchDenied("OUTPUT_UNAVAILABLE")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        raise BatchDenied("OUTPUT_UNAVAILABLE") from None
+
+
+def _rename_directory_no_replace(source: Path, target: Path) -> None:
+    """Linux renameat2(RENAME_NOREPLACE): no check-then-rename race."""
+    if not sys.platform.startswith("linux"):
+        raise BatchDenied("OUTPUT_UNAVAILABLE")
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        operation = libc.renameat2
+        operation.argtypes = (ctypes.c_int, ctypes.c_char_p,
+                              ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+        operation.restype = ctypes.c_int
+        result = operation(-100, os.fsencode(source), -100, os.fsencode(target), 1)
+    except (AttributeError, OSError, TypeError):
+        raise BatchDenied("OUTPUT_UNAVAILABLE") from None
+    if result != 0:
+        code = ctypes.get_errno()
+        raise BatchDenied("OUTPUT_CONFLICT" if code == errno.EEXIST
+                          else "OUTPUT_UNAVAILABLE")
+
+
 def prepare_atomic_bundle(
     sources: dict[str, Path], destination: Path, *,
     expected_sha256: dict[str, str],
     mappings: dict[str, dict[str, str]] | None = None,
 ) -> dict:
-    """Publish VEHICLE and SERVICE as one visible directory entry.
+    """Publish both outputs under one durable no-clobber directory entry.
 
-    Destination is an existing trusted parent. No concurrent writers are
-    permitted; stdlib rename does not provide no-replace across all OSes.
+    Requires Linux renameat2 + directory fsync; all other systems fail closed.
     """
     if destination.is_symlink() or not destination.is_dir():
         raise BatchDenied("OUTPUT_UNAVAILABLE")
@@ -111,12 +146,12 @@ def prepare_atomic_bundle(
         report = prepare_synthetic_batch(
             sources, staged, expected_sha256=expected_sha256, mappings=mappings
         )
-        if os.path.lexists(final):
-            raise BatchDenied("OUTPUT_CONFLICT")
-        try:
-            os.rename(staged, final)
-        except OSError:
-            raise BatchDenied("OUTPUT_UNAVAILABLE") from None
+        _sync_directory(staged)
+        # Linux no-replace is atomic, including if another writer races here.
+        _rename_directory_no_replace(staged, final)
+        # After rename, fsync may fail: return a refusal, but preserve published
+        # output for operator inspection instead of deleting potentially valid data.
+        _sync_directory(destination)
     return {**report, "mode": "SYNTHETIC_XLSX_ATOMIC_BUNDLE"}
 
 
