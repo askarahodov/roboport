@@ -6,14 +6,15 @@
   - [Администратор: журнал (dev)](/guides/administrator.md)
   - [Мастер-приёмщик: привязка и осмотр авто (dev)](/guides/intake.md)
   - [Кладовщик: операции склада (dev)](/guides/warehouse.md)
-  - [Руководитель: проверка связи (dev)]
-  - [Механик: контроль качества (dev)](/guides/mechanic.md)(/guides/manager.md)
+  - [Руководитель: связь и сметы (dev)](/guides/manager.md)
+  - [Механик: контроль качества (dev)](/guides/mechanic.md)
 - **Роли: функциональность планируется**
   - [Бухгалтер и кассир](/guides/finance.md)
   - [Мобильное приложение](/guides/mobile.md)
 - **Реализовано в dev**
   - [Связь клиента с автомобилем](/auto/VEHICLE_OWNERSHIP.md)
   - [Услуги автомобильного заказ-наряда](/auto/WORKSHOP_OPERATIONS.md)
+  - [Версии и согласование автомобильной сметы](/auto/ESTIMATES.md)
   - [Аудит актуальности](/auto/DOCUMENTATION_AUDIT.md)
 - **Разработчикам**
   - [Продукт и функции](/auto/PRODUCT.md)
