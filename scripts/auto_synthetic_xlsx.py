@@ -119,6 +119,8 @@ def _rows_from_xlsx(raw: bytes, headers: tuple[str, ...]) -> list[list[str]]:
             if not result or tuple(result[0]) != headers or len(result) < 2:
                 raise SyntheticWorkbookDenied("SCHEMA")
             return result
+    except SyntheticWorkbookDenied:
+        raise
     except (zipfile.BadZipFile, ET.ParseError, ValueError, KeyError, OverflowError):
         raise SyntheticWorkbookDenied("UNREADABLE") from None
 
