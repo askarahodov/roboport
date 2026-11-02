@@ -118,6 +118,45 @@ def upgrade():
       BEFORE INSERT ON auto_work_order_execution_finish FOR EACH ROW
       EXECUTE FUNCTION guard_auto_execution_finish()
     """)
+    op.execute("""
+      CREATE FUNCTION guard_auto_execution_qc()
+      RETURNS trigger LANGUAGE plpgsql AS $f$
+      BEGIN
+        IF EXISTS(SELECT 1 FROM auto_work_order_execution
+                  WHERE work_order_id=NEW.work_order_id) AND (
+           NOT EXISTS(
+             SELECT 1 FROM auto_work_order_execution_finish f
+             JOIN auto_work_order_execution e ON e.id=f.execution_id
+             WHERE e.work_order_id=NEW.work_order_id)
+           OR EXISTS(
+             SELECT 1 FROM auto_work_order_labor_entry l
+             JOIN auto_work_order_execution e ON e.id=l.execution_id
+             WHERE e.work_order_id=NEW.work_order_id AND l.actor_id=NEW.actor_id)
+        ) THEN RAISE EXCEPTION 'execution must finish and QC actor must be independent'; END IF;
+        RETURN NEW;
+      END $f$
+    """)
+    op.execute("""
+      CREATE TRIGGER auto_execution_qc_guard BEFORE INSERT ON auto_work_order_qc_event
+      FOR EACH ROW EXECUTE FUNCTION guard_auto_execution_qc()
+    """)
+    op.execute("""
+      CREATE FUNCTION guard_auto_execution_late_issue()
+      RETURNS trigger LANGUAGE plpgsql AS $f$
+      BEGIN
+        IF EXISTS(
+          SELECT 1 FROM auto_work_order_execution_finish f
+          JOIN auto_work_order_execution e ON e.id=f.execution_id
+          WHERE e.work_order_id=NEW.work_order_id
+        ) THEN RAISE EXCEPTION 'materials forbidden after execution finish'; END IF;
+        RETURN NEW;
+      END $f$
+    """)
+    op.execute("""
+      CREATE TRIGGER auto_execution_late_issue_guard BEFORE INSERT
+      ON auto_stock_lot_work_order_issue FOR EACH ROW
+      EXECUTE FUNCTION guard_auto_execution_late_issue()
+    """)
     for table in ("auto_work_order_execution","auto_work_order_labor_entry",
                   "auto_work_order_execution_finish"):
         op.execute(f"""CREATE TRIGGER {table}_immutable
@@ -128,6 +167,10 @@ def upgrade():
 
 def downgrade():
     # Only for disposable synthetic DB: deleting audit evidence on real DB prohibited.
+    op.execute("DROP TRIGGER auto_execution_qc_guard ON auto_work_order_qc_event")
+    op.execute("DROP TRIGGER auto_execution_late_issue_guard ON auto_stock_lot_work_order_issue")
+    op.execute("DROP FUNCTION guard_auto_execution_qc()")
+    op.execute("DROP FUNCTION guard_auto_execution_late_issue()")
     for table in ("auto_work_order_execution_finish","auto_work_order_labor_entry",
                   "auto_work_order_execution"):
         op.execute(f"DROP TABLE {table}")
