@@ -240,3 +240,41 @@ def test_mixed_organization_source_rejected_before_staging_write(tmp_path):
             "SELECT count(*) FROM auto_migration_staging_batch WHERE id=%s",
             (batch,),
         ).fetchone()[0] == 0
+
+
+def test_replay_rejects_disabled_branch_without_new_writes(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        batch = uuid4()
+        path = tmp_path / "batch.csv"
+        digest = _csv(path, [
+            ("SKU", "SKU-1", str(org), str(loc), "FILTER-001", "0"),
+        ])
+        stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
+                            expected_sha256=digest)
+        db.execute("UPDATE auto_service_location SET disabled_at=now() WHERE id=%s",
+                   (loc,))
+        with pytest.raises(SyntheticImportRejected, match="staging scope unavailable"):
+            stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
+                                expected_sha256=digest)
+        assert db.execute(
+            "SELECT count(*) FROM auto_migration_staging_line WHERE batch_id=%s",
+            (batch,),
+        ).fetchone()[0] == 1
+
+
+def test_replay_rejects_disabled_organization(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        batch = uuid4()
+        path = tmp_path / "batch.csv"
+        digest = _csv(path, [
+            ("SKU", "SKU-1", str(org), str(loc), "FILTER-001", "0"),
+        ])
+        stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
+                            expected_sha256=digest)
+        db.execute("UPDATE auto_organization SET disabled_at=now() WHERE id=%s",
+                   (org,))
+        with pytest.raises(SyntheticImportRejected, match="staging scope unavailable"):
+            stage_synthetic_csv(db, path, organization_id=org, batch_id=batch,
+                                expected_sha256=digest)
