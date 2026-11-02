@@ -62,7 +62,7 @@ def _text(cell, shared: list[str]) -> str:
     raise SyntheticWorkbookDenied("CELL_TYPE")
 
 
-def _rows_from_xlsx(raw: bytes, headers: tuple[str, ...]) -> list[list[str]]:
+def _rows_from_xlsx(raw: bytes, headers: tuple[str, ...], mapping=None) -> list[list[str]]:
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as book:
             members = book.infolist()
@@ -116,9 +116,18 @@ def _rows_from_xlsx(raw: bytes, headers: tuple[str, ...]) -> list[list[str]]:
                 if len(seen) != len(headers):
                     raise SyntheticWorkbookDenied("SCHEMA")
                 result.append(fields)
-            if not result or tuple(result[0]) != headers or len(result) < 2:
+            if not result or len(result) < 2:
                 raise SyntheticWorkbookDenied("SCHEMA")
-            return result
+            if mapping is None:
+                if tuple(result[0]) != headers:
+                    raise SyntheticWorkbookDenied("SCHEMA")
+                return result
+            incoming = result[0]
+            if len(set(incoming)) != len(headers) or set(incoming) != set(mapping):
+                raise SyntheticWorkbookDenied("SCHEMA")
+            order = [incoming.index(next(k for k, v in mapping.items() if v == field))
+                     for field in headers]
+            return [list(headers)] + [[row[i] for i in order] for row in result[1:]]
     except SyntheticWorkbookDenied:
         raise
     except (zipfile.BadZipFile, ET.ParseError, ValueError, KeyError, OverflowError):
@@ -126,7 +135,8 @@ def _rows_from_xlsx(raw: bytes, headers: tuple[str, ...]) -> list[list[str]]:
 
 
 def convert_synthetic_xlsx(source: Path, target: Path, *, kind: str,
-                           expected_sha256: str | None = None) -> dict:
+                           expected_sha256: str | None = None,
+                           mapping: dict[str, str] | None = None) -> dict:
     if kind not in ("VEHICLE", "SERVICE"):
         raise SyntheticWorkbookDenied("TYPE")
     if type(expected_sha256) is not str or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
@@ -146,7 +156,14 @@ def convert_synthetic_xlsx(source: Path, target: Path, *, kind: str,
     if hashlib.sha256(raw).hexdigest() != expected_sha256:
         raise SyntheticWorkbookDenied("SOURCE_CHECKSUM")
     headers = VEHICLE_COLUMNS if kind == "VEHICLE" else SERVICE_COLUMNS
-    rows = _rows_from_xlsx(raw, headers)
+    if mapping is not None and (
+        type(mapping) is not dict or len(mapping) != len(headers)
+        or any(type(k) is not str or not k or type(v) is not str
+               for k, v in mapping.items())
+        or set(mapping.values()) != set(headers)
+    ):
+        raise SyntheticWorkbookDenied("MAPPING")
+    rows = _rows_from_xlsx(raw, headers, mapping)
     out = io.StringIO(newline="")
     writer = csv.writer(out, lineterminator="\n")
     writer.writerows(rows)
@@ -194,13 +211,25 @@ def main() -> int:
     parser.add_argument("--kind", required=True, choices=("VEHICLE", "SERVICE"))
     parser.add_argument("--expect-sha256", required=True,
                         help="Trusted lowercase SHA-256 of the exact source XLSX.")
+    parser.add_argument("--field", action="append", metavar="SOURCE=TARGET")
     parser.add_argument("source", type=Path)
     parser.add_argument("target", type=Path)
     options = parser.parse_args()
+    mapping = None
+    if options.field is not None:
+        mapping = {}
+        for field in options.field:
+            if "=" not in field:
+                parser.error("each --field requires SOURCE=TARGET")
+            source, target = field.split("=", 1)
+            if not source or source in mapping:
+                parser.error("duplicate or empty source field")
+            mapping[source] = target
     try:
         report = convert_synthetic_xlsx(options.source, options.target,
                                         kind=options.kind,
-                                        expected_sha256=options.expect_sha256)
+                                        expected_sha256=options.expect_sha256,
+                                        mapping=mapping)
     except SyntheticWorkbookDenied as error:
         print(json.dumps({"ok": False, "code": str(error), "writes": 0}))
         return 1
