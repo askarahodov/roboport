@@ -18,7 +18,8 @@ class VehicleStagingRejected(ValueError):
 
 
 def stage_synthetic_vehicles(conn, path: Path, *, organization_id: UUID,
-                             batch_id: UUID, expected_sha256: str) -> dict:
+                             batch_id: UUID, expected_sha256: str,
+                             required_location_id: UUID | None = None) -> dict:
     if not isinstance(organization_id, UUID) or not isinstance(batch_id, UUID):
         raise VehicleStagingRejected("invalid scope")
     if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
@@ -47,6 +48,9 @@ def stage_synthetic_vehicles(conn, path: Path, *, organization_id: UUID,
     if any(UUID(row["organization_id"]) != organization_id for row in records):
         raise VehicleStagingRejected("tenant mismatch")
     locations = sorted({UUID(row["location_id"]) for row in records})
+    if required_location_id is not None and (type(required_location_id) is not UUID
+            or locations != [required_location_id]):
+        raise VehicleStagingRejected("branch mismatch")
     with conn.transaction():
         for location_id in locations:
             if conn.execute("""
