@@ -48,9 +48,10 @@ test('пользовательские разделы явно разделяю�
       await expect(page.locator('.markdown-section')).toContainText('/staff/warehouse-work-orders');
     } else {
       await expect(page.locator('.markdown-section')).toContainText(
-        ['client', 'intake', 'manager'].includes(path)
-          ? 'Статус: частично current в синтетическом dev'
-          : 'Статус: planned',
+        path === 'mechanic' ? 'Статус: частично current-dev'
+          : ['client', 'intake', 'manager'].includes(path)
+            ? 'Статус: частично current в синтетическом dev'
+            : 'Статус: planned',
       );
     }
     await expect(page.locator('.markdown-section')).not.toContainText(
