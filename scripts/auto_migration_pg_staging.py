@@ -21,10 +21,7 @@ class SyntheticImportRejected(ValueError):
     """Deliberately contains no source rows, identifiers, or personal data."""
 
 
-def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
-                        batch_id: UUID, expected_sha256: str) -> dict:
-    if not isinstance(organization_id, UUID) or not isinstance(batch_id, UUID):
-        raise SyntheticImportRejected("invalid staging scope")
+def _read_verified_rows(path: Path, expected_sha256: str):
     if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
             or any(c not in "0123456789abcdef" for c in expected_sha256)):
         raise SyntheticImportRejected("invalid source fingerprint")
@@ -58,9 +55,22 @@ def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
         raise SyntheticImportRejected("source validation failed")
 
     rows = list(csv.DictReader(io.StringIO(snapshot.decode("utf-8-sig"), newline="")))
-    # Every path, including idempotent replay, must enforce the caller tenant.
+    return rows, report
+
+
+def _validated_batch(path: Path, organization_id: UUID, batch_id: UUID,
+                     expected_sha256: str):
+    if not isinstance(organization_id, UUID) or not isinstance(batch_id, UUID):
+        raise SyntheticImportRejected("invalid staging scope")
+    rows, report = _read_verified_rows(path, expected_sha256)
     if any(UUID(row["organization_id"]) != organization_id for row in rows):
         raise SyntheticImportRejected("staging tenant mismatch")
+    return rows, report
+
+
+def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
+                        batch_id: UUID, expected_sha256: str) -> dict:
+    rows, report = _validated_batch(path, organization_id, batch_id, expected_sha256)
     expected = (len(rows), report["counts"]["SKU"], report["counts"]["STOCK"])
     locations = sorted({UUID(row["location_id"]) for row in rows})
     with conn.transaction():
@@ -125,3 +135,36 @@ def stage_synthetic_csv(conn, path: Path, *, organization_id: UUID,
     return {"ok": True, "replayed": False, "counts": report["counts"],
             "rows": expected[0], "writes": expected[0] + 1,
             "mode": "SYNTHETIC_STAGING"}
+
+
+def reconcile_synthetic_staging(conn, path: Path, *, organization_id: UUID,
+                                batch_id: UUID, expected_sha256: str) -> dict:
+    """Read-only, independent source-to-staging check; never stages or promotes data.
+
+    A snapshot of a trusted synthetic source is compared with every row in PG17.
+    Call in a disposable synthetic DB only; this does not grant an employee role.
+    """
+    rows, report = _validated_batch(path, organization_id, batch_id, expected_sha256)
+    expected = (len(rows), report["counts"]["SKU"], report["counts"]["STOCK"])
+    with conn.transaction():
+        batch = conn.execute("""
+            SELECT organization_id,source_sha256,row_count,sku_count,stock_count
+            FROM auto_migration_staging_batch WHERE id=%s
+        """, (batch_id,)).fetchone()
+        if batch != (organization_id, expected_sha256, *expected):
+            raise SyntheticImportRejected("staging reconciliation mismatch")
+        persisted = conn.execute("""
+            SELECT line_number,organization_id,location_id,record_type,
+                   source_id,article,quantity
+            FROM auto_migration_staging_line WHERE batch_id=%s
+            ORDER BY line_number
+        """, (batch_id,)).fetchall()
+        if len(persisted) != expected[0]:
+            raise SyntheticImportRejected("staging reconciliation mismatch")
+        for number, (stored, row) in enumerate(zip(persisted, rows), start=2):
+            if stored != (number, organization_id, UUID(row["location_id"]),
+                          row["record_type"], row["source_id"], row["article"],
+                          int(row["quantity"])):
+                raise SyntheticImportRejected("staging reconciliation mismatch")
+    return {"ok": True, "counts": report["counts"], "rows": len(rows),
+            "writes": 0, "mode": "SYNTHETIC_RECONCILIATION"}
