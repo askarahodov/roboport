@@ -9,6 +9,7 @@ import { GuestIntake, ClaimProof } from './pages/customer/GuestIntake';
 import { StaffPortal } from './pages/staff/StaffPortal';
 import { AutoStaffAdmin } from './pages/staff/AutoStaffAdmin';
 import { AutoCalendar } from './pages/staff/AutoCalendar';
+import { AutoOrderServices } from './pages/staff/AutoOrderServices';
 import { WarehouseStocktake } from './pages/staff/WarehouseStocktake';
 import { WarehouseReceiving } from './pages/staff/WarehouseReceiving';
 import { WarehouseWorkOrders } from './pages/staff/WarehouseWorkOrders';
@@ -96,6 +97,7 @@ function App() {
         <NavLink to="/staff" end>Сотрудникам</NavLink>
         <NavLink to="/staff/auto-admin" end>Организации (dev)</NavLink>
         <NavLink to="/staff/auto-calendar" end>Календарь (dev)</NavLink>
+        <NavLink to="/staff/auto-order-services" end>Услуги наряда (dev)</NavLink>
         <NavLink to="/staff/warehouse-stocktake" end>Инвентаризация (dev)</NavLink>
         <NavLink to="/staff/warehouse-receiving" end>Приход (dev)</NavLink>
         <NavLink to="/staff/warehouse-work-orders" end>Выдача (dev)</NavLink>
@@ -151,6 +153,7 @@ function App() {
       <Route path="/account/*" element={<CustomerAccount />} />
       <Route path="/staff/auto-admin" element={<AutoStaffAdmin />} />
       <Route path="/staff/auto-calendar" element={<AutoCalendar />} />
+      <Route path="/staff/auto-order-services" element={<AutoOrderServices />} />
       <Route path="/staff/warehouse-stocktake" element={<WarehouseStocktake />} />
       <Route path="/staff/warehouse-receiving" element={<WarehouseReceiving />} />
       <Route path="/staff/warehouse-work-orders" element={<WarehouseWorkOrders />} />
