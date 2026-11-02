@@ -1,0 +1,103 @@
+"""Contract for two-input offline synthetic batch and no-partial-output behavior."""
+import hashlib
+import os
+import zipfile
+from uuid import uuid4
+from xml.sax.saxutils import escape
+
+from scripts.auto_synthetic_batch import inspect_synthetic_batch
+from scripts.auto_vehicle_migration_preflight import COLUMNS
+from roboport_api.auto_service_import import FIELDS
+
+NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+
+
+def workbook(path, headers, values):
+    rows = []
+    for n, fields in enumerate((headers, values), 1):
+        cells = "".join(
+            f'<c r="{chr(65+i)}{n}" t="inlineStr"><is><t>{escape(v)}</t></is></c>'
+            for i, v in enumerate(fields)
+        )
+        rows.append(f'<row r="{n}">{cells}</row>')
+    worksheet = f'<worksheet xmlns="{NS}"><sheetData>{"".join(rows)}</sheetData></worksheet>'
+    root = f'<workbook xmlns="{NS}"><sheets><sheet name="Import" sheetId="1"/></sheets></workbook>'
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("xl/workbook.xml", root)
+        archive.writestr("xl/worksheets/sheet1.xml", worksheet)
+
+
+def fixtures(tmp_path):
+    sources = {"VEHICLE": tmp_path / "vehicles.xlsx", "SERVICE": tmp_path / "services.xlsx"}
+    workbook(sources["VEHICLE"], COLUMNS,
+             ("VEHICLE", "SRC-1", str(uuid4()), str(uuid4()),
+              "1HGCM82633A004381", "SYNTHETIC", "TEST CAR", "DEMO"))
+    workbook(sources["SERVICE"], FIELDS,
+             ("SERVICE", "DEMO", "SRC-1", "BRAKE-TEST", "SYNTHETIC", "30"))
+    digests = {kind: hashlib.sha256(path.read_bytes()).hexdigest()
+               for kind, path in sources.items()}
+    return sources, digests
+
+
+def test_successful_two_domain_batch_is_reconciled_and_private(tmp_path):
+    sources, digests = fixtures(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+    result = inspect_synthetic_batch(sources, output, expected_sha256=digests)
+    assert result["ok"] and not result["release_allowed"] and result["writes"] == 0
+    assert result["rows"] == {"VEHICLE": 1, "SERVICE": 1}
+    for kind in sources:
+        path = output / (kind.lower() + ".csv")
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == result["sha256"][kind]
+        assert path.stat().st_mode & 0o777 == 0o600
+    assert not list(output.glob(".auto-batch-*"))
+
+
+def test_invalid_second_input_cannot_publish_first(tmp_path):
+    sources, digests = fixtures(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+    sources["SERVICE"].write_bytes(sources["SERVICE"].read_bytes() + b"tamper")
+    result = inspect_synthetic_batch(sources, output, expected_sha256=digests)
+    assert not result["ok"] and result["code"] == "SOURCE_CHECKSUM"
+    assert not list(output.iterdir())
+    assert "SRC-1" not in str(result)
+
+
+def test_existing_target_does_not_overwrite_or_publish_other(tmp_path):
+    sources, digests = fixtures(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "service.csv").write_bytes(b"previous")
+    result = inspect_synthetic_batch(sources, output, expected_sha256=digests)
+    assert result["code"] == "OUTPUT_CONFLICT"
+    assert (output / "service.csv").read_bytes() == b"previous"
+    assert not (output / "vehicle.csv").exists()
+
+
+def test_failure_publishing_second_rolls_back_first(tmp_path, monkeypatch):
+    sources, digests = fixtures(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+    link = os.link
+    def broken(source, target, **options):
+        if str(target).endswith("service.csv"):
+            raise OSError("simulated write failure")
+        return link(source, target, **options)
+    monkeypatch.setattr(os, "link", broken)
+    result = inspect_synthetic_batch(sources, output, expected_sha256=digests)
+    assert result["code"] == "OUTPUT_UNAVAILABLE"
+    assert not list(output.iterdir())
+
+
+def test_missing_input_and_missing_output_dir_are_safe(tmp_path):
+    sources, digests = fixtures(tmp_path)
+    output = tmp_path / "output"
+    assert inspect_synthetic_batch(sources, output, expected_sha256=digests)["ok"] is False
+    output.mkdir()
+    sources["VEHICLE"].unlink()
+    result = inspect_synthetic_batch(sources, output, expected_sha256=digests)
+    assert result["ok"] is False
+    assert result["writes"] == 0
+    assert not list(output.iterdir())
