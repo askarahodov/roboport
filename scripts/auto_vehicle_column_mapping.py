@@ -73,15 +73,26 @@ def map_synthetic_vehicle_csv(source: Path, target: Path, *, mapping: dict[str, 
         report = inspect_vehicle_csv(candidate)
     if not report["ok"]:
         raise VehicleMappingRejected("PREFLIGHT")
-    # Refuse overwrites, existing symlinks and paths escaping their parent.
-    # File is private, created only after all source validation.
+    # Publish only a complete private file; hard links fail if target already exists.
+    # A temporary file is placed in the target directory for same-filesystem linking.
+    temporary = None
     try:
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                     0o600)
+        fd, name = tempfile.mkstemp(prefix=".vehicle-map-", suffix=".tmp",
+                                    dir=target.parent)
+        temporary = Path(name)
         with os.fdopen(fd, "wb") as stream:
             stream.write(canonical)
-    except OSError:
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, target, follow_symlinks=False)
+    except (OSError, ValueError):
         raise VehicleMappingRejected("OUTPUT_UNAVAILABLE") from None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
     return {"ok": True, "count": count, "sha256": hashlib.sha256(canonical).hexdigest(),
             "writes": 0, "mode": "SYNTHETIC_VEHICLE_MAPPING"}
 

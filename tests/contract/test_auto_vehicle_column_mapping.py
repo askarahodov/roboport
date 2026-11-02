@@ -101,3 +101,28 @@ def test_invalid_mapping_is_rejected_without_identifiers(tmp_path):
     with pytest.raises(VehicleMappingRejected, match="MAPPING"):
         map_synthetic_vehicle_csv(source, target, mapping={"номер": "vin"})
     assert not target.exists()
+
+
+def test_failed_output_publish_never_exposes_partial_file(tmp_path, monkeypatch):
+    import os
+    org, loc = uuid4(), uuid4()
+    source, target = tmp_path / "source.csv", tmp_path / "destination.csv"
+    write_fixture(source, MAPPING, [values(org, loc)])
+    def broken_link(*args, **kwargs):
+        raise OSError("synthetic publish failure")
+    monkeypatch.setattr(os, "link", broken_link)
+    with pytest.raises(VehicleMappingRejected, match="OUTPUT_UNAVAILABLE"):
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+    assert not target.exists()
+    assert not list(tmp_path.glob(".vehicle-map-*.tmp"))
+
+
+def test_existing_target_is_not_replaced_by_atomic_publish(tmp_path):
+    org, loc = uuid4(), uuid4()
+    source, target = tmp_path / "source.csv", tmp_path / "destination.csv"
+    write_fixture(source, MAPPING, [values(org, loc)])
+    target.write_bytes(b"existing")
+    with pytest.raises(VehicleMappingRejected, match="OUTPUT_UNAVAILABLE"):
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+    assert target.read_bytes() == b"existing"
+    assert not list(tmp_path.glob(".vehicle-map-*.tmp"))
