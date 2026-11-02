@@ -142,3 +142,14 @@ def test_deeply_nested_manifest_fails_closed_without_traceback(tmp_path):
         "writes": 0, "mode": "PROVENANCE_PREFLIGHT_ONLY",
         "ok": False, "code": "SCHEMA", "release_allowed": False,
     }
+
+
+def test_manifest_requires_utf8_not_implicit_utf16_or_utf32(tmp_path):
+    path, manifest = make_bundle(tmp_path)
+    for encoding in ("utf-16", "utf-32"):
+        path.write_bytes(json.dumps(manifest).encode(encoding))
+        result = inspect_provenance_bundle(path)
+        assert result == {
+            "writes": 0, "mode": "PROVENANCE_PREFLIGHT_ONLY",
+            "ok": False, "code": "SCHEMA", "release_allowed": False,
+        }

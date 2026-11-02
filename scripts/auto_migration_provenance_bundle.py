@@ -67,7 +67,7 @@ def inspect_provenance_bundle(manifest: Path) -> dict:
     """Inspect metadata and SHA256 only; never return source identifiers."""
     try:
         raw = _read_regular(manifest, MAX_MANIFEST)
-        payload = json.loads(raw, object_pairs_hook=_reject_duplicate_keys,
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys,
                              parse_constant=_reject_nonfinite_number)
         if not isinstance(payload, dict) or set(payload) != ALLOWED:
             raise ProvenanceDenied("SCHEMA")
