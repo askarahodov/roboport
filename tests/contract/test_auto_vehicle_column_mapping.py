@@ -37,7 +37,8 @@ def test_explicit_mapping_produces_canonical_staging_input(tmp_path):
     reversed_mapping = list(reversed(list(MAPPING)))
     original = dict(zip(MAPPING, values(org, loc)))
     write_fixture(source, reversed_mapping, [[original[h] for h in reversed_mapping]])
-    report = map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+    report = map_synthetic_vehicle_csv(source, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert report["ok"] and report["count"] == 1 and report["writes"] == 0
     assert report["sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
     assert inspect_vehicle_csv(target)["ok"]
@@ -87,7 +88,8 @@ def test_rejects_symlink_source_and_output(tmp_path):
     link = tmp_path / "link.csv"
     link.symlink_to(source)
     with pytest.raises(VehicleMappingRejected, match="UNAVAILABLE"):
-        map_synthetic_vehicle_csv(link, target, mapping=MAPPING)
+        map_synthetic_vehicle_csv(link, target, mapping=MAPPING,
+                                  expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not target.exists()
     target.symlink_to(source)
     before = source.read_bytes()
@@ -126,3 +128,19 @@ def test_existing_target_is_not_replaced_by_atomic_publish(tmp_path):
         map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
     assert target.read_bytes() == b"existing"
     assert not list(tmp_path.glob(".vehicle-map-*.tmp"))
+
+
+def test_source_sha256_must_be_precommitted_and_match_before_output(tmp_path):
+    org, loc = uuid4(), uuid4()
+    source, target = tmp_path / "source.csv", tmp_path / "mapped.csv"
+    write_fixture(source, MAPPING, [values(org, loc)])
+    original = hashlib.sha256(source.read_bytes()).hexdigest()
+    with pytest.raises(VehicleMappingRejected, match="SOURCE_DIGEST_REQUIRED"):
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING)
+    for bad in ("", "A" * 64, "1" * 63, 123):
+        with pytest.raises(VehicleMappingRejected, match="SOURCE_DIGEST_REQUIRED"):
+            map_synthetic_vehicle_csv(source, target, mapping=MAPPING, expected_sha256=bad)
+    source.write_bytes(source.read_bytes() + b"\\n")
+    with pytest.raises(VehicleMappingRejected, match="SOURCE_CHECKSUM"):
+        map_synthetic_vehicle_csv(source, target, mapping=MAPPING, expected_sha256=original)
+    assert not target.exists()
