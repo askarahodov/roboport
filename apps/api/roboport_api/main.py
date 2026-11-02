@@ -34,6 +34,8 @@ from .auto_order_financial_read_http import router as auto_order_financial_read_
 app.include_router(auto_order_financial_read_router)
 from .auto_order_service_http import router as auto_order_service_router
 app.include_router(auto_order_service_router)
+from .auto_workshop_qc_http import router as auto_workshop_qc_router
+app.include_router(auto_workshop_qc_router)
 
 
 @app.middleware("http")
