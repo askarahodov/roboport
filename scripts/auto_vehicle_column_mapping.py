@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import stat
 import tempfile
 from pathlib import Path
@@ -22,13 +23,17 @@ class VehicleMappingRejected(ValueError):
     """Error codes only; never include row values, paths or sensitive headers."""
 
 
-def map_synthetic_vehicle_csv(source: Path, target: Path, *, mapping: dict[str, str]) -> dict:
+def map_synthetic_vehicle_csv(source: Path, target: Path, *, mapping: dict[str, str],
+                              expected_sha256: str | None = None) -> dict:
     """Canonicalize an explicitly declared synthetic CSV using atomic fail-closed output."""
     if (type(mapping) is not dict or len(mapping) != len(COLUMNS)
             or set(mapping.values()) != set(COLUMNS)
             or any(type(k) is not str or not k or type(v) is not str
                    for k, v in mapping.items())):
         raise VehicleMappingRejected("MAPPING")
+    if (type(expected_sha256) is not str or
+            re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None):
+        raise VehicleMappingRejected("SOURCE_DIGEST_REQUIRED")
     if not hasattr(os, "O_NOFOLLOW"):
         raise VehicleMappingRejected("UNAVAILABLE")
     try:
@@ -42,6 +47,8 @@ def map_synthetic_vehicle_csv(source: Path, target: Path, *, mapping: dict[str, 
         raise VehicleMappingRejected("UNAVAILABLE") from None
     if len(raw) > MAX_BYTES:
         raise VehicleMappingRejected("FILE_LIMIT")
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise VehicleMappingRejected("SOURCE_CHECKSUM")
     try:
         reader = csv.DictReader(io.StringIO(raw.decode("utf-8-sig"), newline=""),
                                 strict=True)
@@ -102,6 +109,8 @@ def main() -> int:
     parser.add_argument("--synthetic-only", action="store_true", required=True)
     parser.add_argument("--field", action="append", required=True, metavar="SOURCE=TARGET",
                         help="Repeat for each of the eight canonical fields.")
+    parser.add_argument("--expect-sha256", required=True,
+                        help="Trusted SHA-256 of the exact synthetic source bytes.")
     parser.add_argument("source", type=Path)
     parser.add_argument("target", type=Path)
     args = parser.parse_args()
@@ -114,7 +123,8 @@ def main() -> int:
             parser.error("duplicate source field")
         mapping[key] = value
     try:
-        result = map_synthetic_vehicle_csv(args.source, args.target, mapping=mapping)
+        result = map_synthetic_vehicle_csv(args.source, args.target, mapping=mapping,
+                                           expected_sha256=args.expect_sha256)
     except VehicleMappingRejected as error:
         print(json.dumps({"ok": False, "code": str(error), "writes": 0},
                          sort_keys=True))
