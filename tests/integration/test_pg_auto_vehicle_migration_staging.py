@@ -96,16 +96,16 @@ def test_existing_live_vehicle_vin_blocks_staging_without_writes(tmp_path):
     with psycopg.connect(DSN) as db:
         org, loc, _ = _org_and_bay(db)
         path, batch = tmp_path / "vehicles.csv", uuid4()
-        digest = source(path, [vehicle(org, loc)])
+        digest = source(path, [vehicle(org, loc, vin="1HGCM82633A004353")])
         existing_vehicle = uuid4()
         db.execute(
             "INSERT INTO auto_vehicle(id,vin,make,model) VALUES (%s,%s,%s,%s)",
-            (existing_vehicle, "1HGCM82633A004352", "SYNTHETIC", "ALREADY EXISTS"),
+            (existing_vehicle, "1HGCM82633A004353", "SYNTHETIC", "ALREADY EXISTS"),
         )
         with pytest.raises(VehicleStagingRejected, match="vehicle identity conflicts") as error:
             stage_synthetic_vehicles(db, path, organization_id=org,
                                      batch_id=batch, expected_sha256=digest)
-        assert "1HGCM82633A004352" not in str(error.value)
+        assert "1HGCM82633A004353" not in str(error.value)
         assert db.execute(
             "SELECT count(*) FROM auto_vehicle_migration_batch WHERE id=%s",
             (batch,),
