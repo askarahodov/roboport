@@ -134,6 +134,23 @@ def record_work_order_qc(conn, token, org, loc, order, *,
             raise InspectionConflict("INSPECTION_REQUIRED")
         if inspection[1]==actor:
             raise InspectionDenied("SEPARATION_REQUIRED")
+        execution=conn.execute("""
+          SELECT e.id FROM auto_work_order_execution e
+          WHERE e.work_order_id=%s
+        """,(order,)).fetchone()
+        if execution:
+            finished=conn.execute("""
+              SELECT id FROM auto_work_order_execution_finish
+              WHERE execution_id=%s
+            """,(execution[0],)).fetchone()
+            if finished is None:
+                raise InspectionConflict("EXECUTION_INCOMPLETE")
+            performed=conn.execute("""
+              SELECT 1 FROM auto_work_order_labor_entry
+              WHERE execution_id=%s AND actor_id=%s LIMIT 1
+            """,(execution[0],actor)).fetchone()
+            if performed:
+                raise InspectionDenied("SEPARATION_REQUIRED")
         existing=conn.execute("""
           SELECT result,finding_code,actor_id FROM auto_work_order_qc_event
           WHERE work_order_id=%s AND request_key=%s
