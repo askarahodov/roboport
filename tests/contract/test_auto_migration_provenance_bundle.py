@@ -116,3 +116,19 @@ def test_nonfinite_json_constants_rejected_even_in_ignored_fields(tmp_path):
         assert result["code"] == "SCHEMA"
         assert result["writes"] == 0
         assert result["release_allowed"] is False
+
+
+def test_total_declared_bundle_size_limit_before_reading_sources(tmp_path):
+    path, manifest = make_bundle(tmp_path)
+    # Five valid metadata entries over the aggregate limit; no large fixture files needed.
+    base = manifest["sources"][0]
+    manifest["sources"] = [
+        {**base, "file": f"SOURCE{i}.FIXTURE", "bytes": 10_000_000}
+        for i in range(5)
+    ]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    result = inspect_provenance_bundle(path)
+    assert result == {
+        "writes": 0, "mode": "PROVENANCE_PREFLIGHT_ONLY",
+        "ok": False, "code": "BUNDLE_LIMIT", "release_allowed": False,
+    }
