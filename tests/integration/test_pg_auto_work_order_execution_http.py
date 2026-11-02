@@ -112,8 +112,9 @@ def test_full_approved_execution_stock_handoff_and_independent_qc(monkeypatch):
     assert finish.json()["releaseAllowed"] is False
     assert post(http,base+"/finish",mech,finish_key).status_code==200
     assert post(http,base+"/finish",mech).status_code==409
+    warehouse=session(http,d,d["intake"])
     assert post(http,base+"/materials/issue",warehouse,
-                lotId=str(lot),quantity=1).status_code==403 or True
+                lotId=str(lot),quantity=1).status_code==409
     # Mechanic that performed labor cannot independently QC own order.
     assert post(http,qc_path,mech,result="PASS",findingCode="NONE").status_code==403
     other=session(http,d,d["other"])
