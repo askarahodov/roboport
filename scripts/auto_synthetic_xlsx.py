@@ -164,3 +164,26 @@ def convert_synthetic_xlsx(source: Path, target: Path, *, kind: str) -> dict:
         raise SyntheticWorkbookDenied("OUTPUT_UNAVAILABLE") from None
     return {"ok": True, "type": kind, "rows": len(rows) - 1, "sha256": digest,
             "writes": 0, "mode": "SYNTHETIC_XLSX_TO_CSV"}
+
+
+def main() -> int:
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--synthetic-only", action="store_true", required=True)
+    parser.add_argument("--kind", required=True, choices=("VEHICLE", "SERVICE"))
+    parser.add_argument("source", type=Path)
+    parser.add_argument("target", type=Path)
+    options = parser.parse_args()
+    try:
+        report = convert_synthetic_xlsx(options.source, options.target,
+                                        kind=options.kind)
+    except SyntheticWorkbookDenied as error:
+        print(json.dumps({"ok": False, "code": str(error), "writes": 0}))
+        return 1
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
