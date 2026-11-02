@@ -1,16 +1,16 @@
 - **Главная**
   - [Обзор и статусы](/)
   - [Карта всей документации](/INDEX.md)
-- **Пользователям (планируется)**
-  - [Клиент](/guides/client.md)
-  - [Мобильное приложение](/guides/mobile.md)
-- **Сотрудникам (планируется)**
-  - [Администратор](/guides/administrator.md)
-  - [Мастер-приёмщик](/guides/intake.md)
+- **Роли: частично доступно в synthetic dev**
+  - [Клиент: подтверждение авто (dev)](/guides/client.md)
+  - [Администратор: журнал (dev)](/guides/administrator.md)
+  - [Мастер-приёмщик: привязка авто (dev)](/guides/intake.md)
+  - [Кладовщик: операции склада (dev)](/guides/warehouse.md)
+  - [Руководитель: проверка связи (dev)](/guides/manager.md)
+- **Роли: функциональность планируется**
   - [Механик и диагност](/guides/mechanic.md)
-  - [Кладовщик и закупщик](/guides/warehouse.md)
-  - [Руководитель](/guides/manager.md)
   - [Бухгалтер и кассир](/guides/finance.md)
+  - [Мобильное приложение](/guides/mobile.md)
 - **Реализовано в dev**
   - [Связь клиента с автомобилем](/auto/VEHICLE_OWNERSHIP.md)
   - [Аудит актуальности](/auto/DOCUMENTATION_AUDIT.md)
