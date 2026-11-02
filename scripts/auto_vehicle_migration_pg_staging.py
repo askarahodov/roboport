@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from uuid import UUID
 
+import psycopg
+
 from scripts.auto_vehicle_migration_preflight import MAX_BYTES, inspect_vehicle_csv
 
 
@@ -95,15 +97,21 @@ def stage_synthetic_vehicles(conn, path: Path, *, organization_id: UUID,
                     raise VehicleStagingRejected("line mismatch")
             return {"ok": True, "replayed": True, "count": len(records),
                     "writes": 0, "mode": "SYNTHETIC_VEHICLE_STAGING"}
-        for row_number, row in enumerate(records, start=2):
-            conn.execute("""
-                INSERT INTO auto_vehicle_migration_line
-                (batch_id,row_number,organization_id,location_id,source_id,
-                 source_system,vin,make,model)
-                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (batch_id, row_number, organization_id, UUID(row["location_id"]),
-                  row["source_id"], row["source_system"], row["vin"],
-                  row["make"], row["model"]))
+        # Savepoint protects the outer transaction from PostgreSQL unique errors.
+        # Do not expose PostgreSQL's DETAIL field (which includes the VIN).
+        try:
+            with conn.transaction():
+            for row_number, row in enumerate(records, start=2):
+                conn.execute("""
+                    INSERT INTO auto_vehicle_migration_line
+                    (batch_id,row_number,organization_id,location_id,source_id,
+                     source_system,vin,make,model)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (batch_id, row_number, organization_id, UUID(row["location_id"]),
+                      row["source_id"], row["source_system"], row["vin"],
+                      row["make"], row["model"]))
+            except psycopg.errors.UniqueViolation:
+            raise VehicleStagingRejected("vehicle staging identity conflict") from None
         if conn.execute("""
             SELECT count(*) FROM auto_vehicle_migration_line WHERE batch_id=%s
         """, (batch_id,)).fetchone()[0] != len(records):
