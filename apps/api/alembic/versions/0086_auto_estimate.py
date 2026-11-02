@@ -123,6 +123,21 @@ def upgrade():
       BEFORE INSERT ON auto_work_order_estimate_decision
       FOR EACH ROW EXECUTE FUNCTION guard_auto_estimate_decision()
     """)
+    op.execute("""
+      CREATE FUNCTION guard_auto_estimate_service_freeze()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF EXISTS(SELECT 1 FROM auto_work_order_estimate_revision
+                  WHERE work_order_id=NEW.work_order_id)
+        THEN RAISE EXCEPTION 'cannot add services after estimate publication'; END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE TRIGGER auto_service_estimate_freeze
+      BEFORE INSERT ON auto_work_order_service
+      FOR EACH ROW EXECUTE FUNCTION guard_auto_estimate_service_freeze()
+    """)
     for table in ("auto_work_order_estimate_revision", "auto_work_order_estimate_decision"):
         op.execute(f"""CREATE TRIGGER {table}_immutable BEFORE UPDATE OR DELETE
           ON {table} FOR EACH ROW EXECUTE FUNCTION immutable_auto_stock_event()""")
@@ -131,6 +146,8 @@ def upgrade():
 
 def downgrade():
     # Only disposable synthetic databases; preserves no real accounting evidence.
+    op.execute("DROP TRIGGER auto_service_estimate_freeze ON auto_work_order_service")
+    op.execute("DROP FUNCTION guard_auto_estimate_service_freeze()")
     op.execute("DROP TABLE auto_work_order_estimate_decision")
     op.execute("DROP TABLE auto_work_order_estimate_revision")
     op.execute("DROP FUNCTION guard_auto_estimate_decision()")
