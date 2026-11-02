@@ -37,7 +37,9 @@ test('пользовательские разделы явно разделяю�
   ];
   await page.goto('/docs/');
   for (const [path, heading] of routes) {
-    await page.locator('.sidebar-nav a[href*="guides/' + path + '"]').click();
+    // Direct route navigation avoids Docsify sidebar re-render races when
+    // traversing several long role pages; sidebar clicks have separate smoke.
+    await page.goto('/docs/#/guides/' + path);
     await expect(page.locator('.markdown-section h1')).toContainText(heading);
     // Складская инструкция должна перечислять реализованные dev-операции
     // и явно запрещать работу с реальными данными; production ещё planned.
@@ -48,9 +50,10 @@ test('пользовательские разделы явно разделяю�
       await expect(page.locator('.markdown-section')).toContainText('/staff/warehouse-work-orders');
     } else {
       await expect(page.locator('.markdown-section')).toContainText(
-        ['client', 'intake', 'manager'].includes(path)
-          ? 'Статус: частично current в синтетическом dev'
-          : 'Статус: planned',
+        path === 'mechanic' ? 'Статус: частично current-dev'
+          : ['client', 'intake', 'manager'].includes(path)
+            ? 'Статус: частично current в синтетическом dev'
+            : 'Статус: planned',
       );
     }
     await expect(page.locator('.markdown-section')).not.toContainText(

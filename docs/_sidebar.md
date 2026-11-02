@@ -4,11 +4,11 @@
 - **Роли: частично доступно в synthetic dev**
   - [Клиент: подтверждение авто (dev)](/guides/client.md)
   - [Администратор: журнал (dev)](/guides/administrator.md)
-  - [Мастер-приёмщик: привязка авто (dev)](/guides/intake.md)
+  - [Мастер-приёмщик: привязка и осмотр авто (dev)](/guides/intake.md)
   - [Кладовщик: операции склада (dev)](/guides/warehouse.md)
-  - [Руководитель: проверка связи (dev)](/guides/manager.md)
+  - [Руководитель: проверка связи (dev)]
+  - [Механик: контроль качества (dev)](/guides/mechanic.md)(/guides/manager.md)
 - **Роли: функциональность планируется**
-  - [Механик и диагност](/guides/mechanic.md)
   - [Бухгалтер и кассир](/guides/finance.md)
   - [Мобильное приложение](/guides/mobile.md)
 - **Реализовано в dev**

@@ -10,10 +10,10 @@ def test_role_sidebar_separates_current_dev_from_planned():
         "- **Роли: функциональность планируется**", 1)[0]
     planned = sidebar.split("- **Роли: функциональность планируется**", 1)[1].split(
         "- **Реализовано в dev**", 1)[0]
-    for page in ("client.md", "administrator.md", "intake.md", "warehouse.md", "manager.md"):
+    for page in ("client.md", "administrator.md", "intake.md", "warehouse.md", "manager.md", "mechanic.md"):
         assert "/guides/" + page in current
         assert "/guides/" + page not in planned
-    for page in ("mechanic.md", "finance.md", "mobile.md"):
+    for page in ("finance.md", "mobile.md"):
         assert "/guides/" + page in planned
         assert "/guides/" + page not in current
 
