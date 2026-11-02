@@ -122,7 +122,7 @@ def inspect_provenance_bundle(manifest: Path) -> dict:
         # The presence of opaque evidence references cannot assert legal approval.
         return {**EMPTY_REPORT, "ok": True, "counts": counts,
                 "approval": "NOT_VERIFIED", "release_allowed": False}
-    except (ValueError, TypeError, UnicodeError, json.JSONDecodeError) as error:
+    except (ValueError, TypeError, UnicodeError, RecursionError) as error:
         if isinstance(error, ProvenanceDenied):
             return {**EMPTY_REPORT, "ok": False, "code": str(error),
                     "release_allowed": False}
