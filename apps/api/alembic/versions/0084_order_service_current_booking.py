@@ -1,11 +1,11 @@
 """Validate the currently active booking when selecting services after rescheduling.
 
-Revision ID: 0084_order_service_current_booking
+Revision ID: 0084_auto_order_services
 Revises: 0083_order_service_consent
 """
 from alembic import op
 
-revision = "0084_order_service_current_booking"
+revision = "0084_auto_order_services"
 down_revision = "0083_order_service_consent"
 branch_labels = None
 depends_on = None
