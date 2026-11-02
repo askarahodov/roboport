@@ -226,3 +226,8 @@ python scripts/auto_migration_provenance_bundle.py --synthetic-only ./synthetic_
 ## Fail-closed CSV dry-run при ошибках чтения (#352)
 
 Вызовы `inspect_csv()` из Python-кода и через CLI возвращают одинаковый безопасный JSON при некорректной UTF-8 кодировке, ошибочном CSV quoting и некорректных параметрах сверки: `ok=false`, `writes=0`, `mode=DRY_RUN_ONLY`, `UNREADABLE`, без исходных значений и traceback. Позитивные синтетические пакеты и ограничения размера/SHA-256 продолжают проверяться прежним способом. Это не разрешение на импорт реальных данных.
+
+
+### Единый формат всех ответов CSV preflight (#352)
+
+Любой ответ `inspect_csv()`, включая ранние отказы `UNAVAILABLE`, `SCHEMA`, `SOURCE_CHECKSUM` и `UNREADABLE`, содержит `ok`, `counts`, `errors`, `mode: DRY_RUN_ONLY` и `writes: 0`. Вызов из Python и CLI сохраняют единый контракт; `writes: 0` не является разрешением на реальный импорт.
