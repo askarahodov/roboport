@@ -148,7 +148,10 @@ def prepare_atomic_bundle(
         )
         _sync_directory(staged)
         # Linux no-replace is atomic, including if another writer races here.
-        _rename_directory_no_replace(staged, final)
+        try:
+            _rename_directory_no_replace(staged, final)
+        except OSError:
+            raise BatchDenied("OUTPUT_UNAVAILABLE") from None
         # After rename, fsync may fail: return a refusal, but preserve published
         # output for operator inspection instead of deleting potentially valid data.
         _sync_directory(destination)
