@@ -1,5 +1,6 @@
 """Offline, synthetic XLSX inputs for both existing vehicle and service CSV paths."""
 import csv
+import hashlib
 import io
 import zipfile
 from uuid import uuid4
@@ -51,20 +52,23 @@ def test_vehicle_workbook_to_canonical_preflight(tmp_path):
     values = ("VEHICLE", "SRC-1", str(org), str(loc),
               "1HGCM82633A004381", "SYNTHETIC", "TEST CAR", "DEMO")
     workbook(source, COLUMNS, values)
-    result = convert_synthetic_xlsx(source, output, kind="VEHICLE")
+    result = convert_synthetic_xlsx(source, output, kind="VEHICLE",
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert result["ok"] and result["rows"] == 1 and result["writes"] == 0
     assert inspect_vehicle_csv(output)["ok"]
     assert str(org) not in str(result) and values[4] not in str(result)
     assert output.stat().st_mode & 0o777 == 0o600
     with pytest.raises(SyntheticWorkbookDenied, match="OUTPUT_UNAVAILABLE"):
-        convert_synthetic_xlsx(source, output, kind="VEHICLE")
+        convert_synthetic_xlsx(source, output, kind="VEHICLE",
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
 
 
 def test_service_workbook_shared_strings_to_service_preflight(tmp_path):
     source, output = tmp_path / "service.xlsx", tmp_path / "service.csv"
     row = ("SERVICE", "DEMO", "SRV-1", "BRAKE-TEST", "SYNTHETIC BRAKE TEST", "30")
     workbook(source, FIELDS, row, shared=True)
-    result = convert_synthetic_xlsx(source, output, kind="SERVICE")
+    result = convert_synthetic_xlsx(source, output, kind="SERVICE",
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert result["rows"] == 1
     assert inspect_synthetic_services(output, expected_sha256=result["sha256"])["ok"]
     with output.open(encoding="utf-8", newline="") as stream:
@@ -81,7 +85,8 @@ def test_rejects_unsafe_excel_without_output(tmp_path, options, code):
              ("SERVICE", "DEMO", "S-1", "OIL-CHANGE", "SYNTHETIC", "30"),
              **options)
     with pytest.raises(SyntheticWorkbookDenied, match=code):
-        convert_synthetic_xlsx(source, output, kind="SERVICE")
+        convert_synthetic_xlsx(source, output, kind="SERVICE",
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not output.exists()
 
 
@@ -92,12 +97,14 @@ def test_rejects_real_owner_columns_and_invalid_vehicle_without_output(tmp_path)
              ("VEHICLE", "SRC-1", str(org), str(loc),
               "1HGCM82633A004382", "SYNTHETIC", "TEST CAR", "DEMO", "PERSON"))
     with pytest.raises(SyntheticWorkbookDenied, match="SCHEMA"):
-        convert_synthetic_xlsx(source, output, kind="VEHICLE")
+        convert_synthetic_xlsx(source, output, kind="VEHICLE",
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not output.exists()
     workbook(source, COLUMNS, ("VEHICLE", "SRC-1", str(org), str(loc),
              "1HGCM82633I004382", "SYNTHETIC", "TEST CAR", "DEMO"))
     with pytest.raises(SyntheticWorkbookDenied, match="PREFLIGHT"):
-        convert_synthetic_xlsx(source, output, kind="VEHICLE")
+        convert_synthetic_xlsx(source, output, kind="VEHICLE",
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not output.exists()
 
 
@@ -107,9 +114,52 @@ def test_rejects_symlink_and_malicious_zip(tmp_path):
     link = tmp_path / "link.xlsx"
     link.symlink_to(source)
     with pytest.raises(SyntheticWorkbookDenied, match="UNAVAILABLE"):
-        convert_synthetic_xlsx(link, output, kind="SERVICE")
+        convert_synthetic_xlsx(link, output, kind="SERVICE",
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     with zipfile.ZipFile(source, "a") as book:
         book.writestr("../bad", "x")
     with pytest.raises(SyntheticWorkbookDenied, match="WORKBOOK_UNSAFE"):
-        convert_synthetic_xlsx(source, output, kind="SERVICE")
+        convert_synthetic_xlsx(source, output, kind="SERVICE",
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     assert not output.exists()
+
+
+def test_source_integrity_is_required_before_unpacking_and_output(tmp_path):
+    source, target = tmp_path / "source.xlsx", tmp_path / "out.csv"
+    row = ("SERVICE", "DEMO", "SRV-1", "BRAKE-TEST", "SYNTHETIC", "30")
+    workbook(source, FIELDS, row)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    with pytest.raises(SyntheticWorkbookDenied, match="SOURCE_DIGEST_REQUIRED"):
+        convert_synthetic_xlsx(source, target, kind="SERVICE")
+    for bad in ("", "A" * 64, "f" * 63, 123):
+        with pytest.raises(SyntheticWorkbookDenied, match="SOURCE_DIGEST_REQUIRED"):
+            convert_synthetic_xlsx(source, target, kind="SERVICE", expected_sha256=bad)
+    source.write_bytes(source.read_bytes() + b"change")
+    with pytest.raises(SyntheticWorkbookDenied, match="SOURCE_CHECKSUM"):
+        convert_synthetic_xlsx(source, target, kind="SERVICE", expected_sha256=digest)
+    assert not target.exists()
+
+
+def test_atomic_publish_failure_leaves_no_output_or_tmp(tmp_path, monkeypatch):
+    import os
+    source, target = tmp_path / "source.xlsx", tmp_path / "out.csv"
+    workbook(source, FIELDS, ("SERVICE", "DEMO", "S-1", "OIL-CHANGE", "SYNTHETIC", "30"))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    def denied(*args, **kwargs):
+        raise OSError("simulated publish failure")
+    monkeypatch.setattr(os, "link", denied)
+    with pytest.raises(SyntheticWorkbookDenied, match="OUTPUT_UNAVAILABLE"):
+        convert_synthetic_xlsx(source, target, kind="SERVICE", expected_sha256=digest)
+    assert not target.exists()
+    assert not list(tmp_path.glob(".synthetic-xlsx-*.tmp"))
+
+
+def test_atomic_publish_preserves_existing_output(tmp_path):
+    source, target = tmp_path / "source.xlsx", tmp_path / "out.csv"
+    workbook(source, FIELDS, ("SERVICE", "DEMO", "S-1", "OIL-CHANGE", "SYNTHETIC", "30"))
+    target.write_bytes(b"unchanged")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    with pytest.raises(SyntheticWorkbookDenied, match="OUTPUT_UNAVAILABLE"):
+        convert_synthetic_xlsx(source, target, kind="SERVICE", expected_sha256=digest)
+    assert target.read_bytes() == b"unchanged"
+    assert not list(tmp_path.glob(".synthetic-xlsx-*.tmp"))
