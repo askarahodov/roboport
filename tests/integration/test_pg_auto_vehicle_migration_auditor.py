@@ -26,6 +26,8 @@ def test_migration_auditor_is_nologin_noinherit_without_sensitive_table_access()
                        has_column_privilege(current_user,
                        'auto_vehicle_migration_batch','row_count','SELECT')
             """).fetchone() == (True, True)
+            assert db.execute("SELECT has_column_privilege(current_user,'auto_vehicle_migration_batch','source_sha256','SELECT')").fetchone()[0] is False
+            assert db.execute("SELECT has_column_privilege(current_user,'auto_vehicle_migration_batch','created_at','SELECT')").fetchone()[0] is False
             for table in ("auto_vehicle_migration_line",
                           "auto_vehicle_migration_promotion", "auto_vehicle",
                           "auto_vehicle_customer_link"):
