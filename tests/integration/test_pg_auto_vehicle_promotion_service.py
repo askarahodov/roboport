@@ -105,3 +105,45 @@ def test_promotion_transaction_rollback_includes_lineage(tmp_path):
             "SELECT count(*) FROM auto_vehicle WHERE vin=%s",
             ("1HGCM82633A004363",),
         ).fetchone()[0] == 0
+
+
+def test_database_rejects_forged_vehicle_promotion_lineage(tmp_path):
+    scenario = _scenario()
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        batch = setup_batch(db, tmp_path, org, loc, "1HGCM82633A004364")
+        unrelated = uuid4()
+        db.execute(
+            "INSERT INTO auto_vehicle(id,vin,make,model) VALUES(%s,%s,'SYNTHETIC','TEST CAR')",
+            (unrelated, "1HGCM82633A004365"),
+        )
+        with pytest.raises(psycopg.errors.RaiseException, match="lineage mismatch"):
+            with db.transaction():
+                db.execute("""
+                    INSERT INTO auto_vehicle_migration_promotion
+                      (batch_id,row_number,vehicle_id) VALUES(%s,2,%s)
+                """, (batch, unrelated))
+        assert db.execute(
+            "SELECT count(*) FROM auto_vehicle_migration_promotion WHERE batch_id=%s",
+            (batch,),
+        ).fetchone()[0] == 0
+        actor = scenario["intake"]
+        grant(db, actor, org, loc, "MANAGER")
+        assert promote(db, scenario["tokens"][actor], org, loc, batch)["count"] == 1
+
+
+def test_database_rejects_forged_model_even_with_matching_vin(tmp_path):
+    with psycopg.connect(DSN) as db:
+        org, loc, _ = _org_and_bay(db)
+        batch = setup_batch(db, tmp_path, org, loc, "1HGCM82633A004366")
+        vehicle_id = uuid4()
+        db.execute(
+            "INSERT INTO auto_vehicle(id,vin,make,model) VALUES(%s,%s,'SYNTHETIC','WRONG')",
+            (vehicle_id, "1HGCM82633A004366"),
+        )
+        with pytest.raises(psycopg.errors.RaiseException, match="lineage mismatch"):
+            with db.transaction():
+                db.execute("""
+                    INSERT INTO auto_vehicle_migration_promotion
+                      (batch_id,row_number,vehicle_id) VALUES(%s,2,%s)
+                """, (batch, vehicle_id))
