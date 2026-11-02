@@ -45,3 +45,12 @@ def test_manager_guide_sidebar_link_and_estimate_guide():
     for expected in ("/staff/auto-estimates", "/account/auto-estimates",
                      "APPROVED", "DECLINED", "releaseAllowed: false", "#119"):
         assert expected in guide
+
+
+def test_synthetic_close_guide_and_role_sidebar():
+    sidebar=(ROOT / '_sidebar.md').read_text(encoding='utf-8')
+    assert '[Условная сверка и пакет перед выдачей](/auto/DEMO_CLOSE.md)' in sidebar
+    guide=(ROOT / 'auto' / 'DEMO_CLOSE.md').read_text(encoding='utf-8')
+    for phrase in ('/staff/auto-demo-close','/account/auto-demo-close',
+                   'SIM_PAYMENT','SIM_REFUND','releaseAllowed','#119'):
+        assert phrase in guide
