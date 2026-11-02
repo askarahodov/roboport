@@ -163,3 +163,62 @@ def test_atomic_publish_preserves_existing_output(tmp_path):
         convert_synthetic_xlsx(source, target, kind="SERVICE", expected_sha256=digest)
     assert target.read_bytes() == b"unchanged"
     assert not list(tmp_path.glob(".synthetic-xlsx-*.tmp"))
+
+
+def test_explicit_reordered_xlsx_mapping_for_both_domains(tmp_path):
+    examples = [
+        ("SERVICE", FIELDS, ("SERVICE", "DEMO", "SRC-1", "BRAKE-TEST", "SYNTHETIC", "30")),
+        ("VEHICLE", COLUMNS, ("VEHICLE", "SRC-1", str(uuid4()), str(uuid4()),
+                              "1HGCM82633A004381", "SYNTHETIC", "TEST CAR", "DEMO")),
+    ]
+    for kind, headers, values in examples:
+        source = tmp_path / (kind + ".xlsx")
+        target = tmp_path / (kind + ".csv")
+        mapping = {"F" + str(i): field for i, field in enumerate(headers)}
+        order = list(reversed(range(len(headers))))
+        workbook(source, ["F" + str(i) for i in order], [values[i] for i in order])
+        result = convert_synthetic_xlsx(
+            source, target, kind=kind, mapping=mapping,
+            expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+        assert result["ok"] and result["rows"] == 1 and result["writes"] == 0
+        with target.open(encoding="utf-8", newline="") as stream:
+            assert tuple(next(csv.reader(stream))) == headers
+        assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_xlsx_mapping_rejects_incomplete_extra_ambiguous_headers(tmp_path):
+    source, target = tmp_path / "input.xlsx", tmp_path / "out.csv"
+    fields = ["F" + str(i) for i in range(len(FIELDS))]
+    values = ("SERVICE", "DEMO", "SRC-1", "BRAKE-TEST", "SYNTHETIC", "30")
+    workbook(source, fields, values)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    mapping = dict(zip(fields, FIELDS))
+    for invalid in (
+        {"F0": "record_type"},
+        {**mapping, "extra": "title"},
+        {**mapping, "F1": "record_type"},
+        {**mapping, "F1": 17},
+    ):
+        with pytest.raises(SyntheticWorkbookDenied, match="MAPPING"):
+            convert_synthetic_xlsx(source, target, kind="SERVICE",
+                                   mapping=invalid, expected_sha256=digest)
+    workbook(source, ["F0", "F0", *fields[2:]], values)
+    with pytest.raises(SyntheticWorkbookDenied, match="SCHEMA"):
+        convert_synthetic_xlsx(source, target, kind="SERVICE",
+                               mapping=mapping,
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+    assert not target.exists()
+
+
+def test_xlsx_mapping_rejects_extra_owner_columns(tmp_path):
+    source, target = tmp_path / "input.xlsx", tmp_path / "out.csv"
+    fields = ["F" + str(i) for i in range(len(COLUMNS))]
+    mapping = dict(zip(fields, COLUMNS))
+    workbook(source, [*fields, "owner"],
+             ("VEHICLE", "SRC-1", str(uuid4()), str(uuid4()),
+              "1HGCM82633A004381", "SYNTHETIC", "TEST CAR", "DEMO", "PERSON"))
+    with pytest.raises(SyntheticWorkbookDenied, match="SCHEMA"):
+        convert_synthetic_xlsx(source, target, kind="VEHICLE",
+                               mapping=mapping,
+                               expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+    assert not target.exists()
