@@ -36,7 +36,7 @@ def prepare_synthetic_batch(
     interrupted processes require inspection and cleanup before retry.
     """
     if (type(sources) is not dict or set(sources) != set(KINDS)
-            or any(type(path) is not Path for path in sources.values())
+            or any(not isinstance(path, Path) for path in sources.values())
             or type(expected_sha256) is not dict
             or set(expected_sha256) != set(KINDS)
             or (mappings is not None and
