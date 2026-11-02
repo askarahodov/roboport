@@ -55,7 +55,7 @@ def test_complete_demo_reconcile_reserve_seal_client_view_and_immutability(monke
     assert "SIMULATED_BALANCE_OPEN" in state.json()["blockers"]
     assert post(http,base+"/seal-preview",manager).status_code==409
     cash=base+"/simulated-cash"
-    assert post(http,cash).status_code==403
+    assert post(http,cash,kind="SIM_PAYMENT",amountMinor=2500).status_code==403
     assert post(http,cash,manager,kind="SIM_PAYMENT",amountMinor=0).status_code==422
     assert post(http,cash,manager,kind="SIM_REFUND",amountMinor=1).status_code==409
     key=uuid4()
