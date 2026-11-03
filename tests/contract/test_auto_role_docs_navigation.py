@@ -54,3 +54,13 @@ def test_synthetic_close_guide_and_role_sidebar():
     for phrase in ('/staff/auto-demo-close','/account/auto-demo-close',
                    'SIM_PAYMENT','SIM_REFUND','releaseAllowed','#119'):
         assert phrase in guide
+
+
+def test_customer_order_history_guide_and_sidebar():
+    sidebar=(ROOT / "_sidebar.md").read_text(encoding="utf-8")
+    assert "[История заказ-нарядов клиента и сметы](/auto/CUSTOMER_HISTORY.md)" in sidebar
+    guide=(ROOT / "auto" / "CUSTOMER_HISTORY.md").read_text(encoding="utf-8")
+    for text in ("/account/auto-orders", "Мои заказ-наряды (dev)",
+                 "Показать ещё заказ-наряды", "Согласовать последнюю версию",
+                 "releaseAllowed:false", "#119"):
+        assert text in guide
