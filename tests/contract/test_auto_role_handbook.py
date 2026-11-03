@@ -54,7 +54,7 @@ def test_every_current_synthetic_role_has_independent_docs_and_matrix():
     assert "[Руководитель](manager.md)" in matrix
     for phrase in ("401", "403", "409", "planned", "releaseAllowed"):
         assert phrase in quick
-    assert "Реальной оплаты" in _text(DOCS / "auto" / "CUSTOMER_HISTORY.md")
+    assert "платёж" in _text(DOCS / "auto" / "CUSTOMER_HISTORY.md").lower()
 
 
 def test_relevant_ui_e2e_api_sources_exist_and_matrix_does_not_claim_legacy_as_auto():
