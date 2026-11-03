@@ -161,7 +161,7 @@ def _graph(db: psycopg.Connection, ids: dict) -> dict:
         """, (order,)),
         "appointmentEvents": _rows(db, """
             SELECT appointment_id,action FROM auto_appointment_event
-            WHERE appointment_id=%s ORDER BY created_at,id
+            WHERE appointment_id=%s ORDER BY id
         """, (appointment,)),
         "outbox": _rows(db, """
             SELECT event_key,aggregate_type,aggregate_id,event_type,payload::text
