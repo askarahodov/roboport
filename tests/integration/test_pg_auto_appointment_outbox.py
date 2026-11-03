@@ -8,7 +8,7 @@ import pytest
 from roboport_api.auto_appointment_service import (
     create_appointment, reschedule_appointment, cancel_appointment,
 )
-from roboport_api.notification_outbox import run_once, run_batch
+from roboport_api.notification_outbox import run_once
 from test_pg_auto_vehicle_claim_http import _scenario
 from test_pg_auto_bay_booking import _org_and_bay
 from test_pg_baseline import DSN
