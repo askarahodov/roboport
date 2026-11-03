@@ -256,7 +256,7 @@ export function AutoCalendar() {
         <h2>{target?'Перенести запись':'Новая запись'}</h2>{fields(!target)}
         {!target&&<fieldset aria-label="Работы в новой записи"><legend>Услуги филиала (необязательно)</legend>
           <p>Не более 8 услуг. Их суммарная длительность не должна превышать интервал брони.</p>
-          {serviceMessage&&<p role="status">{serviceMessage}</p>}
+          {serviceMessage&&<p>{serviceMessage}</p>}
           {services.map(service=><label key={service.id} style={{display:'block'}}>
             <input type="checkbox" aria-label={'Работа '+service.code}
               checked={selectedServices.includes(service.id)}
