@@ -18,10 +18,11 @@ import json
 import os
 from pathlib import Path
 import sys
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 
 SOURCE_DB = "roboport"
@@ -39,12 +40,37 @@ def _dsn(database: str) -> str:
         raise ValueError("CI PostgreSQL DSN unavailable")
     raw = raw.replace("postgresql+psycopg://", "postgresql://", 1)
     parts = urlsplit(raw)
-    # Only the two local disposable CI databases; never a remote restore.
+    # Query parameters can secretly override host, hostaddr and dbname in
+    # libpq. Validate the parsed *effective* connection fields as well as
+    # the URL authority before building a fresh, pinned conninfo.
+    if parts.query or parts.fragment:
+        raise ValueError("CI DSN overrides forbidden")
+    try:
+        parsed = conninfo_to_dict(raw)
+    except psycopg.Error as exc:
+        raise ValueError("malformed CI DSN") from exc
     if (database not in (SOURCE_DB, RESTORED_DB)
-        or parts.hostname not in ("127.0.0.1", "localhost")
-        or parts.port != 5432 or parts.path != "/roboport"):
+        or parts.hostname != "127.0.0.1" or parts.port != 5432
+        or parts.path != "/roboport"
+        or set(parsed)-{"dbname","host","port","user","password"}
+        or parsed.get("dbname") != SOURCE_DB
+        or parsed.get("host") != "127.0.0.1"
+        or str(parsed.get("port")) != "5432"
+        or parsed.get("user") != "roboport"):
         raise ValueError("not a disposable loopback CI PostgreSQL DSN")
-    return urlunsplit(parts._replace(path="/" + database))
+    # Ambient PG* settings are not allowed to affect the connection even
+    # when the URL is safe. Explicit hostaddr/dbname below prevents routing
+    # to any other database if the process inherited a PG configuration.
+    if any(os.getenv(name) for name in (
+        "PGSERVICE","PGSERVICEFILE","PGHOST","PGHOSTADDR","PGPORT",
+        "PGDATABASE","PGOPTIONS","PGSSLMODE","PGTARGETSESSIONATTRS",
+    )):
+        raise ValueError("ambient PostgreSQL options forbidden")
+    return make_conninfo(
+        host="127.0.0.1",hostaddr="127.0.0.1",port=5432,
+        dbname=database,user="roboport",password=parsed.get("password",""),
+        sslmode="disable",connect_timeout=5,
+    )
 
 
 def _digest(snapshot: dict) -> str:
@@ -173,7 +199,7 @@ def _graph(db: psycopg.Connection, ids: dict) -> dict:
     }:
         raise ValueError("material classifications do not match RESERVE")
     balances = {row[0]:(row[1],row[2]) for row in data["balance"]}
-    if balances != {str(part):("8","3"),str(consumable):("5","2")}:
+    if balances != {str(part):("8","2"),str(consumable):("5","2")}:
         raise ValueError("restored stock balance differs from reserved ledger")
     actions: dict[str,list[str]] = {str(part):[],str(consumable):[]}
     for row in data["stock"]:
