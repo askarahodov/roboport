@@ -160,27 +160,44 @@ def read_calendar(org_id: str, request: Request, locationId: str,
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/slot-candidates")
 def read_slot_candidates(org_id: str, request: Request, locationId: str,
-                         bayId: str, day: str, employeeId: str | None = None,
+                         bayId: str, day: str | None = None,
+                         localDay: str | None = None,
+                         employeeId: str | None = None,
                          appointmentId: str | None = None):
     from .auto_slot_candidates import candidate_slots, SlotsDenied
+    from .auto_calendar import local_day_window, CalendarInvalid, CalendarDenied
     from datetime import timezone
-    dsn=_request_dsn(request)
-    if isinstance(dsn,JSONResponse):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
         return dsn
     try:
-        org,location,bay=UUID(org_id),UUID(locationId),UUID(bayId)
-        employee=UUID(employeeId) if employeeId is not None else None
-        appointment=UUID(appointmentId) if appointmentId is not None else None
-        if len(day)!=10 or datetime.strptime(day,"%Y-%m-%d").strftime("%Y-%m-%d")!=day:
-            raise ValueError("invalid UTC day")
-        start=datetime.strptime(day,"%Y-%m-%d").replace(tzinfo=timezone.utc)
-    except (ValueError,TypeError):
-        return _response(request,422,"INVALID_INPUT")
+        org, location, bay = UUID(org_id), UUID(locationId), UUID(bayId)
+        employee = UUID(employeeId) if employeeId is not None else None
+        appointment = UUID(appointmentId) if appointmentId is not None else None
+        if (day is None) == (localDay is None):
+            raise ValueError("exactly one of day or localDay required")
+        if day is not None:
+            if len(day) != 10 or datetime.strptime(day,"%Y-%m-%d").strftime("%Y-%m-%d") != day:
+                raise ValueError("invalid UTC day")
+            start = datetime.strptime(day,"%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
-            slots=candidate_slots(db,request.cookies.get("rp_session",""),
-                                  org,location,bay,start,employee,appointment)
-        except SlotsDenied:
-            return _response(request,403,"FORBIDDEN")
-    return JSONResponse(content={"items":slots,"guaranteed":False},
-                        headers={"Cache-Control":"no-store"})
+            zone = None
+            end = None
+            if localDay is not None:
+                start, end, zone = local_day_window(
+                    db, request.cookies.get("rp_session", ""), org, location, localDay,
+                )
+            slots = candidate_slots(
+                db, request.cookies.get("rp_session", ""),
+                org, location, bay, start, employee, appointment, day_end=end,
+            )
+        except CalendarInvalid:
+            return _response(request, 422, "INVALID_INPUT")
+        except (CalendarDenied, SlotsDenied):
+            return _response(request, 403, "FORBIDDEN")
+    return JSONResponse(content={"items": slots, "guaranteed": False,
+                                 **({"timeZone": zone} if zone else {})},
+                        headers={"Cache-Control": "no-store"})
