@@ -4,6 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { CustomerTickets } from './CustomerTickets';
 import { CustomerVehicles } from './CustomerVehicles';
 import { CustomerAutoOrders } from './CustomerAutoOrders';
+import { CustomerAutoBooking } from './CustomerAutoBooking';
 import { CustomerSummary } from './CustomerSummary';
 import { CustomerOverview } from './CustomerOverview';
 import { CustomerSettings } from './CustomerSettings';
@@ -14,6 +15,7 @@ const sections = [
   { path: '/account', title: 'Обзор', end: true },
   { path: '/account/robots', title: 'Роботы' },
   { path: '/account/vehicles', title: 'Автомобили (dev)' },
+  { path: '/account/auto-booking', title: 'Запись на сервис (dev)' },
   { path: '/account/auto-orders', title: 'Мои заказ-наряды (dev)' },
   { path: '/account/tickets', title: 'Заявки' },
   { path: '/account/estimates', title: 'Сметы' },
@@ -109,6 +111,7 @@ export function CustomerAccount() {
     <Card>{pathname === '/account/tickets' ? <CustomerTickets /> :
       pathname === '/account/robots' ? <CustomerSummary section="robots" /> :
       pathname === '/account/vehicles' ? <CustomerVehicles /> :
+      pathname === '/account/auto-booking' ? <CustomerAutoBooking /> :
       pathname === '/account/auto-orders' ? <CustomerAutoOrders /> :
       pathname === '/account/estimates' ? <CustomerSummary section="estimates" /> :
       pathname === '/account/documents' ? <CustomerSummary section="documents" /> :
