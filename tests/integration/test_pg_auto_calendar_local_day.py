@@ -1,0 +1,97 @@
+"""Проверка IANA зон филиала, локального дня и DST без tenant leakage."""
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+from zoneinfo import ZoneInfo
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from roboport_api.auto_calendar import local_day_window, CalendarDenied, CalendarInvalid
+from roboport_api.auto_appointment_service import create_appointment
+from roboport_api.main import app
+from test_pg_auto_vehicle_claim_http import _scenario
+from test_pg_auto_bay_booking import _org_and_bay
+from test_pg_baseline import DSN
+
+
+def _setup_zone():
+    d = _scenario()
+    with psycopg.connect(DSN) as db:
+        org, loc, bay = _org_and_bay(db)
+        db.execute(
+            "UPDATE auto_service_location SET timezone_name='Europe/Berlin' WHERE id=%s",
+            (loc,),
+        )
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+            (d["manager"], d["link"]),
+        )
+        db.execute(
+            "INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) VALUES(%s,%s)",
+            (d["vehicle"], loc),
+        )
+        db.execute(
+            """INSERT INTO auto_organization_role_grant
+               (id,organization_id,location_id,user_id,role_code)
+               VALUES(%s,%s,%s,%s,'INTAKE')""",
+            (uuid4(), org, loc, d["intake"]),
+        )
+    return d, org, loc, bay
+
+
+def test_local_calendar_dst_boundaries_and_api_scope(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d, org, loc, bay = _setup_zone()
+    token = d["tokens"][d["intake"]]
+    with psycopg.connect(DSN) as db:
+        spring, spring_end, zone = local_day_window(db, token, org, loc, "2030-03-31")
+        assert zone == "Europe/Berlin"
+        assert spring.astimezone(timezone.utc).isoformat() == "2030-03-30T23:00:00+00:00"
+        assert spring_end.astimezone(timezone.utc).isoformat() == "2030-03-31T22:00:00+00:00"
+        assert spring_end.astimezone(timezone.utc) - spring.astimezone(timezone.utc) == timedelta(hours=23)
+        autumn, autumn_end, _ = local_day_window(db, token, org, loc, "2030-10-27")
+        assert autumn_end.astimezone(timezone.utc) - autumn.astimezone(timezone.utc) == timedelta(hours=25)
+        with pytest.raises(CalendarInvalid):
+            local_day_window(db, token, org, loc, "2030-02-30")
+        with pytest.raises(CalendarDenied):
+            local_day_window(db, d["tokens"][d["manager"]], org, loc, "2030-03-31")
+
+        begins = spring.astimezone(timezone.utc) + timedelta(minutes=20)
+        appointment, booking, work = create_appointment(
+            db, token, org, loc, bay, d["link"], begins, begins+timedelta(minutes=30)
+        )
+        # После брони запрещается тихо менять IANA зону местной истории.
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE auto_service_location SET timezone_name='UTC' WHERE id=%s", (loc,))
+    client = TestClient(app, base_url="https://127.0.0.1")
+    url = f"/api/v1/dev/auto/organizations/{org}/calendar"
+    params = {"locationId": str(loc), "localDay": "2030-03-31"}
+    assert client.get(url, params=params).status_code == 403
+    client.cookies.set("rp_session", token)
+    ok = client.get(url, params=params)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["timeZone"] == "Europe/Berlin"
+    assert len(ok.json()["items"]) == 1
+    assert ok.json()["items"][0]["appointmentId"] == str(appointment)
+    assert ok.json()["items"][0]["workOrderId"] == str(work)
+    assert client.get(url,params={**params,"localDay":"2030-02-30"}).status_code == 422
+    assert client.get(url,params={**params,"startsAt":"2030-03-31T00:00:00Z"}).status_code == 422
+    assert client.get(url,params={"locationId":str(loc)}).status_code == 422
+    assert client.get(url,params={**params,"locationId":str(uuid4())}).status_code == 403
+    assert "vehicleId" not in ok.text and "customerId" not in ok.text
+
+
+def test_bad_timezone_rejected_without_workshop_records():
+    with psycopg.connect(DSN) as db:
+        org, loc, bay = _org_and_bay(db)
+        for zone in ("UTC+1", "CET", "Fake/Invalid", "Europe/Berlin;DROP", ""):
+            with pytest.raises(psycopg.errors.RaiseException):
+                with db.transaction():
+                    db.execute("UPDATE auto_service_location SET timezone_name=%s WHERE id=%s", (zone,loc))
+        assert db.execute(
+            "SELECT timezone_name FROM auto_service_location WHERE id=%s",(loc,)
+        ).fetchone()[0] == "UTC"
