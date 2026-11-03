@@ -215,3 +215,54 @@ def test_reschedule_idempotency_rechecks_revoked_link_before_replay():
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
         with pytest.raises(AppointmentDenied):
             reschedule_appointment(db,*args,request_key=key)
+
+
+
+def test_create_key_cannot_replay_superseded_or_canceled_booking():
+    """Receipt создания остаётся неизменным, но устаревшая бронь не подтверждается."""
+    d = _scenario()
+    start = datetime.now(timezone.utc) + timedelta(days=18)
+    with psycopg.connect(DSN) as db:
+        org, loc, bay = _org_and_bay(db)
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+            (d["manager"], d["link"]),
+        )
+        db.execute(
+            "INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) VALUES(%s,%s)",
+            (d["vehicle"], loc),
+        )
+        db.execute(
+            """INSERT INTO auto_organization_role_grant
+               (id,organization_id,location_id,user_id,role_code)
+               VALUES(%s,%s,%s,%s,'INTAKE')""",
+            (uuid4(), org, loc, d["intake"]),
+        )
+    token = d["tokens"][d["intake"]]
+    key = uuid4()
+    args = (token, org, loc, bay, d["link"], start, start + timedelta(hours=1))
+    with psycopg.connect(DSN) as db:
+        appointment, old, order = create_appointment(db, *args, request_key=key)
+        assert create_appointment(db, *args, request_key=key) == (appointment, old, order)
+        new = reschedule_appointment(
+            db, token, org, appointment, bay,
+            start + timedelta(hours=2), start + timedelta(hours=3),
+        )
+        assert new != old
+        with pytest.raises(AppointmentKeyConflict):
+            create_appointment(db, *args, request_key=key)
+        assert cancel_appointment(db, token, org, appointment) == "CANCELED"
+        with pytest.raises(AppointmentKeyConflict):
+            create_appointment(db, *args, request_key=key)
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment_idempotency WHERE organization_id=%s",
+            (org,),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment WHERE organization_id=%s",
+            (org,),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT count(*) FROM auto_work_order WHERE appointment_id=%s",
+            (appointment,),
+        ).fetchone()[0] == 1
