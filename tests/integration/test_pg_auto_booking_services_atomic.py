@@ -9,7 +9,9 @@ from uuid import uuid4
 import psycopg
 from fastapi.testclient import TestClient
 
-from roboport_api.auto_appointment_service import create_appointment, AppointmentDenied
+from roboport_api.auto_appointment_service import (
+    create_appointment, AppointmentDenied, AppointmentDurationInvalid,
+)
 from roboport_api.main import app
 from test_pg_auto_customer_booking_http import _setup, _auth, ROOT
 from test_pg_baseline import DSN
@@ -184,7 +186,7 @@ def test_iana_dst_elapsed_time_not_wall_clock_and_legacy_fingerprint(monkeypatch
     spring_start = datetime(2030,3,31,1,30,tzinfo=berlin)
     spring_end = datetime(2030,3,31,3,30,tzinfo=berlin)
     with psycopg.connect(DSN) as db:
-        with pytest.raises(AppointmentDenied):
+        with pytest.raises(AppointmentDurationInvalid):
             create_appointment(
                 db, token, org, loc, bay, d["link"],
                 spring_start, spring_end, service_ids=(first,long),
