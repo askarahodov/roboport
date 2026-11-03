@@ -164,7 +164,7 @@ export function AutoCalendar() {
         (!(target&&clearEmployee)&&!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
         onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
       {slotsMessage&&<p role="status">{slotsMessage}</p>}
-      {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты в часовом поясе {timeZone}, не гарантия брони:</p><ul>
+      {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><p>Часовой пояс окон: {timeZone}</p><ul>
         {slots.map(slot=><li key={slot.startsAt}><button type="button" onClick={()=>{setForm(v=>({...v,starts:slot.startsAt,ends:slot.endsAt}));resetSlots();}}>
           {formatLocal(slot.startsAt)} — {formatLocal(slot.endsAt)} ({timeZone}); ISO: {slot.startsAt} — {slot.endsAt}</button></li>)}
       </ul></div>}
