@@ -238,9 +238,9 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                     (organization,actor,appointment,request_key)).fetchone()
                 if existing is None or existing[0] != fingerprint:
                     raise AppointmentKeyConflict("idempotency key used for different reschedule")
-                # A receipt proves a past success, not that its booking remains
-                # current. Cancellation or another reschedule must invalidate
-                # stale replays; authorization and link checks already ran.
+                # Receipt подтверждает прошлый успех, но не актуальность брони.
+                # После отмены или следующего переноса прежний ключ недействителен;
+                # полномочия и связь автомобиля уже перепроверены выше.
                 current = current_appointment_booking(conn, appointment)
                 active = conn.execute(
                     """SELECT 1 FROM auto_bay_booking
