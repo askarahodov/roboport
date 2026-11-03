@@ -2,6 +2,8 @@ import React from 'react';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Service={id:string;code:string;title:string;durationMinutes:number};
+type StockItem={skuId:string;article:string;available:number};
+type BookingMaterial={skuId:string;kind:'PART'|'CONSUMABLE';quantity:number};
 type Entry = { appointmentId:string; bookingId:string; bayId:string;
   startsAt:string; endsAt:string; workOrderId:string; employeeId:string|null };
 type Form = { bay:string; link:string; employee:string; starts:string; ends:string };
@@ -37,6 +39,9 @@ export function AutoCalendar() {
   const [services,setServices]=React.useState<Service[]>([]);
   const [selectedServices,setSelectedServices]=React.useState<string[]>([]);
   const [serviceMessage,setServiceMessage]=React.useState('');
+  const [stock,setStock]=React.useState<StockItem[]>([]);
+  const [materials,setMaterials]=React.useState<BookingMaterial[]>([]);
+  const [stockMessage,setStockMessage]=React.useState('');
   const [busy,setBusy]=React.useState(false);
   const [slots,setSlots]=React.useState<Array<{startsAt:string;endsAt:string}>>([]);
   const [slotsMessage,setSlotsMessage]=React.useState('');
@@ -103,6 +108,27 @@ export function AutoCalendar() {
       }).catch(()=>{if(!controller.signal.aborted)setServiceMessage('Каталог услуг недоступен.');});
     return ()=>controller.abort();
   },[org,location]);
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    setStock([]);setMaterials([]);setStockMessage('');
+    if(!uuid.test(org.trim())||!uuid.test(location.trim()))return ()=>controller.abort();
+    const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
+      '/locations/'+encodeURIComponent(location.trim())+'/booking-stock';
+    void fetch(url,{credentials:'include',cache:'no-store',signal:controller.signal})
+      .then(async response=>{
+        if(controller.signal.aborted)return;
+        if(response.status===403){setStockMessage('Для резерва деталей требуются роли INTAKE и WAREHOUSE.');return;}
+        if(!response.ok)throw Error('stock');
+        const raw:unknown=await response.json();
+        if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||
+          raw.syntheticOnly!==true||!('items' in raw)||!Array.isArray(raw.items)||
+          raw.items.length>100||!raw.items.every((item:StockItem)=>
+            uuid.test(item.skuId)&&typeof item.article==='string'&&
+            Number.isSafeInteger(item.available)&&item.available>=0))throw Error('shape');
+        if(!controller.signal.aborted)setStock(raw.items as StockItem[]);
+      }).catch(()=>{if(!controller.signal.aborted)setStockMessage('Каталог остатков недоступен.');});
+    return ()=>controller.abort();
+  },[org,location]);
   function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
   function resetPage(){setCursor(null);setHistory([]);resetSlots();}
   React.useEffect(()=>{setPending(null);},[org,location]);
@@ -166,7 +192,7 @@ export function AutoCalendar() {
       if(response.status>=500)throw new Error('uncertain server outcome');
       if(!response.ok){setPending(null);setMessage(response.status===409?'Пост или специалист занят / ключ запроса использован (409).':
         [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
-      setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);setSelectedServices([]);resetPage();setRevision(n=>n+1);
+      setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);setSelectedServices([]);setMaterials([]);resetPage();setRevision(n=>n+1);
     }catch{
       if(!scopeIsCurrent())return;
       if(snapshot){setPending(snapshot);setMessage('Результат запроса неизвестен. Повторите с прежним ключом или обновите календарь перед новой операцией.');}
@@ -205,7 +231,12 @@ export function AutoCalendar() {
   const selectedMinutes=services.filter(x=>selectedServices.includes(x.id)).reduce((a,x)=>a+x.durationMinutes,0);
   const availableMinutes=validIsoInstant(form.starts)&&validIsoInstant(form.ends)?
     Math.max(0,(Date.parse(form.ends)-Date.parse(form.starts))/60000):60;
-  const validForm=(!target?selectedMinutes<=availableMinutes:true)&&
+  const validMaterials=materials.length<=8&&materials.every(item=>{
+    const known=stock.find(x=>x.skuId===item.skuId);
+    return known&&Number.isSafeInteger(item.quantity)&&item.quantity>=1&&
+      item.quantity<=known.available;
+  });
+  const validForm=(!target?selectedMinutes<=availableMinutes&&validMaterials:true)&&
     (clearEmployee||!form.employee.trim()||uuid.test(form.employee.trim()))&&uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
     validIsoInstant(form.starts)&&validIsoInstant(form.ends)&&
     Date.parse(form.ends)>Date.parse(form.starts)&&
@@ -252,7 +283,7 @@ export function AutoCalendar() {
           ...(target&&clearEmployee?{employeeId:null}:form.employee.trim()?{employeeId:form.employee.trim()}:{})};
         if(target)void action(base+'/'+target+'/reschedule',payload,'Запись перенесена.');
         else void action(base,{...payload,locationId:location.trim(),customerLinkId:form.link.trim(),
-          serviceIds:selectedServices},'Запись создана.');
+          serviceIds:selectedServices,materialItems:materials},'Запись создана.');
       }}>
         <h2>{target?'Перенести запись':'Новая запись'}</h2>{fields(!target)}
         {!target&&<fieldset aria-label="Работы в новой записи"><legend>Услуги филиала (необязательно)</legend>
@@ -267,6 +298,42 @@ export function AutoCalendar() {
                 old.filter(id=>id!==service.id));}}/>
             {service.title} ({service.durationMinutes} мин.)
           </label>)}
+        </fieldset>}
+        {!target&&<fieldset aria-label="Товары и расходные материалы для резерва">
+          <legend>Товары со склада / Материалы (необязательно)</legend>
+          <p>Синтетический резерв. Только при двух ролях INTAKE и WAREHOUSE;
+            стоимость не рассчитывается, списание не выполняется. Не более восьми SKU.</p>
+          {stockMessage&&<p>{stockMessage}</p>}
+          {stock.filter(x=>x.available>0).map(item=>{
+            const chosen=materials.find(x=>x.skuId===item.skuId);
+            return <div key={item.skuId}>
+              <label><input type="checkbox" aria-label={'Выбрать SKU '+item.article}
+                checked={!!chosen} disabled={busy||!!pending||
+                  (!chosen&&materials.length>=8)}
+                onChange={e=>setMaterials(old=>e.target.checked?
+                  [...old,{skuId:item.skuId,kind:'PART',quantity:1}]:
+                  old.filter(x=>x.skuId!==item.skuId))}/>
+                {item.article} · доступно {item.available}</label>
+              {chosen&&<>
+                <label>Тип {item.article}
+                  <select aria-label={'Тип SKU '+item.article} value={chosen.kind}
+                    disabled={busy||!!pending}
+                    onChange={e=>setMaterials(old=>old.map(x=>x.skuId===item.skuId?
+                      {...x,kind:e.target.value as BookingMaterial['kind']}:x))}>
+                    <option value="PART">Товар со склада</option>
+                    <option value="CONSUMABLE">Расходный материал</option>
+                  </select>
+                </label>
+                <label>Количество {item.article}
+                  <input aria-label={'Количество SKU '+item.article}
+                    type="number" min={1} max={item.available} step={1}
+                    value={chosen.quantity} disabled={busy||!!pending}
+                    onChange={e=>setMaterials(old=>old.map(x=>x.skuId===item.skuId?
+                      {...x,quantity:Number(e.target.value)}:x))}/>
+                </label>
+              </>}
+            </div>;
+          })}
         </fieldset>}
         <button type="submit" disabled={busy||!validForm}>{target?'Сохранить перенос':'Создать запись'}</button>
         {target&&<button type="button" onClick={()=>{resetSlots();setTarget(null);setClearEmployee(false);setForm(empty);}}>Отмена переноса</button>}

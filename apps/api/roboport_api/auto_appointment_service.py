@@ -19,6 +19,10 @@ class AppointmentDurationInvalid(ValueError):
     """Длительность выбранных работ превышает интервал записи."""
     pass
 
+class AppointmentStockUnavailable(ValueError):
+    """Подтверждённого свободного остатка не хватает на новый резерв."""
+    pass
+
 def _customer_scope(conn: psycopg.Connection, token: str,
                     organization: UUID, location: UUID, link: UUID) -> UUID:
     """Живой CLIENT, собственная verified-связь и разрешённый филиал."""
@@ -84,7 +88,9 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        starts: datetime, ends: datetime, employee: UUID | None = None,
                        request_key: UUID | None = None,
                        customer_mode: bool = False,
-                       service_ids: tuple[UUID, ...] = ()) -> tuple[UUID, UUID, UUID]:
+                       service_ids: tuple[UUID, ...] = (),
+                       material_items: tuple[tuple[UUID, str, int], ...] = ()
+                       ) -> tuple[UUID, UUID, UUID]:
     if (not all(isinstance(x, UUID) for x in (organization,location,bay,link))
             or (employee is not None and not isinstance(employee, UUID))
             or (request_key is not None and not isinstance(request_key, UUID))
@@ -94,6 +100,16 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             or len(service_ids) > 8
             or any(type(item) is not UUID for item in service_ids)
             or len(set(service_ids)) != len(service_ids)
+            or type(material_items) is not tuple
+            or len(material_items) > 8
+            or any(type(item) is not tuple or len(item) != 3 or
+                   type(item[0]) is not UUID or
+                   item[1] not in ("PART", "CONSUMABLE") or
+                   type(item[2]) is not int or not 1 <= item[2] <= 1_000_000_000
+                   for item in material_items)
+            or len({item[0] for item in material_items}) != len(material_items)
+            or (customer_mode and material_items)
+            or (material_items and request_key is None)
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
             or ends.astimezone(timezone.utc) <= starts.astimezone(timezone.utc)
@@ -105,6 +121,12 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
         elif not organization_role_allows(
                 conn, token, organization, "INTAKE", location, for_mutation=True):
             raise AppointmentDenied("organization intake required")
+        # Для складского резерва обязательны ОБЕ действующие роли.
+        # Клиентская сессия никогда не получает прямого доступа к stock ledger.
+        if material_items and not organization_role_allows(
+            conn, token, organization, "WAREHOUSE", location, for_mutation=True
+        ):
+            raise AppointmentDenied("warehouse grant required for materials")
         # Guard current ownership with row locks; no legacy roles are inherited.
         row = conn.execute(
             """SELECT link.vehicle_id FROM auto_vehicle_customer_link link
@@ -156,6 +178,12 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             }
             if service_ids:
                 fingerprint_body["services"] = sorted(str(item) for item in service_ids)
+            if material_items:
+                fingerprint_body["materials"] = sorted(
+                    [{"skuId":str(sku),"kind":kind,"quantity":quantity}
+                     for sku,kind,quantity in material_items],
+                    key=lambda item:item["skuId"],
+                )
             fingerprint = hashlib.sha256(json.dumps(
                 fingerprint_body,sort_keys=True,separators=(",",":")
             ).encode()).hexdigest()
@@ -192,9 +220,47 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                 ).fetchone()
                 if current != existing[2] or live is None:
                     raise AppointmentKeyConflict("create receipt no longer current")
+                if material_items:
+                    # Receipt резерва не обещает наличие материалов после
+                    # отдельной выдачи/освобождения с тем же WorkOrder.
+                    rows = conn.execute(
+                        """SELECT sku_id,
+                             SUM(CASE WHEN action='RESERVE' THEN quantity
+                                      WHEN action IN ('ISSUE','RELEASE') THEN -quantity
+                                      ELSE 0 END)::bigint
+                           FROM auto_work_order_stock_event
+                           WHERE work_order_id=%s
+                           GROUP BY sku_id""",
+                        (existing[3],),
+                    ).fetchall()
+                    outstanding = dict(rows)
+                    if any(outstanding.get(sku) != qty
+                           for sku,_,qty in material_items):
+                        raise AppointmentKeyConflict("stock receipt no longer reserved")
                 return existing[1],existing[2],existing[3]
         if starts <= datetime.now(timezone.utc):
             raise AppointmentDenied("appointment must begin in future")
+        if material_items:
+            # Блокируем SKU в устойчивом порядке прежде чем проверять остатки.
+            # Это защищает две параллельные записи от двойного RESERVE.
+            sku_ids = sorted((sku for sku,_,_ in material_items),key=str)
+            scoped_skus = conn.execute(
+                """SELECT id FROM auto_stock_sku
+                   WHERE organization_id=%s AND location_id=%s
+                     AND id=ANY(%s::uuid[]) ORDER BY id FOR UPDATE""",
+                (organization,location,sku_ids),
+            ).fetchall()
+            if len(scoped_skus) != len(material_items):
+                raise AppointmentDenied("material SKU scope unavailable")
+            available = dict(conn.execute(
+                """SELECT sku_id,on_hand-reserved FROM auto_stock_balance
+                   WHERE organization_id=%s AND location_id=%s
+                     AND sku_id=ANY(%s::uuid[])""",
+                (organization,location,sku_ids),
+            ).fetchall())
+            if any(available.get(sku,0) < qty
+                   for sku,_,qty in material_items):
+                raise AppointmentStockUnavailable("insufficient unreserved stock")
         try:
             with conn.transaction():
                 conn.execute(
@@ -224,6 +290,25 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                            VALUES(%s,%s,%s,%s,%s)""",
                         (uuid4(), order, service_id, organization, location),
                     )
+                if material_items:
+                    from .auto_work_order_stock import mutate_work_order_stock
+                    from .auto_stock_service import AutoStockConflict, AutoStockDenied
+                    for sku,kind,qty in sorted(material_items,key=lambda item:str(item[0])):
+                        try:
+                            reserve_id = mutate_work_order_stock(
+                                conn,token,organization,location,order,sku,
+                                uuid4(),"RESERVE",qty,
+                            )
+                        except AutoStockDenied as exc:
+                            raise AppointmentDenied("warehouse authority revoked") from exc
+                        except AutoStockConflict as exc:
+                            raise AppointmentStockUnavailable("stock reserve conflict") from exc
+                        conn.execute(
+                            """INSERT INTO auto_appointment_material_selection
+                               (stock_event_id,work_order_id,sku_id,item_kind,quantity)
+                               VALUES(%s,%s,%s,%s,%s)""",
+                            (reserve_id,order,sku,kind,qty),
+                        )
         except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException,
                 psycopg.errors.DeadlockDetected) as exc:
             # Конкурентные INSERT по exclusion могут завершиться SQLSTATE 40P01.

@@ -517,3 +517,112 @@ test('intake chooses service in the same booking POST on mobile',async({page})=>
   expect(body?.serviceIds).toEqual([service]);
   expect(body?.customerLinkId).toBe(link);
 });
+
+
+
+test('INTAKE+WAREHOUSE reserves parts and consumables in a single create request on mobile',async({page})=>{
+  const part='88888888-8888-4888-8888-888888888888';
+  const consumable='99999999-9999-4999-8999-999999999999';
+  let requestBody:Record<string,unknown>|null=null;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route(base,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='GET'&&url.pathname.endsWith('/booking-stock'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,items:[
+          {skuId:part,article:'PART-001',available:2},
+          {skuId:consumable,article:'OIL-001',available:5},
+        ],
+      })});
+    if(req.method()==='GET'&&url.pathname.endsWith('/booking-services'))
+      return route.fulfill({status:200,contentType:'application/json',
+        body:'{"syntheticOnly":true,"items":[]}'});
+    if(req.method()==='GET')
+      return route.fulfill({status:200,contentType:'application/json',
+        body:'{"items":[],"hasMore":false}'});
+    requestBody=req.postDataJSON();
+    return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({
+      appointmentId:appointment,bookingId:bay,workOrderId:work,
+    })});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const parts=page.getByRole('group',{name:'Товары и расходные материалы для резерва'});
+  await expect(parts.getByLabel('Выбрать SKU PART-001')).toBeVisible();
+  await parts.getByLabel('Выбрать SKU PART-001').check();
+  await parts.getByLabel('Выбрать SKU OIL-001').check();
+  await parts.getByLabel('Тип SKU OIL-001').selectOption('CONSUMABLE');
+  await parts.getByLabel('Количество SKU OIL-001').fill('3');
+  await parts.getByLabel('Количество SKU PART-001').fill('3');
+  await expect(page.getByRole('button',{name:'Создать запись'})).toBeDisabled();
+  await parts.getByLabel('Количество SKU PART-001').fill('2');
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
+  await page.getByRole('button',{name:'Создать запись'}).click();
+  await expect.poll(()=>requestBody).not.toBeNull();
+  expect(requestBody?.materialItems).toEqual([
+    {skuId:part,kind:'PART',quantity:2},
+    {skuId:consumable,kind:'CONSUMABLE',quantity:3},
+  ]);
+  expect(requestBody?.serviceIds).toEqual([]);
+  await page.setViewportSize({width:1280,height:800});
+  await expect(page.getByRole('heading',{name:'Календарь приёмщика'})).toBeVisible();
+});
+
+test('warehouse-less intake sees no material picker data and cannot select stock',async({page})=>{
+  await page.route(base,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(url.pathname.endsWith('/booking-stock'))
+      return route.fulfill({status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify(url.pathname.endsWith('/booking-services')?
+        {syntheticOnly:true,items:[]}:{items:[],hasMore:false})});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Для резерва деталей требуются роли INTAKE и WAREHOUSE.')).toBeVisible();
+  await expect(page.getByRole('checkbox',{name:/Выбрать SKU/})).toHaveCount(0);
+});
+
+
+test('changing bay while slot search is pending re-enables search',async({page})=>{
+  let acknowledge!:()=>void;
+  let finish!:()=>void;
+  const started=new Promise<void>(resolve=>acknowledge=resolve);
+  const release=new Promise<void>(resolve=>finish=resolve);
+  await page.route(base,async route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname.endsWith('/slot-candidates')){
+      acknowledge();
+      await release;
+      try{await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        items:[{startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:00:00Z'}],
+        guaranteed:false,
+      })});}catch{return;}
+      return;
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(
+      url.pathname.endsWith('/booking-stock')||url.pathname.endsWith('/booking-services')?
+        {items:[],syntheticOnly:true}:{items:[],hasMore:false},
+    )});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  const search=page.getByRole('button',{name:'Проверить свободные окна (dev)'});
+  await search.click();
+  await started;
+  await expect(search).toBeDisabled();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill('77777777-7777-4777-8777-777777777777');
+  await expect(search).toBeEnabled();
+  finish();
+  await expect(page.getByLabel('Кандидаты времени')).toHaveCount(0);
+});
