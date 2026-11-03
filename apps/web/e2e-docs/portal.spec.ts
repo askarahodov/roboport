@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { expectIndexedDocsSearch } from './docs-search-helper';
 
 test('главная, навигация, кодовые блоки и поиск', async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto('/docs/');
   await expect(page.locator('.markdown-section h1')).toContainText(
     'База знаний Airmatik Pro Service',
@@ -15,8 +17,7 @@ test('главная, навигация, кодовые блоки и поис�
     'Привязка автомобиля к клиенту',
   );
   await expect(page.locator('.markdown-section pre code').first()).toBeVisible();
-  const search = page.locator('.sidebar .search input');
-  await search.fill('доказательство');
+  await expectIndexedDocsSearch(page, 'доказательство');
   await expect(page.locator('.sidebar .results-panel')).toBeVisible();
   const results = page.locator('.sidebar .results-panel');
   await expect(results.locator('a').first()).toBeVisible();

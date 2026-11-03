@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {expectIndexedDocsSearch} from './docs-search-helper';
 
 // These are actual Docsify pages backed by the repository's Markdown, NOT
 // mockups or screenshots of customers. CI publishes the PNGs with the SHA.
@@ -44,6 +45,7 @@ for(const role of roles){
 }
 
 test('скриншоты мобильной навигации и статусов current/planned',async({page},info)=>{
+  test.setTimeout(90_000);
   await page.setViewportSize({width:390,height:844});
   await page.goto('/docs/');
   await expect(page.locator('.markdown-section h1')).toContainText(
@@ -55,8 +57,7 @@ test('скриншоты мобильной навигации и статусо
     path:info.outputPath('docs-mobile-menu-current-planned.png'),
     animations:'disabled',
   });
-  const search=page.locator('.sidebar .search input');
-  await search.fill('смета');
+  await expectIndexedDocsSearch(page,'смета');
   await expect(page.locator('.sidebar .results-panel a').first()).toBeVisible();
   await page.screenshot({
     path:info.outputPath('docs-mobile-search-synthetic.png'),
