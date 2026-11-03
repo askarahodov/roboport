@@ -25,6 +25,7 @@ export function AutoCalendar() {
   const [org,setOrg]=React.useState('');
   const [location,setLocation]=React.useState('');
   const [day,setDay]=React.useState(()=>new Date().toISOString().slice(0,10));
+  const [timeZone,setTimeZone]=React.useState('UTC');
   const [items,setItems]=React.useState<Entry[]>([]);
   const [hasMore,setHasMore]=React.useState(false);
   const [cursor,setCursor]=React.useState<{startsAt:string;appointmentId:string}|null>(null);
@@ -46,15 +47,13 @@ export function AutoCalendar() {
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
   React.useEffect(()=>{
-    setItems([]);setHasMore(false);setNextCursor(null);setMessage('');setTarget(null);
+    setItems([]);setHasMore(false);setNextCursor(null);setMessage('');setTarget(null);setTimeZone('UTC');
     if(!valid){setStatus('idle');return;}
     const controller=new AbortController();
     setStatus('loading');
-    const start=new Date(day+'T00:00:00Z');
-    const end=new Date(start.getTime()+86400000);
-    if(Number.isNaN(start.getTime())){setStatus('idle');return;}
+    // Границы локальных суток (в том числе 23/25 часов) вычисляет сервер.
     const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+'/calendar';
-    const query=new URLSearchParams({locationId:location.trim(),startsAt:start.toISOString(),endsAt:end.toISOString()});
+    const query=new URLSearchParams({locationId:location.trim(),localDay:day});
     if(cursor){query.set('afterStartsAt',cursor.startsAt);query.set('afterAppointmentId',cursor.appointmentId);}
     void fetch(path+'?'+query,{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async response=>{
@@ -69,11 +68,12 @@ export function AutoCalendar() {
         if(!data.items.every((x:Entry)=>'employeeId' in x &&
           (x.employeeId===null||(typeof x.employeeId==='string'&&uuid.test(x.employeeId)))))throw new Error();
         if(!('hasMore' in data)||typeof data.hasMore!=='boolean')throw new Error();
+        if('timeZone' in data&&(typeof data.timeZone!=='string'||data.timeZone.length>64))throw new Error();
         const next=data.hasMore && 'nextStartsAt' in data && typeof data.nextStartsAt==='string' &&
           'nextAppointmentId' in data && typeof data.nextAppointmentId==='string' &&
           uuid.test(data.nextAppointmentId)?{startsAt:data.nextStartsAt,appointmentId:data.nextAppointmentId}:null;
         if(data.hasMore&&!next)throw new Error();
-        if(!controller.signal.aborted){setItems(data.items as Entry[]);setHasMore(data.hasMore);setNextCursor(next);setStatus('ready');}
+        if(!controller.signal.aborted){setItems(data.items as Entry[]);setHasMore(data.hasMore);setNextCursor(next);setTimeZone('timeZone' in data ? data.timeZone as string : 'UTC');setStatus('ready');}
       }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
   },[org,location,day,revision,valid,cursor]);
@@ -87,7 +87,7 @@ export function AutoCalendar() {
        (effectiveEmployee!==null&&!uuid.test(effectiveEmployee)))return;
     const requestId=++slotRequest.current;
     setSlotsBusy(true);setSlots([]);setSlotsMessage('');
-    const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),day});
+    const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),localDay:day});
     if(effectiveEmployee)query.set('employeeId',effectiveEmployee);
     if(target&&!target.startsWith('cancel:'))query.set('appointmentId',target);
     try{
@@ -100,12 +100,13 @@ export function AutoCalendar() {
       if(!response.ok)throw new Error();
       const data:unknown=await response.json();
       if(!data||typeof data!=='object'||!('guaranteed' in data)||data.guaranteed!==false||
-        !('items' in data)||!Array.isArray(data.items)||data.items.length>48||
+        !('items' in data)||!Array.isArray(data.items)||data.items.length>50||
         !data.items.every((x:unknown)=>x&&typeof x==='object'&&
           'startsAt' in x&&typeof x.startsAt==='string'&&validIsoInstant(x.startsAt)&&
           'endsAt' in x&&typeof x.endsAt==='string'&&validIsoInstant(x.endsAt)&&
           Date.parse(x.endsAt)>Date.parse(x.startsAt)))throw new Error();
       if(requestId!==slotRequest.current)return;
+      if('timeZone' in data && data.timeZone!==timeZone)throw new Error();
       setSlots(data.items as Array<{startsAt:string;endsAt:string}>);
       if(data.items.length===0)setSlotsMessage('Подходящих окон нет.');
     }catch{if(requestId===slotRequest.current)setSlotsMessage('Не удалось получить окна записи.');}
@@ -145,6 +146,9 @@ export function AutoCalendar() {
       else setMessage('Не удалось выполнить запрос. Проверьте сессию.');
     }finally{setBusy(false);}
   }
+  const formatLocal=(instant:string)=>new Intl.DateTimeFormat('ru-RU',{
+    timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23',
+  }).format(new Date(instant));
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+'/appointments';
   function fields(includeLink:boolean){
     return <div>
@@ -160,9 +164,9 @@ export function AutoCalendar() {
         (!(target&&clearEmployee)&&!!form.employee.trim()&&!uuid.test(form.employee.trim()))}
         onClick={()=>void findSlots()}>Проверить свободные окна (dev)</button>
       {slotsMessage&&<p role="status">{slotsMessage}</p>}
-      {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><ul>
+      {slots.length>0&&<div aria-label="Кандидаты времени"><p>Кандидаты, не гарантия брони:</p><p>Часовой пояс окон: {timeZone}</p><ul>
         {slots.map(slot=><li key={slot.startsAt}><button type="button" onClick={()=>{setForm(v=>({...v,starts:slot.startsAt,ends:slot.endsAt}));resetSlots();}}>
-          {slot.startsAt} — {slot.endsAt}</button></li>)}
+          {formatLocal(slot.startsAt)} — {formatLocal(slot.endsAt)} ({timeZone}); ISO: {slot.startsAt} — {slot.endsAt}</button></li>)}
       </ul></div>}
       <label>Начало (ISO 8601 с часовым поясом) <input aria-label="Начало ISO" value={form.starts}
         onChange={e=>setForm(s=>({...s,starts:e.target.value}))}
@@ -178,18 +182,18 @@ export function AutoCalendar() {
     Date.parse(form.starts)>Date.now();
   return <section aria-label="Календарь приёмщика (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>Календарь приёмщика</h1>
-    <p>Синтетический HTTPS-стенд. Время поиска — сутки UTC. Реальных клиентов не добавляйте.</p>
+    <p>Синтетический HTTPS-стенд. Поиск записей и свободных окон — по местным суткам филиала с учётом перевода часов. Поле ISO содержит абсолютное время для бронирования. Реальных клиентов не добавляйте.</p>
     <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>{resetPage();setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>{resetPage();setLocation(e.target.value);}}/></label>
-    <label>День (UTC) <input aria-label="День UTC" type="date" value={day} onChange={e=>{resetPage();setDay(e.target.value);}}/></label>
+    <label>День филиала <input aria-label="День филиала" type="date" value={day} onChange={e=>{resetPage();setDay(e.target.value);}}/></label>
     {status==='idle'&&<p>Укажите организацию, филиал и день.</p>}
     {status==='loading'&&<p role="status">Загрузка календаря…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или dev API отключён.</p>}
     {status==='error'&&<p role="alert">Ошибка загрузки календаря. <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить</button></p>}
-    {status==='ready'&&<><h2>Записи</h2>
+    {status==='ready'&&<><h2>Записи</h2><p>Часовой пояс филиала: {timeZone}</p>
       {hasMore&&<p role="status">Есть дополнительные записи. Перейдите на следующую страницу.</p>}
       {items.length===0?<p>Записей нет.</p>:<ul>{items.map(entry=><li key={entry.appointmentId}>
-        <strong>{entry.startsAt} — {entry.endsAt}</strong> · пост {entry.bayId}
+        <strong>{formatLocal(entry.startsAt)} — {formatLocal(entry.endsAt)} ({timeZone})</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
         <p>Специалист: {entry.employeeId??'не назначен'}</p>
         <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId,employee:entry.employeeId??''});}}>

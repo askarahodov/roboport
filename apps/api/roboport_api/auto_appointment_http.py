@@ -112,57 +112,92 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/calendar")
 def read_calendar(org_id: str, request: Request, locationId: str,
-                  startsAt: str, endsAt: str, afterStartsAt: str | None = None,
+                  startsAt: str | None = None, endsAt: str | None = None,
+                  localDay: str | None = None, afterStartsAt: str | None = None,
                   afterAppointmentId: str | None = None):
-    from .auto_calendar import calendar_items, CalendarDenied, CalendarInvalid
-    dsn=_request_dsn(request)
-    if isinstance(dsn,JSONResponse):
+    from .auto_calendar import (
+        calendar_items, local_day_window, CalendarDenied, CalendarInvalid,
+    )
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
         return dsn
     try:
-        org,location=UUID(org_id),UUID(locationId)
-        start,end=datetime.fromisoformat(startsAt),datetime.fromisoformat(endsAt)
-        after_start=datetime.fromisoformat(afterStartsAt) if afterStartsAt is not None else None
-        after_appointment=UUID(afterAppointmentId) if afterAppointmentId is not None else None
-    except (ValueError,TypeError):
-        return _response(request,422,"INVALID_INPUT")
+        org, location = UUID(org_id), UUID(locationId)
+        # Ровно один режим окна: legacy absolute или локальные сутки филиала.
+        if (localDay is None) == (startsAt is None or endsAt is None):
+            raise ValueError("choose a single calendar window")
+        if localDay is not None and (startsAt is not None or endsAt is not None):
+            raise ValueError("mixed calendar window")
+        start = datetime.fromisoformat(startsAt) if startsAt is not None else None
+        end = datetime.fromisoformat(endsAt) if endsAt is not None else None
+        after_start = datetime.fromisoformat(afterStartsAt) if afterStartsAt is not None else None
+        after_appointment = UUID(afterAppointmentId) if afterAppointmentId is not None else None
+    except (ValueError, TypeError):
+        return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
-            items=calendar_items(db,request.cookies.get("rp_session",""),
-                                 org,location,start,end,after_start,after_appointment)
+            timezone_name = None
+            if localDay is not None:
+                start, end, timezone_name = local_day_window(
+                    db, request.cookies.get("rp_session", ""), org, location, localDay,
+                )
+            items = calendar_items(
+                db, request.cookies.get("rp_session", ""),
+                org, location, start, end, after_start, after_appointment,
+            )
         except CalendarInvalid:
-            return _response(request,422,"INVALID_INPUT")
+            return _response(request, 422, "INVALID_INPUT")
         except CalendarDenied:
-            return _response(request,403,"FORBIDDEN")
-    page=items[:100]
-    more=len(items)>100
-    cursor=({"nextStartsAt":page[-1]["startsAt"],
-             "nextAppointmentId":page[-1]["appointmentId"]} if more else {})
-    return JSONResponse(content={"items":page,"hasMore":more,**cursor},
-                        headers={"Cache-Control":"no-store"})
+            return _response(request, 403, "FORBIDDEN")
+    page = items[:100]
+    more = len(items) > 100
+    cursor = ({"nextStartsAt": page[-1]["startsAt"],
+               "nextAppointmentId": page[-1]["appointmentId"]} if more else {})
+    return JSONResponse(content={"items": page, "hasMore": more, **cursor,
+                                 **({"timeZone": timezone_name} if timezone_name else {})},
+                        headers={"Cache-Control": "no-store"})
+
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/slot-candidates")
 def read_slot_candidates(org_id: str, request: Request, locationId: str,
-                         bayId: str, day: str, employeeId: str | None = None,
+                         bayId: str, day: str | None = None,
+                         localDay: str | None = None,
+                         employeeId: str | None = None,
                          appointmentId: str | None = None):
     from .auto_slot_candidates import candidate_slots, SlotsDenied
+    from .auto_calendar import local_day_window, CalendarInvalid, CalendarDenied
     from datetime import timezone
-    dsn=_request_dsn(request)
-    if isinstance(dsn,JSONResponse):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
         return dsn
     try:
-        org,location,bay=UUID(org_id),UUID(locationId),UUID(bayId)
-        employee=UUID(employeeId) if employeeId is not None else None
-        appointment=UUID(appointmentId) if appointmentId is not None else None
-        if len(day)!=10 or datetime.strptime(day,"%Y-%m-%d").strftime("%Y-%m-%d")!=day:
-            raise ValueError("invalid UTC day")
-        start=datetime.strptime(day,"%Y-%m-%d").replace(tzinfo=timezone.utc)
-    except (ValueError,TypeError):
-        return _response(request,422,"INVALID_INPUT")
+        org, location, bay = UUID(org_id), UUID(locationId), UUID(bayId)
+        employee = UUID(employeeId) if employeeId is not None else None
+        appointment = UUID(appointmentId) if appointmentId is not None else None
+        if (day is None) == (localDay is None):
+            raise ValueError("exactly one of day or localDay required")
+        if day is not None:
+            if len(day) != 10 or datetime.strptime(day,"%Y-%m-%d").strftime("%Y-%m-%d") != day:
+                raise ValueError("invalid UTC day")
+            start = datetime.strptime(day,"%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
-            slots=candidate_slots(db,request.cookies.get("rp_session",""),
-                                  org,location,bay,start,employee,appointment)
-        except SlotsDenied:
-            return _response(request,403,"FORBIDDEN")
-    return JSONResponse(content={"items":slots,"guaranteed":False},
-                        headers={"Cache-Control":"no-store"})
+            zone = None
+            end = None
+            if localDay is not None:
+                start, end, zone = local_day_window(
+                    db, request.cookies.get("rp_session", ""), org, location, localDay,
+                )
+            slots = candidate_slots(
+                db, request.cookies.get("rp_session", ""),
+                org, location, bay, start, employee, appointment, day_end=end,
+            )
+        except CalendarInvalid:
+            return _response(request, 422, "INVALID_INPUT")
+        except (CalendarDenied, SlotsDenied):
+            return _response(request, 403, "FORBIDDEN")
+    return JSONResponse(content={"items": slots, "guaranteed": False,
+                                 **({"timeZone": zone} if zone else {})},
+                        headers={"Cache-Control": "no-store"})

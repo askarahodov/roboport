@@ -14,17 +14,26 @@ class SlotsDenied(ValueError):
 def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                     location: UUID, bay: UUID, start: datetime,
                     employee: UUID | None = None,
-                    appointment: UUID | None = None) -> list[dict]:
-    """At most 47 one-hour candidates with 30-minute steps in a UTC day."""
+                    appointment: UUID | None = None,
+                    day_end: datetime | None = None) -> list[dict]:
+    """Кандидаты на UTC либо локальные сутки; бронь не гарантируется."""
     if (not all(isinstance(v, UUID) for v in (org, location, bay))
         or (employee is not None and not isinstance(employee, UUID))
         or (appointment is not None and not isinstance(appointment, UUID))
         or not isinstance(start, datetime) or start.tzinfo is None
-        or start.utcoffset() is None):
+        or start.utcoffset() is None
+        or (day_end is not None and (not isinstance(day_end, datetime)
+            or day_end.tzinfo is None or day_end.utcoffset() is None))):
         raise SlotsDenied("invalid scope or day")
     day = start.astimezone(timezone.utc)
-    if (day.hour, day.minute, day.second, day.microsecond) != (0, 0, 0, 0):
-        raise SlotsDenied("UTC midnight required")
+    if day_end is None:
+        if (day.hour, day.minute, day.second, day.microsecond) != (0, 0, 0, 0):
+            raise SlotsDenied("UTC midnight required")
+        end = day + timedelta(days=1)
+    else:
+        end = day_end.astimezone(timezone.utc)
+        if not timedelta(hours=23) <= end - day <= timedelta(hours=25):
+            raise SlotsDenied("invalid local day duration")
     with conn.transaction():
         if not organization_role_allows(conn, token, org, "INTAKE", location,
                                         for_mutation=True):
@@ -57,7 +66,7 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
             WITH candidates AS (
               SELECT s AS starts_at, s + interval '60 minutes' AS ends_at
               FROM generate_series(
-                %s::timestamptz, %s::timestamptz + interval '23 hours',
+                %s::timestamptz, %s::timestamptz - interval '60 minutes',
                 interval '30 minutes'
               ) s
             )
@@ -83,8 +92,8 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                     AND er.starts_at<c.ends_at AND er.ends_at>c.starts_at
                 )
               ))
-            ORDER BY c.starts_at LIMIT 48
-        """, (day, day, bay, org, location, employee, employee, org, location,
+            ORDER BY c.starts_at LIMIT 50
+        """, (day, end, bay, org, location, employee, employee, org, location,
               employee, old_booking, old_booking)).fetchall()
     return [{"startsAt": a.isoformat(), "endsAt": b.isoformat()}
             for a, b in rows]
