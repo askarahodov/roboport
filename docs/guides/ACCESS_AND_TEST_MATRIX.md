@@ -29,6 +29,7 @@
 | Условная сверка по заказу | MANAGER; **не реальная касса** | `/staff/auto-demo-close` | `AutoDemoClose.tsx` | `auto-demo-close.spec.ts` | [Руководитель](manager.md) |
 | Освобождение остатка резерва | WAREHOUSE, до immutable preview | `/staff/auto-demo-close` | `AutoDemoClose.tsx` | `auto-demo-close.spec.ts` | [Склад](warehouse.md) |
 | Просмотр подтверждённых авто и предъявление кода | CLIENT, только свои подтверждения | `/account/vehicles` | `CustomerVehicles.tsx` | `auto-vehicles.spec.ts` | [Клиент](client.md) |
+| Самостоятельная запись, перенос и отмена | CLIENT с подтверждённой собственной связью, до начала работ | `/account/auto-booking` | `CustomerAutoBooking.tsx` | `customer-auto-booking.spec.ts` | [Клиент](client.md), [Процесс](../auto/CUSTOMER_BOOKING.md) |
 | История собственных заказов, QC, сметы и документ | CLIENT, **исходный customer-link на момент заказа** | `/account/auto-orders` | `CustomerAutoOrders.tsx` | `customer-auto-orders.spec.ts` | [Клиент](client.md) |
 | Решение по последней версии сметы | CLIENT исходного заказчика, exact revision | `/account/auto-orders` | `CustomerAutoOrders.tsx` | `customer-auto-orders.spec.ts` | [Клиент](client.md) |
 | Просмотр технического пакета | CLIENT исходного заказчика, без подписи | `/account/auto-demo-close` | `AutoDemoClose.tsx` | `auto-demo-close.spec.ts` | [Клиент](client.md) |
@@ -61,7 +62,7 @@ production-UI. В тестовом интерфейсе есть nav-ссылк�
 | Настоящие платежи, кассы, возврат денег, 54-ФЗ/эквайринг | `SIM_PAYMENT` не является оплатой | #170, #119 |
 | Выпуск и юридическое подписание акта/выдача автомобиля | Preview dev `releaseAllowed: false` | #114, #119 |
 | Публичный автомобильный веб-сайт с подтверждённым брендом | Нет brand/legal approval и decommission | #110, #165, #119 |
-| Самостоятельная запись и приём документов автовладельца | Нет утверждённого customer production flow | #113, #117, #124 |
+| Production самостоятельная запись и приём настоящих документов | В dev есть только синтетический booking, нет реального consent/identity/production ingress | #113, #117, #119, #124 |
 | iOS/Android, offline/push | Mobile discovery, нет приложений | #118 |
 | Коммерческие OEM-провайдеры и применяемость | Лицензия, внешние поставщики не разрешены | #111, #115 |
 | Зарплаты, прибыль и ABC/XYZ | Нет достоверного финансового реестра | #171 |
@@ -81,3 +82,6 @@ production-UI. В тестовом интерфейсе есть nav-ссылк�
 значку открытой ветки. Точный чек-лист ручного ролевого тестирования и
 скриншоты — в [SCREENSHOT_EVIDENCE](SCREENSHOT_EVIDENCE.md);
 независимый QA/авторизация релиза по #76/#119 ещё требуются.
+
+
+Отдельный customer booking HTTP и негативные PG17 проверки: `auto_customer_booking_http.py`, `test_pg_auto_customer_booking_http.py`; они не входят в публичный OpenAPI до #119.
