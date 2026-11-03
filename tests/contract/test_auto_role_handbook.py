@@ -92,6 +92,6 @@ def test_32_real_viewport_screenshots_and_safe_evidence_procedure():
     for token in ("390", "1280", "light", "dark", "page.screenshot", "outputPath"):
         assert token in test_source
     for phrase in ("14 дней", "roboport-browser-evidence", "SHA",
-                   "независим", "ручной"):
+                   "независим", "ручн"):
         assert phrase in evidence
     assert "32 снимка" in evidence
