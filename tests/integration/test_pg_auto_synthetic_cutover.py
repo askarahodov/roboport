@@ -169,6 +169,14 @@ def test_full_cutover_is_atomic_reconciled_and_repeatable(tmp_path):
         )
         assert rechecked["writes"]==0
         assert rechecked["vehicles"]==1 and rechecked["services"]==2
+        # A standalone reconciliation must not trust a substituted expected
+        # SHA simply because the same batch IDs and live row counts exist.
+        with pytest.raises(SyntheticCutoverDenied,match="SOURCE_MISMATCH"):
+            reconcile_synthetic_cutover(
+                db,token,organization_id=org,location_id=loc,
+                sources=replace(sources,inventory_sha256="a"*64),
+                synthetic_only=True,
+            )
         replay=_go(db,d,org,loc,sources)
         assert replay["replayed"] is True and replay["writes"]==0
         assert _counts(db,sources)==before
