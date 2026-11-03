@@ -36,6 +36,33 @@ const validIsoInstant=(value:string)=>{
     (offsetHour!==14||offsetMinute===0)&&!Number.isNaN(Date.parse(value));
 };
 
+/** Ответы dev API не раскрывают клиентские данные; показываем только известные коды. */
+function bookingFailure(status:number, code:unknown):string {
+  if(status===403||status===401||status===404)return 'Доступ запрещён. Проверьте сессию и права филиала.';
+  if(status===409){
+    switch(code){
+      case 'STOCK_RECONCILIATION_REQUIRED':
+        return 'Отмена невозможна: сначала выполните сверку склада и возврат/освобождение резерва по заказ-наряду (409).';
+      case 'STOCK_UNAVAILABLE':
+        return 'Недостаточно свободного остатка для резерва. Обновите остатки и проверьте запись перед повтором (409).';
+      case 'LOCATION_CLOSED':
+        return 'Филиал закрыт в выбранное время. Проверьте график и выберите другое окно (409).';
+      case 'IDEMPOTENCY_KEY_REUSED':
+        return 'Ключ повтора уже использован для другого запроса. Обновите календарь перед новой операцией (409).';
+      case 'RESOURCE_BUSY':
+        return 'Пост или специалист уже занят. Обновите свободные окна (409).';
+      default:
+        return 'Конфликт при выполнении операции. Обновите календарь перед повтором (409).';
+    }
+  }
+  if(status===422){
+    return code==='SERVICES_EXCEED_SLOT'
+      ? 'Выбранные работы не помещаются в интервал записи. Выберите более длинное окно (422).'
+      : 'Проверьте данные записи и время с часовым поясом (422).';
+  }
+  return 'Ошибка операции ('+status+').';
+}
+
 export function AutoCalendar() {
   const [org,setOrg]=React.useState('');
   const [location,setLocation]=React.useState('');
@@ -289,8 +316,13 @@ export function AutoCalendar() {
         body:snapshot?snapshot.body:JSON.stringify(payload)});
       if(!scopeIsCurrent())return;
       if(response.status>=500)throw new Error('uncertain server outcome');
-      if(!response.ok){setPending(null);setMessage(response.status===409?'Пост или специалист занят / ключ запроса использован (409).':
-        [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
+      if(!response.ok){
+        const errorBody:unknown=await response.json().catch(()=>null);
+        if(!scopeIsCurrent())return;
+        const code=errorBody&&typeof errorBody==='object'&&'code' in errorBody
+          ? errorBody.code:null;
+        setPending(null);setMessage(bookingFailure(response.status,code));return;
+      }
       setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);setSelectedServices([]);setMaterials([]);resetPage();setRevision(n=>n+1);
     }catch{
       if(!scopeIsCurrent())return;
