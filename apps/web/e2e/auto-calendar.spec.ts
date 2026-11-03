@@ -471,3 +471,42 @@ test('calendar sends local day, shows IANA zone and autumn DST repeated hour',as
   expect(query.has('startsAt')).toBe(false);
   expect(query.has('endsAt')).toBe(false);
 });
+
+
+test('intake chooses service in the same booking POST on mobile',async({page})=>{
+  const service='99999999-9999-4999-8999-999999999999';
+  let body:Record<string,unknown>|null=null;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route(base,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='GET'&&url.pathname.endsWith('/booking-services'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        items:[{id:service,code:'OIL-CHANGE',title:'Замена масла',durationMinutes:30}],
+        syntheticOnly:true,
+      })});
+    if(req.method()==='GET')
+      return route.fulfill({status:200,contentType:'application/json',
+        body:'{"items":[],"hasMore":false}'});
+    body=req.postDataJSON();
+    return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({
+      appointmentId:appointment,bookingId:bay,workOrderId:work,
+    })});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const workChoice=page.getByRole('checkbox',{name:'Работа OIL-CHANGE'});
+  await expect(workChoice).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
+  await workChoice.check();
+  await page.getByRole('button',{name:'Создать запись'}).click();
+  await expect.poll(()=>body).not.toBeNull();
+  expect(body?.serviceIds).toEqual([service]);
+  expect(body?.customerLinkId).toBe(link);
+});
