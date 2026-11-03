@@ -98,3 +98,8 @@
 и [архивом robot-документации](LEGACY_ARCHIVE.md).
 Автоматический Docsify link/search/keyboard/viewport smoke нельзя приравнивать
 к завершённому manual QA, юридическому подписанию или decommission (#119/#165/#173).
+
+
+## Повтор переноса после отмены (current-dev, #113)
+
+`POST /api/v1/dev/auto/organizations/{org}/appointments/{appointment}/reschedule` с тем же `Idempotency-Key` и неизменным payload возвращает исходный `bookingId` только пока эта бронь **актуальна и активна**. Если после удачного переноса запись отменена или повторно перенесена, старый receipt не считается подтверждением действующей брони: повтор возвращает `409 IDEMPOTENCY_KEY_REUSED` без новых движений/аудита. При повторе сначала заново проверяются сессия, полномочия филиала и подтверждённая связь автомобиля с клиентом. Покрытие: `tests/integration/test_pg_auto_reschedule_http.py` (успешный replay → отмена → 409). Всё остаётся внутри synthetic loopback; #113 и production gate #119 открыты.
