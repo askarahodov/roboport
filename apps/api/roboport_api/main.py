@@ -22,6 +22,8 @@ from .auto_org_staff_http import router as auto_org_staff_router
 app.include_router(auto_org_staff_router)
 from .auto_appointment_http import router as auto_appointment_router
 app.include_router(auto_appointment_router)
+from .auto_bay_occupancy import router as auto_bay_occupancy_router
+app.include_router(auto_bay_occupancy_router)
 from .auto_opening_hours_http import router as auto_opening_hours_router
 app.include_router(auto_opening_hours_router)
 from .auto_stocktake_http import router as auto_stocktake_router

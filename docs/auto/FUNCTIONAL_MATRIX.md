@@ -132,3 +132,8 @@
 ## Дополнение к миграции каталога/склада: полный synthetic batch (#172, current-dev)
 
 **D/current-dev:** три источника VEHICLE/SERVICE/SKU+STOCK проверяются по SHA и staging lineage, затем одной atomic PG17 transaction активируются vehicle без прав клиента, service catalog и stock SKU/RECEIPT. Применяется независимое разрешение MANAGER+WAREHOUSE, FK/trigger-guard postрочного provenance, запрет чужого SKU/tenant, повтор без phantom и неизменяемый audit. **P/planned:** юридически разрешённые реальные контрагенты и клиенты, документы/история, отдельный transfer consent, надёжный промышленный импорт XLSX через trusted pipeline, документированная реальная инвентаризация и RPO/RTO/ops+security sign-off. См. `docs/auto/SYNTHETIC_CUTOVER.md`; #172 нельзя закрывать по одному synthetic checkpoint.
+
+
+### #171 — отчёт по текущей календарной загрузке постов (current-dev)
+
+В `/staff/auto-bay-occupancy` реализован исключительно **синтетический** read-only отчёт MANAGER по текущим активным броням за 1–31 локальных суток филиала, с 23/25-часовым DST. Исторические отменённые/перенесённые брони не входят, состав активных постов фиксируется на момент запроса. **Это не** рабочее время сотрудников, средняя производительность, выручка, денежный поток, доля продаж, прибыль или полный BI #171. Доказательства: [формулы и ограничения](REPORTING.md), `test_pg_auto_bay_occupancy_http.py` и `auto-bay-occupancy.spec.ts`. Остальные критерии #171 и gate #119 — `planned`.

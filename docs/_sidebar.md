@@ -30,6 +30,7 @@
   - [Функциональная матрица](/auto/FUNCTIONAL_MATRIX.md)
   - [Дорожная карта полного автосервиса](/auto/FEATURE_ROADMAP.md)
   - [Пакетный synthetic cutover (разработчикам/QA)](/auto/SYNTHETIC_CUTOVER.md)
+  - [Загрузка постов: методика и API (dev)](/auto/REPORTING.md)
   - [Каталоги запчастей](/auto/PARTS_CATALOG.md)
   - [Технологии](/TECH_STACK.md)
   - [Локальная разработка](/operations/DEV_ENVIRONMENT.md)

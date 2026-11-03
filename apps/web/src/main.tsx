@@ -9,6 +9,7 @@ import { GuestIntake, ClaimProof } from './pages/customer/GuestIntake';
 import { StaffPortal } from './pages/staff/StaffPortal';
 import { AutoStaffAdmin } from './pages/staff/AutoStaffAdmin';
 import { AutoCalendar } from './pages/staff/AutoCalendar';
+import { AutoBayOccupancy } from './pages/staff/AutoBayOccupancy';
 import { AutoOrderServices } from './pages/staff/AutoOrderServices';
 import { AutoWorkshopQc } from './pages/staff/AutoWorkshopQc';
 import { AutoEstimateConsole } from './pages/shared/AutoEstimateConsole';
@@ -101,6 +102,7 @@ function App() {
         <NavLink to="/staff" end>Сотрудникам</NavLink>
         <NavLink to="/staff/auto-admin" end>Организации (dev)</NavLink>
         <NavLink to="/staff/auto-calendar" end>Календарь (dev)</NavLink>
+        <NavLink to="/staff/auto-bay-occupancy" end>Загрузка постов (dev)</NavLink>
         <NavLink to="/staff/auto-order-services" end>Услуги наряда (dev)</NavLink>
         <NavLink to="/staff/auto-workshop-qc" end>Осмотр и QC (dev)</NavLink>
         <NavLink to="/staff/auto-estimates" end>Сметы (dev)</NavLink>
@@ -161,6 +163,7 @@ function App() {
       <Route path="/account/*" element={<CustomerAccount />} />
       <Route path="/staff/auto-admin" element={<AutoStaffAdmin />} />
       <Route path="/staff/auto-calendar" element={<AutoCalendar />} />
+      <Route path="/staff/auto-bay-occupancy" element={<AutoBayOccupancy />} />
       <Route path="/staff/auto-order-services" element={<AutoOrderServices />} />
       <Route path="/staff/auto-workshop-qc" element={<AutoWorkshopQc />} />
       <Route path="/staff/auto-estimates" element={<AutoEstimateConsole role="manager" />} />
