@@ -22,6 +22,41 @@ class CreateAppointment(BaseModel):
     endsAt: datetime
     serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
 
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/booking-services")
+def intake_booking_services(org_id: str, loc_id: str, request: Request):
+    """Каталог филиала для INTAKE: без назначения роли MANAGER."""
+    from .auto_org_authority import organization_role_allows
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        org, loc = UUID(org_id), UUID(loc_id)
+    except (ValueError, TypeError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        with db.transaction():
+            if not organization_role_allows(
+                db, request.cookies.get("rp_session", ""), org,
+                "INTAKE", loc, for_mutation=True,
+            ):
+                return _response(request, 403, "FORBIDDEN")
+            rows = db.execute(
+                """SELECT id,code,title,duration_minutes FROM auto_service_catalog
+                   WHERE organization_id=%s AND location_id=%s
+                   ORDER BY code,id LIMIT 101""",
+                (org, loc),
+            ).fetchall()
+    if len(rows) > 100:
+        return _response(request, 503, "UNAVAILABLE")
+    return JSONResponse(
+        content={"items":[
+            {"id":str(i),"code":code,"title":title,"durationMinutes":minutes}
+            for i,code,title,minutes in rows
+        ],"syntheticOnly":True},
+        headers={"Cache-Control":"no-store"},
+    )
+
+
 @router.post("/api/v1/dev/auto/organizations/{org_id}/appointments")
 async def create(org_id: str, request: Request):
     dsn=_request_dsn(request)
