@@ -7,6 +7,8 @@ type Booking={appointmentId:string;organizationId:string;locationId:string;custo
   bookingId:string;bayId:string;startsAt:string;endsAt:string;status:'SCHEDULED'|'CANCELED';
   workOrderId:string;timeZone:string;canManage:boolean};
 type Slot={startsAt:string;endsAt:string};
+type Service={id:string;code:string;title:string;durationMinutes:number};
+type Sku={id:string;article:string};
 type Pending={path:string;body:string;key:string|null};
 const today=()=>new Date().toISOString().slice(0,10);
 const locale=(time:string,zone:string)=>new Intl.DateTimeFormat('ru-RU',{
@@ -27,6 +29,13 @@ export function CustomerAutoBooking(){
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [revision,setRevision]=React.useState(0);
+  const [catalogState,setCatalogState]=React.useState<'idle'|'loading'|'ready'|'error'>('idle');
+  const [services,setServices]=React.useState<Service[]>([]);
+  const [skus,setSkus]=React.useState<Sku[]>([]);
+  const [serviceId,setServiceId]=React.useState('');
+  const [skuId,setSkuId]=React.useState('');
+  const [kind,setKind]=React.useState<'PART'|'MATERIAL'>('PART');
+  const [quantity,setQuantity]=React.useState(1);
   const slotRequest=React.useRef(0);
   const resource=resources.find(r=>selected===r.customerLinkId+':'+r.bayId);
   const choices=target?resources.filter(r=>r.organizationId===target.organizationId&&
@@ -75,10 +84,43 @@ export function CustomerAutoBooking(){
     return ()=>controller.abort();
   },[revision]);
 
+  React.useEffect(()=>{
+    setCatalogState('idle');setServices([]);setSkus([]);
+    setServiceId('');setSkuId('');setQuantity(1);
+    if(!scoped||state!=='ready'||target)return;
+    const controller=new AbortController(),r=scoped;
+    setCatalogState('loading');
+    const params=new URLSearchParams({organizationId:r.organizationId,
+      locationId:r.locationId,customerLinkId:r.customerLinkId});
+    void fetch('/api/v1/dev/auto/customer/booking/catalog?'+params,{
+      credentials:'include',cache:'no-store',signal:controller.signal,
+    }).then(async resp=>{
+      if(controller.signal.aborted)return;
+      if([401,403,404].includes(resp.status)){
+        setResources([]);setBookings([]);setState('denied');return;
+      }
+      if(!resp.ok)throw Error('catalog');
+      const raw:unknown=await resp.json();
+      if(!raw||typeof raw!=='object'||!('services' in raw)||!Array.isArray(raw.services)||
+         !('skus' in raw)||!Array.isArray(raw.skus)||
+         !('stockReserved' in raw)||raw.stockReserved!==false||
+         raw.services.length>50||raw.skus.length>50||
+         !raw.services.every((item:Service)=>uuid.test(item.id)&&
+           typeof item.title==='string'&&typeof item.code==='string'&&
+           Number.isInteger(item.durationMinutes)&&item.durationMinutes>=5)||
+         !raw.skus.every((item:Sku)=>uuid.test(item.id)&&typeof item.article==='string'))
+        throw Error('catalog shape');
+      if(controller.signal.aborted)return;
+      setServices(raw.services as Service[]);setSkus(raw.skus as Sku[]);
+      setCatalogState('ready');
+    }).catch(()=>{if(!controller.signal.aborted)setCatalogState('error');});
+    return ()=>controller.abort();
+  },[selected,revision,state,target,scoped?.customerLinkId,scoped?.bayId]);
+
   React.useEffect(()=>{slotRequest.current++;setSlots([]);setSlotState('');},[selected,day,target]);
 
   async function search(){
-    if(!scoped||busy||pending)return;
+    if(!scoped||busy||pending||(!target&&catalogState!=='ready'))return;
     const requestId=++slotRequest.current;
     setSlotState('Загрузка окон…');setSlots([]);
     const r=scoped;
@@ -140,7 +182,9 @@ export function CustomerAutoBooking(){
       startsAt:slot.startsAt,endsAt:slot.endsAt}:
       {organizationId:scoped.organizationId,locationId:scoped.locationId,
        customerLinkId:scoped.customerLinkId,bayId:scoped.bayId,
-       startsAt:slot.startsAt,endsAt:slot.endsAt};
+       startsAt:slot.startsAt,endsAt:slot.endsAt,
+       serviceIds:serviceId?[serviceId]:[],
+       materials:skuId?[{skuId,kind,quantity}]:[]};
     void mutate(path,JSON.stringify(payload),crypto.randomUUID());
   }
 
@@ -188,13 +232,40 @@ export function CustomerAutoBooking(){
             {r.vehicle.make} {r.vehicle.model} · {r.timeZone} · пост {r.bayId}
           </option>)}
         </select></label>
+        {!target&&<div aria-label="Состав записи">
+          <p>Услуги и запрошенные позиции записываются вместе с бронированием. Детали и материалы не списываются и не резервируются.</p>
+          {catalogState==='loading'&&<p role="status">Загрузка каталога филиала…</p>}
+          {catalogState==='error'&&<p role="alert">Каталог недоступен. Обновите записи.</p>}
+          {catalogState==='ready'&&<>
+            <label>Услуга <select aria-label="Услуга записи" value={serviceId}
+              onChange={e=>setServiceId(e.target.value)}>
+              <option value="">Без предварительной услуги</option>
+              {services.map(v=><option key={v.id} value={v.id}>{v.title} ({v.durationMinutes} мин.)</option>)}
+            </select></label>
+            <label>Запрошенная деталь или материал <select aria-label="Позиция каталога" value={skuId}
+              onChange={e=>setSkuId(e.target.value)}>
+              <option value="">Не выбирать</option>
+              {skus.map(v=><option key={v.id} value={v.id}>{v.article}</option>)}
+            </select></label>
+            {skuId&&<><label>Тип позиции <select aria-label="Тип позиции" value={kind}
+              onChange={e=>setKind(e.target.value as 'PART'|'MATERIAL')}>
+              <option value="PART">Товар/запчасть</option><option value="MATERIAL">Расходный материал</option>
+            </select></label><label>Количество <input aria-label="Количество позиции" type="number"
+              min={1} max={1000} step={1} value={quantity}
+              onChange={e=>setQuantity(Number(e.target.value))}/></label></>}
+          </>}
+        </div>}
         <label>День филиала <input aria-label="День филиала" type="date"
           value={day} onChange={e=>setDay(e.target.value)}/></label>
-        <button type="button" disabled={busy||!!pending||!scoped}
+        <button type="button" disabled={busy||!!pending||!scoped||(!target&&catalogState!=='ready')}
           onClick={()=>void search()}>Показать свободные окна</button>
         {slotState&&<p role="status">{slotState}</p>}
         {slots.length>0&&scoped&&<ul>{slots.map(slot=><li key={slot.startsAt}>
-          <button type="button" disabled={busy||!!pending} onClick={()=>selectSlot(slot)}>
+          <button type="button" disabled={busy||!!pending||
+            (!target&&!!serviceId&&services.some(s=>s.id===serviceId&&
+              Date.parse(slot.endsAt)-Date.parse(slot.startsAt)<s.durationMinutes*60000))||
+            (!target&&!!skuId&&(!Number.isInteger(quantity)||quantity<1||quantity>1000))}
+            onClick={()=>selectSlot(slot)}>
             {locale(slot.startsAt,scoped.timeZone)} — {locale(slot.endsAt,scoped.timeZone)}
             {' '}({scoped.timeZone})
           </button>
