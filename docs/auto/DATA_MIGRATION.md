@@ -298,3 +298,36 @@ python scripts/auto_synthetic_batch.py --synthetic-only --vehicle synthetic_vehi
 ### Восстановление всей активированной synthetic связки после реального pg_restore
 
 В едином PR #172 новый `scripts/auto_cutover_restore_probe.py` засевает контрольный VEHICLE/SERVICE/SKU+STOCK пакет перед `pg_dump -Fc`, сохраняет SHA-256 связей source→staging→live вне дампа, сверяет оригинальную и восстановленную базы по отдельному manifest и повторно оспаривает immutable/tenant защиту **только** на clone. Используются те же ограничения loopback PostgreSQL, что и `auto_restore_lifecycle_probe._dsn`. Команды и формат доказательства: [SYNTHETIC_CUTOVER.md](SYNTHETIC_CUTOVER.md). Никаких настоящих VIN, финансовых операций, публикуемых CSV или обратимых production-migrations не добавлено.
+
+
+## Экспорт и независимая проверка сверенного synthetic cutover (#172, current-dev)
+
+Для завершённой синтетической цепочки `VEHICLE + SERVICE + SKU/STOCK` доступна внутренняя функция `roboport_api.auto_synthetic_cutover_export.export_reconciled_synthetic_cutover`. Она **не создаёт экспорт из чужих данных по произвольным UUID**: нужны те же три исходных файла, digest и batch IDs (`SyntheticCutoverSources`), которыми создан cutover, действующая сессия с **двумя** ролями `MANAGER` и `WAREHOUSE` этого филиала, `synthetic_only=True`, а также полная повторная сверка staging/source/live объектов и отсутствие связки автомобиля с владельцем. Если хоть одна проверка нарушена, экспорт не формируется. Функция не вызывает staging/promotion и не изменяет рабочие каталоги или ledger.
+
+**Порядок для разработчика на изолированном Linux/PG17 стенде:** после `rehearse_synthetic_cutover(...)` используйте **тот же** экземпляр `SyntheticCutoverSources` и контекст действующей сессии, затем:
+
+```python
+from pathlib import Path
+from roboport_api.auto_synthetic_cutover_export import (
+    export_reconciled_synthetic_cutover,
+)
+result = export_reconciled_synthetic_cutover(
+    db, token, organization_id=org, location_id=loc, sources=sources,
+    destination=Path("./synthetic-cutover-export"), synthetic_only=True,
+)
+assert result["ok"] and not result["productionApproved"]
+```
+
+Условные `db/token/org/loc/sources` здесь — переменные **авторизованного** тестового процесса; никакие токены не передавайте как аргументы командной строки, в логи или файлы. Пользовательского HTTP/UI экспорта пока нет, а прямой доступ к БД остаётся доступным только изолированным доверенным dev-клиентам.
+
+Новый **отсутствующий ранее сквозной выход** — каталог, который **не должен существовать до запуска**; он создаётся с правами `0700`, а файлы `vehicles.csv`, `services.csv`, `inventory.csv` и `manifest.json` — `0600`. Перезапись существующего каталога запрещена; при ошибке записи вновь созданный каталог очищается. CSV — точные проверенные исходные bytes, каждый из них повторно читается из одного regular-file descriptor без следования symlink, со строгим SHA-256 и ограничением размера. Манифест версии 1 содержит размеры/digest файлов, batch IDs, tenant/branch ID, только счётчики, `productionApproved:false`; в нём **нет** VIN, источника строк, данных владельца, истории ремонта и секретов. В самих `vehicles.csv` присутствует искусственный VIN: каталог нельзя публиковать или размещать на общедоступном диске.
+
+**Независимая проверка файла после передачи на другой тестовый стенд (без DB и токенов):**
+
+```bash
+PYTHONPATH=apps/api:. python scripts/auto_cutover_export_verify.py --synthetic-only ./synthetic-cutover-export
+```
+
+Проверяющий сверяет точный список из 4 файлов, SHA-256 и размеры, права доступа, отсутствие symlink, версию/состав manifest; выводит только коды, счётчики и hash manifest без VIN и содержимого CSV. Изменённый CSV, добавленный файл, неправильная версия manifest или открытые POSIX-права отвергаются. **SHA-256 подтверждает целостность байтов, а не юридическое происхождение, подлинность согласия, полномочие владельца или безопасность реальных данных**. Следующая стадия production-импорта по #172 и #119 всё ещё `planned`. Рекомендуется зашифрованное хранилище для любых архивов; этот инструмент не шифрует файлы и не подменяет backup/restore.
+
+**Тесты:** `PYTHONPATH=apps/api:. pytest -q tests/integration/test_pg_auto_synthetic_cutover_export.py` на disposable PG17 с полной миграцией. Покрыты атомарный cutover → export → offline verify, byte-for-byte сверка, неизменность БД, ошибки уже существующего каталога, чужой tenant/отозванный WAREHOUSE, повреждённый SHA, подмена CSV, symlink и частичный сбой диска. Откат: каталог может быть удалён после архивирования контрольного manifest; миграций БД или удаления provenance для экспорта не требуется.
