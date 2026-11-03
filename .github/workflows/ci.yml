@@ -53,6 +53,10 @@ jobs:
           # kept outside Git and is never sent to logs or the DB dump.
           PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_restore_lifecycle_probe \
             seed --manifest /tmp/roboport-auto-lifecycle-restore.json
+          # A second, independent source-to-live migration set (VEHICLE,
+          # SERVICE, SKU/STOCK) must also survive the same full archive.
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_cutover_restore_probe \
+            seed --manifest /tmp/roboport-auto-cutover-restore.json
       - name: Synthetic PostgreSQL pg_dump / pg_restore roundtrip
         shell: bash
         run: |
@@ -81,6 +85,14 @@ jobs:
             --database roboport
           PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_restore_lifecycle_probe \
             verify-clone --manifest /tmp/roboport-auto-lifecycle-restore.json \
+            --database roboport_restored
+          # Verify all three staged + activated automotive domains with
+          # immutable source/live receipt provenance and clone-only probes.
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_cutover_restore_probe \
+            verify --manifest /tmp/roboport-auto-cutover-restore.json \
+            --database roboport
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_cutover_restore_probe \
+            verify-clone --manifest /tmp/roboport-auto-cutover-restore.json \
             --database roboport_restored
           ORIGINAL="$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport -At -c "SELECT count(*) FROM customer WHERE label='restore-probe'")"
           RESTORED="$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -At -c "SELECT count(*) FROM customer WHERE label='restore-probe'")"
