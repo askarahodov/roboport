@@ -1,4 +1,4 @@
-"""Synthetic-only manager dashboard: current bay occupancy by local calendar day.
+"""Synthetic-only manager dashboard: active bay and staff assignment aggregates.
 
 No customer, VIN, appointment, employee, price or financial data is exposed.
 A cancelled/rescheduled historical booking does not inflate live occupancy.
@@ -117,6 +117,65 @@ def bay_occupancy(conn: psycopg.Connection, token: str, *,
                      AND b.starts_at < %s AND b.ends_at > %s""",
                 (end, start, organization_id, location_id, end, start),
             ).fetchone()
+
+            # Active shifts are themselves immutable time ranges with a
+            # non-overlap constraint per employee. Only aggregate capacity;
+            # never return user IDs or individual shifts.
+            scheduled_count, shift_seconds = conn.execute(
+                """SELECT COUNT(DISTINCT sh.user_id)::bigint,
+                          COALESCE(SUM(EXTRACT(EPOCH FROM
+                             LEAST(sh.ends_at,%s::timestamptz) -
+                             GREATEST(sh.starts_at,%s::timestamptz)
+                          )),0)::bigint
+                   FROM auto_staff_shift sh
+                   WHERE sh.organization_id=%s AND sh.location_id=%s
+                     AND sh.canceled_at IS NULL
+                     AND sh.starts_at < %s AND sh.ends_at > %s""",
+                (end,start,organization_id,location_id,end,start),
+            ).fetchone()
+            # Only current appointment bookings count. A stale employee
+            # reservation on a superseded booking cannot inflate the report.
+            # An assignment whose shift was revoked is excluded; it cannot
+            # be reported as reserved capacity of an active shift.
+            assigned_count, assigned_seconds = conn.execute(
+                """SELECT COUNT(*)::bigint,
+                          COALESCE(SUM(EXTRACT(EPOCH FROM
+                             LEAST(er.ends_at,%s::timestamptz) -
+                             GREATEST(er.starts_at,%s::timestamptz)
+                          )),0)::bigint
+                   FROM auto_employee_reservation er
+                   JOIN auto_bay_booking b ON b.id=er.booking_id
+                     AND b.organization_id=er.organization_id
+                     AND b.location_id=er.location_id
+                     AND b.canceled_at IS NULL
+                   JOIN auto_work_bay bay ON bay.id=b.bay_id
+                     AND bay.organization_id=er.organization_id
+                     AND bay.location_id=er.location_id
+                     AND bay.disabled_at IS NULL
+                   JOIN auto_appointment a ON a.organization_id=b.organization_id
+                     AND a.location_id=b.location_id
+                   JOIN LATERAL (
+                     SELECT COALESCE(
+                       (SELECT r.new_booking_id FROM auto_appointment_reschedule r
+                        WHERE r.appointment_id=a.id
+                        ORDER BY r.created_at DESC,r.id DESC LIMIT 1),
+                       a.booking_id
+                     ) AS current_id
+                   ) latest ON latest.current_id=b.id
+                   WHERE er.organization_id=%s AND er.location_id=%s
+                     AND er.canceled_at IS NULL
+                     AND er.starts_at < %s AND er.ends_at > %s
+                     AND EXISTS(
+                       SELECT 1 FROM auto_staff_shift sh
+                       WHERE sh.organization_id=er.organization_id
+                         AND sh.location_id=er.location_id
+                         AND sh.user_id=er.employee_id
+                         AND sh.canceled_at IS NULL
+                         AND sh.starts_at<=er.starts_at
+                         AND sh.ends_at>=er.ends_at
+                     )""",
+                (end,start,organization_id,location_id,end,start),
+            ).fetchone()
             capacity = bay_count * day_seconds
             # Never claim this is operating-hours utilization: denominator
             # includes the WHOLE local calendar day, including closed hours.
@@ -127,6 +186,13 @@ def bay_occupancy(conn: psycopg.Connection, token: str, *,
                 "occupiedSeconds": seconds,
                 "calendarCapacitySeconds": capacity,
                 "occupancyBasisPoints": (seconds*10000//capacity if capacity else None),
+                "scheduledEmployees": scheduled_count,
+                "scheduledShiftSeconds": shift_seconds,
+                "activeAssignments": assigned_count,
+                "assignedSeconds": assigned_seconds,
+                "assignmentBasisPoints": (
+                    assigned_seconds*10000//shift_seconds if shift_seconds else None
+                ),
             })
         return {
             "items":items, "timeZone":row[0], "bayCount":bay_count,
