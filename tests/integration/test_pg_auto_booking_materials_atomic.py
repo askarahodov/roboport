@@ -3,7 +3,7 @@
 Only scoped synthetic stock, never payment, public access or real goods.
 """
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -195,7 +195,7 @@ def test_missing_warehouse_role_and_released_material_receipt_fail_closed(monkey
     created=http.post(create,json=payload,headers=key)
     assert created.status_code==201,created.text
     with psycopg.connect(DSN) as db:
-        order=created.json()["workOrderId"]
+        order=UUID(created.json()["workOrderId"])
         mutate_work_order_stock(
             db,d["tokens"][d["intake"]],org,loc,order,part,uuid4(),"RELEASE",1,
         )
