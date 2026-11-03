@@ -42,6 +42,8 @@ from .auto_work_order_execution_http import router as auto_work_order_execution_
 app.include_router(auto_work_order_execution_router)
 from .auto_demo_close_http import router as auto_demo_close_router
 app.include_router(auto_demo_close_router)
+from .auto_customer_orders_http import router as auto_customer_orders_router
+app.include_router(auto_customer_orders_router)
 
 
 @app.middleware("http")
