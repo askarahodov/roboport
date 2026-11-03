@@ -98,3 +98,8 @@
 и [архивом robot-документации](LEGACY_ARCHIVE.md).
 Автоматический Docsify link/search/keyboard/viewport smoke нельзя приравнивать
 к завершённому manual QA, юридическому подписанию или decommission (#119/#165/#173).
+
+
+## Календарь: различение ошибок запроса и прав доступа (current-dev, #113)
+
+Закрытый synthetic endpoint `GET /api/v1/dev/auto/organizations/{org}/calendar` возвращает `422 INVALID_INPUT` для неверного диапазона (включая интервал более 7 суток, обратные или timezone-naive даты) и неполного курсора пагинации. Неверные UUID/даты также получают `422`. При отсутствии действующей роли `INTAKE`, при чужом филиале или организации возвращается `403 FORBIDDEN` без раскрытия данных. Нормальная страница не более 100 записей, результат `Cache-Control: no-store`. Контракт проверяется `tests/integration/test_pg_auto_calendar_http.py` на PG17. Это **не** разрешает production, не реализует уведомления, клиентскую self-service запись или юридические гейты #119; issue #113 остаётся открытой.

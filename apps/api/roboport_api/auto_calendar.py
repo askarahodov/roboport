@@ -7,6 +7,11 @@ from .auto_org_authority import organization_role_allows
 class CalendarDenied(ValueError):
     pass
 
+
+class CalendarInvalid(ValueError):
+    """Invalid calendar window/cursor; not an authorization failure."""
+    pass
+
 def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UUID,
                    start: datetime, end: datetime, after_start: datetime | None = None,
                    after_appointment: UUID | None = None) -> list[dict]:
@@ -18,7 +23,7 @@ def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UU
         or (after_start is not None and
             (not isinstance(after_start,datetime) or after_start.tzinfo is None
              or after_start.utcoffset() is None or not isinstance(after_appointment,UUID)))):
-        raise CalendarDenied("invalid calendar window")
+        raise CalendarInvalid("invalid calendar window")
     with conn.transaction():
         if not organization_role_allows(conn,token,org,"INTAKE",location,
                                        for_mutation=True):
