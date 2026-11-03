@@ -52,7 +52,7 @@ def test_reschedule_then_cancel_current_booking_and_audit(monkeypatch):
     canceled=client.post(f"{url}/{appointment}/cancel",headers=headers)
     assert canceled.status_code==200,canceled.text
     assert canceled.json()["status"]=="CANCELED"
-    # A receipt for a canceled booking cannot report a fresh success.
+    # Receipt отменённой брони не должен возвращать ложный успех.
     stale=client.post(res,json=payload,headers=retry_headers)
     assert stale.status_code==409,stale.text
     assert stale.json()["code"]=="IDEMPOTENCY_KEY_REUSED"
