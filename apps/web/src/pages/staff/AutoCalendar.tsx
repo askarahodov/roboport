@@ -1,6 +1,7 @@
 import React from 'react';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type Service={id:string;code:string;title:string;durationMinutes:number};
 type Entry = { appointmentId:string; bookingId:string; bayId:string;
   startsAt:string; endsAt:string; workOrderId:string; employeeId:string|null };
 type Form = { bay:string; link:string; employee:string; starts:string; ends:string };
@@ -33,6 +34,9 @@ export function AutoCalendar() {
   const [history,setHistory]=React.useState<Array<{startsAt:string;appointmentId:string}|null>>([]);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [form,setForm]=React.useState<Form>(empty);
+  const [services,setServices]=React.useState<Service[]>([]);
+  const [selectedServices,setSelectedServices]=React.useState<string[]>([]);
+  const [serviceMessage,setServiceMessage]=React.useState('');
   const [busy,setBusy]=React.useState(false);
   const [slots,setSlots]=React.useState<Array<{startsAt:string;endsAt:string}>>([]);
   const [slotsMessage,setSlotsMessage]=React.useState('');
@@ -77,6 +81,28 @@ export function AutoCalendar() {
       }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
   },[org,location,day,revision,valid,cursor]);
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    setServices([]);setSelectedServices([]);setServiceMessage('');
+    if(!uuid.test(org.trim())||!uuid.test(location.trim()))return ()=>controller.abort();
+    setServiceMessage('Загрузка каталога работ…');
+    void fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
+      '/locations/'+encodeURIComponent(location.trim())+'/booking-services',{
+        credentials:'include',cache:'no-store',signal:controller.signal,
+      }).then(async response=>{
+        if(controller.signal.aborted)return;
+        if(!response.ok)throw Error('catalog');
+        const data:unknown=await response.json();
+        if(!data||typeof data!=='object'||!('syntheticOnly' in data)||
+          data.syntheticOnly!==true||!('items' in data)||!Array.isArray(data.items)||
+          data.items.length>100||!data.items.every((item:Service)=>uuid.test(item.id)&&
+            typeof item.code==='string'&&typeof item.title==='string'&&
+            Number.isInteger(item.durationMinutes)&&item.durationMinutes>=5&&
+            item.durationMinutes<=1440))throw Error('shape');
+        if(!controller.signal.aborted){setServices(data.items as Service[]);setServiceMessage('');}
+      }).catch(()=>{if(!controller.signal.aborted)setServiceMessage('Каталог услуг недоступен.');});
+    return ()=>controller.abort();
+  },[org,location]);
   function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
   function resetPage(){setCursor(null);setHistory([]);resetSlots();}
   React.useEffect(()=>{setPending(null);},[org,location]);
@@ -139,7 +165,7 @@ export function AutoCalendar() {
       if(response.status>=500)throw new Error('uncertain server outcome');
       if(!response.ok){setPending(null);setMessage(response.status===409?'Пост или специалист занят / ключ запроса использован (409).':
         [401,403,404].includes(response.status)?'Доступ запрещён.':'Ошибка операции ('+response.status+').');return;}
-      setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);resetPage();setRevision(n=>n+1);
+      setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);setSelectedServices([]);resetPage();setRevision(n=>n+1);
     }catch{
       if(!scopeIsCurrent())return;
       if(snapshot){setPending(snapshot);setMessage('Результат запроса неизвестен. Повторите с прежним ключом или обновите календарь перед новой операцией.');}
@@ -175,7 +201,11 @@ export function AutoCalendar() {
         onChange={e=>setForm(s=>({...s,ends:e.target.value}))}/></label>
     </div>;
   }
-  const validForm=(clearEmployee||!form.employee.trim()||uuid.test(form.employee.trim()))&&uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
+  const selectedMinutes=services.filter(x=>selectedServices.includes(x.id)).reduce((a,x)=>a+x.durationMinutes,0);
+  const availableMinutes=validIsoInstant(form.starts)&&validIsoInstant(form.ends)?
+    Math.max(0,(Date.parse(form.ends)-Date.parse(form.starts))/60000):60;
+  const validForm=(!target?selectedMinutes<=availableMinutes:true)&&
+    (clearEmployee||!form.employee.trim()||uuid.test(form.employee.trim()))&&uuid.test(form.bay.trim())&&(!target?uuid.test(form.link.trim()):true)&&
     validIsoInstant(form.starts)&&validIsoInstant(form.ends)&&
     Date.parse(form.ends)>Date.parse(form.starts)&&
     Date.parse(form.ends)-Date.parse(form.starts)<=86400000&&
@@ -220,9 +250,23 @@ export function AutoCalendar() {
         const payload={bayId:form.bay.trim(),startsAt:form.starts,endsAt:form.ends,
           ...(target&&clearEmployee?{employeeId:null}:form.employee.trim()?{employeeId:form.employee.trim()}:{})};
         if(target)void action(base+'/'+target+'/reschedule',payload,'Запись перенесена.');
-        else void action(base,{...payload,locationId:location.trim(),customerLinkId:form.link.trim()},'Запись создана.');
+        else void action(base,{...payload,locationId:location.trim(),customerLinkId:form.link.trim(),
+          serviceIds:selectedServices},'Запись создана.');
       }}>
         <h2>{target?'Перенести запись':'Новая запись'}</h2>{fields(!target)}
+        {!target&&<fieldset aria-label="Работы в новой записи"><legend>Услуги филиала (необязательно)</legend>
+          <p>Не более 8 услуг. Их суммарная длительность не должна превышать интервал брони.</p>
+          {serviceMessage&&<p role="status">{serviceMessage}</p>}
+          {services.map(service=><label key={service.id} style={{display:'block'}}>
+            <input type="checkbox" aria-label={'Работа '+service.code}
+              checked={selectedServices.includes(service.id)}
+              disabled={busy||!!pending||(!selectedServices.includes(service.id)&&
+                (selectedServices.length>=8||selectedMinutes+service.durationMinutes>availableMinutes))}
+              onChange={e=>setSelectedServices(old=>e.target.checked?[...old,service.id]:
+                old.filter(id=>id!==service.id))}/>
+            {service.title} ({service.durationMinutes} мин.)
+          </label>)}
+        </fieldset>}
         <button type="submit" disabled={busy||!validForm}>{target?'Сохранить перенос':'Создать запись'}</button>
         {target&&<button type="button" onClick={()=>{resetSlots();setTarget(null);setClearEmployee(false);setForm(empty);}}>Отмена переноса</button>}
       </form>}
