@@ -4,7 +4,7 @@ from uuid import UUID
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, Field
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_appointment_service import (
@@ -20,7 +20,7 @@ class CreateAppointment(BaseModel):
     employeeId: UUID | None = None
     startsAt: datetime
     endsAt: datetime
-    serviceIds: list[UUID] = []
+    serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
 
 @router.post("/api/v1/dev/auto/organizations/{org_id}/appointments")
 async def create(org_id: str, request: Request):
