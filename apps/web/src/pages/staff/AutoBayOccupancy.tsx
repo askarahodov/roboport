@@ -9,6 +9,7 @@ type Row={
   scheduledEmployees:number;scheduledShiftSeconds:number;
   activeAssignments:number;assignedSeconds:number;
   assignmentBasisPoints:number|null;
+  recordedLaborEntries:number;recordedLaborMinutes:number;finishedExecutions:number;
 };
 type Report={
   syntheticOnly:true;basis:'CURRENT_BOOKINGS_CALENDAR_DAY';
@@ -25,7 +26,8 @@ function valid(value:unknown):value is Report{
     Array.isArray(r.items)&&r.items.length<=31&&
     r.items.every(x=>x&&typeof x.localDay==='string'&&day.test(x.localDay)&&
       [x.daySeconds,x.activeAppointments,x.occupiedSeconds,x.calendarCapacitySeconds,
-       x.scheduledEmployees,x.scheduledShiftSeconds,x.activeAssignments,x.assignedSeconds]
+       x.scheduledEmployees,x.scheduledShiftSeconds,x.activeAssignments,x.assignedSeconds,
+       x.recordedLaborEntries,x.recordedLaborMinutes,x.finishedExecutions]
         .every(v=>Number.isSafeInteger(v)&&v>=0)&&
       x.occupiedSeconds<=x.calendarCapacitySeconds&&
       x.assignedSeconds<=x.scheduledShiftSeconds&&
@@ -93,7 +95,9 @@ export function AutoBayOccupancy(){
       Доля считается от <strong>всех часов локальных календарных суток</strong>,
       включая нерабочие часы; доступность постов — на момент запроса.
       Также показаны агрегированные часы действующих смен и назначений
-      сотрудников, но не фактически отработанные часы и не расчёт зарплаты.</p>
+      сотрудников, но не фактически отработанные часы и не расчёт зарплаты.
+      Отдельно выводятся неизменяемые записи трудозатрат и завершений
+      исполнения: их дата — момент регистрации события в филиале, не дата записи.</p>
     <label>UUID организации <input aria-label="UUID организации"
       value={org} onChange={e=>updateOrg(e.target.value)}/></label>
     <label>UUID филиала <input aria-label="UUID филиала"
@@ -120,7 +124,9 @@ export function AutoBayOccupancy(){
             <th scope="col">Доля</th><th scope="col">Сотрудники в сменах</th>
             <th scope="col">Часы смен</th><th scope="col">Назначения</th>
             <th scope="col">Часы назначений</th>
-            <th scope="col">Доля назначений от смен</th></tr></thead>
+            <th scope="col">Доля назначений от смен</th>
+            <th scope="col">Записи труда</th><th scope="col">Минуты по журналу</th>
+            <th scope="col">Завершено исполнений</th></tr></thead>
           <tbody>{report.items.map(x=><tr key={x.localDay}>
             <th scope="row">{x.localDay}</th><td>{x.activeAppointments}</td>
             <td>{hours(x.occupiedSeconds)}</td>
@@ -135,6 +141,8 @@ export function AutoBayOccupancy(){
               (x.assignmentBasisPoints/100).toLocaleString('ru-RU',{
                 maximumFractionDigits:2,
               })+' %'}</td>
+            <td>{x.recordedLaborEntries}</td><td>{x.recordedLaborMinutes}</td>
+            <td>{x.finishedExecutions}</td>
           </tr>)}</tbody>
         </table>
       </div>

@@ -80,6 +80,7 @@ def test_manager_report_tracks_current_booking_across_dst_move_and_cancel(monkey
             "occupancyBasisPoints":3600*10000//(23*3600),
             "scheduledEmployees":0,"scheduledShiftSeconds":0,
             "activeAssignments":0,"assignedSeconds":0,"assignmentBasisPoints":None,
+            "recordedLaborEntries":0,"recordedLaborMinutes":0,"finishedExecutions":0,
         },
         {
             "localDay":"2030-04-01","daySeconds":24*3600,
@@ -87,6 +88,7 @@ def test_manager_report_tracks_current_booking_across_dst_move_and_cancel(monkey
             "calendarCapacitySeconds":24*3600,"occupancyBasisPoints":0,
             "scheduledEmployees":0,"scheduledShiftSeconds":0,
             "activeAssignments":0,"assignedSeconds":0,"assignmentBasisPoints":None,
+            "recordedLaborEntries":0,"recordedLaborMinutes":0,"finishedExecutions":0,
         },
     ]
     assert "vin" not in first.text.lower()
@@ -253,3 +255,79 @@ def test_aggregate_staff_report_no_cross_branch_grants_or_raw_user_identifiers(m
     assert http.get(_url(other,foreign),params={"fromDay":day,"toDay":day}).status_code==403
     http.cookies.set("rp_session",d["tokens"][d["intake"]])
     assert http.get(_url(org,loc),params={"fromDay":day,"toDay":day}).status_code==403
+
+
+def test_immutable_recorded_labor_and_finish_report_full_execution_lifecycle(monkeypatch):
+    """Approved WorkOrder → immutable actual labor → finish → manager aggregate.
+
+    Replayed labor/finish receipts do not inflate counts. The reporting day
+    follows event.created_at in the branch timezone, not appointment dates.
+    """
+    from test_pg_auto_work_order_execution_http import fixture as execution_fixture
+    from roboport_api.auto_work_order_execution import (
+        start_execution, labor_execution, finish_execution,
+    )
+    d,org,loc,order,service,_,_=execution_fixture(monkeypatch,with_material=False)
+    manager=d["tokens"][d["intake"]]
+    mechanic=d["tokens"][d["manager"]]
+    http=TestClient(app,base_url="https://127.0.0.1")
+    path=_url(org,loc)
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "UPDATE auto_service_location SET timezone_name='Europe/Berlin' WHERE id=%s",
+            (loc,),
+        )
+        start_execution(db,manager,org,loc,order,uuid4())
+        labor_key=uuid4()
+        entry=labor_execution(db,mechanic,org,loc,order,service,37,labor_key)
+        assert entry["ok"] and entry["replayed"] is False
+        replay=labor_execution(db,mechanic,org,loc,order,service,37,labor_key)
+        assert replay["replayed"] is True
+        event_date=db.execute(
+            """SELECT (l.created_at AT TIME ZONE 'Europe/Berlin')::date
+               FROM auto_work_order_labor_entry l
+               JOIN auto_work_order_execution e ON e.id=l.execution_id
+               WHERE e.work_order_id=%s""",
+            (order,),
+        ).fetchone()[0].isoformat()
+    http.cookies.set("rp_session",manager)
+    before=http.get(path,params={"fromDay":event_date,"toDay":event_date})
+    assert before.status_code==200,before.text
+    row=before.json()["items"][0]
+    assert row["recordedLaborEntries"]==1
+    assert row["recordedLaborMinutes"]==37
+    assert row["finishedExecutions"]==0
+    with psycopg.connect(DSN) as db:
+        finish_key=uuid4()
+        finished=finish_execution(db,mechanic,org,loc,order,finish_key)
+        assert finished["ok"] and finished["replayed"] is False
+        again=finish_execution(db,mechanic,org,loc,order,finish_key)
+        assert again["replayed"] is True
+        finish_date=db.execute(
+            """SELECT (f.created_at AT TIME ZONE 'Europe/Berlin')::date
+               FROM auto_work_order_execution_finish f
+               JOIN auto_work_order_execution e ON e.id=f.execution_id
+               WHERE e.work_order_id=%s""",
+            (order,),
+        ).fetchone()[0].isoformat()
+    after=http.get(path,params={"fromDay":finish_date,"toDay":finish_date})
+    assert after.status_code==200,after.text
+    assert after.json()["items"][0]["finishedExecutions"]==1
+    if finish_date==event_date:
+        assert after.json()["items"][0]["recordedLaborMinutes"]==37
+    for forbidden in (str(order),str(service),str(d["manager"]),str(d["vehicle"])):
+        assert forbidden not in after.text
+    with psycopg.connect(DSN) as db:
+        other,foreign,_=_org_and_bay(db)
+    assert http.get(_url(other,foreign),params={
+        "fromDay":finish_date,"toDay":finish_date,
+    }).status_code==403
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """UPDATE auto_organization_role_grant SET revoked_at=now()
+               WHERE organization_id=%s AND user_id=%s AND role_code='MANAGER'""",
+            (org,d["intake"]),
+        )
+    assert http.get(path,params={
+        "fromDay":finish_date,"toDay":finish_date,
+    }).status_code==403

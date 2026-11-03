@@ -176,6 +176,32 @@ def bay_occupancy(conn: psycopg.Connection, token: str, *,
                      )""",
                 (end,start,organization_id,location_id,end,start),
             ).fetchone()
+            # Immutable labor ledger, attributed to the LOCAL DAY WHEN
+            # RECORDED, not the booking date or the promised duration.
+            # A finish event belongs to its own completion date. Neither
+            # metric is attendance, time clock, billable hours or payroll.
+            labor_count, labor_minutes = conn.execute(
+                """SELECT COUNT(*)::bigint, COALESCE(SUM(l.actual_minutes),0)::bigint
+                   FROM auto_work_order_labor_entry l
+                   JOIN auto_work_order_execution e ON e.id=l.execution_id
+                   JOIN auto_work_order w ON w.id=e.work_order_id
+                   WHERE e.organization_id=%s AND e.location_id=%s
+                     AND w.organization_id=e.organization_id
+                     AND w.location_id=e.location_id
+                     AND l.created_at >= %s AND l.created_at < %s""",
+                (organization_id, location_id, start, end),
+            ).fetchone()
+            finished_count = conn.execute(
+                """SELECT COUNT(*)::bigint
+                   FROM auto_work_order_execution_finish f
+                   JOIN auto_work_order_execution e ON e.id=f.execution_id
+                   JOIN auto_work_order w ON w.id=e.work_order_id
+                   WHERE e.organization_id=%s AND e.location_id=%s
+                     AND w.organization_id=e.organization_id
+                     AND w.location_id=e.location_id
+                     AND f.created_at >= %s AND f.created_at < %s""",
+                (organization_id, location_id, start, end),
+            ).fetchone()[0]
             capacity = bay_count * day_seconds
             # Never claim this is operating-hours utilization: denominator
             # includes the WHOLE local calendar day, including closed hours.
@@ -193,6 +219,9 @@ def bay_occupancy(conn: psycopg.Connection, token: str, *,
                 "assignmentBasisPoints": (
                     assigned_seconds*10000//shift_seconds if shift_seconds else None
                 ),
+                "recordedLaborEntries": labor_count,
+                "recordedLaborMinutes": labor_minutes,
+                "finishedExecutions": finished_count,
             })
         return {
             "items":items, "timeZone":row[0], "bayCount":bay_count,
