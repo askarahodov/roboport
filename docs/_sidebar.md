@@ -1,6 +1,10 @@
 - **Главная**
   - [Обзор и статусы](/)
   - [Карта всей документации](/INDEX.md)
+  - [Быстрый старт сотрудников и клиентов](/guides/QUICK_START.md)
+  - [Матрица ролей и тестов](/guides/ACCESS_AND_TEST_MATRIX.md)
+  - [Частые вопросы и безопасные ошибки](/guides/FAQ.md)
+  - [Скриншоты и ручная приёмка](/guides/SCREENSHOT_EVIDENCE.md)
 - **Роли: частично доступно в synthetic dev**
   - [Клиент: подтверждение авто (dev)](/guides/client.md)
   - [Администратор: журнал (dev)](/guides/administrator.md)
@@ -19,6 +23,7 @@
   - [Работы, детали и независимый QC](/auto/EXECUTION.md)
   - [Условная сверка и пакет перед выдачей](/auto/DEMO_CLOSE.md)
   - [Аудит актуальности](/auto/DOCUMENTATION_AUDIT.md)
+  - [Реестр доказательств операций](/auto/OPERATIONS_EVIDENCE.md)
 - **Разработчикам**
   - [Продукт и функции](/auto/PRODUCT.md)
   - [Архитектура и безопасность](/auto/ARCHITECTURE.md)
@@ -31,3 +36,6 @@
   - [HTTP API](/api/API_IMPLEMENTATION.md)
   - [Политика документации](/DOCUMENTATION_POLICY.md)
   - [Стандарт Issue](/implementation/ISSUE_STANDARD.md)
+
+- **Архив: legacy робототехника (не инструкция СТО)**
+  - [Реестр legacy и правила cutover](/auto/LEGACY_ARCHIVE.md)
