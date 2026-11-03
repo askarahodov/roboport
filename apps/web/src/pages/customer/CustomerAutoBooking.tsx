@@ -27,6 +27,7 @@ export function CustomerAutoBooking(){
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [revision,setRevision]=React.useState(0);
+  const slotRequest=React.useRef(0);
   const resource=resources.find(r=>selected===r.customerLinkId+':'+r.bayId);
   const choices=target?resources.filter(r=>r.organizationId===target.organizationId&&
     r.locationId===target.locationId&&r.customerLinkId===target.customerLinkId):resources;
@@ -73,10 +74,11 @@ export function CustomerAutoBooking(){
     return ()=>controller.abort();
   },[revision]);
 
-  React.useEffect(()=>{setSlots([]);setSlotState('');},[selected,day,target]);
+  React.useEffect(()=>{slotRequest.current++;setSlots([]);setSlotState('');},[selected,day,target]);
 
   async function search(){
     if(!scoped||busy||pending)return;
+    const requestId=++slotRequest.current;
     setSlotState('Загрузка окон…');setSlots([]);
     const r=scoped;
     const query=new URLSearchParams({organizationId:r.organizationId,
@@ -84,6 +86,7 @@ export function CustomerAutoBooking(){
     try{
       const resp=await fetch('/api/v1/dev/auto/customer/booking/slots?'+query,{
         credentials:'include',cache:'no-store'});
+      if(requestId!==slotRequest.current)return;
       if([401,403,404].includes(resp.status)){setState('denied');setResources([]);setBookings([]);return;}
       if(!resp.ok)throw Error('http');
       const raw:unknown=await resp.json();
@@ -92,9 +95,10 @@ export function CustomerAutoBooking(){
         !('timeZone' in raw)||raw.timeZone!==r.timeZone||
         !raw.items.every((s:Slot)=>typeof s.startsAt==='string'&&
           typeof s.endsAt==='string'&&Date.parse(s.endsAt)>Date.parse(s.startsAt)))throw Error('shape');
+      if(requestId!==slotRequest.current)return;
       setSlots(raw.items as Slot[]);
       setSlotState(raw.items.length?'Кандидаты не гарантируют бронь.':'Свободных окон нет.');
-    }catch{setSlotState('Не удалось получить свободные окна.');}
+    }catch{if(requestId===slotRequest.current)setSlotState('Не удалось получить свободные окна.');}
   }
 
   async function mutate(path:string,body:string,key:string|null,known?:Pending){
