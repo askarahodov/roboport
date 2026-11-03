@@ -16,13 +16,17 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                     employee: UUID | None = None,
                     appointment: UUID | None = None,
                     day_end: datetime | None = None,
-                    customer_link: UUID | None = None) -> list[dict]:
+                    customer_link: UUID | None = None,
+                    service_ids: tuple[UUID, ...] = ()) -> list[dict]:
     """Кандидаты на UTC либо локальные сутки; бронь не гарантируется."""
     if (not all(isinstance(v, UUID) for v in (org, location, bay))
         or (employee is not None and not isinstance(employee, UUID))
         or (appointment is not None and not isinstance(appointment, UUID))
         or (customer_link is not None and not isinstance(customer_link, UUID))
         or (customer_link is not None and employee is not None)
+        or type(service_ids) is not tuple or len(service_ids) > 8
+        or any(type(item) is not UUID for item in service_ids)
+        or len(set(service_ids)) != len(service_ids)
         or not isinstance(start, datetime) or start.tzinfo is None
         or start.utcoffset() is None
         or (day_end is not None and (not isinstance(day_end, datetime)
@@ -57,6 +61,21 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
         """, (bay, org, location)).fetchone()
         if found is None:
             raise SlotsDenied("scoped bay unavailable")
+        # По умолчанию сохраняем старое одночасовое окно. Если переданы
+        # услуги, длительность рассчитывается только по своему каталогу БД.
+        duration_minutes = 60
+        if service_ids:
+            services = conn.execute(
+                """SELECT id,duration_minutes FROM auto_service_catalog
+                   WHERE organization_id=%s AND location_id=%s
+                     AND id = ANY(%s::uuid[]) ORDER BY id FOR SHARE""",
+                (org,location,list(service_ids)),
+            ).fetchall()
+            if len(services) != len(service_ids):
+                raise SlotsDenied("service catalog scope unavailable")
+            duration_minutes = sum(row[1] for row in services)
+            if not 5 <= duration_minutes <= 1440:
+                raise SlotsDenied("selected duration unsupported")
         old_booking = None
         if appointment is not None:
             scoped = conn.execute("""
@@ -74,9 +93,11 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
             old_booking = scoped[0]
         rows = conn.execute("""
             WITH candidates AS (
-              SELECT s AS starts_at, s + interval '60 minutes' AS ends_at
+              SELECT s AS starts_at,
+                     s + (%s * interval '1 minute') AS ends_at
               FROM generate_series(
-                %s::timestamptz, %s::timestamptz - interval '60 minutes',
+                %s::timestamptz,
+                %s::timestamptz - (%s * interval '1 minute'),
                 interval '30 minutes'
               ) s
             )
@@ -103,7 +124,8 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                 )
               ))
             ORDER BY c.starts_at LIMIT 50
-        """, (day, end, bay, org, location, employee, employee, org, location,
-              employee, old_booking, old_booking)).fetchall()
+        """, (duration_minutes,day,end,duration_minutes,
+              bay,org,location,employee,employee,org,location,
+              employee,old_booking,old_booking)).fetchall()
     return [{"startsAt": a.isoformat(), "endsAt": b.isoformat()}
             for a, b in rows]
