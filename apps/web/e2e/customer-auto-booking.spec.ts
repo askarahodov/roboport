@@ -7,6 +7,7 @@ const link='33333333-3333-4333-8333-333333333333';
 const bay='44444444-4444-4444-8444-444444444444';
 const appointment='55555555-5555-4555-8555-555555555555';
 const booking='66666666-6666-4666-8666-666666666666';
+const service='88888888-8888-4888-8888-888888888888';
 const work='77777777-7777-4777-8777-777777777777';
 const resources={syntheticOnly:true,items:[{organizationId:org,locationId:loc,
   customerLinkId:link,bayId:bay,timeZone:'Europe/Berlin',
@@ -41,6 +42,11 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
           workOrderId:work,timeZone:'Europe/Berlin',canManage:status==='ACTIVE',
         }],
       })});
+    if(req.method()==='GET'&&url.pathname.endsWith('/services'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,items:[{id:service,code:'SVC-001',title:'Тестовая работа',
+          durationMinutes:30}],
+      })});
     if(req.method()==='GET'&&url.pathname.endsWith('/slots')){
       expect(url.searchParams.get('localDay')).toBe('2030-01-01');
       expect(url.searchParams.get('customerLinkId')).toBe(link);
@@ -69,6 +75,8 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
   await page.goto('/account/auto-booking');
   const region=page.getByRole('region',{name:'Самостоятельная запись автомобиля (dev)'});
   await expect(region.getByText('Записей пока нет.')).toBeVisible();
+  await expect(region.getByLabel('Услуга SVC-001')).toBeVisible();
+  // Полный сценарий переноса/отмены остаётся без выбора услуг.
   await region.getByLabel('День филиала').fill('2030-01-01');
   await region.getByRole('button',{name:'Показать свободные окна'}).click();
   await expect(region.getByText('Кандидаты не гарантируют бронь.')).toBeVisible();
@@ -91,6 +99,7 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
   expect(posts[1].key).toMatch(/^[0-9a-f-]{36}$/);
   expect(posts[2].key).toBeUndefined();
   expect(posts[0].body.customerLinkId).toBe(link);
+  expect(posts[0].body.serviceIds).toEqual([]);
   expect(posts[1].body.organizationId).toBe(org);
   expect(JSON.stringify(resources)).not.toContain('vin');
   await page.setViewportSize({width:1280,height:800});
@@ -115,4 +124,45 @@ test('customer booking hides own resources immediately after 403',async({page})=
   await region.getByRole('button',{name:'Обновить мои записи'}).click();
   await expect(region.getByRole('alert')).toContainText('Доступ к записи запрещён');
   await expect(region.getByText('Synthetic Sedan',{exact:false})).toHaveCount(0);
+});
+
+
+test('selected workshop service is sent with the first booking in one payload',async({page})=>{
+  await auth(page);
+  let saved:Record<string,unknown>|null=null;
+  await page.route('**/api/v1/dev/auto/customer/booking/**',route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='GET'&&url.pathname.endsWith('/resources'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(resources)});
+    if(req.method()==='GET'&&url.pathname.endsWith('/appointments'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,items:[],
+      })});
+    if(req.method()==='GET'&&url.pathname.endsWith('/services'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,items:[{id:service,code:'SVC-001',title:'Тестовая работа',
+          durationMinutes:30}],
+      })});
+    if(req.method()==='GET'&&url.pathname.endsWith('/slots'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,guaranteed:false,timeZone:'Europe/Berlin',items:[first],
+      })});
+    if(req.method()==='POST'&&url.pathname.endsWith('/appointments')){
+      saved=req.postDataJSON();
+      return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify({appointmentId:appointment,bookingId:booking,workOrderId:work})});
+    }
+    return route.fulfill({status:403,body:'{"code":"FORBIDDEN"}'});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/auto-booking');
+  const region=page.getByRole('region',{name:'Самостоятельная запись автомобиля (dev)'});
+  await expect(region.getByLabel('Услуга SVC-001')).toBeVisible();
+  await region.getByLabel('Услуга SVC-001').check();
+  await region.getByLabel('День филиала').fill('2030-01-01');
+  await region.getByRole('button',{name:'Показать свободные окна'}).click();
+  await region.getByRole('button',{name:/01\.01\.2030.*11:00/}).click();
+  await expect.poll(()=>saved).not.toBeNull();
+  expect(saved?.serviceIds).toEqual([service]);
+  expect(saved?.customerLinkId).toBe(link);
 });

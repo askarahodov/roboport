@@ -4,11 +4,11 @@ from uuid import UUID
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, Field
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_appointment_service import (
-    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict,
+    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict, AppointmentDurationInvalid,
 )
 router=APIRouter(include_in_schema=False)
 
@@ -20,6 +20,42 @@ class CreateAppointment(BaseModel):
     employeeId: UUID | None = None
     startsAt: datetime
     endsAt: datetime
+    serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/booking-services")
+def intake_booking_services(org_id: str, loc_id: str, request: Request):
+    """Каталог филиала для INTAKE: без назначения роли MANAGER."""
+    from .auto_org_authority import organization_role_allows
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        org, loc = UUID(org_id), UUID(loc_id)
+    except (ValueError, TypeError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        with db.transaction():
+            if not organization_role_allows(
+                db, request.cookies.get("rp_session", ""), org,
+                "INTAKE", loc, for_mutation=True,
+            ):
+                return _response(request, 403, "FORBIDDEN")
+            rows = db.execute(
+                """SELECT id,code,title,duration_minutes FROM auto_service_catalog
+                   WHERE organization_id=%s AND location_id=%s
+                   ORDER BY code,id LIMIT 101""",
+                (org, loc),
+            ).fetchall()
+    if len(rows) > 100:
+        return _response(request, 503, "UNAVAILABLE")
+    return JSONResponse(
+        content={"items":[
+            {"id":str(i),"code":code,"title":title,"durationMinutes":minutes}
+            for i,code,title,minutes in rows
+        ],"syntheticOnly":True},
+        headers={"Cache-Control":"no-store"},
+    )
+
 
 @router.post("/api/v1/dev/auto/organizations/{org_id}/appointments")
 async def create(org_id: str, request: Request):
@@ -40,12 +76,14 @@ async def create(org_id: str, request: Request):
             appointment,booking,work_order=create_appointment(
                 db,request.cookies.get("rp_session",""),org,body.locationId,
                 body.bayId,body.customerLinkId,body.startsAt,body.endsAt,body.employeeId,
-                request_key,
+                request_key, service_ids=tuple(body.serviceIds),
             )
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
         except AppointmentKeyConflict:
             return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
+        except AppointmentDurationInvalid:
+            return _response(request,422,"SERVICES_EXCEED_SLOT")
         except AppointmentConflict:
             return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(status_code=201,content={

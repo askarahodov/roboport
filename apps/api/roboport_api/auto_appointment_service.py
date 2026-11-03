@@ -15,6 +15,10 @@ class AppointmentConflict(ValueError):
 class AppointmentKeyConflict(ValueError):
     pass
 
+class AppointmentDurationInvalid(ValueError):
+    """Длительность выбранных работ превышает интервал записи."""
+    pass
+
 def _customer_scope(conn: psycopg.Connection, token: str,
                     organization: UUID, location: UUID, link: UUID) -> UUID:
     """Живой CLIENT, собственная verified-связь и разрешённый филиал."""
@@ -68,15 +72,21 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        location: UUID, bay: UUID, link: UUID,
                        starts: datetime, ends: datetime, employee: UUID | None = None,
                        request_key: UUID | None = None,
-                       customer_mode: bool = False) -> tuple[UUID, UUID, UUID]:
+                       customer_mode: bool = False,
+                       service_ids: tuple[UUID, ...] = ()) -> tuple[UUID, UUID, UUID]:
     if (not all(isinstance(x, UUID) for x in (organization,location,bay,link))
             or (employee is not None and not isinstance(employee, UUID))
             or (request_key is not None and not isinstance(request_key, UUID))
             or type(customer_mode) is not bool
             or (customer_mode and employee is not None)
+            or not isinstance(service_ids, tuple)
+            or len(service_ids) > 8
+            or any(type(item) is not UUID for item in service_ids)
+            or len(set(service_ids)) != len(service_ids)
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
-            or ends <= starts or (ends-starts).total_seconds() > 86400):
+            or ends.astimezone(timezone.utc) <= starts.astimezone(timezone.utc)
+            or (ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)).total_seconds() > 86400):
         raise AppointmentDenied("invalid appointment scope or interval")
     with conn.transaction():
         if customer_mode:
@@ -101,6 +111,22 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             (bay,organization,location),
         ).fetchone() is None:
             raise AppointmentDenied("bay unavailable")
+        # Каталог и длительности проверяются в той же транзакции, что бронь:
+        # чужая/несуществующая услуга не создаёт ни Appointment, ни WorkOrder.
+        if service_ids:
+            rows = conn.execute(
+                """SELECT id,duration_minutes FROM auto_service_catalog
+                   WHERE organization_id=%s AND location_id=%s
+                     AND id = ANY(%s::uuid[]) ORDER BY id FOR SHARE""",
+                (organization, location, list(service_ids)),
+            ).fetchall()
+            if len(rows) != len(service_ids):
+                raise AppointmentDenied("service catalog scope unavailable")
+            total_minutes = sum(duration for _, duration in rows)
+            if total_minutes * 60 > (
+                ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)
+            ).total_seconds():
+                raise AppointmentDurationInvalid("services exceed reserved interval")
         # The unique ledger index serializes concurrent requests with the same
         # actor/key. Its insert and the booking commit or roll back together.
         booking, appointment, order = uuid4(),uuid4(),uuid4()
@@ -109,12 +135,19 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             actor = session_subject(conn, token, for_mutation=True)
             if actor is None:
                 raise AppointmentDenied("session unavailable")
-            fingerprint = hashlib.sha256(json.dumps({
+            # Пустой набор сохраняет прежний fingerprint для ключей,
+            # выданных до добавления услуг в API.
+            fingerprint_body = {
                 "location":str(location),"bay":str(bay),"link":str(link),
                 "employee":str(employee) if employee else None,
                 "starts":starts.astimezone(timezone.utc).isoformat(),
                 "ends":ends.astimezone(timezone.utc).isoformat(),
-            },sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            }
+            if service_ids:
+                fingerprint_body["services"] = sorted(str(item) for item in service_ids)
+            fingerprint = hashlib.sha256(json.dumps(
+                fingerprint_body,sort_keys=True,separators=(",",":")
+            ).encode()).hexdigest()
             inserted = conn.execute("""INSERT INTO auto_appointment_idempotency
               (organization_id,actor_id,request_key,fingerprint,
                appointment_id,booking_id,work_order_id)
@@ -173,7 +206,18 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        VALUES(%s,%s,%s,%s)""",
                     (order,appointment,organization,location),
                 )
-        except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException) as exc:
+                for service_id in service_ids:
+                    conn.execute(
+                        """INSERT INTO auto_work_order_service
+                           (id,work_order_id,service_id,organization_id,location_id)
+                           VALUES(%s,%s,%s,%s,%s)""",
+                        (uuid4(), order, service_id, organization, location),
+                    )
+        except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException,
+                psycopg.errors.DeadlockDetected) as exc:
+            # Конкурентные INSERT по exclusion могут завершиться SQLSTATE 40P01.
+            # Сохранение через nested transaction уже отменено: клиент получает
+            # управляемый конфликт, а не 500 с неизвестным исходом брони.
             raise AppointmentConflict("bay already reserved") from exc
         return appointment,booking,order
 
