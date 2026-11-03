@@ -13,6 +13,7 @@
   - [Мобильное приложение](/guides/mobile.md)
 - **Реализовано в dev**
   - [Связь клиента с автомобилем](/auto/VEHICLE_OWNERSHIP.md)
+  - [История заказ-нарядов клиента и сметы](/auto/CUSTOMER_HISTORY.md)
   - [Услуги автомобильного заказ-наряда](/auto/WORKSHOP_OPERATIONS.md)
   - [Версии и согласование автомобильной сметы](/auto/ESTIMATES.md)
   - [Работы, детали и независимый QC](/auto/EXECUTION.md)
