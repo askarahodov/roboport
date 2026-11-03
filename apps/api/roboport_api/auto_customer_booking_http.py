@@ -16,7 +16,7 @@ from .auto_appointment_service import (
     _customer_scope, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict,
     AppointmentDurationInvalid,
 )
-from .auto_slot_candidates import candidate_slots, SlotsDenied
+from .auto_slot_candidates import candidate_slots, SlotsDenied, parse_slot_services
 
 router = APIRouter(include_in_schema=False)
 
@@ -86,6 +86,7 @@ def get_slots(request: Request, organizationId: str, locationId: str,
         return dsn
     try:
         org, loc, link, bay = map(UUID, (organizationId, locationId, customerLinkId, bayId))
+        selected_services = parse_slot_services(request.query_params.getlist("serviceId"))
         if len(localDay) != 10:
             raise ValueError("invalid local day")
         day = date.fromisoformat(localDay)
@@ -110,7 +111,7 @@ def get_slots(request: Request, organizationId: str, locationId: str,
                 end = datetime(tomorrow.year,tomorrow.month,tomorrow.day,tzinfo=zone)
                 items = candidate_slots(
                     db, token, org, loc, bay, start,
-                    day_end=end, customer_link=link,
+                    day_end=end, customer_link=link, service_ids=selected_services,
                 )
         except (AppointmentDenied, SlotsDenied, ZoneInfoNotFoundError):
             return _response(request, 403, "FORBIDDEN")
