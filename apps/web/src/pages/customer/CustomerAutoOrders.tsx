@@ -202,7 +202,7 @@ export function CustomerAutoOrders(){
         Показать ещё заказ-наряды</button>}
     </>}
     {selected&&status==='ready'&&<section aria-label="Карточка автомобильного заказа"
-      className="account-help" aria-live="polite">
+      className="account-help" aria-live="polite" style={{overflowWrap:"anywhere"}}>
       {detailStatus==='loading'&&<p role="status">Загрузка карточки…</p>}
       {detailStatus==='denied'&&<p role="alert">Карточка недоступна: доступ мог быть отозван.</p>}
       {detailStatus==='error'&&<p role="alert">Не удалось прочитать карточку. Обновите список.</p>}
