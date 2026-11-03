@@ -52,7 +52,7 @@ def _validate(token: str,organization_id: UUID,location_id: UUID,
             sources.vehicle_batch_id,sources.service_batch_id,
             sources.inventory_batch_id
         })!=3
-        or any(type(x) is not Path for x in (
+        or any(not isinstance(x, Path) for x in (
             sources.vehicle_path,sources.service_path,sources.inventory_path))
         or any(type(x) is not str or len(x)!=64
                or any(c not in "0123456789abcdef" for c in x)
