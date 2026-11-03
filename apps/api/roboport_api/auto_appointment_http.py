@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, Field
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_appointment_service import (
-    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict,
+    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict, AppointmentDurationInvalid,
 )
 router=APIRouter(include_in_schema=False)
 
@@ -82,6 +82,8 @@ async def create(org_id: str, request: Request):
             return _response(request,403,"FORBIDDEN")
         except AppointmentKeyConflict:
             return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
+        except AppointmentDurationInvalid:
+            return _response(request,422,"SERVICES_EXCEED_SLOT")
         except AppointmentConflict:
             return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(status_code=201,content={
