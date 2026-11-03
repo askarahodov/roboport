@@ -114,6 +114,7 @@ export function AutoCalendar() {
     const requestId=++slotRequest.current;
     setSlotsBusy(true);setSlots([]);setSlotsMessage('');
     const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),localDay:day});
+    if(!target)selectedServices.forEach(id=>query.append('serviceId',id));
     if(effectiveEmployee)query.set('employeeId',effectiveEmployee);
     if(target&&!target.startsWith('cancel:'))query.set('appointmentId',target);
     try{
@@ -255,15 +256,15 @@ export function AutoCalendar() {
       }}>
         <h2>{target?'Перенести запись':'Новая запись'}</h2>{fields(!target)}
         {!target&&<fieldset aria-label="Работы в новой записи"><legend>Услуги филиала (необязательно)</legend>
-          <p>Не более 8 услуг. Их суммарная длительность не должна превышать интервал брони.</p>
+          <p>Не более 8 услуг и 24 часов суммарно. Поиск слотов учитывает полную длительность, а создание проверяет совпадение с выбранным интервалом.</p>
           {serviceMessage&&<p>{serviceMessage}</p>}
           {services.map(service=><label key={service.id} style={{display:'block'}}>
             <input type="checkbox" aria-label={'Работа '+service.code}
               checked={selectedServices.includes(service.id)}
               disabled={busy||!!pending||(!selectedServices.includes(service.id)&&
-                (selectedServices.length>=8||selectedMinutes+service.durationMinutes>availableMinutes))}
-              onChange={e=>setSelectedServices(old=>e.target.checked?[...old,service.id]:
-                old.filter(id=>id!==service.id))}/>
+                (selectedServices.length>=8||selectedMinutes+service.durationMinutes>1440))}
+              onChange={e=>{resetSlots();setSelectedServices(old=>e.target.checked?[...old,service.id]:
+                old.filter(id=>id!==service.id));}}/>
             {service.title} ({service.durationMinutes} мин.)
           </label>)}
         </fieldset>}

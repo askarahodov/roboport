@@ -202,7 +202,7 @@ def read_slot_candidates(org_id: str, request: Request, locationId: str,
                          localDay: str | None = None,
                          employeeId: str | None = None,
                          appointmentId: str | None = None):
-    from .auto_slot_candidates import candidate_slots, SlotsDenied
+    from .auto_slot_candidates import candidate_slots, SlotsDenied, parse_slot_services
     from .auto_calendar import local_day_window, CalendarInvalid, CalendarDenied
     from datetime import timezone
     dsn = _request_dsn(request)
@@ -212,6 +212,7 @@ def read_slot_candidates(org_id: str, request: Request, locationId: str,
         org, location, bay = UUID(org_id), UUID(locationId), UUID(bayId)
         employee = UUID(employeeId) if employeeId is not None else None
         appointment = UUID(appointmentId) if appointmentId is not None else None
+        selected_services = parse_slot_services(request.query_params.getlist("serviceId"))
         if (day is None) == (localDay is None):
             raise ValueError("exactly one of day or localDay required")
         if day is not None:
@@ -231,6 +232,7 @@ def read_slot_candidates(org_id: str, request: Request, locationId: str,
             slots = candidate_slots(
                 db, request.cookies.get("rp_session", ""),
                 org, location, bay, start, employee, appointment, day_end=end,
+                service_ids=selected_services,
             )
         except CalendarInvalid:
             return _response(request, 422, "INVALID_INPUT")

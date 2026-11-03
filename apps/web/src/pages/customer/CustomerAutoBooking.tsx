@@ -79,7 +79,7 @@ export function CustomerAutoBooking(){
     return ()=>controller.abort();
   },[revision]);
 
-  React.useEffect(()=>{slotRequest.current++;setSlots([]);setSlotState('');},[selected,day,target]);
+  React.useEffect(()=>{slotRequest.current++;setSlots([]);setSlotState('');},[selected,day,target,selectedServices]);
 
   React.useEffect(()=>{
     const controller=new AbortController();
@@ -113,6 +113,7 @@ export function CustomerAutoBooking(){
     const r=scoped;
     const query=new URLSearchParams({organizationId:r.organizationId,
       locationId:r.locationId,customerLinkId:r.customerLinkId,bayId:r.bayId,localDay:day});
+    if(!target)selectedServices.forEach(id=>query.append('serviceId',id));
     try{
       const resp=await fetch('/api/v1/dev/auto/customer/booking/slots?'+query,{
         credentials:'include',cache:'no-store'});
@@ -218,14 +219,14 @@ export function CustomerAutoBooking(){
           </option>)}
         </select></label>
         {!target&&<fieldset aria-label="Услуги при записи (dev)"><legend>Работы по записи (необязательно)</legend>
-          <p>Выберите не более 8 услуг и не более 60 минут суммарно. После выбора работ самостоятельный перенос и отмена недоступны.</p>
+          <p>Выберите не более 8 услуг и не более 24 часов суммарно. Поиск учитывает полную длительность, а после включения работ самостоятельный перенос и отмена недоступны.</p>
           {serviceState&&<p role="status">{serviceState}</p>}
           {services.map(service=><label key={service.id} style={{display:'block'}}>
             <input type="checkbox" aria-label={'Услуга '+service.code}
               checked={selectedServices.includes(service.id)}
               disabled={busy||!!pending||(!selectedServices.includes(service.id)&&(
                 selectedServices.length>=8||services.filter(x=>selectedServices.includes(x.id))
-                  .reduce((sum,x)=>sum+x.durationMinutes,0)+service.durationMinutes>60))}
+                  .reduce((sum,x)=>sum+x.durationMinutes,0)+service.durationMinutes>1440))}
               onChange={e=>setSelectedServices(old=>e.target.checked?[...old,service.id]:
                 old.filter(id=>id!==service.id))}/>
             {service.title} ({service.durationMinutes} мин.)

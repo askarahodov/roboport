@@ -486,6 +486,13 @@ test('intake chooses service in the same booking POST on mobile',async({page})=>
         items:[{id:service,code:'OIL-CHANGE',title:'Замена масла',durationMinutes:30}],
         syntheticOnly:true,
       })});
+    if(req.method()==='GET'&&url.pathname.endsWith('/slot-candidates')){
+      expect(url.searchParams.getAll('serviceId')).toEqual([service]);
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({items:[{
+          startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T10:30:00Z',
+        }],guaranteed:false})});
+    }
     if(req.method()==='GET')
       return route.fulfill({status:200,contentType:'application/json',
         body:'{"items":[],"hasMore":false}'});
@@ -502,9 +509,9 @@ test('intake chooses service in the same booking POST on mobile',async({page})=>
   await expect(workChoice).toBeVisible();
   await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
   await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
-  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T10:00:00Z');
-  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T11:00:00Z');
   await workChoice.check();
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await page.getByRole('button',{name:/ISO: 2030-01-01T10:00:00Z — 2030-01-01T10:30:00Z/}).click();
   await page.getByRole('button',{name:'Создать запись'}).click();
   await expect.poll(()=>body).not.toBeNull();
   expect(body?.serviceIds).toEqual([service]);
