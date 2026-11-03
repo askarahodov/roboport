@@ -8,7 +8,8 @@
 2. При успешном переносе `auto_appointment_reschedule` фиксирует историю и создаёт **ровно одно** событие `RESCHEDULED`. Отмена прежней брони внутри переноса не создаёт ложное событие клиентской отмены.
 3. При настоящей отмене актуальной брони `auto_appointment_event.BOOKING_CANCELED` создаёт `CANCELED`. Повторная отмена (`ALREADY_CANCELED`) не создаёт ещё одно событие.
 4. При откате любой бизнес-транзакции её уведомление тоже откатывается. События генерирует БД, а не отдельный HTTP-вызов, поэтому успешное создание и запись в очередь атомарны.
-5. Существующий `notification_outbox`/worker поддерживает claim `FOR UPDATE SKIP LOCKED`, lease/fencing, backoff 2/4/8/16 секунд, максимум 5 попыток и `DEAD`. Успех — только запись в **`synthetic_notification_delivery` (`DEV_SINK`)**, в одной транзакции с `DELIVERED`. Повтор worker не создаёт второй sink receipt.
+5. При переносе/отмене новый event **атомарно** помечает старые ещё не доставленные CREATED/RESCHEDULED для этой записи как `SUPERSEDED` (включая ранее захваченные worker строки). Они остаются в аудите, но больше не могут быть выданы worker: проверка lease/fencing отвергает устаревшее завершение. Уже доставленные `DELIVERED` события сохраняют историю фактической DEV_SINK-доставки. Отмена без новой записи (повторный запрос) не изменяет очередь; rollback возвращает прежнее состояние.
+6. Существующий `notification_outbox`/worker поддерживает claim `FOR UPDATE SKIP LOCKED`, lease/fencing, backoff 2/4/8/16 секунд, максимум 5 попыток и `DEAD`. Успех — только запись в **`synthetic_notification_delivery` (`DEV_SINK`)**, в одной транзакции с `DELIVERED`. Повтор worker не создаёт второй sink receipt.
 
 `event_key` различает append-only идентификатор события: `auto-appointment:event:<event-id>` для создания/отмены и `auto-appointment:move:<reschedule-id>` для переноса. `aggregate_type='auto_appointment'`; `aggregate_id` — UUID записи; `event_type` — `CREATED`, `RESCHEDULED` либо `CANCELED`. JSON `payload` содержит **только** `{"action":"..."}`; никакого имени, телефона, VIN, customerLinkId, employeeId или пользовательского текста.
 
@@ -33,3 +34,12 @@
 
 
 Дополнительно `0091` обновляет парные PG17-функции `record_auto_stock_lot_work_order_issue` и `record_auto_stock_lot_work_order_return`: для конкретной партии также проверяется **последняя активная бронь**, сохраняя locks по организации, SKU и лоту. Test `tests/integration/test_pg_auto_booking_lot_move_reconcile.py` проверяет `RESERVE → RESCHEDULE → lot ISSUE → lot RETURN → RELEASE → CANCEL`, остатки физической партии и ровно три уведомления. Операции возврата проходят только через роль `WAREHOUSE` и существующий ledger.
+
+
+## Вытеснение устаревших событий и защита от гонок (current-dev, #113)
+
+Миграция `0096_auto_outbox_supersession` добавляет терминальное состояние `SUPERSEDED` для событий `auto_appointment`: после успешного **переноса** или **отмены** созданное в той же транзакции событие вытесняет предыдущие ещё не доставленные `CREATED` и `RESCHEDULED` **только этой записи**. Само событие `CANCELED` не вытесняется. Другие записи и legacy `ticket/estimate` не изменяются. В `SUPERSEDED` прежний payload и event key сохраняются для аудита, а mutable claim очищается; обратно в `PENDING` перейти нельзя. Если worker ранее успел выдать уведомление в `DEV_SINK`, состояние `DELIVERED` не пересматривается: доставленное уведомление нельзя «отозвать» из реального мира.
+
+**Что проверять:** создайте запись и перенесите её до работы worker: прежний `CREATED` получает `SUPERSEDED`, а `RESCHEDULED` остаётся `PENDING`; если затем отменить до обработки, оба прежних типа станут `SUPERSEDED`, а worker доставит только `CANCELED`. Если worker захватил старое событие, перенос снимет lease и `finish_one` вернёт `False` для старого attempt. Если отмена откатится, старое состояние очереди восстановится. Подробные тесты: `tests/integration/test_pg_auto_appointment_outbox.py`. Продовый SLA, каналы, согласия, правила opt-out и гарантии внешнего провайдера — **planned**, #119 остаётся блокером.
+
+**Откат:** migration downgrade блокируется при наличии хотя бы одного `SUPERSEDED` receipt; нельзя возвращать устаревшие оповещения в живую очередь. Используйте только изолированную копию/backup и утверждённый recovery-план. Данных и клиентских контактов в `DEV_SINK` нет.
