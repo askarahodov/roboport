@@ -216,6 +216,8 @@ async def reschedule_customer_booking(appointment_id: str, request: Request):
             return _response(request, 403, "FORBIDDEN")
         except AppointmentKeyConflict:
             return _response(request, 409, "IDEMPOTENCY_KEY_REUSED")
+        except AppointmentDurationInvalid:
+            return _response(request, 422, "SERVICES_EXCEED_SLOT")
         except AppointmentHoursClosed:
             return _response(request, 409, "LOCATION_CLOSED")
         except AppointmentConflict:

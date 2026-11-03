@@ -39,7 +39,7 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
           appointmentId:appointment,organizationId:org,locationId:loc,
           customerLinkId:link,bookingId:booking,bayId:bay,
           ...interval,status:status==='CANCELED'?'CANCELED':'SCHEDULED',
-          workOrderId:work,timeZone:'Europe/Berlin',canManage:status==='ACTIVE',
+          workOrderId:work,timeZone:'Europe/Berlin',canManage:status==='ACTIVE',serviceIds:[service],
         }],
       })});
     if(req.method()==='GET'&&url.pathname.endsWith('/services'))
@@ -50,6 +50,7 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
     if(req.method()==='GET'&&url.pathname.endsWith('/slots')){
       expect(url.searchParams.get('localDay')).toBe('2030-01-01');
       expect(url.searchParams.get('customerLinkId')).toBe(link);
+      expect(url.searchParams.getAll('serviceId')).toEqual([service]);
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
         syntheticOnly:true,timeZone:'Europe/Berlin',guaranteed:false,items:[first,second],
       })});
@@ -76,7 +77,8 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
   const region=page.getByRole('region',{name:'Самостоятельная запись автомобиля (dev)'});
   await expect(region.getByText('Записей пока нет.')).toBeVisible();
   await expect(region.getByLabel('Услуга SVC-001')).toBeVisible();
-  // Полный сценарий переноса/отмены остаётся без выбора услуг.
+  // Selecting a service still allows the complete move and cancel lifecycle.
+  await region.getByLabel('Услуга SVC-001').check();
   await region.getByLabel('День филиала').fill('2030-01-01');
   await region.getByRole('button',{name:'Показать свободные окна'}).click();
   await expect(region.getByText('Кандидаты не гарантируют бронь.')).toBeVisible();
@@ -99,7 +101,7 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
   expect(posts[1].key).toMatch(/^[0-9a-f-]{36}$/);
   expect(posts[2].key).toMatch(/^[0-9a-f-]{36}$/);
   expect(posts[0].body.customerLinkId).toBe(link);
-  expect(posts[0].body.serviceIds).toEqual([]);
+  expect(posts[0].body.serviceIds).toEqual([service]);
   expect(posts[1].body.organizationId).toBe(org);
   expect(JSON.stringify(resources)).not.toContain('vin');
   await page.setViewportSize({width:1280,height:800});
@@ -181,7 +183,7 @@ test('client cancellation retry preserves original key after lost response',asyn
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
         syntheticOnly:true,items:[{appointmentId:appointment,organizationId:org,locationId:loc,
           customerLinkId:link,bookingId:booking,bayId:bay,...first,
-          status:'SCHEDULED',workOrderId:work,timeZone:'Europe/Berlin',canManage:true}],
+          status:'SCHEDULED',workOrderId:work,timeZone:'Europe/Berlin',canManage:true,serviceIds:[]}],
       })});
     if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',
       body:'{"items":[],"syntheticOnly":true}'});

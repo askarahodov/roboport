@@ -113,9 +113,13 @@ def test_customer_catalog_and_atomic_services_booking_http(monkeypatch):
                WHERE aggregate_type='auto_appointment' AND aggregate_id=%s""",
             (appointment,),
         ).fetchone()[0] == 1
-    # После включения работ клиент не может незаметно отменить оформленный наряд.
+    # Initial BOOKING selections do not mean staff has begun work.
+    own = http.get(ROOT + "/appointments")
+    assert own.status_code == 200
+    assert own.json()["items"][0]["canManage"] is True
+    assert set(own.json()["items"][0]["serviceIds"]) == {str(first),str(second)}
     assert http.post(url+"/"+appointment+"/cancel",
-                     json={"organizationId":str(org)},headers=headers).status_code == 403
+                     json={"organizationId":str(org)},headers=headers).status_code == 200
 
 
 def test_staff_create_booking_and_selected_service_share_one_transaction(monkeypatch):
