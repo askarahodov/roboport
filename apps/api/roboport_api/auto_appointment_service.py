@@ -61,7 +61,16 @@ def _customer_order_pristine(conn: psycopg.Connection, appointment: UUID) -> Non
              AND NOT EXISTS (SELECT 1 FROM auto_work_order_inspection i
                              WHERE i.work_order_id=w.id)
              AND NOT EXISTS (SELECT 1 FROM auto_work_order_estimate_revision r
-                             WHERE r.work_order_id=w.id)""",
+                             WHERE r.work_order_id=w.id)
+             AND NOT EXISTS (
+               SELECT 1 FROM auto_work_order_stock_event e
+               WHERE e.work_order_id=w.id
+               GROUP BY e.work_order_id
+               HAVING SUM(CASE WHEN e.action='RESERVE' THEN e.quantity
+                               WHEN e.action IN ('ISSUE','RELEASE') THEN -e.quantity
+                               ELSE 0 END)>0
+                   OR SUM(CASE WHEN e.action='ISSUE' THEN e.quantity ELSE 0 END)>0
+             )""",
         (appointment,),
     ).fetchone()
     if allowed is None:
@@ -274,7 +283,16 @@ def cancel_appointment(conn: psycopg.Connection, token: str,
             raise AppointmentDenied("booking unavailable")
         if booking[1] is not None:
             return "ALREADY_CANCELED"
-        conn.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s", (booking[0],))
+        try:
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",
+                    (booking[0],),
+                )
+        except psycopg.errors.RaiseException as exc:
+            if "work order stock must be reconciled before cancel" in str(exc):
+                raise AppointmentConflict("STOCK_RECONCILIATION_REQUIRED") from exc
+            raise
         conn.execute(
             """INSERT INTO auto_appointment_actor_action
                (id,appointment_id,organization_id,actor_id,action)
