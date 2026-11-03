@@ -62,11 +62,14 @@ def test_customer_catalog_and_atomic_services_booking_http(monkeypatch):
     url = ROOT + "/appointments"
     key = {**headers,"Idempotency-Key":str(uuid4())}
     # Запрет чужих услуг, превышения времени и повторных UUID: no phantom rows.
-    for selected in ([str(first),str(foreign)],
-                     [str(first),str(long)], [str(first),str(first)]):
+    for selected in ([str(first),str(foreign)], [str(first),str(first)]):
         forbidden = http.post(url,json={**payload,"serviceIds":selected},
                               headers={**headers,"Idempotency-Key":str(uuid4())})
         assert forbidden.status_code == 403, forbidden.text
+    too_long = http.post(url,json={**payload,"serviceIds":[str(first),str(long)]},
+                         headers={**headers,"Idempotency-Key":str(uuid4())})
+    assert too_long.status_code == 422, too_long.text
+    assert too_long.json()["code"] == "SERVICES_EXCEED_SLOT"
     malformed = http.post(url,json={**payload,"serviceIds":[str(first)]*9},
                           headers={**headers,"Idempotency-Key":str(uuid4())})
     assert malformed.status_code in (403, 422), malformed.text
