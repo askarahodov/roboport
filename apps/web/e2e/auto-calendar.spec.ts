@@ -11,7 +11,7 @@ const base='**/api/v1/dev/auto/organizations/**';
 test('calendar opens on the current UTC day, not a fixed fixture date',async({page})=>{
   await page.clock.setFixedTime(new Date('2026-10-28T23:30:00Z'));
   await page.goto('/staff/auto-calendar');
-  await expect(page.getByLabel('День UTC')).toHaveValue('2026-10-28');
+  await expect(page.getByLabel('День филиала')).toHaveValue('2026-10-28');
 });
 
 test('calendar denies access without showing previous tenant records',async({page})=>{
@@ -222,8 +222,8 @@ test('calendar rejects invalid UTC calendar day before querying API',async({page
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
   await expect(page.getByText('Записей нет.')).toBeVisible();
   const before=reads;
-  await page.getByLabel('День UTC').evaluate((input:HTMLInputElement)=>{input.type='text';});
-  await page.getByLabel('День UTC').fill('2030-02-30');
+  await page.getByLabel('День филиала').evaluate((input:HTMLInputElement)=>{input.type='text';});
+  await page.getByLabel('День филиала').fill('2030-02-30');
   await expect(page.getByText('Укажите организацию, филиал и день.')).toBeVisible();
   expect(reads).toBe(before);
 });
@@ -441,4 +441,29 @@ test('late failed request from previous tenant cannot restore pending retry',asy
   failOld();
   await expect(page.getByText('Записей нет.')).toBeVisible();
   await expect(page.getByRole('group',{name:'Неопределённый результат записи'})).toHaveCount(0);
+});
+
+
+test('calendar sends local day, shows IANA zone and autumn DST repeated hour',async({page})=>{
+  const requests:string[]=[];
+  await page.route(base,route=>{
+    requests.push(route.request().url());
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      timeZone:'Europe/Berlin',hasMore:false,
+      items:[{appointmentId:appointment,bookingId:bay,bayId:bay,
+        startsAt:'2030-10-27T00:30:00Z',endsAt:'2030-10-27T02:30:00Z',
+        workOrderId:work,employeeId:null}],
+    })});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByLabel('День филиала').fill('2030-10-27');
+  await expect(page.getByText('Часовой пояс филиала: Europe/Berlin')).toBeVisible();
+  await expect(page.getByText('Appointment '+appointment+' · WorkOrder '+work)).toBeVisible();
+  await expect(page.getByText(/27\.10\.2030/).first()).toBeVisible();
+  const query=new URL(requests[requests.length-1]).searchParams;
+  expect(query.get('localDay')).toBe('2030-10-27');
+  expect(query.has('startsAt')).toBe(false);
+  expect(query.has('endsAt')).toBe(false);
 });
