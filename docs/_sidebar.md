@@ -29,6 +29,7 @@
   - [Архитектура и безопасность](/auto/ARCHITECTURE.md)
   - [Функциональная матрица](/auto/FUNCTIONAL_MATRIX.md)
   - [Дорожная карта полного автосервиса](/auto/FEATURE_ROADMAP.md)
+  - [Пакетный synthetic cutover (разработчикам/QA)](/auto/SYNTHETIC_CUTOVER.md)
   - [Каталоги запчастей](/auto/PARTS_CATALOG.md)
   - [Технологии](/TECH_STACK.md)
   - [Локальная разработка](/operations/DEV_ENVIRONMENT.md)
@@ -40,4 +41,3 @@
 - **Архив: legacy робототехника (не инструкция СТО)**
   - [Реестр legacy и правила cutover](/auto/LEGACY_ARCHIVE.md)
 
-  - [Пакетный synthetic cutover (разработчикам/QA)](/auto/SYNTHETIC_CUTOVER.md)
