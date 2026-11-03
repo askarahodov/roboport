@@ -210,6 +210,146 @@ def upgrade():
       END $fn$
     """)
 
+    # Lot-level ISSUE/RETURN must use the same current booking as the SKU ledger.
+    op.execute("""
+      CREATE OR REPLACE FUNCTION record_auto_stock_lot_work_order_issue(
+        p_order uuid,p_lot uuid,p_request uuid,p_quantity bigint
+      ) RETURNS uuid LANGUAGE plpgsql AS $fn$
+      DECLARE lot_row record; order_row record; prior record;
+              debit uuid; stock_event uuid; issue_id uuid; lot_qty bigint;
+      BEGIN
+        IF p_order IS NULL OR p_lot IS NULL OR p_request IS NULL OR p_quantity IS NULL
+           OR p_quantity<1 OR p_quantity>1000000000 THEN
+          RAISE EXCEPTION 'invalid lot work order issue';
+        END IF;
+        SELECT l.sku_id,l.organization_id,l.location_id INTO lot_row
+          FROM auto_stock_lot l
+          JOIN auto_service_location loc ON loc.id=l.location_id
+            AND loc.organization_id=l.organization_id
+          JOIN auto_organization org ON org.id=l.organization_id
+          WHERE l.id=p_lot AND loc.disabled_at IS NULL AND org.disabled_at IS NULL;
+        IF NOT FOUND THEN RAISE EXCEPTION 'lot unavailable'; END IF;
+        -- Same order as existing services: work order scope, then SKU lock.
+        SELECT w.id INTO order_row FROM auto_work_order w
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          JOIN LATERAL (
+            SELECT COALESCE((
+              SELECT rs.new_booking_id FROM auto_appointment_reschedule rs
+              WHERE rs.appointment_id=a.id
+              ORDER BY rs.created_at DESC,rs.id DESC LIMIT 1
+            ),a.booking_id) AS current_id
+          ) current_booking ON TRUE
+          JOIN auto_bay_booking b ON b.id=current_booking.current_id
+            AND b.organization_id=w.organization_id
+            AND b.location_id=w.location_id
+          WHERE w.id=p_order AND w.organization_id=lot_row.organization_id
+            AND w.location_id=lot_row.location_id
+            AND a.organization_id=w.organization_id
+            AND a.location_id=w.location_id AND b.canceled_at IS NULL
+          FOR SHARE OF w,a,b;
+        IF NOT FOUND THEN RAISE EXCEPTION 'work order scope unavailable'; END IF;
+        PERFORM 1 FROM auto_stock_sku WHERE id=lot_row.sku_id FOR UPDATE;
+        SELECT * INTO prior FROM auto_stock_lot_work_order_issue WHERE request_id=p_request;
+        IF FOUND THEN
+          IF prior.work_order_id=p_order AND prior.lot_id=p_lot
+             AND prior.sku_id=lot_row.sku_id AND prior.quantity=p_quantity THEN
+            RETURN prior.id;
+          END IF;
+          RAISE EXCEPTION 'lot issue request replay mismatch';
+        END IF;
+        -- Reserve must be held by this order, not some other order.
+        IF (SELECT COALESCE(SUM(CASE WHEN action='RESERVE' THEN quantity
+                                     WHEN action IN ('ISSUE','RELEASE') THEN -quantity
+                                     ELSE 0 END),0)
+            FROM auto_work_order_stock_event
+            WHERE work_order_id=p_order AND sku_id=lot_row.sku_id) < p_quantity THEN
+          RAISE EXCEPTION 'work order reservation insufficient';
+        END IF;
+        SELECT allocated INTO lot_qty FROM auto_stock_lot_balance WHERE lot_id=p_lot;
+        IF lot_qty<p_quantity THEN RAISE EXCEPTION 'lot allocation insufficient'; END IF;
+        -- First deallocate, then consume the physical stock and work order
+        -- reservation in the SAME transaction: rollback restores all legs.
+        debit:=record_auto_stock_lot_allocation(
+          p_lot,gen_random_uuid(),'DEALLOCATE',p_quantity);
+        stock_event:=record_auto_work_order_stock(
+          p_order,lot_row.sku_id,p_request,'ISSUE',p_quantity);
+        issue_id:=gen_random_uuid();
+        INSERT INTO auto_stock_lot_work_order_issue
+          (id,request_id,work_order_id,lot_id,sku_id,quantity,lot_debit_id,stock_event_id)
+          VALUES(issue_id,p_request,p_order,p_lot,lot_row.sku_id,
+                 p_quantity,debit,stock_event);
+        RETURN issue_id;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE OR REPLACE FUNCTION record_auto_stock_lot_work_order_return(
+        p_order uuid,p_lot uuid,p_request uuid,p_quantity bigint
+      ) RETURNS uuid LANGUAGE plpgsql AS $fn$
+      DECLARE lot_row record; order_row record; prior record;
+              available bigint; stock_event uuid; credit uuid; return_id uuid;
+      BEGIN
+        IF p_order IS NULL OR p_lot IS NULL OR p_request IS NULL
+           OR p_quantity IS NULL OR p_quantity<1 OR p_quantity>1000000000 THEN
+          RAISE EXCEPTION 'invalid lot work order return';
+        END IF;
+        SELECT l.sku_id,l.organization_id,l.location_id INTO lot_row
+          FROM auto_stock_lot l
+          JOIN auto_service_location loc ON loc.id=l.location_id
+            AND loc.organization_id=l.organization_id
+          JOIN auto_organization org ON org.id=l.organization_id
+          WHERE l.id=p_lot AND loc.disabled_at IS NULL AND org.disabled_at IS NULL
+          FOR SHARE OF l,loc,org;
+        IF NOT FOUND THEN RAISE EXCEPTION 'lot unavailable'; END IF;
+        SELECT w.id INTO order_row FROM auto_work_order w
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          JOIN LATERAL (
+            SELECT COALESCE((
+              SELECT rs.new_booking_id FROM auto_appointment_reschedule rs
+              WHERE rs.appointment_id=a.id
+              ORDER BY rs.created_at DESC,rs.id DESC LIMIT 1
+            ),a.booking_id) AS current_id
+          ) current_booking ON TRUE
+          JOIN auto_bay_booking b ON b.id=current_booking.current_id
+            AND b.organization_id=w.organization_id
+            AND b.location_id=w.location_id
+          WHERE w.id=p_order AND w.organization_id=lot_row.organization_id
+            AND w.location_id=lot_row.location_id
+            AND a.organization_id=w.organization_id AND a.location_id=w.location_id
+            AND b.canceled_at IS NULL
+          FOR SHARE OF w,a,b;
+        IF NOT FOUND THEN RAISE EXCEPTION 'work order scope unavailable'; END IF;
+        PERFORM 1 FROM auto_stock_sku WHERE id=lot_row.sku_id FOR UPDATE;
+        SELECT * INTO prior FROM auto_stock_lot_work_order_return WHERE request_id=p_request;
+        IF FOUND THEN
+          IF prior.work_order_id=p_order AND prior.lot_id=p_lot
+             AND prior.sku_id=lot_row.sku_id AND prior.quantity=p_quantity THEN
+            RETURN prior.id;
+          END IF;
+          RAISE EXCEPTION 'lot return request replay mismatch';
+        END IF;
+        SELECT COALESCE(SUM(q),0)::bigint INTO available FROM (
+          SELECT quantity AS q FROM auto_stock_lot_work_order_issue
+            WHERE work_order_id=p_order AND lot_id=p_lot AND sku_id=lot_row.sku_id
+          UNION ALL
+          SELECT -quantity AS q FROM auto_stock_lot_work_order_return
+            WHERE work_order_id=p_order AND lot_id=p_lot AND sku_id=lot_row.sku_id
+        ) quantities;
+        IF available<p_quantity THEN RAISE EXCEPTION 'lot return exceeds net issues'; END IF;
+        -- Credit physical stock first, then place the returned units in the lot.
+        -- Both legs and the linking record are committed or rolled back together.
+        stock_event:=record_auto_work_order_return(
+          p_order,lot_row.sku_id,p_request,p_quantity);
+        credit:=record_auto_stock_lot_allocation(
+          p_lot,gen_random_uuid(),'ALLOCATE',p_quantity);
+        return_id:=gen_random_uuid();
+        INSERT INTO auto_stock_lot_work_order_return
+          (id,request_id,work_order_id,lot_id,sku_id,quantity,lot_credit_id,stock_event_id)
+          VALUES(return_id,p_request,p_order,p_lot,lot_row.sku_id,
+                 p_quantity,credit,stock_event);
+        RETURN return_id;
+      END $fn$
+    """)
+
 
 def downgrade():
     # Do not make stock-bearing orders cancelable by silent down-migration.
@@ -276,6 +416,126 @@ def downgrade():
           (stock_event_id,work_order_id,sku_id,action,quantity)
           VALUES(new_id,p_order,p_sku,'RETURN',p_quantity);
         RETURN new_id;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE OR REPLACE FUNCTION record_auto_stock_lot_work_order_issue(
+        p_order uuid,p_lot uuid,p_request uuid,p_quantity bigint
+      ) RETURNS uuid LANGUAGE plpgsql AS $fn$
+      DECLARE lot_row record; order_row record; prior record;
+              debit uuid; stock_event uuid; issue_id uuid; lot_qty bigint;
+      BEGIN
+        IF p_order IS NULL OR p_lot IS NULL OR p_request IS NULL OR p_quantity IS NULL
+           OR p_quantity<1 OR p_quantity>1000000000 THEN
+          RAISE EXCEPTION 'invalid lot work order issue';
+        END IF;
+        SELECT l.sku_id,l.organization_id,l.location_id INTO lot_row
+          FROM auto_stock_lot l
+          JOIN auto_service_location loc ON loc.id=l.location_id
+            AND loc.organization_id=l.organization_id
+          JOIN auto_organization org ON org.id=l.organization_id
+          WHERE l.id=p_lot AND loc.disabled_at IS NULL AND org.disabled_at IS NULL;
+        IF NOT FOUND THEN RAISE EXCEPTION 'lot unavailable'; END IF;
+        -- Same order as existing services: work order scope, then SKU lock.
+        SELECT w.id INTO order_row FROM auto_work_order w
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          JOIN auto_bay_booking b ON b.id=a.booking_id
+          WHERE w.id=p_order AND w.organization_id=lot_row.organization_id
+            AND w.location_id=lot_row.location_id
+            AND a.organization_id=w.organization_id
+            AND a.location_id=w.location_id AND b.canceled_at IS NULL
+          FOR SHARE OF w,a,b;
+        IF NOT FOUND THEN RAISE EXCEPTION 'work order scope unavailable'; END IF;
+        PERFORM 1 FROM auto_stock_sku WHERE id=lot_row.sku_id FOR UPDATE;
+        SELECT * INTO prior FROM auto_stock_lot_work_order_issue WHERE request_id=p_request;
+        IF FOUND THEN
+          IF prior.work_order_id=p_order AND prior.lot_id=p_lot
+             AND prior.sku_id=lot_row.sku_id AND prior.quantity=p_quantity THEN
+            RETURN prior.id;
+          END IF;
+          RAISE EXCEPTION 'lot issue request replay mismatch';
+        END IF;
+        -- Reserve must be held by this order, not some other order.
+        IF (SELECT COALESCE(SUM(CASE WHEN action='RESERVE' THEN quantity
+                                     WHEN action IN ('ISSUE','RELEASE') THEN -quantity
+                                     ELSE 0 END),0)
+            FROM auto_work_order_stock_event
+            WHERE work_order_id=p_order AND sku_id=lot_row.sku_id) < p_quantity THEN
+          RAISE EXCEPTION 'work order reservation insufficient';
+        END IF;
+        SELECT allocated INTO lot_qty FROM auto_stock_lot_balance WHERE lot_id=p_lot;
+        IF lot_qty<p_quantity THEN RAISE EXCEPTION 'lot allocation insufficient'; END IF;
+        -- First deallocate, then consume the physical stock and work order
+        -- reservation in the SAME transaction: rollback restores all legs.
+        debit:=record_auto_stock_lot_allocation(
+          p_lot,gen_random_uuid(),'DEALLOCATE',p_quantity);
+        stock_event:=record_auto_work_order_stock(
+          p_order,lot_row.sku_id,p_request,'ISSUE',p_quantity);
+        issue_id:=gen_random_uuid();
+        INSERT INTO auto_stock_lot_work_order_issue
+          (id,request_id,work_order_id,lot_id,sku_id,quantity,lot_debit_id,stock_event_id)
+          VALUES(issue_id,p_request,p_order,p_lot,lot_row.sku_id,
+                 p_quantity,debit,stock_event);
+        RETURN issue_id;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE OR REPLACE FUNCTION record_auto_stock_lot_work_order_return(
+        p_order uuid,p_lot uuid,p_request uuid,p_quantity bigint
+      ) RETURNS uuid LANGUAGE plpgsql AS $fn$
+      DECLARE lot_row record; order_row record; prior record;
+              available bigint; stock_event uuid; credit uuid; return_id uuid;
+      BEGIN
+        IF p_order IS NULL OR p_lot IS NULL OR p_request IS NULL
+           OR p_quantity IS NULL OR p_quantity<1 OR p_quantity>1000000000 THEN
+          RAISE EXCEPTION 'invalid lot work order return';
+        END IF;
+        SELECT l.sku_id,l.organization_id,l.location_id INTO lot_row
+          FROM auto_stock_lot l
+          JOIN auto_service_location loc ON loc.id=l.location_id
+            AND loc.organization_id=l.organization_id
+          JOIN auto_organization org ON org.id=l.organization_id
+          WHERE l.id=p_lot AND loc.disabled_at IS NULL AND org.disabled_at IS NULL
+          FOR SHARE OF l,loc,org;
+        IF NOT FOUND THEN RAISE EXCEPTION 'lot unavailable'; END IF;
+        SELECT w.id INTO order_row FROM auto_work_order w
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          JOIN auto_bay_booking b ON b.id=a.booking_id
+          WHERE w.id=p_order AND w.organization_id=lot_row.organization_id
+            AND w.location_id=lot_row.location_id
+            AND a.organization_id=w.organization_id AND a.location_id=w.location_id
+            AND b.canceled_at IS NULL
+          FOR SHARE OF w,a,b;
+        IF NOT FOUND THEN RAISE EXCEPTION 'work order scope unavailable'; END IF;
+        PERFORM 1 FROM auto_stock_sku WHERE id=lot_row.sku_id FOR UPDATE;
+        SELECT * INTO prior FROM auto_stock_lot_work_order_return WHERE request_id=p_request;
+        IF FOUND THEN
+          IF prior.work_order_id=p_order AND prior.lot_id=p_lot
+             AND prior.sku_id=lot_row.sku_id AND prior.quantity=p_quantity THEN
+            RETURN prior.id;
+          END IF;
+          RAISE EXCEPTION 'lot return request replay mismatch';
+        END IF;
+        SELECT COALESCE(SUM(q),0)::bigint INTO available FROM (
+          SELECT quantity AS q FROM auto_stock_lot_work_order_issue
+            WHERE work_order_id=p_order AND lot_id=p_lot AND sku_id=lot_row.sku_id
+          UNION ALL
+          SELECT -quantity AS q FROM auto_stock_lot_work_order_return
+            WHERE work_order_id=p_order AND lot_id=p_lot AND sku_id=lot_row.sku_id
+        ) quantities;
+        IF available<p_quantity THEN RAISE EXCEPTION 'lot return exceeds net issues'; END IF;
+        -- Credit physical stock first, then place the returned units in the lot.
+        -- Both legs and the linking record are committed or rolled back together.
+        stock_event:=record_auto_work_order_return(
+          p_order,lot_row.sku_id,p_request,p_quantity);
+        credit:=record_auto_stock_lot_allocation(
+          p_lot,gen_random_uuid(),'ALLOCATE',p_quantity);
+        return_id:=gen_random_uuid();
+        INSERT INTO auto_stock_lot_work_order_return
+          (id,request_id,work_order_id,lot_id,sku_id,quantity,lot_credit_id,stock_event_id)
+          VALUES(return_id,p_request,p_order,p_lot,lot_row.sku_id,
+                 p_quantity,credit,stock_event);
+        RETURN return_id;
       END $fn$
     """)
     # The old function would incorrectly use the initial booking after move.
