@@ -273,10 +273,10 @@ def test_immutable_recorded_labor_and_finish_report_full_execution_lifecycle(mon
     http=TestClient(app,base_url="https://127.0.0.1")
     path=_url(org,loc)
     with psycopg.connect(DSN) as db:
-        db.execute(
-            "UPDATE auto_service_location SET timezone_name='Europe/Berlin' WHERE id=%s",
+        zone = ZoneInfo(db.execute(
+            "SELECT timezone_name FROM auto_service_location WHERE id=%s",
             (loc,),
-        )
+        ).fetchone()[0])
         start_execution(db,manager,org,loc,order,uuid4())
         labor_key=uuid4()
         entry=labor_execution(db,mechanic,org,loc,order,service,37,labor_key)
@@ -284,12 +284,12 @@ def test_immutable_recorded_labor_and_finish_report_full_execution_lifecycle(mon
         replay=labor_execution(db,mechanic,org,loc,order,service,37,labor_key)
         assert replay["replayed"] is True
         event_date=db.execute(
-            """SELECT (l.created_at AT TIME ZONE 'Europe/Berlin')::date
+            """SELECT l.created_at
                FROM auto_work_order_labor_entry l
                JOIN auto_work_order_execution e ON e.id=l.execution_id
                WHERE e.work_order_id=%s""",
             (order,),
-        ).fetchone()[0].isoformat()
+        ).fetchone()[0].astimezone(zone).date().isoformat()
     http.cookies.set("rp_session",manager)
     before=http.get(path,params={"fromDay":event_date,"toDay":event_date})
     assert before.status_code==200,before.text
@@ -304,12 +304,12 @@ def test_immutable_recorded_labor_and_finish_report_full_execution_lifecycle(mon
         again=finish_execution(db,mechanic,org,loc,order,finish_key)
         assert again["replayed"] is True
         finish_date=db.execute(
-            """SELECT (f.created_at AT TIME ZONE 'Europe/Berlin')::date
+            """SELECT f.created_at
                FROM auto_work_order_execution_finish f
                JOIN auto_work_order_execution e ON e.id=f.execution_id
                WHERE e.work_order_id=%s""",
             (order,),
-        ).fetchone()[0].isoformat()
+        ).fetchone()[0].astimezone(zone).date().isoformat()
     after=http.get(path,params={"fromDay":finish_date,"toDay":finish_date})
     assert after.status_code==200,after.text
     assert after.json()["items"][0]["finishedExecutions"]==1
