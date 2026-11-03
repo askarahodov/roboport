@@ -234,4 +234,6 @@ async def cancel_customer_booking(appointment_id: str, request: Request):
             )
         except AppointmentDenied:
             return _response(request, 403, "FORBIDDEN")
+        except AppointmentConflict:
+            return _response(request, 409, "STOCK_RECONCILIATION_REQUIRED")
     return JSONResponse(content={"status":status},headers={"Cache-Control":"no-store"})
