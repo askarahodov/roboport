@@ -1,6 +1,6 @@
 """PG17 HTTP contract: org intake, CSRF, conflict and actor-attributed revoke."""
 from datetime import datetime,timedelta,timezone
-from uuid import uuid4
+from uuid import UUID,uuid4
 import psycopg
 from fastapi.testclient import TestClient
 from roboport_api.main import app
@@ -71,7 +71,7 @@ def test_closed_http_create_cancel_and_isolation(monkeypatch):
                           (second.json()["bookingId"],)).fetchone()==(True,)
         assert db.execute("""SELECT actor_id,appointment_id,booking_id
              FROM auto_cancel_idempotency WHERE organization_id=%s""",
-             (org,)).fetchall()==[(d["intake"],ident,created.json()["bookingId"])]
+             (org,)).fetchall()==[(d["intake"],UUID(ident),UUID(created.json()["bookingId"]))]
         assert db.execute("""SELECT actor_id,action FROM auto_appointment_actor_action
              WHERE appointment_id=%s""",(ident,)).fetchall()==[(d["intake"],"CANCELED")]
         assert db.execute("""SELECT action FROM auto_appointment_event
