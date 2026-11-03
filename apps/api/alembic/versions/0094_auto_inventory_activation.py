@@ -123,6 +123,10 @@ def upgrade():
 
 
 def downgrade():
+    # Prevent a commit between the empty-table check and DROP TABLE.
+    # ACCESS EXCLUSIVE conflicts with INSERT's ROW EXCLUSIVE and stays held
+    # until transactional Alembic DDL commits or rolls back.
+    op.execute("LOCK TABLE auto_migration_stock_activation IN ACCESS EXCLUSIVE MODE")
     if op.get_bind().execute(text(
         "SELECT 1 FROM auto_migration_stock_activation LIMIT 1"
     )).first():
