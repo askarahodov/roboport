@@ -62,4 +62,4 @@ def test_lot_issue_and_return_after_reschedule_stays_atomic_and_reconciles():
             """SELECT count(*) FROM notification_outbox
                WHERE aggregate_type='auto_appointment' AND aggregate_id=%s""",
             (appointment,),
-        ).fetchone()[0]==2
+        ).fetchone()[0]==3
