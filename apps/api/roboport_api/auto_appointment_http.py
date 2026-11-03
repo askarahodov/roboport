@@ -1,6 +1,7 @@
 """Synthetic loopback-only appointment create and cancellation endpoints."""
 from datetime import datetime
 from uuid import UUID
+from typing import Literal
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -8,9 +9,16 @@ from pydantic import BaseModel, ConfigDict, ValidationError, Field
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_appointment_service import (
-    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict, AppointmentDurationInvalid,
+    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict, AppointmentDurationInvalid, AppointmentStockUnavailable,
 )
 router=APIRouter(include_in_schema=False)
+
+class BookingMaterialItem(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    skuId: UUID
+    kind: Literal["PART","CONSUMABLE"]
+    quantity: int = Field(gt=0, le=1000000000, strict=True)
+
 
 class CreateAppointment(BaseModel):
     model_config=ConfigDict(extra="forbid")
@@ -21,6 +29,7 @@ class CreateAppointment(BaseModel):
     startsAt: datetime
     endsAt: datetime
     serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
+    materialItems: list[BookingMaterialItem] = Field(default_factory=list, max_length=8)
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/booking-services")
 def intake_booking_services(org_id: str, loc_id: str, request: Request):
@@ -57,6 +66,42 @@ def intake_booking_services(org_id: str, loc_id: str, request: Request):
     )
 
 
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/booking-stock")
+def intake_booking_stock(org_id: str, loc_id: str, request: Request):
+    """Только INTAKE+WAREHOUSE: свободный синтетический остаток без PII."""
+    from .auto_org_authority import organization_role_allows
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(loc_id)
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        with db.transaction():
+            token=request.cookies.get("rp_session","")
+            if not (organization_role_allows(db,token,org,"INTAKE",loc,for_mutation=True)
+                    and organization_role_allows(db,token,org,"WAREHOUSE",loc,for_mutation=True)):
+                return _response(request,403,"FORBIDDEN")
+            items=db.execute(
+                """SELECT s.id,s.article,b.on_hand-b.reserved AS available
+                   FROM auto_stock_sku s
+                   JOIN auto_stock_balance b ON b.sku_id=s.id
+                   WHERE s.organization_id=%s AND s.location_id=%s
+                   ORDER BY s.article,s.id LIMIT 101""",
+                (org,loc),
+            ).fetchall()
+    if len(items)>100:
+        return _response(request,503,"UNAVAILABLE")
+    return JSONResponse(
+        content={"items":[
+            {"skuId":str(ident),"article":article,"available":max(0,available)}
+            for ident,article,available in items
+        ],"syntheticOnly":True},
+        headers={"Cache-Control":"no-store"},
+    )
+
+
 @router.post("/api/v1/dev/auto/organizations/{org_id}/appointments")
 async def create(org_id: str, request: Request):
     dsn=_request_dsn(request)
@@ -77,6 +122,10 @@ async def create(org_id: str, request: Request):
                 db,request.cookies.get("rp_session",""),org,body.locationId,
                 body.bayId,body.customerLinkId,body.startsAt,body.endsAt,body.employeeId,
                 request_key, service_ids=tuple(body.serviceIds),
+                material_items=tuple(
+                    (item.skuId,item.kind,item.quantity)
+                    for item in body.materialItems
+                ),
             )
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
@@ -84,6 +133,8 @@ async def create(org_id: str, request: Request):
             return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
         except AppointmentDurationInvalid:
             return _response(request,422,"SERVICES_EXCEED_SLOT")
+        except AppointmentStockUnavailable:
+            return _response(request,409,"STOCK_UNAVAILABLE")
         except AppointmentConflict:
             return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(status_code=201,content={
