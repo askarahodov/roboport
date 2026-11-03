@@ -5,7 +5,9 @@ type Resource={organizationId:string;locationId:string;customerLinkId:string;bay
   timeZone:string;vehicle:{make:string;model:string}};
 type Booking={appointmentId:string;organizationId:string;locationId:string;customerLinkId:string;
   bookingId:string;bayId:string;startsAt:string;endsAt:string;status:'SCHEDULED'|'CANCELED';
-  workOrderId:string;timeZone:string;canManage:boolean};
+  workOrderId:string;timeZone:string;canManage:boolean;
+  services?:{serviceId:string;title:string;durationMinutes:number}[];
+  materials?:{skuId:string;article:string;kind:'PART'|'MATERIAL';quantity:number}[]};
 type Slot={startsAt:string;endsAt:string};
 type Service={id:string;code:string;title:string;durationMinutes:number};
 type Sku={id:string;article:string};
@@ -209,6 +211,11 @@ export function CustomerAutoBooking(){
           <strong>{locale(b.startsAt,b.timeZone)} — {locale(b.endsAt,b.timeZone)}
             {' '}({b.timeZone})</strong>
           <p>Заказ-наряд {b.workOrderId} · {b.status==='CANCELED'?'Отменена':'Активна'}</p>
+          {!!b.services?.length&&<p>Услуги: {b.services.map(v=>v.title).join(', ')}</p>}
+          {!!b.materials?.length&&<p>Запрошенные позиции (без резерва): {
+            b.materials.map(v=>v.article+' — '+(v.kind==='PART'?'товар':'материал')+
+              ', '+v.quantity+' шт.').join('; ')
+          }</p>}
           {b.canManage&&<div>
             <button type="button" disabled={busy||!!pending} onClick={()=>{
               setTarget(b);
