@@ -213,7 +213,11 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                            VALUES(%s,%s,%s,%s,%s)""",
                         (uuid4(), order, service_id, organization, location),
                     )
-        except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException) as exc:
+        except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException,
+                psycopg.errors.DeadlockDetected) as exc:
+            # Конкурентные INSERT по exclusion могут завершиться SQLSTATE 40P01.
+            # Сохранение через nested transaction уже отменено: клиент получает
+            # управляемый конфликт, а не 500 с неизвестным исходом брони.
             raise AppointmentConflict("bay already reserved") from exc
         return appointment,booking,order
 
