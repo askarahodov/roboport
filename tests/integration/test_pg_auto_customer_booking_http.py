@@ -107,11 +107,20 @@ def test_customer_book_move_cancel_own_scope_and_replays(monkeypatch):
     assert http.post(move_url,json=moved_payload,headers=moving).json()==moved.json()
     assert http.post(url,json=payload,headers=key).status_code==409
     cancel_url=url+"/"+appointment+"/cancel"
-    canceled=http.post(cancel_url,json={"organizationId":str(org)},headers=headers)
+    cancel_headers={**headers,"Idempotency-Key":str(uuid4())}
+    canceled=http.post(cancel_url,json={"organizationId":str(org)},headers=cancel_headers)
     assert canceled.status_code==200,canceled.text
     assert canceled.json()["status"]=="CANCELED"
+    assert http.post(cancel_url,json={"organizationId":str(org)},headers=cancel_headers).json()["status"]=="CANCELED"
     assert http.post(cancel_url,json={"organizationId":str(org)},headers=headers).json()["status"]=="ALREADY_CANCELED"
+    assert http.post(cancel_url,json={"organizationId":str(org)},headers={**headers,"Idempotency-Key":"invalid"}).status_code==422
     assert http.post(move_url,json=moved_payload,headers=moving).status_code==409
+    # A receipt is not an authority grant: revoking the customer proof denies replay.
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+                   (d["link"],))
+    denied=http.post(cancel_url,json={"organizationId":str(org)},headers=cancel_headers)
+    assert denied.status_code==403,denied.text
     with psycopg.connect(DSN) as db:
         assert db.execute(
             "SELECT count(*) FROM auto_work_order WHERE appointment_id=%s",(appointment,)

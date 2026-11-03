@@ -182,7 +182,7 @@ export function CustomerAutoBooking(){
     if(pending)return;
     void mutate('/api/v1/dev/auto/customer/booking/appointments/'+
       encodeURIComponent(booking.appointmentId)+'/cancel',
-      JSON.stringify({organizationId:booking.organizationId}),null);
+      JSON.stringify({organizationId:booking.organizationId}),crypto.randomUUID());
   }
 
   return <section aria-label="Самостоятельная запись автомобиля (dev)">

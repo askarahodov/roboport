@@ -97,7 +97,7 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
   ]);
   expect(posts[0].key).toMatch(/^[0-9a-f-]{36}$/);
   expect(posts[1].key).toMatch(/^[0-9a-f-]{36}$/);
-  expect(posts[2].key).toBeUndefined();
+  expect(posts[2].key).toMatch(/^[0-9a-f-]{36}$/);
   expect(posts[0].body.customerLinkId).toBe(link);
   expect(posts[0].body.serviceIds).toEqual([]);
   expect(posts[1].body.organizationId).toBe(org);
@@ -168,4 +168,39 @@ test('selected workshop service is sent with the first booking in one payload',a
   await expect.poll(()=>saved).not.toBeNull();
   expect(saved?.serviceIds).toEqual([service]);
   expect(saved?.customerLinkId).toBe(link);
+});
+
+test('client cancellation retry preserves original key after lost response',async({page})=>{
+  await auth(page);
+  let sent:string|undefined,count=0;
+  await page.route('**/api/v1/dev/auto/customer/booking/**',route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='GET'&&url.pathname.endsWith('/resources'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(resources)});
+    if(req.method()==='GET'&&url.pathname.endsWith('/appointments'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,items:[{appointmentId:appointment,organizationId:org,locationId:loc,
+          customerLinkId:link,bookingId:booking,bayId:bay,...first,
+          status:'SCHEDULED',workOrderId:work,timeZone:'Europe/Berlin',canManage:true}],
+      })});
+    if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',
+      body:'{"items":[],"syntheticOnly":true}'});
+    if(url.pathname.endsWith('/cancel')){
+      count++;
+      const current=req.headers()['idempotency-key'];
+      expect(current).toMatch(/^[0-9a-f-]{36}$/);
+      if(sent)expect(current).toBe(sent);
+      sent=current;
+      if(count===1)return route.abort('failed');
+      return route.fulfill({status:200,contentType:'application/json',body:'{"status":"CANCELED"}'});
+    }
+    return route.fulfill({status:409,contentType:'application/json',body:'{"code":"RESOURCE_BUSY"}'});
+  });
+  await page.goto('/account/auto-booking');
+  await expect(page.getByRole('button',{name:'Отменить свою запись'})).toBeVisible();
+  await page.getByRole('button',{name:'Отменить свою запись'}).click();
+  await expect(page.getByRole('button',{name:'Повторить прежний запрос'})).toBeVisible();
+  await page.getByRole('button',{name:'Повторить прежний запрос'}).click();
+  await expect(page.getByText('Изменение записи принято сервером.')).toBeVisible();
+  expect(count).toBe(2);
 });

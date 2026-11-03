@@ -232,6 +232,8 @@ async def cancel_customer_booking(appointment_id: str, request: Request):
     try:
         ident = UUID(appointment_id)
         body = CustomerCancel.model_validate(await request.json())
+        header=request.headers.get("Idempotency-Key")
+        request_key=UUID(header) if header is not None else None
     except (ValueError, ValidationError, TypeError, UnicodeDecodeError):
         return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(dsn) as db:
@@ -240,8 +242,10 @@ async def cancel_customer_booking(appointment_id: str, request: Request):
         try:
             status = cancel_appointment(
                 db, request.cookies.get("rp_session", ""), body.organizationId,
-                ident, customer_mode=True,
+                ident, customer_mode=True, request_key=request_key,
             )
+        except AppointmentKeyConflict:
+            return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
         except AppointmentDenied:
             return _response(request, 403, "FORBIDDEN")
         except AppointmentConflict:

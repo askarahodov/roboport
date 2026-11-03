@@ -335,10 +335,12 @@ def _reserve_employee(conn: psycopg.Connection, booking: UUID, organization: UUI
 
 def cancel_appointment(conn: psycopg.Connection, token: str,
                        organization: UUID, appointment: UUID,
-                       customer_mode: bool = False) -> str:
+                       customer_mode: bool = False,
+                       request_key: UUID | None = None) -> str:
     """Revoke the reservation, preserving Appointment and WorkOrder history."""
     if (not isinstance(organization, UUID) or not isinstance(appointment, UUID)
-            or type(customer_mode) is not bool):
+            or type(customer_mode) is not bool
+            or (request_key is not None and not isinstance(request_key, UUID))):
         raise AppointmentDenied("invalid identifiers")
     from .session_lookup import session_subject
     with conn.transaction():
@@ -375,8 +377,30 @@ def cancel_appointment(conn: psycopg.Connection, token: str,
         ).fetchone()
         if booking is None:
             raise AppointmentDenied("booking unavailable")
+        # Revalidate rights before reading any receipt; revoked grants never replay.
+        if request_key is not None:
+            receipt = conn.execute(
+                """SELECT appointment_id,booking_id FROM auto_cancel_idempotency
+                   WHERE organization_id=%s AND actor_id=%s AND request_key=%s""",
+                (organization,actor,request_key),
+            ).fetchone()
+            if receipt is not None:
+                if receipt != (appointment,booking[0]) or booking[1] is None:
+                    raise AppointmentKeyConflict("cancel receipt does not match")
+                return "CANCELED"
         if booking[1] is not None:
             return "ALREADY_CANCELED"
+        if request_key is not None:
+            inserted = conn.execute(
+                """INSERT INTO auto_cancel_idempotency
+                   (organization_id,actor_id,request_key,appointment_id,booking_id)
+                   VALUES(%s,%s,%s,%s,%s)
+                   ON CONFLICT (organization_id,actor_id,request_key) DO NOTHING
+                   RETURNING request_key""",
+                (organization,actor,request_key,appointment,booking[0]),
+            ).fetchone()
+            if inserted is None:
+                raise AppointmentKeyConflict("cancel key already used")
         try:
             with conn.transaction():
                 conn.execute(

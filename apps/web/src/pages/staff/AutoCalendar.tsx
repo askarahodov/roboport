@@ -295,7 +295,7 @@ export function AutoCalendar() {
   async function action(path:string,payload:unknown,success:string,
                         retry?:{path:string;body:string;key:string;success:string;org:string;location:string}){
     if(busy||!valid||(pending&&!retry))return;
-    const isIdempotent=path.endsWith('/reschedule')||path.endsWith('/appointments');
+    const isIdempotent=path.endsWith('/reschedule')||path.endsWith('/appointments')||path.endsWith('/cancel');
     const snapshot=retry??(isIdempotent?{
       path,body:JSON.stringify(payload),key:crypto.randomUUID(),success,
       org:org.trim(),location:location.trim(),
