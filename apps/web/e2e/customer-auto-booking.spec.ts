@@ -110,7 +110,7 @@ test('customer booking hides own resources immediately after 403',async({page})=
   });
   await page.goto('/account/auto-booking');
   const region=page.getByRole('region',{name:'Самостоятельная запись автомобиля (dev)'});
-  await expect(region.getByText('Synthetic Sedan',{exact:false})).toBeVisible();
+  await expect(region.getByRole('combobox',{name:'Автомобиль и пост'})).toHaveValue(link+':'+bay);
   forbidden=true;
   await region.getByRole('button',{name:'Обновить мои записи'}).click();
   await expect(region.getByRole('alert')).toContainText('Доступ к записи запрещён');
