@@ -143,10 +143,13 @@ test('selected workshop service is sent with the first booking in one payload',a
         syntheticOnly:true,items:[{id:service,code:'SVC-001',title:'Тестовая работа',
           durationMinutes:30}],
       })});
-    if(req.method()==='GET'&&url.pathname.endsWith('/slots'))
+    if(req.method()==='GET'&&url.pathname.endsWith('/slots')){
+      expect(url.searchParams.getAll('serviceId')).toEqual([service]);
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
-        syntheticOnly:true,guaranteed:false,timeZone:'Europe/Berlin',items:[first],
+        syntheticOnly:true,guaranteed:false,timeZone:'Europe/Berlin',
+        items:[{startsAt:first.startsAt,endsAt:'2030-01-01T10:30:00Z'}],
       })});
+    }
     if(req.method()==='POST'&&url.pathname.endsWith('/appointments')){
       saved=req.postDataJSON();
       return route.fulfill({status:201,contentType:'application/json',
@@ -161,7 +164,7 @@ test('selected workshop service is sent with the first booking in one payload',a
   await region.getByLabel('Услуга SVC-001').check();
   await region.getByLabel('День филиала').fill('2030-01-01');
   await region.getByRole('button',{name:'Показать свободные окна'}).click();
-  await region.getByRole('button',{name:/01\.01\.2030.*11:00/}).click();
+  await region.getByRole('button',{name:/01\.01\.2030.*10:30/}).click();
   await expect.poll(()=>saved).not.toBeNull();
   expect(saved?.serviceIds).toEqual([service]);
   expect(saved?.customerLinkId).toBe(link);
