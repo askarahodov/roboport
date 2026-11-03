@@ -52,7 +52,7 @@ def upgrade():
         start_min numeric;
         end_min numeric;
         weekday int;
-        window jsonb;
+        opening_entry jsonb;
       BEGIN
         IF p_zone IS NULL OR p_windows IS NULL OR p_starts IS NULL
            OR p_ends IS NULL OR p_ends <= p_starts THEN
@@ -78,10 +78,10 @@ def upgrade():
                    + extract(minute from local_start)
                    + extract(second from local_start)/60;
         weekday := extract(isodow from local_start)::int;
-        FOR window IN SELECT value FROM jsonb_array_elements(p_windows) LOOP
-          IF (window->>'weekday')::int=weekday
-             AND start_min >= (window->>'opensMinute')::int
-             AND end_min <= (window->>'closesMinute')::int THEN
+        FOR opening_entry IN SELECT value FROM jsonb_array_elements(p_windows) LOOP
+          IF (opening_entry->>'weekday')::int=weekday
+             AND start_min >= (opening_entry->>'opensMinute')::int
+             AND end_min <= (opening_entry->>'closesMinute')::int THEN
             RETURN true;
           END IF;
         END LOOP;
