@@ -11,6 +11,16 @@ class SlotsDenied(ValueError):
     pass
 
 
+def parse_slot_services(values: list[str]) -> tuple[UUID, ...]:
+    """До восьми уникальных UUID из повторяемых query-полей serviceId."""
+    if len(values) > 8:
+        raise ValueError("too many selected services")
+    ids = tuple(UUID(value) for value in values)
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate selected service")
+    return ids
+
+
 def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                     location: UUID, bay: UUID, start: datetime,
                     employee: UUID | None = None,
