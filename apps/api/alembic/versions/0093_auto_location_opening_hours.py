@@ -81,7 +81,30 @@ def upgrade():
         FOR opening_entry IN SELECT value FROM jsonb_array_elements(p_windows) LOOP
           IF (opening_entry->>'weekday')::int=weekday
              AND start_min >= (opening_entry->>'opensMinute')::int
-             AND end_min <= (opening_entry->>'closesMinute')::int THEN
+             AND end_min <= (opening_entry->>'closesMinute')::int
+             -- Start/end alone are insufficient during the repeated autumn
+             -- hour: intermediate local time may leave the opening window.
+             -- Minute checkpoints plus the last microsecond cover both DST
+             -- folds without converting ambiguous local wall times to UTC.
+             AND NOT EXISTS (
+               SELECT 1
+               FROM (
+                 SELECT tick FROM generate_series(
+                   p_starts,p_ends - interval '1 microsecond',
+                   interval '1 minute'
+                 ) AS point(tick)
+                 UNION ALL SELECT p_ends - interval '1 microsecond'
+               ) checkpoints
+               WHERE (tick AT TIME ZONE p_zone)::date<>start_date
+                  OR (extract(hour from tick AT TIME ZONE p_zone)*60
+                      + extract(minute from tick AT TIME ZONE p_zone)
+                      + extract(second from tick AT TIME ZONE p_zone)/60)
+                     < (opening_entry->>'opensMinute')::int
+                  OR (extract(hour from tick AT TIME ZONE p_zone)*60
+                      + extract(minute from tick AT TIME ZONE p_zone)
+                      + extract(second from tick AT TIME ZONE p_zone)/60)
+                     >= (opening_entry->>'closesMinute')::int
+             ) THEN
             RETURN true;
           END IF;
         END LOOP;
