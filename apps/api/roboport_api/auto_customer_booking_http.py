@@ -14,7 +14,7 @@ from .auto_customer_booking import bookable_resources, my_appointments
 from .auto_appointment_service import (
     create_appointment, reschedule_appointment, cancel_appointment,
     _customer_scope, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict,
-    AppointmentDurationInvalid,
+    AppointmentDurationInvalid, AppointmentHoursClosed,
 )
 from .auto_slot_candidates import candidate_slots, SlotsDenied, parse_slot_services
 
@@ -113,10 +113,16 @@ def get_slots(request: Request, organizationId: str, locationId: str,
                     db, token, org, loc, bay, start,
                     day_end=end, customer_link=link, service_ids=selected_services,
                 )
+                hours_configured = db.execute(
+                    """SELECT 1 FROM auto_location_opening_policy
+                       WHERE location_id=%s AND organization_id=%s""",
+                    (loc,org),
+                ).fetchone() is not None
         except (AppointmentDenied, SlotsDenied, ZoneInfoNotFoundError):
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(content={"items":items,"timeZone":row[0],
-                                 "guaranteed":False,"syntheticOnly":True},
+                                 "guaranteed":False,"syntheticOnly":True,
+                                 "openingHoursConfigured":hours_configured},
                         headers={"Cache-Control":"no-store"})
 
 
@@ -177,6 +183,8 @@ async def create_customer_booking(request: Request):
             return _response(request, 409, "IDEMPOTENCY_KEY_REUSED")
         except AppointmentDurationInvalid:
             return _response(request, 422, "SERVICES_EXCEED_SLOT")
+        except AppointmentHoursClosed:
+            return _response(request, 409, "LOCATION_CLOSED")
         except AppointmentConflict:
             return _response(request, 409, "RESOURCE_BUSY")
     return JSONResponse(status_code=201,content={
@@ -208,6 +216,8 @@ async def reschedule_customer_booking(appointment_id: str, request: Request):
             return _response(request, 403, "FORBIDDEN")
         except AppointmentKeyConflict:
             return _response(request, 409, "IDEMPOTENCY_KEY_REUSED")
+        except AppointmentHoursClosed:
+            return _response(request, 409, "LOCATION_CLOSED")
         except AppointmentConflict:
             return _response(request, 409, "RESOURCE_BUSY")
     return JSONResponse(content={"status":"RESCHEDULED","bookingId":str(booking)},
