@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, Field
 
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
@@ -28,7 +28,7 @@ class CustomerCreate(BaseModel):
     bayId: UUID
     startsAt: datetime
     endsAt: datetime
-    serviceIds: list[UUID] = []
+    serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
 
 
 class CustomerMove(BaseModel):
