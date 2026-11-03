@@ -13,6 +13,7 @@ from roboport_api.auto_appointment_service import (
     AppointmentConflict,
 )
 from roboport_api.auto_work_order_stock import mutate_work_order_stock
+from roboport_api.auto_work_order_return import return_work_order_stock
 from test_pg_auto_customer_booking_http import _setup, _auth, ROOT
 from test_pg_auto_stock_ledger import sku, record, balance
 from test_pg_auto_stock_service import grant
@@ -123,4 +124,18 @@ def test_rescheduled_work_order_can_complete_reserved_issue_without_orphan(monke
         assert db.execute(
             "SELECT count(*) FROM auto_work_order_stock_event WHERE work_order_id=%s",
             (order,),
+        ).fetchone()[0]==3
+        receipt=return_work_order_stock(
+            db,token,org,loc,order,item,uuid4(),1,
+        )
+        assert receipt
+        assert balance(db,item)==(5,0)
+        assert cancel_appointment(db,token,org,appointment)=="CANCELED"
+        assert db.execute(
+            "SELECT canceled_at IS NOT NULL FROM auto_bay_booking WHERE id=%s",(newer,)
+        ).fetchone()==(True,)
+        assert db.execute(
+            """SELECT count(*) FROM notification_outbox
+               WHERE aggregate_type='auto_appointment' AND aggregate_id=%s""",
+            (appointment,),
         ).fetchone()[0]==3
