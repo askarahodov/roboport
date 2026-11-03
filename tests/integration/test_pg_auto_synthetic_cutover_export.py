@@ -73,7 +73,7 @@ def test_export_fails_closed_for_revoked_grant_wrong_scope_and_real_data_flag(tm
         _go(db,d,org,loc,sources)
         with pytest.raises(SyntheticCutoverDenied,match="INVALID_INPUT"):
             _export(db,d,org,loc,sources,tmp_path/"not-synthetic",synthetic_only=False)
-        with pytest.raises(SyntheticCutoverDenied,match="SOURCE_MISMATCH"):
+        with pytest.raises(SyntheticCutoverDenied,match="SOURCE_UNAVAILABLE"):
             _export(db,d,org,loc,replace(sources,vehicle_sha256="0"*64),
                     tmp_path/"wrong-hash")
         with pytest.raises(SyntheticCutoverDenied,match="FORBIDDEN"):
