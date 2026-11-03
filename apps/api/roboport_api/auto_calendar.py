@@ -41,9 +41,12 @@ def local_day_window(conn: psycopg.Connection, token: str, org: UUID,
             zone = ZoneInfo(row[0])
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise CalendarDenied("location timezone unavailable") from exc
-        start = datetime(parsed.year, parsed.month, parsed.day, tzinfo=zone)
-        tomorrow = parsed + timedelta(days=1)
-        end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=zone)
+        try:
+            start = datetime(parsed.year, parsed.month, parsed.day, tzinfo=zone)
+            tomorrow = parsed + timedelta(days=1)
+            end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=zone)
+        except (OverflowError, ValueError) as exc:
+            raise CalendarInvalid("local day outside supported range") from exc
         return start, end, row[0]
 
 
