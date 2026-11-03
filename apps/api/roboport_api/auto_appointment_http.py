@@ -106,6 +106,8 @@ def cancel(org_id: str, appointment_id: str, request: Request):
             outcome=cancel_appointment(db,request.cookies.get("rp_session",""),org,ident)
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
+        except AppointmentConflict:
+            return _response(request,409,"STOCK_RECONCILIATION_REQUIRED")
     return JSONResponse(content={"status":outcome},headers={"Cache-Control":"no-store"})
 
 

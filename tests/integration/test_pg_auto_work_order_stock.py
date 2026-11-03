@@ -86,6 +86,12 @@ def test_foreign_order_and_role_denied_and_closed_booking():
         with pytest.raises(AutoStockDenied):
             act(db,d,org,loc,order,local_item,"RESERVE",1,actor=d["manager"])
         act(db,d,org,loc,order,local_item,"RESERVE",1)
+        # Current lifecycle protection blocks direct cancellation while stock
+        # is reserved, preventing stranded stock.
+        with pytest.raises(psycopg.errors.RaiseException,match="reconciled before cancel"):
+            with db.transaction():
+                db.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",(booking,))
+        act(db,d,org,loc,order,local_item,"RELEASE",1)
         db.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",(booking,))
         with pytest.raises(AutoStockConflict):
             act(db,d,org,loc,order,local_item,"ISSUE",1)

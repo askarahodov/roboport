@@ -48,7 +48,18 @@ def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
                       OR EXISTS (SELECT 1 FROM auto_work_order_inspection i
                                  WHERE i.work_order_id=w.id)
                       OR EXISTS (SELECT 1 FROM auto_work_order_estimate_revision r
-                                 WHERE r.work_order_id=w.id) AS started
+                                 WHERE r.work_order_id=w.id)
+                      OR EXISTS (
+                        SELECT 1 FROM auto_work_order_stock_event e
+                        WHERE e.work_order_id=w.id
+                        GROUP BY e.work_order_id
+                        HAVING SUM(CASE WHEN e.action='RESERVE' THEN e.quantity
+                                        WHEN e.action IN ('ISSUE','RELEASE') THEN -e.quantity
+                                        ELSE 0 END)>0
+                            OR SUM(CASE WHEN e.action='ISSUE' THEN e.quantity
+                          WHEN e.action='RETURN' THEN -e.quantity
+                          ELSE 0 END) > 0
+                      ) AS started
                FROM auto_appointment a
                JOIN auto_vehicle_customer_link proof ON proof.id=a.customer_link_id
                  AND proof.vehicle_id=a.vehicle_id

@@ -74,13 +74,19 @@ def test_cross_tenant_role_revocation_and_canceled_booking():
             ret(db,d,org,loc,order,other,1)
         with pytest.raises(AutoStockDenied):
             ret(db,d,org,loc,order,item,1,actor=d["manager"])
+        with pytest.raises(psycopg.errors.RaiseException,match="reconciled before cancel"):
+            with db.transaction():
+                db.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",(booking,))
+        # A proper immutable RETURN reconciles the issued material, after
+        # which the cancellation can be performed without orphaning stock.
+        ret(db,d,org,loc,order,item,1)
         db.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",(booking,))
         with pytest.raises(AutoStockConflict):
             ret(db,d,org,loc,order,item,1)
         db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(grant_id,))
         with pytest.raises(AutoStockDenied):
             ret(db,d,org,loc,order,item,1)
-        assert balance(db,item)==(1,0)
+        assert balance(db,item)==(2,0)
 
 
 def test_direct_return_without_matching_order_event_cannot_commit():

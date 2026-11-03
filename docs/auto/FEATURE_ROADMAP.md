@@ -133,3 +133,11 @@
 ## Подбор слотов по длительности работ (current-dev, #113)
 
 В закрытых API клиента (`GET .../customer/booking/slots`) и сотрудника (`GET .../organizations/{org}/slot-candidates`) повторяемые query-параметры `serviceId` выбирают не более 8 уникальных услуг своей организации/филиала. PostgreSQL вычисляет полную длительность по каталогу, а не по данным клиента; без выбора сохраняются одночасовые кандидаты. Начало слота кратно 30 минутам, окончание не выходит за границы UTC/локальных суток (23–25 часов при IANA DST), а SQL отсекает конфликты поста и занятость/смену сотрудника при назначении. Данные чужого каталога отклоняются (`403`), неверные UUID/дубли/более восьми значений — `422`; `guaranteed:false`, повторные проверки при создании обязательны. Оба UI очищают кандидаты при изменении выбранных услуг. PG17/HTTP тесты: `tests/integration/test_pg_auto_service_duration_slots.py`; browser E2E: `apps/web/e2e/customer-auto-booking.spec.ts`, `apps/web/e2e/auto-calendar.spec.ts`. Склад/материалы/стоимость, delivery/consent и production gate #119 остаются блокерами; #113 не закрывать.
+
+
+## Безопасный lifecycle записи и складского резерва (current-dev, #113)
+
+Миграция `0091_auto_booking_stock_guard` защищает от отвязанных запасов: отмена действующей брони с открытым `RESERVE` или непогашенной выдачей `ISSUE - RETURN` блокируется PostgreSQL даже при прямом UPDATE; STAFF получает `409 STOCK_RECONCILIATION_REQUIRED`, CLIENT — `403` и `canManage:false`. После полного `RELEASE` и/или `RETURN` без открытых складских обязательств отмена снова допустима. Перенос сохраняет WorkOrder и складские события; функции `record_auto_work_order_stock` и `record_auto_work_order_return` теперь проверяют последнюю актуальную бронь из immutable истории переносов. Regression tests `test_pg_auto_booking_stock_guard.py` и существующие `test_pg_auto_work_order_stock.py`. Остался внешний/полный workflow покупки, резерва и возврата материалов, цены, consent/privacy и release gate #119; **#113 остаётся открытой**.
+
+
+Парные warehouse lot-функции `record_auto_stock_lot_work_order_issue` и `record_auto_stock_lot_work_order_return` также сверяют текущую бронь после переноса (не первоначальную), с PG17 полным циклом `test_pg_auto_booking_lot_move_reconcile.py`. Не допускается двойное списание партий или отмена до закрытия `ISSUE-RETURN` и `RESERVE-ISSUE-RELEASE`.
