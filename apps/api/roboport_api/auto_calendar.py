@@ -1,6 +1,8 @@
 """Bounded synthetic staff calendar; no customer personal data in responses."""
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from uuid import UUID
+import re
 import psycopg
 from .auto_org_authority import organization_role_allows
 
@@ -11,6 +13,39 @@ class CalendarDenied(ValueError):
 class CalendarInvalid(ValueError):
     """Invalid calendar window/cursor; not an authorization failure."""
     pass
+
+def local_day_window(conn: psycopg.Connection, token: str, org: UUID,
+                     location: UUID, local_day: str) -> tuple[datetime, datetime, str]:
+    """Локальные сутки филиала; их длительность может быть 23/24/25 часов."""
+    if (not isinstance(local_day, str) or
+        re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", local_day) is None):
+        raise CalendarInvalid("invalid local day")
+    try:
+        parsed = date.fromisoformat(local_day)
+        if parsed.isoformat() != local_day:
+            raise ValueError("noncanonical local day")
+    except ValueError as exc:
+        raise CalendarInvalid("invalid local day") from exc
+    with conn.transaction():
+        if not organization_role_allows(conn, token, org, "INTAKE", location,
+                                        for_mutation=True):
+            raise CalendarDenied("intake authority required")
+        row = conn.execute(
+            """SELECT timezone_name FROM auto_service_location
+               WHERE id=%s AND organization_id=%s AND disabled_at IS NULL""",
+            (location, org),
+        ).fetchone()
+        if row is None:
+            raise CalendarDenied("location unavailable")
+        try:
+            zone = ZoneInfo(row[0])
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise CalendarDenied("location timezone unavailable") from exc
+        start = datetime(parsed.year, parsed.month, parsed.day, tzinfo=zone)
+        tomorrow = parsed + timedelta(days=1)
+        end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=zone)
+        return start, end, row[0]
+
 
 def calendar_items(conn: psycopg.Connection, token: str, org: UUID, location: UUID,
                    start: datetime, end: datetime, after_start: datetime | None = None,
