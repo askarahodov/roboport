@@ -130,9 +130,12 @@ def _verify_source_staging(conn: psycopg.Connection,
         raise SyntheticCutoverDenied("SOURCE_MISMATCH")
 
     # _load is strict, verifies a no-follow source snapshot and SHA-256.
-    service_lines=_load_service_source(
-        sources.service_path,sources.service_sha256,
-    )
+    try:
+        service_lines=_load_service_source(
+            sources.service_path,sources.service_sha256,
+        )
+    except ValueError:
+        raise SyntheticCutoverDenied("SOURCE_MISMATCH") from None
     stored_services=conn.execute(
         """SELECT row_number,source_system,source_id,code,title,duration_minutes
            FROM auto_service_import_line WHERE batch_id=%s ORDER BY row_number""",
@@ -143,11 +146,14 @@ def _verify_source_staging(conn: psycopg.Connection,
 
     # This dedicated reconciler is SELECT-only and checks all STOCK/SKU rows,
     # quantities, source order, hash and tenant against the staged PG batch.
-    reconcile_synthetic_staging(
-        conn,sources.inventory_path,organization_id=org,
-        batch_id=sources.inventory_batch_id,
-        expected_sha256=sources.inventory_sha256,
-    )
+    try:
+        reconcile_synthetic_staging(
+            conn,sources.inventory_path,organization_id=org,
+            batch_id=sources.inventory_batch_id,
+            expected_sha256=sources.inventory_sha256,
+        )
+    except ValueError:
+        raise SyntheticCutoverDenied("SOURCE_MISMATCH") from None
 
 
 def _read_promoted(conn: psycopg.Connection,org: UUID,loc: UUID,
