@@ -180,9 +180,10 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                 fingerprint_body["services"] = sorted(str(item) for item in service_ids)
             if material_items:
                 fingerprint_body["materials"] = sorted(
-                    {"skuId":str(sku),"kind":kind,"quantity":quantity}
-                    for sku,kind,quantity in material_items
-                ,key=lambda item:item["skuId"])
+                    [{"skuId":str(sku),"kind":kind,"quantity":quantity}
+                     for sku,kind,quantity in material_items],
+                    key=lambda item:item["skuId"],
+                )
             fingerprint = hashlib.sha256(json.dumps(
                 fingerprint_body,sort_keys=True,separators=(",",":")
             ).encode()).hexdigest()
