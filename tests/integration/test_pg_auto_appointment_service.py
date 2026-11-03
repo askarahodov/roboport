@@ -181,10 +181,12 @@ def test_reschedule_idempotency_replay_mismatch_and_no_duplicate_events():
         second=reschedule_appointment(db,token,org,a,bay,
                         start+timedelta(hours=4),start+timedelta(hours=5))
         assert second != first
-        # Replaying an old key still returns the original booking ID.
-        assert reschedule_appointment(db,token,org,a,bay,
-                        start+timedelta(hours=2),start+timedelta(hours=3),
-                        request_key=key)==first
+        # An earlier receipt cannot advertise a booking superseded by another
+        # successful reschedule. The old key must fail closed without writes.
+        with pytest.raises(AppointmentKeyConflict):
+            reschedule_appointment(db,token,org,a,bay,
+                            start+timedelta(hours=2),start+timedelta(hours=3),
+                            request_key=key)
         assert db.execute("SELECT count(*) FROM auto_appointment_reschedule WHERE appointment_id=%s",
                           (a,)).fetchone()[0]==2
         assert db.execute("SELECT count(*) FROM auto_bay_booking WHERE organization_id=%s",
