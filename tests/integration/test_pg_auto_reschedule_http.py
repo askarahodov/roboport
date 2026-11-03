@@ -40,14 +40,22 @@ def test_reschedule_then_cancel_current_booking_and_audit(monkeypatch):
     assert client.post(res,json=payload).status_code==403
     wrong=f"/api/v1/dev/auto/organizations/{other}/appointments/{appointment}/reschedule"
     assert client.post(wrong,json=payload,headers=headers).status_code==403
-    moved=client.post(res,json=payload,headers=headers)
+    retry_headers={**headers,"Idempotency-Key":str(uuid4())}
+    moved=client.post(res,json=payload,headers=retry_headers)
     assert moved.status_code==200,moved.text
     fresh=moved.json()["bookingId"]
     assert fresh!=old
+    replay=client.post(res,json=payload,headers=retry_headers)
+    assert replay.status_code==200,replay.text
+    assert replay.json()["bookingId"]==fresh
     assert client.post(res,json=payload,headers=headers).status_code==409
     canceled=client.post(f"{url}/{appointment}/cancel",headers=headers)
     assert canceled.status_code==200,canceled.text
     assert canceled.json()["status"]=="CANCELED"
+    # A receipt for a canceled booking cannot report a fresh success.
+    stale=client.post(res,json=payload,headers=retry_headers)
+    assert stale.status_code==409,stale.text
+    assert stale.json()["error"]["code"]=="IDEMPOTENCY_KEY_REUSED" if "error" in stale.json() else stale.status_code==409
     assert client.post(f"{url}/{appointment}/cancel",headers=headers).json()["status"]=="ALREADY_CANCELED"
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT canceled_at IS NOT NULL FROM auto_bay_booking WHERE id=%s""",
