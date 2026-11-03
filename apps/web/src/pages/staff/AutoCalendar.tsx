@@ -4,6 +4,18 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Service={id:string;code:string;title:string;durationMinutes:number};
 type StockItem={skuId:string;article:string;available:number};
 type BookingMaterial={skuId:string;kind:'PART'|'CONSUMABLE';quantity:number};
+type OpeningPolicy={configured:boolean;version:number;timeZone:string;
+  windows:Array<{weekday:number;opensMinute:number;closesMinute:number}>;
+  closedDates:string[];syntheticOnly:true};
+type OpeningDraft={weekday:number;open:string;close:string};
+const weekdays=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+const toClock=(minutes:number)=>String(Math.floor(minutes/60)).padStart(2,'0')+':'+
+  String(minutes%60).padStart(2,'0');
+const fromClock=(value:string)=>{
+  if(!/^(?:[01]\d|2[0-4]):[0-5]\d$/.test(value))return NaN;
+  const [h,m]=value.split(':').map(Number);
+  return h===24&&m!==0?NaN:h*60+m;
+};
 type Entry = { appointmentId:string; bookingId:string; bayId:string;
   startsAt:string; endsAt:string; workOrderId:string; employeeId:string|null };
 type Form = { bay:string; link:string; employee:string; starts:string; ends:string };
@@ -42,6 +54,12 @@ export function AutoCalendar() {
   const [stock,setStock]=React.useState<StockItem[]>([]);
   const [materials,setMaterials]=React.useState<BookingMaterial[]>([]);
   const [stockMessage,setStockMessage]=React.useState('');
+  const [opening,setOpening]=React.useState<OpeningPolicy|null>(null);
+  const [openingState,setOpeningState]=React.useState('График загружается…');
+  const [openingWindows,setOpeningWindows]=React.useState<OpeningDraft[]>([]);
+  const [closedText,setClosedText]=React.useState('');
+  const [openingBusy,setOpeningBusy]=React.useState(false);
+  const [openingRevision,setOpeningRevision]=React.useState(0);
   const [busy,setBusy]=React.useState(false);
   const [slots,setSlots]=React.useState<Array<{startsAt:string;endsAt:string}>>([]);
   const [slotsMessage,setSlotsMessage]=React.useState('');
@@ -129,8 +147,88 @@ export function AutoCalendar() {
       }).catch(()=>{if(!controller.signal.aborted)setStockMessage('Каталог остатков недоступен.');});
     return ()=>controller.abort();
   },[org,location]);
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    setOpening(null);setOpeningWindows([]);setClosedText('');
+    if(!uuid.test(org.trim())||!uuid.test(location.trim())){
+      setOpeningState('Укажите филиал для просмотра графика.');
+      return ()=>controller.abort();
+    }
+    setOpeningState('График загружается…');
+    const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
+      '/locations/'+encodeURIComponent(location.trim())+'/opening-hours';
+    void fetch(url,{credentials:'include',cache:'no-store',signal:controller.signal})
+      .then(async response=>{
+        if(controller.signal.aborted)return;
+        if(response.status===403){setOpeningState('Для просмотра графика требуется INTAKE или MANAGER.');return;}
+        if(!response.ok)throw Error('opening');
+        const raw:unknown=await response.json();
+        if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||
+          raw.syntheticOnly!==true||!('configured' in raw)||
+          typeof raw.configured!=='boolean'||!('version' in raw)||
+          !Number.isInteger(raw.version)||!('windows' in raw)||
+          !Array.isArray(raw.windows)||!('closedDates' in raw)||
+          !Array.isArray(raw.closedDates)||!('timeZone' in raw)||
+          typeof raw.timeZone!=='string')throw Error('shape');
+        if(!controller.signal.aborted){
+          const policy=raw as OpeningPolicy;
+          setOpening(policy);
+          setOpeningWindows(policy.windows.map(x=>({
+            weekday:x.weekday,open:toClock(x.opensMinute),close:toClock(x.closesMinute),
+          })));
+          setClosedText(policy.closedDates.join('\n'));
+          setOpeningState(policy.configured?'График филиала настроен.':
+            'График филиала не настроен: dev-кандидаты не ограничены часами работы.');
+        }
+      }).catch(()=>{if(!controller.signal.aborted)setOpeningState('Не удалось получить график филиала.');});
+    return ()=>controller.abort();
+  },[org,location,openingRevision]);
   function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
   function resetPage(){setCursor(null);setHistory([]);resetSlots();}
+  async function saveOpening(){
+    if(!opening||openingBusy||busy||!valid)return;
+    const windows=openingWindows.map(x=>({
+      weekday:x.weekday,opensMinute:fromClock(x.open),closesMinute:fromClock(x.close),
+    }));
+    const dates=closedText.split(/[\s,;]+/).filter(Boolean);
+    if(windows.length>28||windows.some(x=>!Number.isInteger(x.weekday)||
+      !Number.isInteger(x.opensMinute)||!Number.isInteger(x.closesMinute)||
+      x.weekday<1||x.weekday>7||x.opensMinute<0||x.opensMinute>=x.closesMinute||
+      x.closesMinute>1440)||dates.length>120||
+      dates.some(x=>!validUtcDay(x))||new Set(dates).size!==dates.length){
+      setOpeningState('Проверьте часы (например, 09:00–18:00), дни и уникальные даты закрытия.');
+      return;
+    }
+    const scopedOrg=org.trim(),scopedLoc=location.trim();
+    setOpeningBusy(true);setOpeningState('Сохранение графика…');
+    try{
+      const csrf=await fetch('/api/v1/auth/csrf',{
+        method:'POST',credentials:'include',cache:'no-store',
+      });
+      if(!csrf.ok)throw Error('csrf');
+      const token:unknown=await csrf.json();
+      if(!token||typeof token!=='object'||!('csrfToken' in token)||
+        typeof token.csrfToken!=='string')throw Error('csrf');
+      const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(scopedOrg)+
+        '/locations/'+encodeURIComponent(scopedLoc)+'/opening-hours';
+      const response=await fetch(url,{
+        method:'POST',credentials:'include',cache:'no-store',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':token.csrfToken},
+        body:JSON.stringify({expectedVersion:opening.version,windows,closedDates:dates}),
+      });
+      if(requestScope.current.org!==scopedOrg||requestScope.current.location!==scopedLoc)return;
+      if(response.status===409){
+        setOpeningState('График изменён другим сотрудником или нарушает существующую бронь. Обновите страницу.');return;
+      }
+      if(response.status===403){setOpeningState('Для изменения графика нужна роль MANAGER.');return;}
+      if(!response.ok){setOpeningState('Ошибка графика ('+response.status+').');return;}
+      setOpeningState('График сохранён.');setOpeningRevision(n=>n+1);
+      resetPage();setRevision(n=>n+1);
+    }catch{
+      if(requestScope.current.org===scopedOrg&&requestScope.current.location===scopedLoc)
+        setOpeningState('Результат неизвестен. Повторно загрузите график перед изменением.');
+    }finally{setOpeningBusy(false);}
+  }
   React.useEffect(()=>{setPending(null);},[org,location]);
   async function findSlots(){
     const retained=target?items.find(x=>x.appointmentId===target)?.employeeId:null;
@@ -248,6 +346,49 @@ export function AutoCalendar() {
     <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>{resetPage();setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>{resetPage();setLocation(e.target.value);}}/></label>
     <label>День филиала <input aria-label="День филиала" type="date" value={day} onChange={e=>{resetPage();setDay(e.target.value);}}/></label>
+    <fieldset aria-label="График работы филиала (dev)">
+      <legend>Часы работы и закрытые даты</legend>
+      <p>Настройка для филиала по его часовому поясу. Просмотр: INTAKE/MANAGER; изменение: только MANAGER. Без настройки dev-режим сохраняет старые круглосуточные кандидаты и не готов к production.</p>
+      <p>{openingState}</p>
+      {opening&&<>
+        <p>Версия {opening.version}; зона {opening.timeZone}. Времена указываются по местным часам.</p>
+        {openingWindows.map((window,index)=><div key={index}>
+          <label>День интервала {index+1}
+            <select aria-label={'День интервала '+(index+1)} value={window.weekday}
+              onChange={e=>setOpeningWindows(old=>old.map((w,i)=>i===index?
+                {...w,weekday:Number(e.target.value)}:w))}>
+              {weekdays.map((d,i)=><option key={d} value={i+1}>{d}</option>)}
+            </select>
+          </label>
+          <label>Открытие {index+1}
+            <input aria-label={'Открытие '+(index+1)} value={window.open}
+              onChange={e=>setOpeningWindows(old=>old.map((w,i)=>i===index?
+                {...w,open:e.target.value}:w))} placeholder="09:00"/>
+          </label>
+          <label>Закрытие {index+1}
+            <input aria-label={'Закрытие '+(index+1)} value={window.close}
+              onChange={e=>setOpeningWindows(old=>old.map((w,i)=>i===index?
+                {...w,close:e.target.value}:w))} placeholder="18:00"/>
+          </label>
+          <button type="button" disabled={openingBusy} onClick={()=>setOpeningWindows(old=>
+            old.filter((_,i)=>i!==index))}>Удалить интервал {index+1}</button>
+        </div>)}
+        <button type="button" disabled={openingBusy||openingWindows.length>=28}
+          onClick={()=>setOpeningWindows(old=>[...old,{weekday:1,open:'09:00',close:'18:00'}])}>
+          Добавить рабочий интервал
+        </button>
+        <label>Закрытые даты (ISO YYYY-MM-DD, через запятую или строку)
+          <textarea aria-label="Закрытые даты" value={closedText}
+            onChange={e=>setClosedText(e.target.value)} rows={2}
+            placeholder="2030-01-01"/>
+        </label>
+        <p>Пустой список интервалов закрывает весь филиал после сохранения. Уже подтверждённые будущие брони нельзя сделать недействительными изменением графика.</p>
+        <button type="button" disabled={openingBusy||busy}
+          onClick={()=>void saveOpening()}>Сохранить график филиала</button>
+        <button type="button" disabled={openingBusy}
+          onClick={()=>setOpeningRevision(n=>n+1)}>Перезагрузить график</button>
+      </>}
+    </fieldset>
     {status==='idle'&&<p>Укажите организацию, филиал и день.</p>}
     {status==='loading'&&<p role="status">Загрузка календаря…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или dev API отключён.</p>}
