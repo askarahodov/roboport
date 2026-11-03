@@ -120,6 +120,16 @@ def test_staff_create_booking_and_selected_service_share_one_transaction(monkeyp
     from test_pg_auto_stock_service import grant
     with psycopg.connect(DSN) as db:
         grant(db, d["intake"], org, loc, "INTAKE")
+    staff_catalog = f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/booking-services"
+    assert http.get(staff_catalog).status_code == 403
+    http.cookies.set("rp_session", d["tokens"][d["intake"]])
+    own = http.get(staff_catalog)
+    assert own.status_code == 200, own.text
+    assert {item["id"] for item in own.json()["items"]} == {
+        str(first),str(second),str(long),
+    }
+    assert str(foreign) not in own.text
+    assert http.get(staff_catalog.replace(str(loc),str(other_loc))).status_code == 403
     token = d["tokens"][d["intake"]]
     starts = datetime.now(timezone.utc)+timedelta(days=27)
     with psycopg.connect(DSN) as db:
