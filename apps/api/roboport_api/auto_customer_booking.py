@@ -44,11 +44,26 @@ def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
                       b.id,b.bay_id,b.starts_at,b.ends_at,b.canceled_at,
                       w.id,loc.timezone_name,
                       EXISTS (SELECT 1 FROM auto_work_order_service s
-                              WHERE s.work_order_id=w.id)
+                              WHERE s.work_order_id=w.id AND s.origin='STAFF')
                       OR EXISTS (SELECT 1 FROM auto_work_order_inspection i
                                  WHERE i.work_order_id=w.id)
                       OR EXISTS (SELECT 1 FROM auto_work_order_estimate_revision r
-                                 WHERE r.work_order_id=w.id) AS started
+                                 WHERE r.work_order_id=w.id)
+                      OR EXISTS (SELECT 1 FROM auto_work_order_stock_event e
+                                 WHERE e.work_order_id=w.id) AS started,
+                      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                        'serviceId',s.id,'title',s.title,'durationMinutes',s.duration_minutes
+                      ) ORDER BY s.code,s.id)
+                        FROM auto_work_order_service chosen
+                        JOIN auto_service_catalog s ON s.id=chosen.service_id
+                        WHERE chosen.work_order_id=w.id),'[]'::jsonb) AS services,
+                      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                        'skuId',sku.id,'article',sku.article,'kind',m.kind,
+                        'quantity',m.quantity
+                      ) ORDER BY sku.article,sku.id,m.kind)
+                        FROM auto_work_order_material_request m
+                        JOIN auto_stock_sku sku ON sku.id=m.sku_id
+                        WHERE m.work_order_id=w.id),'[]'::jsonb) AS materials
                FROM auto_appointment a
                JOIN auto_vehicle_customer_link proof ON proof.id=a.customer_link_id
                  AND proof.vehicle_id=a.vehicle_id
@@ -81,5 +96,6 @@ def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
                  "startsAt":start.isoformat(),"endsAt":end.isoformat(),
                  "status":"CANCELED" if canceled is not None else "SCHEDULED",
                  "workOrderId":str(w),"timeZone":zone,
-                 "canManage":canceled is None and not started}
-                for a,o,l,link,booking,bay,start,end,canceled,w,zone,started in rows]
+                 "canManage":canceled is None and not started,
+                 "services":services,"materials":materials}
+                for a,o,l,link,booking,bay,start,end,canceled,w,zone,started,services,materials in rows]
