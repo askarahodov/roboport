@@ -18,7 +18,7 @@ def local_day_window(conn: psycopg.Connection, token: str, org: UUID,
                      location: UUID, local_day: str) -> tuple[datetime, datetime, str]:
     """Локальные сутки филиала; их длительность может быть 23/24/25 часов."""
     if (not isinstance(local_day, str) or
-        re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", local_day) is None):
+        re.fullmatch(r"\d{4}-\d{2}-\d{2}", local_day) is None):
         raise CalendarInvalid("invalid local day")
     try:
         parsed = date.fromisoformat(local_day)
