@@ -72,7 +72,12 @@ def test_customer_catalog_and_atomic_services_booking_http(monkeypatch):
             (org,),
         ).fetchone()[0] == 0
         assert db.execute(
-            "SELECT count(*) FROM notification_outbox WHERE aggregate_type='auto_appointment'",
+            """SELECT count(*) FROM notification_outbox
+               WHERE aggregate_type='auto_appointment'
+                 AND aggregate_id IN (
+                   SELECT id FROM auto_appointment WHERE organization_id=%s
+                 )""",
+            (org,),
         ).fetchone()[0] == 0
     selected = {**payload,"serviceIds":[str(first),str(second)]}
     created = http.post(url,json=selected,headers=key)
