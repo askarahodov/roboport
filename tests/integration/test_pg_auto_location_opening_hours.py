@@ -278,3 +278,27 @@ def test_iana_spring_autumn_days_keep_absolute_interval_with_local_weekly_rules(
         else:
             assert timedelta(hours=1) in repeated
             assert timedelta(hours=2) in repeated
+
+
+
+def test_dst_fall_back_does_not_allow_hidden_out_of_hours_middle():
+    """End points inside 02:00-02:15 are insufficient across the autumn fold."""
+    from psycopg.types.json import Jsonb
+    autumn_start=datetime(2030,10,27,2,10,tzinfo=ZONE,fold=0)
+    autumn_end=datetime(2030,10,27,2,5,tzinfo=ZONE,fold=1)
+    assert autumn_end.astimezone(timezone.utc)>autumn_start.astimezone(timezone.utc)
+    spring_start=datetime(2030,3,31,1,30,tzinfo=ZONE)
+    spring_end=datetime(2030,3,31,3,30,tzinfo=ZONE)
+    with psycopg.connect(DSN) as db:
+        def allows(open_min,close_min,begin,end):
+            return db.execute(
+                """SELECT auto_location_hours_allow(
+                    'Europe/Berlin',%s::jsonb,%s::date[],
+                    %s::timestamptz,%s::timestamptz)""",
+                (Jsonb([{"weekday":7,"opensMinute":open_min,
+                         "closesMinute":close_min}]),
+                 [],begin,end),
+            ).fetchone()[0]
+        assert allows(120,135,autumn_start,autumn_end) is False
+        assert allows(60,240,autumn_start,autumn_end) is True
+        assert allows(60,240,spring_start,spring_end) is True
