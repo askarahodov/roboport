@@ -56,7 +56,9 @@ def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
                         HAVING SUM(CASE WHEN e.action='RESERVE' THEN e.quantity
                                         WHEN e.action IN ('ISSUE','RELEASE') THEN -e.quantity
                                         ELSE 0 END)>0
-                            OR SUM(CASE WHEN e.action='ISSUE' THEN e.quantity ELSE 0 END)>0
+                            OR SUM(CASE WHEN e.action='ISSUE' THEN e.quantity
+                          WHEN e.action='RETURN' THEN -e.quantity
+                          ELSE 0 END) > 0
                       ) AS started
                FROM auto_appointment a
                JOIN auto_vehicle_customer_link proof ON proof.id=a.customer_link_id
