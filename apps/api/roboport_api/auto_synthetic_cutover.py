@@ -4,14 +4,20 @@ Vehicle, service and SKU/STOCK CSV verification, staging, activation and
 reconciliation either commit together or leave NO new live/staged objects.
 No customer ownership, prior repair history, documents, prices or PII move.
 """
+import csv
 from dataclasses import dataclass
+from hashlib import sha256
+import io
+import os
 from pathlib import Path
+import stat
+from tempfile import TemporaryDirectory
 from uuid import UUID
 
 import psycopg
 
 from .auto_org_authority import organization_role_allows
-from .auto_service_import import stage_synthetic_services
+from .auto_service_import import stage_synthetic_services, _load as _load_service_source
 from .auto_service_activation import activate_synthetic_services
 from .auto_vehicle_import_service import stage_authorized_synthetic_vehicles
 from .auto_vehicle_promotion_service import promote_synthetic_vehicles
@@ -20,6 +26,9 @@ from .auto_inventory_activation import (
 )
 from scripts.auto_migration_pg_staging import (
     stage_synthetic_csv,reconcile_synthetic_staging,
+)
+from scripts.auto_vehicle_migration_preflight import (
+    MAX_BYTES as VEHICLE_MAX_BYTES, inspect_vehicle_csv,
 )
 
 
@@ -70,6 +79,75 @@ def _authority(conn: psycopg.Connection,token: str,
         conn,token,org,"WAREHOUSE",loc,for_mutation=True
     )):
         raise SyntheticCutoverDenied("FORBIDDEN")
+
+
+def _verify_source_staging(conn: psycopg.Connection,
+                           org: UUID, loc: UUID,
+                           sources: SyntheticCutoverSources) -> None:
+    """Read-only source-byte/shape/digest/row reconciliation for all three CSVs.
+
+    All vehicle validation uses ONE O_NOFOLLOW snapshot. The existing
+    service and inventory validators already read one secure snapshot.
+    Source validation is deliberately repeated after staging to detect
+    a file replacement before commit and during independent audit.
+    """
+    try:
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise SyntheticCutoverDenied("SOURCE_UNAVAILABLE")
+        fd=os.open(sources.vehicle_path,
+                   os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
+        with os.fdopen(fd,"rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise SyntheticCutoverDenied("SOURCE_UNAVAILABLE")
+            raw=stream.read(VEHICLE_MAX_BYTES+1)
+        if (len(raw)>VEHICLE_MAX_BYTES or
+            sha256(raw).hexdigest()!=sources.vehicle_sha256):
+            raise SyntheticCutoverDenied("SOURCE_MISMATCH")
+        with TemporaryDirectory(prefix="auto-reconcile-") as directory:
+            snapshot=Path(directory)/"vehicle.csv"
+            snapshot.write_bytes(raw)
+            checked=inspect_vehicle_csv(snapshot)
+        if not checked["ok"]:
+            raise SyntheticCutoverDenied("SOURCE_MISMATCH")
+        parsed=list(csv.DictReader(
+            io.StringIO(raw.decode("utf-8-sig"),newline=""),strict=True,
+        ))
+        expected=[
+            (number,org,loc,row["source_id"],row["source_system"],
+             row["vin"],row["make"],row["model"])
+            for number,row in enumerate(parsed,start=2)
+        ]
+    except (OSError,UnicodeError,csv.Error,KeyError,ValueError) as exc:
+        raise SyntheticCutoverDenied("SOURCE_UNAVAILABLE") from None
+    stored=conn.execute(
+        """SELECT row_number,organization_id,location_id,source_id,
+                  source_system,vin,make,model
+           FROM auto_vehicle_migration_line WHERE batch_id=%s
+           ORDER BY row_number""",
+        (sources.vehicle_batch_id,),
+    ).fetchall()
+    if not expected or stored!=expected:
+        raise SyntheticCutoverDenied("SOURCE_MISMATCH")
+
+    # _load is strict, verifies a no-follow source snapshot and SHA-256.
+    service_lines=_load_service_source(
+        sources.service_path,sources.service_sha256,
+    )
+    stored_services=conn.execute(
+        """SELECT row_number,source_system,source_id,code,title,duration_minutes
+           FROM auto_service_import_line WHERE batch_id=%s ORDER BY row_number""",
+        (sources.service_batch_id,),
+    ).fetchall()
+    if stored_services!=service_lines:
+        raise SyntheticCutoverDenied("SOURCE_MISMATCH")
+
+    # This dedicated reconciler is SELECT-only and checks all STOCK/SKU rows,
+    # quantities, source order, hash and tenant against the staged PG batch.
+    reconcile_synthetic_staging(
+        conn,sources.inventory_path,organization_id=org,
+        batch_id=sources.inventory_batch_id,
+        expected_sha256=sources.inventory_sha256,
+    )
 
 
 def _read_promoted(conn: psycopg.Connection,org: UUID,loc: UUID,
@@ -193,6 +271,7 @@ def rehearse_synthetic_cutover(
             location_id=location_id,batch_id=sources.inventory_batch_id,
             synthetic_only=True,
         )
+        _verify_source_staging(conn,organization_id,location_id,sources)
         summary=_read_promoted(conn,organization_id,location_id,sources)
         checked=reconcile_synthetic_inventory(
             conn,token,organization_id=organization_id,location_id=location_id,
@@ -225,6 +304,7 @@ def reconcile_synthetic_cutover(
     _validate(token,organization_id,location_id,sources,synthetic_only)
     with conn.transaction():
         _authority(conn,token,organization_id,location_id)
+        _verify_source_staging(conn,organization_id,location_id,sources)
         result=_read_promoted(conn,organization_id,location_id,sources)
         checked=reconcile_synthetic_inventory(
             conn,token,organization_id=organization_id,location_id=location_id,
