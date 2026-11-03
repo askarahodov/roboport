@@ -51,12 +51,13 @@ def test_customer_book_move_cancel_own_scope_and_replays(monkeypatch):
     resources=http.get(ROOT+"/resources")
     assert resources.status_code==200,resources.text
     assert resources.headers["cache-control"]=="no-store"
-    assert resources.json()["items"]==[{
-      "organizationId":str(org),"locationId":str(loc),
-      "customerLinkId":str(d["link"]),"bayId":str(bay),
-      "vehicle":{"make":"Synthetic","model":"Auto"},
-      "timeZone":"Europe/Berlin",
-    }] or len(resources.json()["items"])==1
+    assert len(resources.json()["items"])==1
+    own_resource=resources.json()["items"][0]
+    assert own_resource["organizationId"]==str(org)
+    assert own_resource["locationId"]==str(loc)
+    assert own_resource["customerLinkId"]==str(d["link"])
+    assert own_resource["bayId"]==str(bay)
+    assert own_resource["timeZone"]=="Europe/Berlin"
     assert str(d["ca"]) not in resources.text and "vin" not in resources.text.lower()
     day=(datetime.now(timezone.utc)+timedelta(days=20)).date().isoformat()
     slots=http.get(ROOT+"/slots",params={
