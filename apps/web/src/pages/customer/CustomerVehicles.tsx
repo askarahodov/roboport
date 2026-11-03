@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Alert, EmptyState, Skeleton } from '../../ui';
 import { CustomerAutoClaim } from './CustomerAutoClaim';
 
@@ -109,8 +110,9 @@ export function CustomerVehicles() {
       </details>
       <details>
         <summary>Где запись, история ремонта, сметы и документы?</summary>
-        <p>Эти функции пока планируются. Этот экран не позволяет записаться,
-          согласовать смету или открыть историю ремонта.</p>
+        <p>Список заказ-нарядов и техническое согласование последней версии сметы
+          доступны в закрытом синтетическом dev-контуре через <Link to="/account/auto-orders">Мои заказ-наряды (dev)</Link>.
+          Самостоятельная запись, реальные платежи, юридические документы и выдача планируются.</p>
       </details>
     </section>
     <p>Тестовый режим Airmatik: отображаются только подтверждённые и неотозванные
