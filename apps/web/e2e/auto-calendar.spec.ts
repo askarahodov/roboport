@@ -93,7 +93,7 @@ test('staff selects a synthetic candidate slot without treating it as a reservat
   await page.getByRole('textbox',{name:'UUID специалиста'}).fill(appointment);
   await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
   await expect(page.getByText('Кандидаты, не гарантия брони:')).toBeVisible();
-  await page.getByRole('button',{name:start+' — '+end}).click();
+  await page.getByRole('button',{name:/ISO: 2030-01-01T10:00:00\+00:00 — 2030-01-01T11:00:00\+00:00/}).click();
   await expect(page.getByRole('textbox',{name:'Начало ISO'})).toHaveValue(start);
   await expect(page.getByRole('textbox',{name:'Конец ISO'})).toHaveValue(end);
   expect(queries).toBe(1);
