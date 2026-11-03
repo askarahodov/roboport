@@ -15,11 +15,14 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                     location: UUID, bay: UUID, start: datetime,
                     employee: UUID | None = None,
                     appointment: UUID | None = None,
-                    day_end: datetime | None = None) -> list[dict]:
+                    day_end: datetime | None = None,
+                    customer_link: UUID | None = None) -> list[dict]:
     """Кандидаты на UTC либо локальные сутки; бронь не гарантируется."""
     if (not all(isinstance(v, UUID) for v in (org, location, bay))
         or (employee is not None and not isinstance(employee, UUID))
         or (appointment is not None and not isinstance(appointment, UUID))
+        or (customer_link is not None and not isinstance(customer_link, UUID))
+        or (customer_link is not None and employee is not None)
         or not isinstance(start, datetime) or start.tzinfo is None
         or start.utcoffset() is None
         or (day_end is not None and (not isinstance(day_end, datetime)
@@ -35,8 +38,14 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
         if not timedelta(hours=23) <= end - day <= timedelta(hours=25):
             raise SlotsDenied("invalid local day duration")
     with conn.transaction():
-        if not organization_role_allows(conn, token, org, "INTAKE", location,
-                                        for_mutation=True):
+        if customer_link is not None:
+            from .auto_appointment_service import _customer_scope, AppointmentDenied
+            try:
+                _customer_scope(conn, token, org, location, customer_link)
+            except AppointmentDenied as exc:
+                raise SlotsDenied("customer scope required") from exc
+        elif not organization_role_allows(conn, token, org, "INTAKE", location,
+                                         for_mutation=True):
             raise SlotsDenied("intake authority required")
         found = conn.execute("""
             SELECT 1 FROM auto_work_bay b
@@ -56,7 +65,8 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                   ORDER BY r.created_at DESC,r.id DESC LIMIT 1),a.booking_id)
                 FROM auto_appointment a WHERE a.id=%s AND a.organization_id=%s
                   AND a.location_id=%s
-            """, (appointment,org,location)).fetchone()
+                  AND (%s::uuid IS NULL OR a.customer_link_id=%s::uuid)
+            """, (appointment,org,location,customer_link,customer_link)).fetchone()
             if scoped is None or conn.execute("""SELECT 1 FROM auto_bay_booking
                 WHERE id=%s AND canceled_at IS NULL AND organization_id=%s
                   AND location_id=%s""",(scoped[0],org,location)).fetchone() is None:
