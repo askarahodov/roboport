@@ -6,6 +6,7 @@ Revises: 0088_auto_demo_close
 Только dev sink; никакой отправки реальных SMS/email и никакого PII.
 """
 from alembic import op
+from sqlalchemy import text
 
 revision = "0089_auto_appointment_outbox"
 down_revision = "0088_auto_demo_close"
@@ -30,7 +31,7 @@ def upgrade():
       RETURNS trigger LANGUAGE plpgsql AS $fn$
       DECLARE kind text;
       BEGIN
-        kind = CASE WHEN NEW.action='CREATED' THEN 'CREATED' ELSE 'CANCELED' END;
+        kind := CASE WHEN NEW.action='CREATED' THEN 'CREATED' ELSE 'CANCELED' END;
         INSERT INTO notification_outbox(event_key,aggregate_type,aggregate_id,event_type,payload)
           VALUES ('auto-appointment:event:' || NEW.id::text,
                   'auto_appointment',NEW.appointment_id,kind,
@@ -63,7 +64,7 @@ def upgrade():
 def downgrade():
     # Сохраняем audit/outbox данные и не стираем отправленные receipts.
     conn = op.get_bind()
-    pending = conn.execute(__import__("sqlalchemy").text(
+    pending = conn.execute(text(
         "SELECT 1 FROM notification_outbox WHERE aggregate_type='auto_appointment' LIMIT 1"
     )).first()
     if pending is not None:
