@@ -462,6 +462,10 @@ test('calendar sends local day, shows IANA zone and autumn DST repeated hour',as
   await expect(page.getByText('Часовой пояс филиала: Europe/Berlin')).toBeVisible();
   await expect(page.getByText('Appointment '+appointment+' · WorkOrder '+work)).toBeVisible();
   await expect(page.getByText(/27\.10\.2030/).first()).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  await expect(page.getByText('Часовой пояс филиала: Europe/Berlin')).toBeVisible();
+  await page.setViewportSize({width:1280,height:800});
+  await expect(page.getByText('Часовой пояс филиала: Europe/Berlin')).toBeVisible();
   const query=new URL(requests[requests.length-1]).searchParams;
   expect(query.get('localDay')).toBe('2030-10-27');
   expect(query.has('startsAt')).toBe(false);
