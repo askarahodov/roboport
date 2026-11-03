@@ -166,7 +166,8 @@ export function AutoCalendar() {
         if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||
           raw.syntheticOnly!==true||!('configured' in raw)||
           typeof raw.configured!=='boolean'||!('version' in raw)||
-          !Number.isInteger(raw.version)||!('windows' in raw)||
+          (typeof raw.version!=='number'||!Number.isInteger(raw.version))||
+          !('windows' in raw)||
           !Array.isArray(raw.windows)||!('closedDates' in raw)||
           !Array.isArray(raw.closedDates)||!('timeZone' in raw)||
           typeof raw.timeZone!=='string')throw Error('shape');
