@@ -5,7 +5,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, Field
+from typing import Literal
 
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
@@ -14,10 +15,18 @@ from .auto_customer_booking import bookable_resources, my_appointments
 from .auto_appointment_service import (
     create_appointment, reschedule_appointment, cancel_appointment,
     _customer_scope, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict,
+    AppointmentCompositionInvalid,
 )
 from .auto_slot_candidates import candidate_slots, SlotsDenied
 
 router = APIRouter(include_in_schema=False)
+
+
+class MaterialLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    skuId: UUID
+    kind: Literal["PART", "MATERIAL"]
+    quantity: int = Field(ge=1, le=1000)
 
 
 class CustomerCreate(BaseModel):
@@ -28,6 +37,8 @@ class CustomerCreate(BaseModel):
     bayId: UUID
     startsAt: datetime
     endsAt: datetime
+    serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
+    materials: list[MaterialLine] = Field(default_factory=list, max_length=12)
 
 
 class CustomerMove(BaseModel):
@@ -74,6 +85,42 @@ def get_appointments(request: Request):
             return _deny(request, exc)
     return JSONResponse(content={"items":items,"syntheticOnly":True},
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/customer/booking/catalog")
+def get_booking_catalog(request: Request, organizationId: str, locationId: str,
+                        customerLinkId: str):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        org,loc,link = map(UUID,(organizationId,locationId,customerLinkId))
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            with db.transaction():
+                _customer_scope(db, request.cookies.get("rp_session",""),org,loc,link)
+                services=db.execute(
+                    """SELECT id,code,title,duration_minutes FROM auto_service_catalog
+                       WHERE organization_id=%s AND location_id=%s
+                       ORDER BY code,id LIMIT 51""",(org,loc),
+                ).fetchall()
+                skus=db.execute(
+                    """SELECT id,article FROM auto_stock_sku
+                       WHERE organization_id=%s AND location_id=%s
+                       ORDER BY article,id LIMIT 51""",(org,loc),
+                ).fetchall()
+                if len(services)>50 or len(skus)>50:
+                    return _response(request,503,"UNAVAILABLE")
+        except AppointmentDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(content={"services":[
+        {"id":str(i),"code":c,"title":t,"durationMinutes":d}
+        for i,c,t,d in services],"skus":[
+        {"id":str(i),"article":article} for i,article in skus],
+        "syntheticOnly":True,"stockReserved":False},
+        headers={"Cache-Control":"no-store"})
 
 
 @router.get("/api/v1/dev/auto/customer/booking/slots")
@@ -135,9 +182,13 @@ async def create_customer_booking(request: Request):
                 db, request.cookies.get("rp_session", ""), body.organizationId,
                 body.locationId, body.bayId, body.customerLinkId,
                 body.startsAt, body.endsAt, request_key=key, customer_mode=True,
+                service_ids=tuple(body.serviceIds),
+                materials=tuple((m.skuId,m.kind,m.quantity) for m in body.materials),
             )
         except AppointmentDenied:
             return _response(request, 403, "FORBIDDEN")
+        except AppointmentCompositionInvalid:
+            return _response(request, 422, "INVALID_COMPOSITION")
         except AppointmentKeyConflict:
             return _response(request, 409, "IDEMPOTENCY_KEY_REUSED")
         except AppointmentConflict:
