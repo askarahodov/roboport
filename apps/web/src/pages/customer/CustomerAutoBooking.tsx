@@ -7,6 +7,7 @@ type Booking={appointmentId:string;organizationId:string;locationId:string;custo
   bookingId:string;bayId:string;startsAt:string;endsAt:string;status:'SCHEDULED'|'CANCELED';
   workOrderId:string;timeZone:string;canManage:boolean};
 type Slot={startsAt:string;endsAt:string};
+type Service={id:string;code:string;title:string;durationMinutes:number};
 type Pending={path:string;body:string;key:string|null};
 const today=()=>new Date().toISOString().slice(0,10);
 const locale=(time:string,zone:string)=>new Intl.DateTimeFormat('ru-RU',{
@@ -21,6 +22,9 @@ export function CustomerAutoBooking(){
   const [selected,setSelected]=React.useState('');
   const [day,setDay]=React.useState(today);
   const [slots,setSlots]=React.useState<Slot[]>([]);
+  const [services,setServices]=React.useState<Service[]>([]);
+  const [selectedServices,setSelectedServices]=React.useState<string[]>([]);
+  const [serviceState,setServiceState]=React.useState('');
   const [slotState,setSlotState]=React.useState('');
   const [target,setTarget]=React.useState<Booking|null>(null);
   const [pending,setPending]=React.useState<Pending|null>(null);
@@ -76,6 +80,31 @@ export function CustomerAutoBooking(){
   },[revision]);
 
   React.useEffect(()=>{slotRequest.current++;setSlots([]);setSlotState('');},[selected,day,target]);
+
+  React.useEffect(()=>{
+    const controller=new AbortController();
+    setServices([]);setSelectedServices([]);setServiceState('');
+    if(!scoped||target)return ()=>controller.abort();
+    const query=new URLSearchParams({organizationId:scoped.organizationId,
+      locationId:scoped.locationId,customerLinkId:scoped.customerLinkId});
+    setServiceState('Загрузка услуг филиала…');
+    void fetch('/api/v1/dev/auto/customer/booking/services?'+query,{
+      credentials:'include',cache:'no-store',signal:controller.signal,
+    }).then(async response=>{
+      if(controller.signal.aborted)return;
+      if([401,403,404].includes(response.status)){setState('denied');setServices([]);return;}
+      if(!response.ok)throw Error('service catalog');
+      const raw:unknown=await response.json();
+      if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||
+         raw.syntheticOnly!==true||!('items' in raw)||!Array.isArray(raw.items)||
+         raw.items.length>100||!raw.items.every((item:Service)=>uuid.test(item.id)&&
+           typeof item.code==='string'&&typeof item.title==='string'&&
+           Number.isInteger(item.durationMinutes)&&item.durationMinutes>=5&&
+           item.durationMinutes<=1440))throw Error('shape');
+      if(!controller.signal.aborted){setServices(raw.items as Service[]);setServiceState('');}
+    }).catch(()=>{if(!controller.signal.aborted)setServiceState('Не удалось получить каталог услуг.');});
+    return ()=>controller.abort();
+  },[scoped?.organizationId,scoped?.locationId,scoped?.customerLinkId,target]);
 
   async function search(){
     if(!scoped||busy||pending)return;
@@ -140,7 +169,7 @@ export function CustomerAutoBooking(){
       startsAt:slot.startsAt,endsAt:slot.endsAt}:
       {organizationId:scoped.organizationId,locationId:scoped.locationId,
        customerLinkId:scoped.customerLinkId,bayId:scoped.bayId,
-       startsAt:slot.startsAt,endsAt:slot.endsAt};
+       startsAt:slot.startsAt,endsAt:slot.endsAt,serviceIds:selectedServices};
     void mutate(path,JSON.stringify(payload),crypto.randomUUID());
   }
 
@@ -188,6 +217,20 @@ export function CustomerAutoBooking(){
             {r.vehicle.make} {r.vehicle.model} · {r.timeZone} · пост {r.bayId}
           </option>)}
         </select></label>
+        {!target&&<fieldset aria-label="Услуги при записи (dev)"><legend>Работы по записи (необязательно)</legend>
+          <p>Выберите не более 8 услуг и не более 60 минут суммарно. После выбора работ самостоятельный перенос и отмена недоступны.</p>
+          {serviceState&&<p role="status">{serviceState}</p>}
+          {services.map(service=><label key={service.id} style={{display:'block'}}>
+            <input type="checkbox" aria-label={'Услуга '+service.code}
+              checked={selectedServices.includes(service.id)}
+              disabled={busy||!!pending||(!selectedServices.includes(service.id)&&(
+                selectedServices.length>=8||services.filter(x=>selectedServices.includes(x.id))
+                  .reduce((sum,x)=>sum+x.durationMinutes,0)+service.durationMinutes>60))}
+              onChange={e=>setSelectedServices(old=>e.target.checked?[...old,service.id]:
+                old.filter(id=>id!==service.id))}/>
+            {service.title} ({service.durationMinutes} мин.)
+          </label>)}
+        </fieldset>}
         <label>День филиала <input aria-label="День филиала" type="date"
           value={day} onChange={e=>setDay(e.target.value)}/></label>
         <button type="button" disabled={busy||!!pending||!scoped}
