@@ -5,6 +5,7 @@ No production/customer/owner data and no use of a privileged HTTP endpoint.
 from dataclasses import replace
 import csv
 import io
+import os
 import subprocess
 import sys
 from hashlib import sha256
