@@ -28,6 +28,7 @@ class CustomerCreate(BaseModel):
     bayId: UUID
     startsAt: datetime
     endsAt: datetime
+    serviceIds: list[UUID] = []
 
 
 class CustomerMove(BaseModel):
@@ -135,6 +136,7 @@ async def create_customer_booking(request: Request):
                 db, request.cookies.get("rp_session", ""), body.organizationId,
                 body.locationId, body.bayId, body.customerLinkId,
                 body.startsAt, body.endsAt, request_key=key, customer_mode=True,
+                service_ids=tuple(body.serviceIds),
             )
         except AppointmentDenied:
             return _response(request, 403, "FORBIDDEN")
