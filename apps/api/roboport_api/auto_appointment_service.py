@@ -69,7 +69,9 @@ def _customer_order_pristine(conn: psycopg.Connection, appointment: UUID) -> Non
                HAVING SUM(CASE WHEN e.action='RESERVE' THEN e.quantity
                                WHEN e.action IN ('ISSUE','RELEASE') THEN -e.quantity
                                ELSE 0 END)>0
-                   OR SUM(CASE WHEN e.action='ISSUE' THEN e.quantity ELSE 0 END)>0
+                   OR SUM(CASE WHEN e.action='ISSUE' THEN e.quantity
+                          WHEN e.action='RETURN' THEN -e.quantity
+                          ELSE 0 END) > 0
              )""",
         (appointment,),
     ).fetchone()
