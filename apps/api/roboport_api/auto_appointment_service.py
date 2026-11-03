@@ -15,6 +15,10 @@ class AppointmentConflict(ValueError):
 class AppointmentKeyConflict(ValueError):
     pass
 
+class AppointmentDurationInvalid(ValueError):
+    """Длительность выбранных работ превышает интервал записи."""
+    pass
+
 def _customer_scope(conn: psycopg.Connection, token: str,
                     organization: UUID, location: UUID, link: UUID) -> UUID:
     """Живой CLIENT, собственная verified-связь и разрешённый филиал."""
@@ -122,7 +126,7 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             if total_minutes * 60 > (
                 ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)
             ).total_seconds():
-                raise AppointmentDenied("services exceed reserved interval")
+                raise AppointmentDurationInvalid("services exceed reserved interval")
         # The unique ledger index serializes concurrent requests with the same
         # actor/key. Its insert and the booking commit or roll back together.
         booking, appointment, order = uuid4(),uuid4(),uuid4()
