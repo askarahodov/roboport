@@ -220,6 +220,23 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                 ).fetchone()
                 if current != existing[2] or live is None:
                     raise AppointmentKeyConflict("create receipt no longer current")
+                if material_items:
+                    # Receipt резерва не обещает наличие материалов после
+                    # отдельной выдачи/освобождения с тем же WorkOrder.
+                    rows = conn.execute(
+                        """SELECT sku_id,
+                             SUM(CASE WHEN action='RESERVE' THEN quantity
+                                      WHEN action IN ('ISSUE','RELEASE') THEN -quantity
+                                      ELSE 0 END)::bigint
+                           FROM auto_work_order_stock_event
+                           WHERE work_order_id=%s
+                           GROUP BY sku_id""",
+                        (existing[3],),
+                    ).fetchall()
+                    outstanding = dict(rows)
+                    if any(outstanding.get(sku) != qty
+                           for sku,_,qty in material_items):
+                        raise AppointmentKeyConflict("stock receipt no longer reserved")
                 return existing[1],existing[2],existing[3]
         if starts <= datetime.now(timezone.utc):
             raise AppointmentDenied("appointment must begin in future")
