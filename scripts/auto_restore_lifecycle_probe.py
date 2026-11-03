@@ -141,7 +141,8 @@ def _graph(db: psycopg.Connection, ids: dict) -> dict:
             SELECT event_key,aggregate_type,aggregate_id,event_type,payload::text
             FROM notification_outbox
             WHERE aggregate_type='auto_appointment' AND aggregate_id=%s
-            ORDER BY created_at,id
+            ORDER BY CASE event_type WHEN 'CREATED' THEN 0
+                     WHEN 'RESCHEDULED' THEN 1 ELSE 2 END,id
         """, (appointment,)),
     }
     # Check actual relational graph, not just a matching checksum of empty data.
@@ -149,7 +150,8 @@ def _graph(db: psycopg.Connection, ids: dict) -> dict:
         or data["vehicleScope"][0][0] != "1"
         or len(data["bookings"]) != 2 or len(data["moves"]) != 1
         or len(data["services"]) != 1 or len(data["materials"]) != 2
-        or len(data["stock"]) != 4 or len(data["balance"]) != 2
+        or len(data["stock"]) != 4 or len(data["stockHistory"]) != 6
+        or len(data["balance"]) != 2
         or len(data["financial"]) != 1 or len(data["financialBalance"]) != 1
         or len(data["appointmentEvents"]) != 1 or len(data["outbox"]) != 2):
         raise ValueError("incomplete live auto restore graph")
@@ -225,6 +227,12 @@ def seed(manifest_path: Path) -> None:
                 request_key=uuid4(),service_ids=(service,),
                 material_items=((part,"PART",3),(consumable,"CONSUMABLE",2)),
             )
+            # The synthetic CHARGE is intentionally before the move:
+            # financial ledger still requires the original booking to be live.
+            db.execute(
+                "SELECT record_auto_work_order_financial(%s,%s,'CHARGE',1200,%s)",
+                (order,uuid4(),"synthetic restore valuation only"),
+            )
             moved=reschedule_appointment(
                 db,token,org,appointment,bay,
                 starts+timedelta(hours=3),ends+timedelta(hours=3),
@@ -235,10 +243,6 @@ def seed(manifest_path: Path) -> None:
             )
             return_work_order_stock(
                 db,token,org,loc,order,part,uuid4(),1,
-            )
-            db.execute(
-                "SELECT record_auto_work_order_financial(%s,%s,'CHARGE',1200,%s)",
-                (order,uuid4(),"synthetic restore valuation only"),
             )
             ids={
                 "organization":str(org),"location":str(loc),"bay":str(bay),
@@ -316,8 +320,8 @@ def _challenge_guards(db: psycopg.Connection, ids: dict) -> None:
         (order,),errors.RaiseException,
     )
     must_reject(
-        "UPDATE auto_appointment_reschedule SET old_booking_id=%s WHERE new_booking_id=%s",
-        (current,current),errors.RaiseException,
+        "UPDATE auto_appointment_reschedule SET actor_id=actor_id WHERE new_booking_id=%s",
+        (current,),errors.RaiseException,
     )
     must_reject(
         "UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s",
