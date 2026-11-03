@@ -352,3 +352,68 @@ def test_same_batch_concurrent_rehearsals_cannot_duplicate_stock_or_vins(tmp_pat
         assert _stock(db,org,loc)==[
             ("COOLANT-001",5,0),("FILTER-001",3,0),
         ]
+
+
+
+def test_independent_reconciliation_requires_all_original_files_and_hashes(tmp_path):
+    d,org,loc,_,_,_,sources=_setup(tmp_path)
+    token=d["tokens"][d["intake"]]
+    with psycopg.connect(DSN) as db:
+        assert _go(db,d,org,loc,sources)["ok"]
+        expected=_counts(db,sources)
+        for field in ("vehicle_path","service_path","inventory_path"):
+            path=getattr(sources,field)
+            first=path.read_bytes()
+            # Shape stays valid enough to open, but bytes changed. Do not
+            # accept matching live counts as proof of original source.
+            path.write_bytes(first+b"\n")
+            with pytest.raises(ValueError):
+                reconcile_synthetic_cutover(
+                    db,token,organization_id=org,location_id=loc,
+                    sources=sources,synthetic_only=True,
+                )
+            path.write_bytes(first)
+        for field in ("vehicle_sha256","service_sha256","inventory_sha256"):
+            different=replace(sources,**{field:"f"*64})
+            with pytest.raises(ValueError):
+                reconcile_synthetic_cutover(
+                    db,token,organization_id=org,location_id=loc,
+                    sources=different,synthetic_only=True,
+                )
+        missing=replace(sources,vehicle_path=tmp_path/"missing.csv")
+        with pytest.raises(ValueError):
+            reconcile_synthetic_cutover(
+                db,token,organization_id=org,location_id=loc,
+                sources=missing,synthetic_only=True,
+            )
+        redirect=tmp_path/"symlink.csv"
+        redirect.symlink_to(sources.vehicle_path)
+        with pytest.raises(ValueError):
+            reconcile_synthetic_cutover(
+                db,token,organization_id=org,location_id=loc,
+                sources=replace(sources,vehicle_path=redirect),
+                synthetic_only=True,
+            )
+        assert _counts(db,sources)==expected
+        assert reconcile_synthetic_cutover(
+            db,token,organization_id=org,location_id=loc,
+            sources=sources,synthetic_only=True,
+        )["writes"]==0
+
+
+def test_exclusive_downgrade_lock_blocks_uncommitted_inventory_activation(tmp_path):
+    d,org,loc,_,_,_,sources=_setup(tmp_path)
+    # Alembic 0094 must acquire ACCESS EXCLUSIVE before checking history.
+    # A concurrent INSERT has ROW EXCLUSIVE and prevents a downgrade from
+    # seeing a falsely empty table and later deleting committed receipts.
+    with psycopg.connect(DSN) as creating,psycopg.connect(DSN) as downgrade:
+        with creating.transaction():
+            assert _go(creating,d,org,loc,sources)["ok"]
+            downgrade.execute("SET lock_timeout='200ms'")
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                with downgrade.transaction():
+                    downgrade.execute(
+                        "LOCK TABLE auto_migration_stock_activation IN ACCESS EXCLUSIVE MODE"
+                    )
+    with psycopg.connect(DSN) as db:
+        assert _counts(db,sources)==(1,1,1,2,1,5)
