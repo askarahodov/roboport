@@ -75,6 +75,25 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                   (organization,actor,request_key)).fetchone()
                 if existing is None or existing[0] != fingerprint:
                     raise AppointmentKeyConflict("idempotency key used for different request")
+                # Повторное создание не должно возвращать уже отменённую или
+                # заменённую переносом бронь; блокируем identity до проверки.
+                identity = conn.execute(
+                    """SELECT 1 FROM auto_appointment
+                       WHERE id=%s AND organization_id=%s AND location_id=%s
+                       FOR UPDATE""",
+                    (existing[1], organization, location),
+                ).fetchone()
+                if identity is None:
+                    raise AppointmentKeyConflict("appointment receipt no longer scoped")
+                current = current_appointment_booking(conn, existing[1])
+                live = conn.execute(
+                    """SELECT 1 FROM auto_bay_booking
+                       WHERE id=%s AND organization_id=%s AND location_id=%s
+                         AND canceled_at IS NULL""",
+                    (existing[2], organization, location),
+                ).fetchone()
+                if current != existing[2] or live is None:
+                    raise AppointmentKeyConflict("create receipt no longer current")
                 return existing[1],existing[2],existing[3]
         if starts <= datetime.now(timezone.utc):
             raise AppointmentDenied("appointment must begin in future")
