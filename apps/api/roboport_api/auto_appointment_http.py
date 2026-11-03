@@ -4,13 +4,21 @@ from uuid import UUID
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, Field
+from typing import Literal
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_appointment_service import (
-    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict,
+    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict, AppointmentCompositionInvalid,
 )
 router=APIRouter(include_in_schema=False)
+
+class AppointmentMaterial(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    skuId: UUID
+    kind: Literal["PART","MATERIAL"]
+    quantity: int = Field(ge=1,le=1000)
+
 
 class CreateAppointment(BaseModel):
     model_config=ConfigDict(extra="forbid")
@@ -20,6 +28,8 @@ class CreateAppointment(BaseModel):
     employeeId: UUID | None = None
     startsAt: datetime
     endsAt: datetime
+    serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
+    materials: list[AppointmentMaterial] = Field(default_factory=list, max_length=12)
 
 @router.post("/api/v1/dev/auto/organizations/{org_id}/appointments")
 async def create(org_id: str, request: Request):
@@ -41,9 +51,13 @@ async def create(org_id: str, request: Request):
                 db,request.cookies.get("rp_session",""),org,body.locationId,
                 body.bayId,body.customerLinkId,body.startsAt,body.endsAt,body.employeeId,
                 request_key,
+                service_ids=tuple(body.serviceIds),
+                materials=tuple((m.skuId,m.kind,m.quantity) for m in body.materials),
             )
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
+        except AppointmentCompositionInvalid:
+            return _response(request,422,"INVALID_COMPOSITION")
         except AppointmentKeyConflict:
             return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
         except AppointmentConflict:
