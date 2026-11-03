@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, Field
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_appointment_service import (
-    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict, AppointmentDurationInvalid, AppointmentStockUnavailable,
+    create_appointment, cancel_appointment, reschedule_appointment, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict, AppointmentDurationInvalid, AppointmentStockUnavailable, AppointmentHoursClosed,
 )
 router=APIRouter(include_in_schema=False)
 
@@ -135,6 +135,8 @@ async def create(org_id: str, request: Request):
             return _response(request,422,"SERVICES_EXCEED_SLOT")
         except AppointmentStockUnavailable:
             return _response(request,409,"STOCK_UNAVAILABLE")
+        except AppointmentHoursClosed:
+            return _response(request,409,"LOCATION_CLOSED")
         except AppointmentConflict:
             return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(status_code=201,content={
@@ -195,6 +197,8 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
             return _response(request,403,"FORBIDDEN")
         except AppointmentKeyConflict:
             return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
+        except AppointmentHoursClosed:
+            return _response(request,409,"LOCATION_CLOSED")
         except AppointmentConflict:
             return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(content={"status":"RESCHEDULED","bookingId":str(booking)},
@@ -287,10 +291,16 @@ def read_slot_candidates(org_id: str, request: Request, locationId: str,
                 org, location, bay, start, employee, appointment, day_end=end,
                 service_ids=selected_services,
             )
+            hours_configured = db.execute(
+                """SELECT 1 FROM auto_location_opening_policy
+                   WHERE location_id=%s AND organization_id=%s""",
+                (location,org),
+            ).fetchone() is not None
         except CalendarInvalid:
             return _response(request, 422, "INVALID_INPUT")
         except (CalendarDenied, SlotsDenied):
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(content={"items": slots, "guaranteed": False,
+                                 "openingHoursConfigured":hours_configured,
                                  **({"timeZone": zone} if zone else {})},
                         headers={"Cache-Control": "no-store"})

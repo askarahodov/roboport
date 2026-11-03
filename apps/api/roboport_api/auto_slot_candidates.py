@@ -119,6 +119,15 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                   AND b.location_id=%s AND b.canceled_at IS NULL
                   AND b.starts_at<c.ends_at AND b.ends_at>c.starts_at
               )
+              AND NOT EXISTS (
+                SELECT 1 FROM auto_location_opening_policy policy
+                JOIN auto_service_location loc ON loc.id=policy.location_id
+                WHERE policy.organization_id=%s AND policy.location_id=%s
+                  AND NOT auto_location_hours_allow(
+                    loc.timezone_name,policy.windows,policy.closed_dates,
+                    c.starts_at,c.ends_at
+                  )
+              )
               AND (%s::uuid IS NULL OR (
                 EXISTS (
                   SELECT 1 FROM auto_staff_shift shift
@@ -135,7 +144,7 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
               ))
             ORDER BY c.starts_at LIMIT 50
         """, (duration_minutes,day,end,duration_minutes,
-              bay,org,location,employee,employee,org,location,
+              bay,org,location,org,location,employee,employee,org,location,
               employee,old_booking,old_booking)).fetchall()
     return [{"startsAt": a.isoformat(), "endsAt": b.isoformat()}
             for a, b in rows]

@@ -128,7 +128,11 @@ export function CustomerAutoBooking(){
           typeof s.endsAt==='string'&&Date.parse(s.endsAt)>Date.parse(s.startsAt)))throw Error('shape');
       if(requestId!==slotRequest.current)return;
       setSlots(raw.items as Slot[]);
-      setSlotState(raw.items.length?'Кандидаты не гарантируют бронь.':'Свободных окон нет.');
+      const unconfigured=('openingHoursConfigured' in raw&&raw.openingHoursConfigured===false);
+      setSlotState(unconfigured?
+        (raw.items.length?'График филиала ещё не настроен; dev-кандидаты не ограничены часами работы.':
+          'Свободных окон нет. График филиала ещё не настроен.') :
+        raw.items.length?'Кандидаты не гарантируют бронь.':'Свободных окон нет.');
     }catch{if(requestId===slotRequest.current)setSlotState('Не удалось получить свободные окна.');}
   }
 

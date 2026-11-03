@@ -626,3 +626,81 @@ test('changing bay while slot search is pending re-enables search',async({page})
   finish();
   await expect(page.getByLabel('Кандидаты времени')).toHaveCount(0);
 });
+
+
+
+test('manager configures weekly branch hours and closed dates on mobile and desktop',async({page})=>{
+  type Schedule={configured:boolean;version:number;timeZone:string;
+    windows:{weekday:number;opensMinute:number;closesMinute:number}[];
+    closedDates:string[];syntheticOnly:true};
+  let schedule:Schedule={configured:false,version:0,timeZone:'Europe/Berlin',
+    windows:[],closedDates:[],syntheticOnly:true};
+  let sent:Record<string,unknown>|null=null;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route(base,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(url.pathname.endsWith('/opening-hours')){
+      if(req.method()==='POST'){
+        expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+        sent=req.postDataJSON();
+        schedule={...schedule,configured:true,version:1,
+          windows:sent?.windows as Schedule['windows'],
+          closedDates:sent?.closedDates as string[]};
+      }
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify(schedule)});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify(url.pathname.endsWith('/booking-services')||
+        url.pathname.endsWith('/booking-stock')?
+          {items:[],syntheticOnly:true}:{items:[],hasMore:false}),
+    });
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const editor=page.getByRole('group',{name:'График работы филиала (dev)'});
+  await expect(editor.getByText(/График филиала не настроен/)).toBeVisible();
+  await editor.getByRole('button',{name:'Добавить рабочий интервал'}).click();
+  await editor.getByLabel('День интервала 1').selectOption('1');
+  await editor.getByLabel('Открытие 1').fill('09:00');
+  await editor.getByLabel('Закрытие 1').fill('18:00');
+  await editor.getByLabel('Закрытые даты').fill('2030-01-01');
+  await editor.getByRole('button',{name:'Сохранить график филиала'}).click();
+  await expect.poll(()=>sent).not.toBeNull();
+  expect(sent).toEqual({expectedVersion:0,windows:[
+    {weekday:1,opensMinute:540,closesMinute:1080},
+  ],closedDates:['2030-01-01']});
+  await expect(editor.getByText(/Версия 1; зона Europe\/Berlin/)).toBeVisible();
+  await page.setViewportSize({width:1280,height:800});
+  await expect(editor.getByRole('button',{name:'Добавить рабочий интервал'})).toBeVisible();
+});
+
+test('intake without MANAGER cannot save opening policy',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route(base,route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname.endsWith('/opening-hours'))return route.fulfill({
+      status:route.request().method()==='POST'?403:200,
+      contentType:'application/json',
+      body:route.request().method()==='POST'?'{"code":"FORBIDDEN"}':JSON.stringify({
+        configured:false,version:0,windows:[],closedDates:[],
+        timeZone:'Europe/Berlin',syntheticOnly:true,
+      }),
+    });
+    return route.fulfill({status:200,contentType:'application/json',
+      body:'{"items":[],"hasMore":false}'});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const editor=page.getByRole('group',{name:'График работы филиала (dev)'});
+  await expect(editor.getByRole('button',{name:'Сохранить график филиала'})).toBeVisible();
+  await editor.getByRole('button',{name:'Сохранить график филиала'}).click();
+  await expect(editor.getByText('Для изменения графика нужна роль MANAGER.')).toBeVisible();
+});

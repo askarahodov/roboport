@@ -12,6 +12,10 @@ class AppointmentDenied(ValueError):
 class AppointmentConflict(ValueError):
     pass
 
+class AppointmentHoursClosed(AppointmentConflict):
+    """Интервал не входит в график работы настроенного филиала."""
+    pass
+
 class AppointmentKeyConflict(ValueError):
     pass
 
@@ -311,6 +315,9 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                         )
         except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException,
                 psycopg.errors.DeadlockDetected) as exc:
+            if (isinstance(exc,psycopg.errors.RaiseException) and
+                "appointment outside opening hours" in str(exc)):
+                raise AppointmentHoursClosed("LOCATION_CLOSED") from exc
             # Конкурентные INSERT по exclusion могут завершиться SQLSTATE 40P01.
             # Сохранение через nested transaction уже отменено: клиент получает
             # управляемый конфликт, а не 500 с неизвестным исходом брони.
@@ -417,8 +424,8 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
             or (customer_mode and (employee is not None or clear_employee))
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
-            or ends <= starts
-            or (ends-starts).total_seconds() > 86400):
+            or ends.astimezone(timezone.utc)<=starts.astimezone(timezone.utc)
+            or (ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)).total_seconds()>86400):
         raise AppointmentDenied("invalid reschedule")
     with conn.transaction():
         # Serialize all reschedules of one appointment with a row-level lock.
@@ -522,6 +529,10 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                 )
                 if assigned is not None:
                     _reserve_employee(conn, fresh, organization, a[0], assigned, starts, ends)
-        except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException) as exc:
+        except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException,
+                psycopg.errors.DeadlockDetected) as exc:
+            if (isinstance(exc,psycopg.errors.RaiseException) and
+                "appointment outside opening hours" in str(exc)):
+                raise AppointmentHoursClosed("LOCATION_CLOSED") from exc
             raise AppointmentConflict("bay already reserved") from exc
         return fresh
