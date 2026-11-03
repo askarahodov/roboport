@@ -739,7 +739,7 @@ test('staff booking shows actionable server conflict codes without leaking ident
   await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T13:00:00Z');
   await page.getByRole('button',{name:'Сохранить перенос'}).click();
   await expect(page.getByText(/Пост или специалист уже занят/)).toBeVisible();
-  await page.getByRole('button',{name:'Назад'}).click();
+  await page.getByRole('button',{name:'Отмена переноса'}).click();
   await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
   await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
   await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T12:00:00Z');
