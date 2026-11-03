@@ -164,7 +164,7 @@ test('selected workshop service is sent with the first booking in one payload',a
   await region.getByLabel('Услуга SVC-001').check();
   await region.getByLabel('День филиала').fill('2030-01-01');
   await region.getByRole('button',{name:'Показать свободные окна'}).click();
-  await region.getByRole('button',{name:/01\.01\.2030.*10:30/}).click();
+  await region.getByRole('button',{name:/01\.01\.2030.*11:00.*11:30/}).click();
   await expect.poll(()=>saved).not.toBeNull();
   expect(saved?.serviceIds).toEqual([service]);
   expect(saved?.customerLinkId).toBe(link);
