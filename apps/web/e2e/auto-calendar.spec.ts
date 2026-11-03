@@ -704,3 +704,58 @@ test('intake without MANAGER cannot save opening policy',async({page})=>{
   await editor.getByRole('button',{name:'Сохранить график филиала'}).click();
   await expect(editor.getByText('Для изменения графика нужна роль MANAGER.')).toBeVisible();
 });
+
+test('staff booking shows actionable server conflict codes without leaking identifiers',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  let failure='LOCATION_CLOSED';
+  const submitted:string[]=[];
+  await page.route(base,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({hasMore:false,items:[{
+        appointmentId:appointment,bookingId:bay,bayId:bay,
+        startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:00:00Z',
+        workOrderId:work,employeeId:null,
+      }]})});
+    submitted.push(url.pathname);
+    return route.fulfill({status:failure==='SERVICES_EXCEED_SLOT'?422:409,
+      contentType:'application/json',body:JSON.stringify({code:failure,requestId:'synthetic'})});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Appointment '+appointment+' · WorkOrder '+work)).toBeVisible();
+  await page.getByRole('button',{name:'Отменить запись'}).click();
+  failure='STOCK_RECONCILIATION_REQUIRED';
+  await page.getByRole('button',{name:'Подтвердить отмену'}).click();
+  await expect(page.getByText(/сначала выполните сверку склада/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Подтвердить отмену'})).toBeVisible();
+  await page.getByRole('button',{name:'Назад'}).click();
+  failure='RESOURCE_BUSY';
+  await page.getByRole('button',{name:'Перенести'}).click();
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T12:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T13:00:00Z');
+  await page.getByRole('button',{name:'Сохранить перенос'}).click();
+  await expect(page.getByText(/Пост или специалист уже занят/)).toBeVisible();
+  await page.getByRole('button',{name:'Назад'}).click();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  await page.getByRole('textbox',{name:'UUID связи клиента'}).fill(link);
+  await page.getByRole('textbox',{name:'Начало ISO'}).fill('2030-01-01T12:00:00Z');
+  await page.getByRole('textbox',{name:'Конец ISO'}).fill('2030-01-01T13:00:00Z');
+  for(const [code,message] of [
+    ['LOCATION_CLOSED','Филиал закрыт'],
+    ['STOCK_UNAVAILABLE','Недостаточно свободного остатка'],
+    ['IDEMPOTENCY_KEY_REUSED','Ключ повтора уже использован'],
+    ['SERVICES_EXCEED_SLOT','Выбранные работы не помещаются'],
+  ]){
+    failure=code;
+    await page.getByRole('button',{name:'Создать запись'}).click();
+    await expect(page.getByText(new RegExp(message))).toBeVisible();
+  }
+  expect(submitted.filter(path=>path.endsWith('/cancel'))).toHaveLength(1);
+  expect(submitted.filter(path=>path.endsWith('/reschedule'))).toHaveLength(1);
+  expect(submitted.filter(path=>path.endsWith('/appointments'))).toHaveLength(4);
+  await expect(page.getByText('Запись создана.')).toHaveCount(0);
+});
