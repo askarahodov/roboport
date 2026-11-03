@@ -63,9 +63,10 @@ export function CustomerAutoBooking(){
              (x.status==='CANCELED'||x.status==='SCHEDULED')&&
              typeof x.timeZone==='string'&&typeof x.canManage==='boolean'))throw Error('shape');
         if(controller.signal.aborted)return;
-        setResources(rr.items as Resource[]);setBookings(bb.items as Booking[]);
-        setSelected(old=>rr.items.some((x:Resource)=>old===x.customerLinkId+':'+x.bayId)?
-          old:rr.items.length?rr.items[0].customerLinkId+':'+rr.items[0].bayId:'');
+        const incoming=rr.items as Resource[];
+        setResources(incoming);setBookings(bb.items as Booking[]);
+        setSelected(old=>incoming.some(x=>old===x.customerLinkId+':'+x.bayId)?
+          old:incoming.length?incoming[0].customerLinkId+':'+incoming[0].bayId:'');
         setState('ready');
       }catch{
         if(!controller.signal.aborted)setState('error');
