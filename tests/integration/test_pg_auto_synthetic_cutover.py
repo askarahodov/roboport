@@ -61,7 +61,7 @@ def _sources(directory:Path,org:UUID,loc:UUID,*,article="FILTER-001",
     ih=_write(i,INVENTORY_FIELDS,[
         ("STOCK","STOCK-1",str(org),str(loc),article,"3"),
         ("SKU","SKU-1",str(org),str(loc),article,"0"),
-        ("SKU","SKU-2",str(org),str(loc),"COOLANT-001","0"),
+        ("SKU","SKU-2",str(org),str(foreign_loc or loc),"COOLANT-001","0"),
         ("STOCK","STOCK-2",str(org),str(loc),article,"0"),
         ("STOCK","STOCK-3",str(org),
          str(foreign_loc or loc),"COOLANT-001","5"),
