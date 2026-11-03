@@ -86,3 +86,15 @@
 ## Клиентский заказ-наряд и собственная история (current-dev; #117/#124)
 
 В закрытом синтетическом dev `/account/auto-orders` клиент видит **собственные** автомобильные WorkOrders с подтверждённой связью оригинального заказчика, актуальным бронированием, историей смет, техническим согласием, работами, QC и immutable preview. Добавлены keyset paging по session-bound HMAC cursor, read-side revocation на каждой странице, исключение передачи истории новому владельцу той же машины и мобильный/desktop E2E. Полный контракт: [CUSTOMER_HISTORY.md](CUSTOMER_HISTORY.md). Это не production клиентский кабинет: самостоятельная запись, реальные документы/подписи, платежи, mobile auth и legal/security gate #119 остаются обязательны; #117 и #124 до полной области не закрывать.
+
+
+## Пользовательская база знаний как единый release gate (03.11.2026)
+
+Код клиентской истории `/account/auto-orders` дополнен
+[полным быстрым стартом ролей](../guides/QUICK_START.md),
+[матрицей экранов/API/тестов](../guides/ACCESS_AND_TEST_MATRIX.md),
+[FAQ 401/403/409/429](../guides/FAQ.md),
+[планом воспроизводимых скриншотов 390/1280](../guides/SCREENSHOT_EVIDENCE.md)
+и [архивом robot-документации](LEGACY_ARCHIVE.md).
+Автоматический Docsify link/search/keyboard/viewport smoke нельзя приравнивать
+к завершённому manual QA, юридическому подписанию или decommission (#119/#165/#173).
