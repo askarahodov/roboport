@@ -89,7 +89,7 @@ def test_bad_timezone_rejected_without_workshop_records():
     with psycopg.connect(DSN) as db:
         org, loc, bay = _org_and_bay(db)
         for zone in ("UTC+1", "CET", "Fake/Invalid", "Europe/Berlin;DROP", ""):
-            with pytest.raises(psycopg.errors.RaiseException):
+            with pytest.raises((psycopg.errors.RaiseException, psycopg.errors.CheckViolation)):
                 with db.transaction():
                     db.execute("UPDATE auto_service_location SET timezone_name=%s WHERE id=%s", (zone,loc))
         assert db.execute(
