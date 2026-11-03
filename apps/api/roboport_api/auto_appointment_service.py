@@ -15,6 +15,11 @@ class AppointmentConflict(ValueError):
 class AppointmentKeyConflict(ValueError):
     pass
 
+
+class AppointmentCompositionInvalid(ValueError):
+    """Неверная композиция заказа или недостаточная длительность записи."""
+    pass
+
 def _customer_scope(conn: psycopg.Connection, token: str,
                     organization: UUID, location: UUID, link: UUID) -> UUID:
     """Живой CLIENT, собственная verified-связь и разрешённый филиал."""
@@ -53,22 +58,69 @@ def _customer_order_pristine(conn: psycopg.Connection, appointment: UUID) -> Non
         """SELECT 1 FROM auto_work_order w
            WHERE w.appointment_id=%s
              AND NOT EXISTS (SELECT 1 FROM auto_work_order_service s
-                             WHERE s.work_order_id=w.id)
+                             WHERE s.work_order_id=w.id AND s.origin='STAFF')
              AND NOT EXISTS (SELECT 1 FROM auto_work_order_inspection i
                              WHERE i.work_order_id=w.id)
              AND NOT EXISTS (SELECT 1 FROM auto_work_order_estimate_revision r
-                             WHERE r.work_order_id=w.id)""",
+                             WHERE r.work_order_id=w.id)
+             AND NOT EXISTS (SELECT 1 FROM auto_work_order_stock_event stock
+                             WHERE stock.work_order_id=w.id)""",
         (appointment,),
     ).fetchone()
     if allowed is None:
         raise AppointmentDenied("work order already in progress")
 
 
+def _checked_booking_composition(
+    conn: psycopg.Connection, organization: UUID, location: UUID,
+    service_ids: tuple[UUID, ...],
+    materials: tuple[tuple[UUID, str, int], ...],
+    starts: datetime, ends: datetime,
+) -> None:
+    """Проверяет каталог и длительность без создания фиктивного резерва склада."""
+    if (type(service_ids) is not tuple or len(service_ids) > 8
+        or any(type(v) is not UUID for v in service_ids)
+        or len(set(service_ids)) != len(service_ids)
+        or type(materials) is not tuple or len(materials) > 12
+        or any(type(line) is not tuple or len(line) != 3
+               or type(line[0]) is not UUID
+               or type(line[1]) is not str or line[1] not in ("PART", "MATERIAL")
+               or type(line[2]) is not int or not 1 <= line[2] <= 1000
+               for line in materials)
+        or len({(line[0], line[1]) for line in materials}) != len(materials)):
+        raise AppointmentCompositionInvalid("invalid booking composition")
+    if service_ids:
+        rows = conn.execute(
+            """SELECT id,duration_minutes FROM auto_service_catalog
+               WHERE organization_id=%s AND location_id=%s
+                 AND id = ANY(%s::uuid[]) FOR SHARE""",
+            (organization, location, list(service_ids)),
+        ).fetchall()
+        if len(rows) != len(service_ids):
+            raise AppointmentDenied("catalog service outside location")
+        total_minutes = sum(minutes for _, minutes in rows)
+        if (ends - starts).total_seconds() < total_minutes * 60:
+            raise AppointmentCompositionInvalid("booking shorter than requested services")
+    if materials:
+        requested_skus = sorted({line[0] for line in materials}, key=str)
+        rows = conn.execute(
+            """SELECT id FROM auto_stock_sku
+               WHERE organization_id=%s AND location_id=%s
+                 AND id = ANY(%s::uuid[]) FOR SHARE""",
+            (organization, location, requested_skus),
+        ).fetchall()
+        if len(rows) != len(requested_skus):
+            raise AppointmentDenied("material sku outside location")
+
+
 def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        location: UUID, bay: UUID, link: UUID,
                        starts: datetime, ends: datetime, employee: UUID | None = None,
                        request_key: UUID | None = None,
-                       customer_mode: bool = False) -> tuple[UUID, UUID, UUID]:
+                       customer_mode: bool = False,
+                       service_ids: tuple[UUID, ...] = (),
+                       materials: tuple[tuple[UUID, str, int], ...] = (),
+                       ) -> tuple[UUID, UUID, UUID]:
     if (not all(isinstance(x, UUID) for x in (organization,location,bay,link))
             or (employee is not None and not isinstance(employee, UUID))
             or (request_key is not None and not isinstance(request_key, UUID))
@@ -101,6 +153,10 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             (bay,organization,location),
         ).fetchone() is None:
             raise AppointmentDenied("bay unavailable")
+        # Вся композиция валидируется до записи receipt и бронирования.
+        _checked_booking_composition(
+            conn, organization, location, service_ids, materials, starts, ends,
+        )
         # The unique ledger index serializes concurrent requests with the same
         # actor/key. Its insert and the booking commit or roll back together.
         booking, appointment, order = uuid4(),uuid4(),uuid4()
@@ -114,6 +170,8 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                 "employee":str(employee) if employee else None,
                 "starts":starts.astimezone(timezone.utc).isoformat(),
                 "ends":ends.astimezone(timezone.utc).isoformat(),
+                "services":sorted(map(str,service_ids)),
+                "materials":sorted((str(sku),kind,qty) for sku,kind,qty in materials),
             },sort_keys=True,separators=(",",":")).encode()).hexdigest()
             inserted = conn.execute("""INSERT INTO auto_appointment_idempotency
               (organization_id,actor_id,request_key,fingerprint,
@@ -173,6 +231,23 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        VALUES(%s,%s,%s,%s)""",
                     (order,appointment,organization,location),
                 )
+                # Услуги, запрошенные детали и запись составляют одну атомарную
+                # операцию. Запрос товара НЕ резервирует и не списывает склад.
+                for service_id in service_ids:
+                    conn.execute(
+                        """INSERT INTO auto_work_order_service
+                           (id,work_order_id,service_id,organization_id,location_id,origin)
+                           VALUES(%s,%s,%s,%s,%s,'BOOKING')""",
+                        (uuid4(),order,service_id,organization,location),
+                    )
+                for sku_id,kind,quantity in materials:
+                    conn.execute(
+                        """INSERT INTO auto_work_order_material_request
+                           (id,work_order_id,sku_id,organization_id,location_id,
+                            kind,quantity)
+                           VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+                        (uuid4(),order,sku_id,organization,location,kind,quantity),
+                    )
         except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException) as exc:
             raise AppointmentConflict("bay already reserved") from exc
         return appointment,booking,order
