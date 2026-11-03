@@ -15,20 +15,74 @@ class AppointmentConflict(ValueError):
 class AppointmentKeyConflict(ValueError):
     pass
 
+def _customer_scope(conn: psycopg.Connection, token: str,
+                    organization: UUID, location: UUID, link: UUID) -> UUID:
+    """Живой CLIENT, собственная verified-связь и разрешённый филиал."""
+    from .session_lookup import session_subject
+    actor = session_subject(conn, token, for_mutation=True)
+    if actor is None:
+        raise AppointmentDenied("client session unavailable")
+    row = conn.execute(
+        """SELECT proof.vehicle_id FROM auto_vehicle_customer_link proof
+           JOIN auto_vehicle_location_binding binding
+             ON binding.vehicle_id=proof.vehicle_id
+           JOIN auto_service_location loc
+             ON loc.id=binding.location_id AND loc.organization_id=%s
+             AND loc.disabled_at IS NULL
+           JOIN auto_organization org ON org.id=loc.organization_id
+             AND org.disabled_at IS NULL
+           JOIN account_customer_link acl ON acl.customer_id=proof.customer_id
+             AND acl.user_id=%s AND acl.revoked_at IS NULL
+           JOIN user_role role ON role.user_id=%s AND role.role_code='CLIENT'
+             AND role.revoked_at IS NULL
+             AND (role.expires_at IS NULL OR role.expires_at>now())
+           WHERE proof.id=%s AND loc.id=%s
+             AND proof.verified_at IS NOT NULL AND proof.verified_by IS NOT NULL
+             AND proof.revoked_at IS NULL
+           FOR SHARE OF proof,binding,loc,org,acl,role""",
+        (organization, actor, actor, link, location),
+    ).fetchone()
+    if row is None:
+        raise AppointmentDenied("verified customer scope unavailable")
+    return actor
+
+
+def _customer_order_pristine(conn: psycopg.Connection, appointment: UUID) -> None:
+    """Клиент не меняет бронь после начала оформления и работ по наряду."""
+    allowed = conn.execute(
+        """SELECT 1 FROM auto_work_order w
+           WHERE w.appointment_id=%s
+             AND NOT EXISTS (SELECT 1 FROM auto_work_order_service s
+                             WHERE s.work_order_id=w.id)
+             AND NOT EXISTS (SELECT 1 FROM auto_work_order_inspection i
+                             WHERE i.work_order_id=w.id)
+             AND NOT EXISTS (SELECT 1 FROM auto_work_order_estimate_revision r
+                             WHERE r.work_order_id=w.id)""",
+        (appointment,),
+    ).fetchone()
+    if allowed is None:
+        raise AppointmentDenied("work order already in progress")
+
+
 def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        location: UUID, bay: UUID, link: UUID,
                        starts: datetime, ends: datetime, employee: UUID | None = None,
-                       request_key: UUID | None = None) -> tuple[UUID, UUID, UUID]:
+                       request_key: UUID | None = None,
+                       customer_mode: bool = False) -> tuple[UUID, UUID, UUID]:
     if (not all(isinstance(x, UUID) for x in (organization,location,bay,link))
             or (employee is not None and not isinstance(employee, UUID))
             or (request_key is not None and not isinstance(request_key, UUID))
+            or type(customer_mode) is not bool
+            or (customer_mode and employee is not None)
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
             or ends <= starts or (ends-starts).total_seconds() > 86400):
         raise AppointmentDenied("invalid appointment scope or interval")
     with conn.transaction():
-        if not organization_role_allows(conn, token, organization, "INTAKE",
-                                        location, for_mutation=True):
+        if customer_mode:
+            _customer_scope(conn, token, organization, location, link)
+        elif not organization_role_allows(
+                conn, token, organization, "INTAKE", location, for_mutation=True):
             raise AppointmentDenied("organization intake required")
         # Guard current ownership with row locks; no legacy roles are inherited.
         row = conn.execute(
@@ -133,9 +187,11 @@ def _reserve_employee(conn: psycopg.Connection, booking: UUID, organization: UUI
 
 
 def cancel_appointment(conn: psycopg.Connection, token: str,
-                       organization: UUID, appointment: UUID) -> str:
+                       organization: UUID, appointment: UUID,
+                       customer_mode: bool = False) -> str:
     """Revoke the reservation, preserving Appointment and WorkOrder history."""
-    if not isinstance(organization, UUID) or not isinstance(appointment, UUID):
+    if (not isinstance(organization, UUID) or not isinstance(appointment, UUID)
+            or type(customer_mode) is not bool):
         raise AppointmentDenied("invalid identifiers")
     from .session_lookup import session_subject
     with conn.transaction():
@@ -144,19 +200,23 @@ def cancel_appointment(conn: psycopg.Connection, token: str,
         if actor is None:
             raise AppointmentDenied("session unavailable")
         scoped = conn.execute(
-            """SELECT location_id FROM auto_appointment
+            """SELECT location_id,customer_link_id FROM auto_appointment
                WHERE id=%s AND organization_id=%s""",
             (appointment,organization),
         ).fetchone()
         if scoped is None:
             raise AppointmentDenied("appointment unavailable")
-        if not organization_role_allows(
+        if customer_mode:
+            _customer_scope(conn, token, organization, scoped[0], scoped[1])
+        elif not organization_role_allows(
             conn, token, organization, "INTAKE", scoped[0], for_mutation=True
         ):
             raise AppointmentDenied("organization intake required")
         # Lock appointment before resolving the latest booking: rescheduling
         # takes the same lock, so a concurrent cancel cannot target stale data.
         conn.execute("SELECT id FROM auto_appointment WHERE id=%s FOR UPDATE", (appointment,))
+        if customer_mode:
+            _customer_order_pristine(conn, appointment)
         current = current_appointment_booking(conn, appointment)
         booking = conn.execute(
             """SELECT b.id,b.canceled_at
@@ -198,11 +258,14 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                            organization: UUID, appointment: UUID, bay: UUID,
                            starts: datetime, ends: datetime, employee: UUID | None = None,
                            clear_employee: bool = False,
-                           request_key: UUID | None = None) -> UUID:
+                           request_key: UUID | None = None,
+                           customer_mode: bool = False) -> UUID:
     if (not all(isinstance(x, UUID) for x in (organization,appointment,bay))
             or (employee is not None and not isinstance(employee, UUID))
             or (request_key is not None and not isinstance(request_key, UUID))
             or (clear_employee and employee is not None)
+            or type(customer_mode) is not bool
+            or (customer_mode and (employee is not None or clear_employee))
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
             or ends <= starts
@@ -216,7 +279,12 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                WHERE id=%s AND organization_id=%s FOR UPDATE""",
             (appointment,organization),
         ).fetchone()
-        if a is None or not organization_role_allows(
+        if a is None:
+            raise AppointmentDenied("appointment unavailable")
+        if customer_mode:
+            _customer_scope(conn, token, organization, a[0], a[1])
+            _customer_order_pristine(conn, appointment)
+        elif not organization_role_allows(
                 conn,token,organization,"INTAKE",a[0],for_mutation=True):
             raise AppointmentDenied("appointment or scope unavailable")
         scope = conn.execute(
