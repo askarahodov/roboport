@@ -81,7 +81,8 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             or len(set(service_ids)) != len(service_ids)
             or not all(isinstance(t, datetime) and t.tzinfo is not None
                        and t.utcoffset() is not None for t in (starts,ends))
-            or ends <= starts or (ends-starts).total_seconds() > 86400):
+            or ends.astimezone(timezone.utc) <= starts.astimezone(timezone.utc)
+            or (ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)).total_seconds() > 86400):
         raise AppointmentDenied("invalid appointment scope or interval")
     with conn.transaction():
         if customer_mode:
@@ -118,7 +119,9 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             if len(rows) != len(service_ids):
                 raise AppointmentDenied("service catalog scope unavailable")
             total_minutes = sum(duration for _, duration in rows)
-            if total_minutes * 60 > (ends - starts).total_seconds():
+            if total_minutes * 60 > (
+                ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)
+            ).total_seconds():
                 raise AppointmentDenied("services exceed reserved interval")
         # The unique ledger index serializes concurrent requests with the same
         # actor/key. Its insert and the booking commit or roll back together.
@@ -128,13 +131,19 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             actor = session_subject(conn, token, for_mutation=True)
             if actor is None:
                 raise AppointmentDenied("session unavailable")
-            fingerprint = hashlib.sha256(json.dumps({
+            # Пустой набор сохраняет прежний fingerprint для ключей,
+            # выданных до добавления услуг в API.
+            fingerprint_body = {
                 "location":str(location),"bay":str(bay),"link":str(link),
                 "employee":str(employee) if employee else None,
-                "services":sorted(str(item) for item in service_ids),
                 "starts":starts.astimezone(timezone.utc).isoformat(),
                 "ends":ends.astimezone(timezone.utc).isoformat(),
-            },sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            }
+            if service_ids:
+                fingerprint_body["services"] = sorted(str(item) for item in service_ids)
+            fingerprint = hashlib.sha256(json.dumps(
+                fingerprint_body,sort_keys=True,separators=(",",":")
+            ).encode()).hexdigest()
             inserted = conn.execute("""INSERT INTO auto_appointment_idempotency
               (organization_id,actor_id,request_key,fingerprint,
                appointment_id,booking_id,work_order_id)
