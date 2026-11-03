@@ -14,6 +14,7 @@ from .auto_customer_booking import bookable_resources, my_appointments
 from .auto_appointment_service import (
     create_appointment, reschedule_appointment, cancel_appointment,
     _customer_scope, AppointmentDenied, AppointmentConflict, AppointmentKeyConflict,
+    AppointmentDurationInvalid,
 )
 from .auto_slot_candidates import candidate_slots, SlotsDenied
 
@@ -173,6 +174,8 @@ async def create_customer_booking(request: Request):
             return _response(request, 403, "FORBIDDEN")
         except AppointmentKeyConflict:
             return _response(request, 409, "IDEMPOTENCY_KEY_REUSED")
+        except AppointmentDurationInvalid:
+            return _response(request, 422, "SERVICES_EXCEED_SLOT")
         except AppointmentConflict:
             return _response(request, 409, "RESOURCE_BUSY")
     return JSONResponse(status_code=201,content={
