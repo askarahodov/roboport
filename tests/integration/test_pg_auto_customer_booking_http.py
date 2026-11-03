@@ -143,3 +143,84 @@ def test_customer_access_revoked_before_mutation(monkeypatch):
         assert db.execute(
           "SELECT count(*) FROM auto_appointment WHERE organization_id=%s",(org,)
         ).fetchone()[0]==0
+
+
+def test_customer_cannot_change_appointment_after_inspection(monkeypatch):
+    d,org,loc,bay,_,_,http=_setup(monkeypatch)
+    headers=_auth(http,d,d["client_a"])
+    at=datetime.now(timezone.utc)+timedelta(days=24)
+    payload={"organizationId":str(org),"locationId":str(loc),
+             "customerLinkId":str(d["link"]),"bayId":str(bay),
+             "startsAt":at.isoformat(),"endsAt":(at+timedelta(hours=1)).isoformat()}
+    created=http.post(ROOT+"/appointments",json=payload,
+                      headers={**headers,"Idempotency-Key":str(uuid4())})
+    assert created.status_code==201,created.text
+    order=created.json()["workOrderId"]
+    appointment=created.json()["appointmentId"]
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """INSERT INTO auto_work_order_inspection(
+                 id,work_order_id,organization_id,location_id,actor_id,
+                 odometer_km,fuel_percent,tyres_ok,lights_ok,fluid_leak,exterior_code
+               ) VALUES(%s,%s,%s,%s,%s,1000,50,true,true,false,'CLEAR')""",
+            (uuid4(),order,org,loc,d["intake"]),
+        )
+    own=http.get(ROOT+"/appointments")
+    assert own.status_code==200,own.text
+    assert own.json()["items"][0]["canManage"] is False
+    moving={"organizationId":str(org),"bayId":str(bay),
+            "startsAt":(at+timedelta(hours=2)).isoformat(),
+            "endsAt":(at+timedelta(hours=3)).isoformat()}
+    move=http.post(ROOT+"/appointments/"+appointment+"/reschedule",
+                   json=moving,headers={**headers,"Idempotency-Key":str(uuid4())})
+    assert move.status_code==403,move.text
+    cancel=http.post(ROOT+"/appointments/"+appointment+"/cancel",
+                     json={"organizationId":str(org)},headers=headers)
+    assert cancel.status_code==403,cancel.text
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment_reschedule WHERE appointment_id=%s",
+            (appointment,),
+        ).fetchone()[0]==0
+        assert db.execute(
+            "SELECT canceled_at IS NULL FROM auto_bay_booking WHERE id=%s",
+            (created.json()["bookingId"],),
+        ).fetchone()==(True,)
+
+
+def test_two_verified_customers_cannot_double_book_same_bay(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from roboport_api.auto_appointment_service import create_appointment, AppointmentConflict
+    d,org,loc,bay,_,_,http=_setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+            (d["manager"],d["other_link"]),
+        )
+    at=datetime.now(timezone.utc)+timedelta(days=25)
+    barrier=Barrier(2)
+    def attempt(who,proof):
+        with psycopg.connect(DSN) as db:
+            barrier.wait(timeout=20)
+            try:
+                create_appointment(
+                    db,d["tokens"][who],org,loc,bay,proof,at,
+                    at+timedelta(hours=1),request_key=uuid4(),customer_mode=True,
+                )
+                return "CREATED"
+            except AppointmentConflict:
+                return "BUSY"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one=pool.submit(attempt,d["client_a"],d["link"])
+        two=pool.submit(attempt,d["client_b"],d["other_link"])
+        assert sorted([one.result(timeout=30),two.result(timeout=30)])==["BUSY","CREATED"]
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_bay_booking WHERE organization_id=%s",
+            (org,),
+        ).fetchone()[0]==1
+        assert db.execute(
+            "SELECT count(*) FROM auto_work_order WHERE organization_id=%s",
+            (org,),
+        ).fetchone()[0]==1
