@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 const routes = [
-  '/account', '/account/robots', '/account/vehicles', '/account/tickets',
+  '/account', '/account/robots', '/account/vehicles', '/account/auto-orders', '/account/tickets',
   '/account/estimates', '/account/documents', '/account/settings',
 ];
 
@@ -59,11 +59,15 @@ test('local login sends only same-origin credentials and never stores password',
 });
 
 
-test('seven private views render after auth API success, responsive and keyboard accessible', async ({ page }) => {
+test('eight private views render after auth API success, responsive and keyboard accessible', async ({ page }) => {
   // UI contract only; live PostgreSQL A/B authorization is covered separately in tests/integration.
   await page.route('**/api/v1/auth/me', route => route.fulfill({
     status:200,contentType:'application/json',
     body:JSON.stringify({subjectId:'00000000-0000-4000-8000-000000000001'}),
+  }));
+  await page.route('**/api/v1/dev/auto/customer/orders?*', route => route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[],nextCursor:null,syntheticOnly:true,releaseAllowed:false}),
   }));
   await page.route('**/api/v1/dev/account/tickets**', route => route.fulfill({
     status:200,contentType:'application/json',
@@ -81,6 +85,7 @@ test('seven private views render after auth API success, responsive and keyboard
   await expect(nav).toBeVisible();
   for (const [path,title] of [
     ['/account','Обзор'],['/account/robots','Роботы'],['/account/vehicles','Автомобили (dev)'],
+    ['/account/auto-orders','Мои заказ-наряды (dev)'],
     ['/account/tickets','Заявки'],['/account/estimates','Сметы'],
     ['/account/documents','Документы'],['/account/settings','Настройки и уведомления'],
   ]) {
