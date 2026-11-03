@@ -42,3 +42,17 @@ PYTHONPATH=apps/api python -m pytest -q -ra tests/integration/test_pg_auto_synth
 - Защита DB от неуполномоченного owner-level SQL не является полной production моделью least privilege/RLS. В dev тестовый PostgreSQL пользователь владеет схемой. Реальные DB grants, PII/legal/consent, независимый security review, backup encryption, retention, RPO/RTO, cutover plan, физическая складская инвентаризация и security/legal/ops sign-off остаются **обязательными и не выполненными**. #172 и #119 остаются OPEN до их подтверждения.
 
 Связанные источники: [миграция и импорт](DATA_MIGRATION.md), [восстановление live WorkOrder](RESTORE_CHECKPOINT.md), [права филиалов](ORGANIZATIONS.md), [план выхода из legacy](https://github.com/askarahodov/roboport/issues/165) и [функциональная матрица](FUNCTIONAL_MATRIX.md).
+
+
+## Доказательство полного восстановления этого же пакета (CI, #172/#119)
+
+В той же обязательной `postgres` job, перед её существующим `pg_dump -Fc`, инструмент `scripts/auto_cutover_restore_probe.py` дополнительно активирует независимый синтетический пакет из всех трёх доменов. Отдельный приватный manifest `/tmp/roboport-auto-cutover-restore.json` (создаётся без overwrite, права 0600, **не входит в dump**) хранит SHA-256 фактических связей staged→live: исходная VIN-строка и ровно одна активная машина без владельца, две услуги с неизменяемым source, пять SKU/STOCK-строк с реальными RECEIPT и остатками. После `pg_restore --exit-on-error` скрипт сравнивает checksum original и `roboport_restored`. На **clone** выполняет SQL отрицательные проверки immutable vehicle/service/stock lineage и stock tenant-scope; checksum должен остаться прежним. Печатаются только `SYNTHETIC_CUTOVER_RESTORE_SEED_OK` и `SYNTHETIC_CUTOVER_RESTORE_VERIFY_OK`, не VIN/source/токены. Команды (исключительно в доверенной disposable CI среде):
+
+```bash
+PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_cutover_restore_probe seed --manifest /tmp/roboport-auto-cutover-restore.json
+# После pg_dump -Fc из roboport и pg_restore в отдельную roboport_restored:
+PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_cutover_restore_probe verify --manifest /tmp/roboport-auto-cutover-restore.json --database roboport
+PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_cutover_restore_probe verify-clone --manifest /tmp/roboport-auto-cutover-restore.json --database roboport_restored
+```
+
+Назначение БД жёстко ограничено унаследованным от `auto_restore_lifecycle_probe._dsn` `127.0.0.1:5432` и двумя локальными CI-именами, без libpq URI query/environment overrides. `verify-clone` никогда не запускается для источника; диагностические ошибки не раскрывают payload. Тесты `tests/contract/test_auto_cutover_restore_probe.py` проверяют manifest/хеш/запрет переписи. Это доказательство **только synthetic восстановления**, не реального customer/legal cutover или утверждённой политики RPO/RTO.
