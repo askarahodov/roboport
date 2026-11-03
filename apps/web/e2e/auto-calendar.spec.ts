@@ -759,3 +759,36 @@ test('staff booking shows actionable server conflict codes without leaking ident
   expect(submitted.filter(path=>path.endsWith('/appointments'))).toHaveLength(4);
   await expect(page.getByText('Запись создана.')).toHaveCount(0);
 });
+
+test('staff cancellation retry reuses exact key after a lost response',async({page})=>{
+  let sent:string|undefined,count=0;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(base,route=>{
+    const req=route.request();
+    if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:[{appointmentId:appointment,bookingId:bay,bayId:bay,
+        startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:00:00Z',
+        workOrderId:work,employeeId:null}],hasMore:false})});
+    if(req.url().endsWith('/cancel')){
+      count++;
+      const current=req.headers()['idempotency-key'];
+      expect(current).toMatch(/^[0-9a-f-]{36}$/);
+      if(sent)expect(current).toBe(sent);
+      sent=current;
+      if(count===1)return route.abort('failed');
+      return route.fulfill({status:200,contentType:'application/json',body:'{"status":"CANCELED"}'});
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:'{}'});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Appointment '+appointment+' · WorkOrder '+work)).toBeVisible();
+  await page.getByRole('button',{name:'Отменить запись'}).click();
+  await page.getByRole('button',{name:'Подтвердить отмену'}).click();
+  await expect(page.getByRole('button',{name:'Повторить запрос с тем же ключом'})).toBeVisible();
+  await page.getByRole('button',{name:'Повторить запрос с тем же ключом'}).click();
+  await expect(page.getByText('Запись отменена.')).toBeVisible();
+  expect(count).toBe(2);
+});

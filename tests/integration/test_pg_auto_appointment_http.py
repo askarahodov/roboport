@@ -46,15 +46,21 @@ def test_closed_http_create_cancel_and_isolation(monkeypatch):
     manager_headers={"Origin":"https://127.0.0.1","X-CSRF-Token":d["csrf"][d["manager"]]}
     assert client.post(cancel,headers=manager_headers).status_code==403
     client.cookies.set("rp_session",d["tokens"][d["intake"]])
-    result=client.post(cancel,headers=headers)
+    cancel_key={**headers,"Idempotency-Key":str(uuid4())}
+    result=client.post(cancel,headers=cancel_key)
     assert result.status_code==200,result.text
     assert result.json()["status"]=="CANCELED"
     # Сохранённый create receipt не подтверждает отменённую бронь.
     stale=client.post(url,json=data,headers=keyed)
     assert stale.status_code==409,stale.text
     assert stale.json()["code"]=="IDEMPOTENCY_KEY_REUSED"
+    assert client.post(cancel,headers=cancel_key).json()["status"]=="CANCELED"
     assert client.post(cancel,headers=headers).json()["status"]=="ALREADY_CANCELED"
+    assert client.post(cancel,headers={**headers,"Idempotency-Key":"invalid"}).status_code==422
     with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT actor_id,appointment_id,booking_id
+             FROM auto_cancel_idempotency WHERE organization_id=%s""",
+             (org,)).fetchall()==[(d["intake"],ident,created.json()["bookingId"])]
         assert db.execute("""SELECT actor_id,action FROM auto_appointment_actor_action
              WHERE appointment_id=%s""",(ident,)).fetchall()==[(d["intake"],"CANCELED")]
         assert db.execute("""SELECT action FROM auto_appointment_event

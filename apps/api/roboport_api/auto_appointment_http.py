@@ -150,13 +150,18 @@ def cancel(org_id: str, appointment_id: str, request: Request):
         return dsn
     try:
         org,ident=UUID(org_id),UUID(appointment_id)
+        header=request.headers.get("Idempotency-Key")
+        request_key=UUID(header) if header is not None else None
     except (ValueError,TypeError):
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         if not _mutation_ok(request,db):
             return _response(request,403,"FORBIDDEN")
         try:
-            outcome=cancel_appointment(db,request.cookies.get("rp_session",""),org,ident)
+            outcome=cancel_appointment(db,request.cookies.get("rp_session",""),org,ident,
+                                       request_key=request_key)
+        except AppointmentKeyConflict:
+            return _response(request,409,"IDEMPOTENCY_KEY_REUSED")
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
         except AppointmentConflict:
