@@ -6,6 +6,8 @@ The caller must hold live MANAGER and WAREHOUSE grants for the exact branch.
 from __future__ import annotations
 
 from hashlib import sha256
+import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -19,9 +21,18 @@ from .auto_synthetic_cutover import (
     SyntheticCutoverDenied, SyntheticCutoverSources,
     reconcile_synthetic_cutover,
 )
-from scripts.auto_vehicle_migration_preflight import MAX_BYTES as VEHICLE_LIMIT
-from roboport_api.auto_service_import import MAX_BYTES as SERVICE_LIMIT
-from scripts.auto_migration_dry_run import MAX_FILE_BYTES as STOCK_LIMIT
+from scripts.auto_vehicle_migration_preflight import (
+    MAX_BYTES as VEHICLE_LIMIT, MAX_ROWS as VEHICLE_ROWS,
+    COLUMNS as VEHICLE_COLUMNS, VIN_ALLOWED, _valid_id, _valid_label,
+)
+from roboport_api.auto_service_import import (
+    MAX_BYTES as SERVICE_LIMIT, MAX_ROWS as SERVICE_ROWS,
+    FIELDS as SERVICE_COLUMNS, IDENT as SERVICE_IDENT, TITLE as SERVICE_TITLE,
+)
+from scripts.auto_migration_dry_run import (
+    MAX_FILE_BYTES as STOCK_LIMIT, MAX_ROWS as STOCK_ROWS,
+    COLUMNS as STOCK_COLUMNS, SAFE_ARTICLE,
+)
 
 
 _FILES = (
@@ -132,6 +143,115 @@ def export_reconciled_synthetic_cutover(
         }
 
 
+
+def _synthetic_bundle_counts(raws: dict[str, bytes], organization: str,
+                             location: str) -> dict[str, int]:
+    """Validate ALL source rows, not merely hashes supplied by a manifest.
+
+    No customer fields, cross-branch inventory, duplicate VIN/IDs, invalid
+    service durations or missing SKU links. Only counters escape this helper.
+    """
+    def decode(name: str, columns: tuple[str, ...], limit: int) -> list[dict]:
+        try:
+            reader = csv.DictReader(
+                io.StringIO(raws[name].decode("utf-8-sig"), newline=""), strict=True,
+            )
+            if reader.fieldnames is None or tuple(reader.fieldnames) != columns:
+                raise SyntheticCutoverDenied("INVALID_EXPORT")
+            rows = list(reader)
+            if not 0 < len(rows) <= limit or any(
+                None in row or any(v is None for v in row.values()) for row in rows
+            ):
+                raise SyntheticCutoverDenied("INVALID_EXPORT")
+            return rows
+        except (csv.Error, UnicodeError, ValueError):
+            raise SyntheticCutoverDenied("INVALID_EXPORT") from None
+
+    vehicles = decode("vehicles.csv", VEHICLE_COLUMNS, VEHICLE_ROWS)
+    services = decode("services.csv", SERVICE_COLUMNS, SERVICE_ROWS)
+    stock = decode("inventory.csv", STOCK_COLUMNS, STOCK_ROWS)
+    seen_vins: set[str] = set()
+    seen_vehicle_sources: set[tuple[str, str]] = set()
+    for row in vehicles:
+        source = (row["source_system"], row["source_id"])
+        vin = row["vin"]
+        if (row["record_type"] != "VEHICLE"
+                or row["organization_id"] != organization
+                or row["location_id"] != location
+                or not _valid_id(source[0], 3, 32)
+                or not _valid_id(source[1], 1, 64)
+                or len(vin) != 17 or any(c not in VIN_ALLOWED for c in vin)
+                or not _valid_label(row["make"], 100)
+                or not _valid_label(row["model"], 120)
+                or source in seen_vehicle_sources or vin in seen_vins):
+            raise SyntheticCutoverDenied("INVALID_EXPORT")
+        seen_vehicle_sources.add(source)
+        seen_vins.add(vin)
+
+    seen_service_sources: set[tuple[str, str]] = set()
+    seen_codes: set[str] = set()
+    for row in services:
+        source = (row["source_system"], row["source_id"])
+        code = row["code"]
+        title = row["title"]
+        duration = row["duration_minutes"]
+        if (row["record_type"] != "SERVICE"
+                or not 3 <= len(source[0]) <= 32
+                or not 1 <= len(source[1]) <= 64
+                or not 3 <= len(code) <= 64
+                or any(c not in SERVICE_IDENT for v in (*source, code) for c in v)
+                or not 1 <= len(title) <= 120
+                or title != title.strip() or title[0] in "=+-@"
+                or any(c not in SERVICE_TITLE for c in title)
+                or not duration.isascii() or not duration.isdecimal()
+                or not 5 <= int(duration) <= 1440
+                or str(int(duration)) != duration
+                or source in seen_service_sources or code in seen_codes):
+            raise SyntheticCutoverDenied("INVALID_EXPORT")
+        seen_service_sources.add(source)
+        seen_codes.add(code)
+
+    sources: set[str] = set()
+    skus: set[str] = set()
+    stocks: set[str] = set()
+    totals: dict[str, int] = {}
+    receipts = 0
+    for row in stock:
+        kind = row["record_type"]
+        source = row["source_id"]
+        article = row["article"]
+        quantity = row["quantity"]
+        if (kind not in ("SKU", "STOCK")
+                or row["organization_id"] != organization
+                or row["location_id"] != location
+                or not 1 <= len(source) <= 64
+                or not 3 <= len(article) <= 64
+                or any(c not in SAFE_ARTICLE for v in (source, article) for c in v)
+                or source in sources
+                or not quantity.isascii() or not quantity.isdecimal()
+                or str(int(quantity)) != quantity
+                or not 0 <= int(quantity) <= 1_000_000_000
+                or (kind == "SKU" and quantity != "0")):
+            raise SyntheticCutoverDenied("INVALID_EXPORT")
+        sources.add(source)
+        if kind == "SKU":
+            if article in skus:
+                raise SyntheticCutoverDenied("INVALID_EXPORT")
+            skus.add(article)
+        else:
+            stocks.add(article)
+            totals[article] = totals.get(article, 0) + int(quantity)
+            if totals[article] > 1_000_000_000:
+                raise SyntheticCutoverDenied("INVALID_EXPORT")
+            receipts += int(quantity) > 0
+    if not skus or not stocks.issubset(skus):
+        raise SyntheticCutoverDenied("INVALID_EXPORT")
+    return {
+        "vehicles": len(vehicles), "services": len(services),
+        "stockRows": len(stock), "skus": len(skus), "receipts": receipts,
+    }
+
+
 def verify_synthetic_cutover_export(destination: Path) -> dict:
     """Verify copied bytes, bounds, inventory and privacy of an offline bundle.
 
@@ -178,6 +298,12 @@ def verify_synthetic_cutover_export(destination: Path) -> dict:
             raise SyntheticCutoverDenied("INVALID_EXPORT")
         UUID(doc["organizationId"])
         UUID(doc["locationId"])
+        raw_files: dict[str, bytes] = {}
+        batch_ids: set[UUID] = set()
+        organization = str(UUID(doc["organizationId"]))
+        location = str(UUID(doc["locationId"]))
+        if organization != doc["organizationId"] or location != doc["locationId"]:
+            raise SyntheticCutoverDenied("INVALID_EXPORT")
         for name, _, _, _, limit in _FILES:
             entry = doc["files"][name]
             if (type(entry) is not dict or set(entry) != {
@@ -188,10 +314,16 @@ def verify_synthetic_cutover_export(destination: Path) -> dict:
                     or type(entry["bytes"]) is not int
                     or not 0 < entry["bytes"] <= limit):
                 raise SyntheticCutoverDenied("INVALID_EXPORT")
-            UUID(entry["batchId"])
+            batch = UUID(entry["batchId"])
+            if str(batch) != entry["batchId"] or batch in batch_ids:
+                raise SyntheticCutoverDenied("INVALID_EXPORT")
+            batch_ids.add(batch)
             raw = read(name, limit)
             if len(raw) != entry["bytes"] or sha256(raw).hexdigest() != entry["sha256"]:
                 raise SyntheticCutoverDenied("INVALID_EXPORT")
+            raw_files[name] = raw
+        if _synthetic_bundle_counts(raw_files, organization, location) != doc["counts"]:
+            raise SyntheticCutoverDenied("INVALID_EXPORT")
         return {
             "ok": True, "mode": "SYNTHETIC_CUTOVER_EXPORT_VERIFIED",
             "files": 4, "counts": doc["counts"], "productionApproved": False,
