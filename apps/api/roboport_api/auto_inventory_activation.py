@@ -92,9 +92,8 @@ def _reconcile(conn: psycopg.Connection, batch_id: UUID,
             if article in by_article:
                 raise InventoryActivationDenied("ACTIVATION_MISMATCH")
             by_article[article]=sku_id
-        elif by_article.get(article)!=sku_id:
-            # SQL row order may place STOCK before SKU; map all SKUs first
-            pass
+        # STOCK may precede SKU in the source; the final pass below
+        # checks all references against the completed SKU mapping.
         if event_id is not None:
             if event_id in actual_events:
                 raise InventoryActivationDenied("ACTIVATION_MISMATCH")
