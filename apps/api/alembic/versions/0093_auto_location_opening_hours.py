@@ -155,14 +155,14 @@ def upgrade():
         END LOOP;
         IF EXISTS (
           SELECT 1
-          FROM jsonb_array_elements(NEW.windows) WITH ORDINALITY a(window,n)
-          JOIN jsonb_array_elements(NEW.windows) WITH ORDINALITY b(window,n)
+          FROM jsonb_array_elements(NEW.windows) WITH ORDINALITY a(entry,n)
+          JOIN jsonb_array_elements(NEW.windows) WITH ORDINALITY b(entry,n)
             ON a.n < b.n
-           AND a.window->>'weekday'=b.window->>'weekday'
-          WHERE (a.window->>'opensMinute')::int
-                  < (b.window->>'closesMinute')::int
-            AND (b.window->>'opensMinute')::int
-                  < (a.window->>'closesMinute')::int
+           AND a.entry->>'weekday'=b.entry->>'weekday'
+          WHERE (a.entry->>'opensMinute')::int
+                  < (b.entry->>'closesMinute')::int
+            AND (b.entry->>'opensMinute')::int
+                  < (a.entry->>'closesMinute')::int
         ) THEN
           RAISE EXCEPTION 'opening windows overlap';
         END IF;
