@@ -140,7 +140,7 @@ test('cursor paging revalidates first page, never retaining revoked cards',async
   const region=page.getByRole('region',{name:'Мои автомобильные заказ-наряды'});
   await expect(region.getByText('Sedan 20')).toBeVisible();
   await region.getByRole('button',{name:'Показать ещё заказ-наряды'}).click();
-  await expect(region.getByText('Synthetic Sedan',{exact:false})).toHaveCount(1);
+  await expect(region.getByText('Synthetic Sedan',{exact:true})).toHaveCount(1);
   expect(calls.filter(x=>x==='first').length).toBeGreaterThanOrEqual(2);
   removed=true;
   await region.getByRole('button',{name:'Обновить заказ-наряды'}).click();
