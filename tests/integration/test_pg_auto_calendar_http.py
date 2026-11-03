@@ -45,7 +45,7 @@ def test_calendar_tenant_active_booking_and_limited_window(monkeypatch):
     wrong=f"/api/v1/dev/auto/organizations/{other}/calendar"
     assert client.get(wrong,params=args).status_code==403
     assert client.get(url,params={**args,"locationId":str(other_loc)}).status_code==403
-    assert client.get(url,params={**args,"endsAt":(start+timedelta(days=10)).isoformat()}).status_code==403
+    assert client.get(url,params={**args,"endsAt":(start+timedelta(days=10)).isoformat()}).status_code==422
 
 
 def test_calendar_101_rows_signals_truncation_without_cross_tenant_data(monkeypatch):
@@ -101,9 +101,11 @@ def test_calendar_101_rows_signals_truncation_without_cross_tenant_data(monkeypa
     assert "nextStartsAt" not in second.json()
     assert second.json()["items"][0]["appointmentId"] not in {
         item["appointmentId"] for item in payload["items"]}
-    assert client.get(url,params={**args,"afterStartsAt":payload["nextStartsAt"]}).status_code==403
+    assert client.get(url,params={**args,"afterStartsAt":payload["nextStartsAt"]}).status_code==422
     assert client.get(url,params={**args,"afterStartsAt":"bad",
         "afterAppointmentId":payload["nextAppointmentId"]}).status_code==422
+    assert client.get(url,params={**args,"startsAt":start.replace(tzinfo=None).isoformat()}).status_code==422
+    assert client.get(url,params={**args,"endsAt":start.isoformat()}).status_code==422
     assert len({item["appointmentId"] for item in payload["items"]})==100
     assert [item["startsAt"] for item in payload["items"]]==sorted(
         item["startsAt"] for item in payload["items"])

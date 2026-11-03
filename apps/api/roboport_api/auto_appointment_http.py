@@ -114,7 +114,7 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
 def read_calendar(org_id: str, request: Request, locationId: str,
                   startsAt: str, endsAt: str, afterStartsAt: str | None = None,
                   afterAppointmentId: str | None = None):
-    from .auto_calendar import calendar_items, CalendarDenied
+    from .auto_calendar import calendar_items, CalendarDenied, CalendarInvalid
     dsn=_request_dsn(request)
     if isinstance(dsn,JSONResponse):
         return dsn
@@ -129,6 +129,8 @@ def read_calendar(org_id: str, request: Request, locationId: str,
         try:
             items=calendar_items(db,request.cookies.get("rp_session",""),
                                  org,location,start,end,after_start,after_appointment)
+        except CalendarInvalid:
+            return _response(request,422,"INVALID_INPUT")
         except CalendarDenied:
             return _response(request,403,"FORBIDDEN")
     page=items[:100]
