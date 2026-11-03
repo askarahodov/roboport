@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from roboport_api.auto_calendar import local_day_window, CalendarDenied, CalendarInvalid
+from roboport_api.auto_slot_candidates import candidate_slots
 from roboport_api.auto_appointment_service import create_appointment
 from roboport_api.main import app
 from test_pg_auto_vehicle_claim_http import _scenario
@@ -54,6 +55,12 @@ def test_local_calendar_dst_boundaries_and_api_scope(monkeypatch):
         assert spring_end.astimezone(timezone.utc) - spring.astimezone(timezone.utc) == timedelta(hours=23)
         autumn, autumn_end, _ = local_day_window(db, token, org, loc, "2030-10-27")
         assert autumn_end.astimezone(timezone.utc) - autumn.astimezone(timezone.utc) == timedelta(hours=25)
+        assert len(candidate_slots(
+            db, token, org, loc, bay, spring, day_end=spring_end
+        )) == 45
+        assert len(candidate_slots(
+            db, token, org, loc, bay, autumn, day_end=autumn_end
+        )) == 49
         with pytest.raises(CalendarInvalid):
             local_day_window(db, token, org, loc, "2030-02-30")
         with pytest.raises(CalendarDenied):
@@ -78,6 +85,15 @@ def test_local_calendar_dst_boundaries_and_api_scope(monkeypatch):
     assert len(ok.json()["items"]) == 1
     assert ok.json()["items"][0]["appointmentId"] == str(appointment)
     assert ok.json()["items"][0]["workOrderId"] == str(work)
+    slot_url = f"/api/v1/dev/auto/organizations/{org}/slot-candidates"
+    slot_params = {"locationId":str(loc),"bayId":str(bay),"localDay":"2030-10-27"}
+    slots = client.get(slot_url, params=slot_params)
+    assert slots.status_code == 200, slots.text
+    assert slots.json()["timeZone"] == "Europe/Berlin"
+    assert slots.json()["guaranteed"] is False
+    assert len(slots.json()["items"]) == 49
+    assert client.get(slot_url, params={**slot_params,"day":"2030-10-27"}).status_code == 422
+    assert client.get(slot_url, params={**slot_params,"localDay":"2030-02-30"}).status_code == 422
     assert client.get(url,params={**params,"localDay":"2030-02-30"}).status_code == 422
     assert client.get(url,params={**params,"startsAt":"2030-03-31T00:00:00Z"}).status_code == 422
     assert client.get(url,params={"locationId":str(loc)}).status_code == 422
