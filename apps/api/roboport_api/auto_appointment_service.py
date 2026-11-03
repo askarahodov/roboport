@@ -165,14 +165,21 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             actor = session_subject(conn, token, for_mutation=True)
             if actor is None:
                 raise AppointmentDenied("session unavailable")
-            fingerprint = hashlib.sha256(json.dumps({
+            fingerprint_input = {
                 "location":str(location),"bay":str(bay),"link":str(link),
                 "employee":str(employee) if employee else None,
                 "starts":starts.astimezone(timezone.utc).isoformat(),
                 "ends":ends.astimezone(timezone.utc).isoformat(),
-                "services":sorted(map(str,service_ids)),
-                "materials":sorted((str(sku),kind,qty) for sku,kind,qty in materials),
-            },sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            }
+            # Совместимость со старыми receipt: пустой состав не меняет digest.
+            if service_ids or materials:
+                fingerprint_input["services"] = sorted(map(str,service_ids))
+                fingerprint_input["materials"] = sorted(
+                    (str(sku),kind,qty) for sku,kind,qty in materials
+                )
+            fingerprint = hashlib.sha256(json.dumps(
+                fingerprint_input,sort_keys=True,separators=(",",":")
+            ).encode()).hexdigest()
             inserted = conn.execute("""INSERT INTO auto_appointment_idempotency
               (organization_id,actor_id,request_key,fingerprint,
                appointment_id,booking_id,work_order_id)
