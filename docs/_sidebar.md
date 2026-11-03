@@ -39,3 +39,5 @@
 
 - **Архив: legacy робототехника (не инструкция СТО)**
   - [Реестр legacy и правила cutover](/auto/LEGACY_ARCHIVE.md)
+
+  - [Пакетный synthetic cutover (разработчикам/QA)](/auto/SYNTHETIC_CUTOVER.md)
