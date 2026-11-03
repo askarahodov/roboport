@@ -91,3 +91,13 @@ anti-BOLA и 409 на конфликт версии/остатка.
 
 
 **Уточнение фактической складской арифметики (review #385).** После `RESERVE 3 → ISSUE 1 → RETURN 1` физический остаток SKU вернулся к 8, но незакрытый резерв **2**, а не 3: возврат не выполняет повторный RESERVE. Скрипт строго сверяет `on_hand=8,reserved=2` для PART и `on_hand=5,reserved=2` для CONSUMABLE. Одновременно проверяется, что libpq query overrides и ambient `PGHOST/PGDATABASE/PGSERVICE` не могут изменить адрес `127.0.0.1:5432` или имя clone при восстановительных пробах. [Подробная процедура](RESTORE_CHECKPOINT.md).
+
+
+## Synthetic all-or-nothing cutover с построчным происхождением склада (#172, current-dev)
+
+Интеграционный PG17 тест `test_pg_auto_synthetic_cutover.py` проверяет одну целую транзакцию из трёх **искусственных** CSV: staged и активированные `VEHICLE`, `SERVICE`, `SKU/STOCK` с точными SHA-256. Две роли MANAGER и WAREHOUSE проверяются из живой сессии; пробные записи не выдают customer ownership, цену или старую историю. SQL trigger `0094_auto_inventory_activation` не допускает подмены чужого SKU/RECEIPT, исправления количества или удаления lineage; прямые SQL негативные тесты и конкурентный replay не создают дубликатов. Имитируемые сбои при активации услуг или склада откатывают даже предыдущие успешные stages/promotions. `reconcile_synthetic_cutover` подтверждает фактические counts без новых записей. [Процедура и границы](SYNTHETIC_CUTOVER.md). Реальное восстановление и independent security/legal/ops gates #119 по-прежнему не пройдены.
+
+
+### Проверка сохранности импортного происхождения после restore (#172)
+
+Обязательный CI проводит второй независимый `pg_dump/pg_restore` checkpoint для всего synthetic миграционного набора: private manifest с SHA-256 staged/live vehicle, service, SKU/STOCK и реальных RECEIPT; сравнение source и restored clone, запреты UPDATE/DELETE activation lineage и чужого stock-event на clone. Скрипт `scripts/auto_cutover_restore_probe.py`, контрактный тест `tests/contract/test_auto_cutover_restore_probe.py`, процедура `docs/auto/SYNTHETIC_CUTOVER.md`. Это **не** полноценная сертификация production recovery, consent/лицензий, RPO/RTO, customer/repair migration и не разрешает #119.

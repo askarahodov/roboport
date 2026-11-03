@@ -63,14 +63,6 @@ def stage_synthetic_vehicles(conn, path: Path, *, organization_id: UUID,
                 FOR SHARE OF l,o
             """, (location_id, organization_id)).fetchone() is None:
                 raise VehicleStagingRejected("scope unavailable")
-        # The current auto_vehicle table has globally unique VINs. Prevent
-        # staging a synthetic candidate that already belongs to an existing
-        # vehicle. Never expose the matching VIN or any owner/history fields.
-        if conn.execute("""
-            SELECT 1 FROM auto_vehicle
-            WHERE vin = ANY(%s::text[]) LIMIT 1
-        """, ([row["vin"] for row in records],)).fetchone() is not None:
-            raise VehicleStagingRejected("vehicle identity conflicts with existing data")
         conn.execute("""
             INSERT INTO auto_vehicle_migration_batch(id,organization_id,source_sha256,row_count)
             VALUES(%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING
@@ -95,8 +87,26 @@ def stage_synthetic_vehicles(conn, path: Path, *, organization_id: UUID,
                             row["make"], row["model"])
                 if original != expected:
                     raise VehicleStagingRejected("line mismatch")
+            # An already promoted batch legitimately owns its now-live VINs.
+            # Never permit replay if the VIN instead belongs to a different
+            # vehicle or an unrelated tenant. This check precedes any replay.
+            if conn.execute("""
+                SELECT 1 FROM auto_vehicle v
+                WHERE v.vin=ANY(%s::text[])
+                  AND NOT EXISTS (
+                    SELECT 1 FROM auto_vehicle_migration_promotion p
+                    WHERE p.batch_id=%s AND p.vehicle_id=v.id
+                  ) LIMIT 1
+            """, ([row["vin"] for row in records],batch_id)).fetchone():
+                raise VehicleStagingRejected("vehicle identity conflicts with existing data")
             return {"ok": True, "replayed": True, "count": len(records),
                     "writes": 0, "mode": "SYNTHETIC_VEHICLE_STAGING"}
+        # A new batch cannot take a VIN from any live automotive vehicle.
+        if conn.execute("""
+            SELECT 1 FROM auto_vehicle
+            WHERE vin=ANY(%s::text[]) LIMIT 1
+        """, ([row["vin"] for row in records],)).fetchone():
+            raise VehicleStagingRejected("vehicle identity conflicts with existing data")
         # Savepoint protects the outer transaction from PostgreSQL unique errors.
         # Do not expose PostgreSQL's DETAIL field (which includes the VIN).
         try:

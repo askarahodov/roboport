@@ -127,3 +127,8 @@
 ## Обновление A06/A07: подтверждённые рабочие интервалы филиала (03.11.2026, #113)
 
 **D/current-dev:** SQL-бронирование и поиск слотов учитывают настроенные MANAGER недельные интервалы, закрытые локальные даты, текущий часовой пояс IANA, историю версии, прямую попытку INSERT, перенос и доступность сотрудника. График можно прочитать `INTAKE` или `MANAGER`, изменять только `MANAGER` своего филиала. `409 LOCATION_CLOSED` возвращает конфликт без фантомных событий. **P/planned:** утверждённые реальные часы каждого филиала/праздники, ночные сквозные интервалы, автоприменение праздничных исключений, независимые юридические проверки и production-gate #119. При отсутствии конфигурации на synthetic-площадке сохраняются старые unrestricted интервалы только для dev, в production такой филиал не допускается. См. `docs/auto/OPENING_HOURS.md`.
+
+
+## Дополнение к миграции каталога/склада: полный synthetic batch (#172, current-dev)
+
+**D/current-dev:** три источника VEHICLE/SERVICE/SKU+STOCK проверяются по SHA и staging lineage, затем одной atomic PG17 transaction активируются vehicle без прав клиента, service catalog и stock SKU/RECEIPT. Применяется независимое разрешение MANAGER+WAREHOUSE, FK/trigger-guard postрочного provenance, запрет чужого SKU/tenant, повтор без phantom и неизменяемый audit. **P/planned:** юридически разрешённые реальные контрагенты и клиенты, документы/история, отдельный transfer consent, надёжный промышленный импорт XLSX через trusted pipeline, документированная реальная инвентаризация и RPO/RTO/ops+security sign-off. См. `docs/auto/SYNTHETIC_CUTOVER.md`; #172 нельзя закрывать по одному synthetic checkpoint.
