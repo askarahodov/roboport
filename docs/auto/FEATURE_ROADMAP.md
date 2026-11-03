@@ -138,3 +138,6 @@
 ## Безопасный lifecycle записи и складского резерва (current-dev, #113)
 
 Миграция `0091_auto_booking_stock_guard` защищает от отвязанных запасов: отмена действующей брони с открытым `RESERVE` или непогашенной выдачей `ISSUE - RETURN` блокируется PostgreSQL даже при прямом UPDATE; STAFF получает `409 STOCK_RECONCILIATION_REQUIRED`, CLIENT — `403` и `canManage:false`. После полного `RELEASE` и/или `RETURN` без открытых складских обязательств отмена снова допустима. Перенос сохраняет WorkOrder и складские события; функции `record_auto_work_order_stock` и `record_auto_work_order_return` теперь проверяют последнюю актуальную бронь из immutable истории переносов. Regression tests `test_pg_auto_booking_stock_guard.py` и существующие `test_pg_auto_work_order_stock.py`. Остался внешний/полный workflow покупки, резерва и возврата материалов, цены, consent/privacy и release gate #119; **#113 остаётся открытой**.
+
+
+Парные warehouse lot-функции `record_auto_stock_lot_work_order_issue` и `record_auto_stock_lot_work_order_return` также сверяют текущую бронь после переноса (не первоначальную), с PG17 полным циклом `test_pg_auto_booking_lot_move_reconcile.py`. Не допускается двойное списание партий или отмена до закрытия `ISSUE-RETURN` и `RESERVE-ISSUE-RELEASE`.
