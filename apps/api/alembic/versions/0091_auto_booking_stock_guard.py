@@ -141,6 +141,75 @@ def upgrade():
       END $fn$
     """)
 
+    # Reconcile issued material through RETURN after moving the booking.
+    op.execute("""
+      CREATE OR REPLACE FUNCTION record_auto_work_order_return(
+        p_order uuid, p_sku uuid, p_request uuid, p_quantity bigint
+      ) RETURNS uuid LANGUAGE plpgsql AS $fn$
+      DECLARE order_row record; sku_row record; prior record; totals record; new_id uuid;
+      BEGIN
+        IF p_order IS NULL OR p_sku IS NULL OR p_request IS NULL
+           OR p_quantity IS NULL OR p_quantity < 1 OR p_quantity > 1000000000 THEN
+          RAISE EXCEPTION 'invalid stock return';
+        END IF;
+        SELECT w.organization_id,w.location_id INTO order_row
+          FROM auto_work_order w
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          JOIN LATERAL (
+            SELECT COALESCE((
+              SELECT rs.new_booking_id FROM auto_appointment_reschedule rs
+              WHERE rs.appointment_id=a.id
+              ORDER BY rs.created_at DESC,rs.id DESC LIMIT 1
+            ),a.booking_id) AS current_id
+          ) current_booking ON TRUE
+          JOIN auto_bay_booking b ON b.id=current_booking.current_id
+            AND b.organization_id=w.organization_id
+            AND b.location_id=w.location_id
+          JOIN auto_organization o ON o.id=w.organization_id
+          JOIN auto_service_location l ON l.id=w.location_id
+          WHERE w.id=p_order AND a.organization_id=w.organization_id
+            AND a.location_id=w.location_id AND b.canceled_at IS NULL
+            AND o.disabled_at IS NULL AND l.disabled_at IS NULL
+            AND l.organization_id=w.organization_id
+          FOR SHARE OF w,a,b,o,l;
+        IF NOT FOUND THEN RAISE EXCEPTION 'work order unavailable'; END IF;
+        SELECT organization_id,location_id INTO sku_row FROM auto_stock_sku
+          WHERE id=p_sku FOR UPDATE;
+        IF NOT FOUND OR (sku_row.organization_id,sku_row.location_id)
+            IS DISTINCT FROM (order_row.organization_id,order_row.location_id) THEN
+          RAISE EXCEPTION 'work order stock scope mismatch';
+        END IF;
+        SELECT e.id,e.sku_id,e.action,e.quantity,wo.work_order_id INTO prior
+          FROM auto_stock_event e
+          LEFT JOIN auto_work_order_stock_event wo ON wo.stock_event_id=e.id
+          WHERE e.request_id=p_request;
+        IF FOUND THEN
+          IF prior.work_order_id=p_order AND prior.sku_id=p_sku
+             AND prior.action='RETURN' AND prior.quantity=p_quantity THEN
+            RETURN prior.id;
+          END IF;
+          RAISE EXCEPTION 'stock request replay mismatch';
+        END IF;
+        SELECT COALESCE(SUM(CASE WHEN action='ISSUE' THEN quantity
+                                 WHEN action='RETURN' THEN -quantity
+                                 ELSE 0 END),0)::bigint AS net_issued
+          INTO totals FROM auto_work_order_stock_event
+          WHERE work_order_id=p_order AND sku_id=p_sku;
+        IF totals.net_issued < p_quantity THEN
+          RAISE EXCEPTION 'return exceeds previously issued quantity';
+        END IF;
+        new_id := gen_random_uuid();
+        INSERT INTO auto_stock_event
+          (id,request_id,sku_id,organization_id,location_id,action,quantity)
+          VALUES(new_id,p_request,p_sku,sku_row.organization_id,
+                 sku_row.location_id,'RETURN',p_quantity);
+        INSERT INTO auto_work_order_stock_event
+          (stock_event_id,work_order_id,sku_id,action,quantity)
+          VALUES(new_id,p_order,p_sku,'RETURN',p_quantity);
+        RETURN new_id;
+      END $fn$
+    """)
+
 
 def downgrade():
     # Do not make stock-bearing orders cancelable by silent down-migration.
@@ -151,6 +220,64 @@ def downgrade():
         raise RuntimeError("stock history exists: use audited disposable restore")
     op.execute("DROP TRIGGER auto_booking_material_cancel_guard ON auto_bay_booking")
     op.execute("DROP FUNCTION guard_auto_booking_material_cancel()")
+    op.execute("""
+      CREATE OR REPLACE FUNCTION record_auto_work_order_return(
+        p_order uuid, p_sku uuid, p_request uuid, p_quantity bigint
+      ) RETURNS uuid LANGUAGE plpgsql AS $fn$
+      DECLARE order_row record; sku_row record; prior record; totals record; new_id uuid;
+      BEGIN
+        IF p_order IS NULL OR p_sku IS NULL OR p_request IS NULL
+           OR p_quantity IS NULL OR p_quantity < 1 OR p_quantity > 1000000000 THEN
+          RAISE EXCEPTION 'invalid stock return';
+        END IF;
+        SELECT w.organization_id,w.location_id INTO order_row
+          FROM auto_work_order w
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          JOIN auto_bay_booking b ON b.id=a.booking_id
+          JOIN auto_organization o ON o.id=w.organization_id
+          JOIN auto_service_location l ON l.id=w.location_id
+          WHERE w.id=p_order AND a.organization_id=w.organization_id
+            AND a.location_id=w.location_id AND b.canceled_at IS NULL
+            AND o.disabled_at IS NULL AND l.disabled_at IS NULL
+            AND l.organization_id=w.organization_id
+          FOR SHARE OF w,a,b,o,l;
+        IF NOT FOUND THEN RAISE EXCEPTION 'work order unavailable'; END IF;
+        SELECT organization_id,location_id INTO sku_row FROM auto_stock_sku
+          WHERE id=p_sku FOR UPDATE;
+        IF NOT FOUND OR (sku_row.organization_id,sku_row.location_id)
+            IS DISTINCT FROM (order_row.organization_id,order_row.location_id) THEN
+          RAISE EXCEPTION 'work order stock scope mismatch';
+        END IF;
+        SELECT e.id,e.sku_id,e.action,e.quantity,wo.work_order_id INTO prior
+          FROM auto_stock_event e
+          LEFT JOIN auto_work_order_stock_event wo ON wo.stock_event_id=e.id
+          WHERE e.request_id=p_request;
+        IF FOUND THEN
+          IF prior.work_order_id=p_order AND prior.sku_id=p_sku
+             AND prior.action='RETURN' AND prior.quantity=p_quantity THEN
+            RETURN prior.id;
+          END IF;
+          RAISE EXCEPTION 'stock request replay mismatch';
+        END IF;
+        SELECT COALESCE(SUM(CASE WHEN action='ISSUE' THEN quantity
+                                 WHEN action='RETURN' THEN -quantity
+                                 ELSE 0 END),0)::bigint AS net_issued
+          INTO totals FROM auto_work_order_stock_event
+          WHERE work_order_id=p_order AND sku_id=p_sku;
+        IF totals.net_issued < p_quantity THEN
+          RAISE EXCEPTION 'return exceeds previously issued quantity';
+        END IF;
+        new_id := gen_random_uuid();
+        INSERT INTO auto_stock_event
+          (id,request_id,sku_id,organization_id,location_id,action,quantity)
+          VALUES(new_id,p_request,p_sku,sku_row.organization_id,
+                 sku_row.location_id,'RETURN',p_quantity);
+        INSERT INTO auto_work_order_stock_event
+          (stock_event_id,work_order_id,sku_id,action,quantity)
+          VALUES(new_id,p_order,p_sku,'RETURN',p_quantity);
+        RETURN new_id;
+      END $fn$
+    """)
     # The old function would incorrectly use the initial booking after move.
     # In a disposable database without stock history, restore by baseline.
     # Do not silently restore an unsafe function when there are movements.
