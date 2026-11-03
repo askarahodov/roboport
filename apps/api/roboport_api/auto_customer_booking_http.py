@@ -118,6 +118,37 @@ def get_slots(request: Request, organizationId: str, locationId: str,
                         headers={"Cache-Control":"no-store"})
 
 
+@router.get("/api/v1/dev/auto/customer/booking/services")
+def get_booking_services(request: Request, organizationId: str, locationId: str,
+                         customerLinkId: str):
+    """Только каталог собственного филиала; данные иных клиентов отсутствуют."""
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        org, loc, link = map(UUID, (organizationId, locationId, customerLinkId))
+    except (ValueError, TypeError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            with db.transaction():
+                _customer_scope(db, request.cookies.get("rp_session", ""), org, loc, link)
+                services = db.execute(
+                    """SELECT id,code,title,duration_minutes FROM auto_service_catalog
+                       WHERE organization_id=%s AND location_id=%s
+                       ORDER BY code,id LIMIT 101""",
+                    (org, loc),
+                ).fetchall()
+        except AppointmentDenied:
+            return _response(request, 403, "FORBIDDEN")
+    if len(services) > 100:
+        return _response(request, 503, "UNAVAILABLE")
+    return JSONResponse(content={"items":[
+        {"id":str(i),"code":code,"title":title,"durationMinutes":duration}
+        for i,code,title,duration in services], "syntheticOnly":True},
+        headers={"Cache-Control":"no-store"})
+
+
 @router.post("/api/v1/dev/auto/customer/booking/appointments")
 async def create_customer_booking(request: Request):
     dsn = _request_dsn(request)
