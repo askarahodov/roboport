@@ -45,6 +45,14 @@ jobs:
           python -m alembic -c apps/api/alembic.ini upgrade head
       - name: PostgreSQL integrity integration tests
         run: python -m pytest -q -ra tests/integration
+      - name: Seed synthetic live automotive lifecycle before pg_dump
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only disposable loopback PG17; private UUID/digest manifest is
+          # kept outside Git and is never sent to logs or the DB dump.
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_restore_lifecycle_probe \
+            seed --manifest /tmp/roboport-auto-lifecycle-restore.json
       - name: Synthetic PostgreSQL pg_dump / pg_restore roundtrip
         shell: bash
         run: |
@@ -65,6 +73,15 @@ jobs:
           docker exec "$PG_CONTAINER" pg_dump -U roboport -Fc -f /tmp/roboport-synthetic.dump roboport
           docker exec "$PG_CONTAINER" createdb -U roboport roboport_restored
           docker exec "$PG_CONTAINER" pg_restore -U roboport --exit-on-error -d roboport_restored /tmp/roboport-synthetic.dump
+          # Confirm restored *live* synthetic booking/order/stock/finance graph
+          # against the exact pre-dump snapshot, then challenge restored
+          # immutable, cancellation, exclusion and tenant boundary triggers.
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_restore_lifecycle_probe \
+            verify --manifest /tmp/roboport-auto-lifecycle-restore.json \
+            --database roboport
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_restore_lifecycle_probe \
+            verify-clone --manifest /tmp/roboport-auto-lifecycle-restore.json \
+            --database roboport_restored
           ORIGINAL="$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport -At -c "SELECT count(*) FROM customer WHERE label='restore-probe'")"
           RESTORED="$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -At -c "SELECT count(*) FROM customer WHERE label='restore-probe'")"
           test "$ORIGINAL" = 1
