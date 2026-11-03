@@ -129,7 +129,7 @@ export function AutoCalendar() {
       }).catch(()=>{if(!controller.signal.aborted)setStockMessage('Каталог остатков недоступен.');});
     return ()=>controller.abort();
   },[org,location]);
-  function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');}
+  function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
   function resetPage(){setCursor(null);setHistory([]);resetSlots();}
   React.useEffect(()=>{setPending(null);},[org,location]);
   async function findSlots(){
