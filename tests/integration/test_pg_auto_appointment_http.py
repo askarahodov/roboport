@@ -57,7 +57,18 @@ def test_closed_http_create_cancel_and_isolation(monkeypatch):
     assert client.post(cancel,headers=cancel_key).json()["status"]=="CANCELED"
     assert client.post(cancel,headers=headers).json()["status"]=="ALREADY_CANCELED"
     assert client.post(cancel,headers={**headers,"Idempotency-Key":"invalid"}).status_code==422
+    # The same actor/key cannot cancel a different, still-active appointment.
+    later={**data,"startsAt":(starts+timedelta(hours=3)).isoformat(),
+                 "endsAt":(starts+timedelta(hours=4)).isoformat()}
+    second=client.post(url,json=later,headers={**headers,"Idempotency-Key":str(uuid4())})
+    assert second.status_code==201,second.text
+    reused=client.post(f"{url}/{second.json()['appointmentId']}/cancel",
+                       headers=cancel_key)
+    assert reused.status_code==409,reused.text
+    assert reused.json()["code"]=="IDEMPOTENCY_KEY_REUSED"
     with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT canceled_at IS NULL FROM auto_bay_booking WHERE id=%s",
+                          (second.json()["bookingId"],)).fetchone()==(True,)
         assert db.execute("""SELECT actor_id,appointment_id,booking_id
              FROM auto_cancel_idempotency WHERE organization_id=%s""",
              (org,)).fetchall()==[(d["intake"],ident,created.json()["bookingId"])]
