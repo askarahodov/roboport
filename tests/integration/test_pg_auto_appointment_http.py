@@ -34,9 +34,11 @@ def test_closed_http_create_cancel_and_isolation(monkeypatch):
     headers={"Origin":"https://127.0.0.1","X-CSRF-Token":d["csrf"][d["intake"]]}
     wrong=f"/api/v1/dev/auto/organizations/{other}/appointments"
     assert client.post(wrong,json=data,headers=headers).status_code==403
-    created=client.post(url,json=data,headers=headers)
+    keyed={**headers,"Idempotency-Key":str(uuid4())}
+    created=client.post(url,json=data,headers=keyed)
     assert created.status_code==201,created.text
     ident=created.json()["appointmentId"]
+    assert client.post(url,json=data,headers=keyed).json()==created.json()
     assert client.post(url,json=data,headers=headers).status_code==409
     cancel=f"{url}/{ident}/cancel"
     assert client.post(f"{wrong}/{ident}/cancel",headers=headers).status_code==403
@@ -47,6 +49,10 @@ def test_closed_http_create_cancel_and_isolation(monkeypatch):
     result=client.post(cancel,headers=headers)
     assert result.status_code==200,result.text
     assert result.json()["status"]=="CANCELED"
+    # Сохранённый create receipt не подтверждает отменённую бронь.
+    stale=client.post(url,json=data,headers=keyed)
+    assert stale.status_code==409,stale.text
+    assert stale.json()["code"]=="IDEMPOTENCY_KEY_REUSED"
     assert client.post(cancel,headers=headers).json()["status"]=="ALREADY_CANCELED"
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT actor_id,action FROM auto_appointment_actor_action
