@@ -590,3 +590,39 @@ test('warehouse-less intake sees no material picker data and cannot select stock
   await expect(page.getByText('Для резерва деталей требуются роли INTAKE и WAREHOUSE.')).toBeVisible();
   await expect(page.getByRole('checkbox',{name:/Выбрать SKU/})).toHaveCount(0);
 });
+
+
+test('changing bay while slot search is pending re-enables search',async({page})=>{
+  let acknowledge!:()=>void;
+  let finish!:()=>void;
+  const started=new Promise<void>(resolve=>acknowledge=resolve);
+  const release=new Promise<void>(resolve=>finish=resolve);
+  await page.route(base,async route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname.endsWith('/slot-candidates')){
+      acknowledge();
+      await release;
+      try{await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        items:[{startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:00:00Z'}],
+        guaranteed:false,
+      })});}catch{return;}
+      return;
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(
+      url.pathname.endsWith('/booking-stock')||url.pathname.endsWith('/booking-services')?
+        {items:[],syntheticOnly:true}:{items:[],hasMore:false},
+    )});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByRole('textbox',{name:'UUID поста'}).fill(bay);
+  const search=page.getByRole('button',{name:'Проверить свободные окна (dev)'});
+  await search.click();
+  await started;
+  await expect(search).toBeDisabled();
+  await page.getByRole('textbox',{name:'UUID поста'}).fill('77777777-7777-4777-8777-777777777777');
+  await expect(search).toBeEnabled();
+  finish();
+  await expect(page.getByLabel('Кандидаты времени')).toHaveCount(0);
+});
