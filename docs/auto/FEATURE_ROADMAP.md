@@ -141,3 +141,8 @@
 
 
 Парные warehouse lot-функции `record_auto_stock_lot_work_order_issue` и `record_auto_stock_lot_work_order_return` также сверяют текущую бронь после переноса (не первоначальную), с PG17 полным циклом `test_pg_auto_booking_lot_move_reconcile.py`. Не допускается двойное списание партий или отмена до закрытия `ISSUE-RETURN` и `RESERVE-ISSUE-RELEASE`.
+
+
+## Первичная запись с товарами и материалами склада (current-dev, #113)
+
+Миграция `0092_auto_booking_materials` связывает неизменяемый выбор `PART`/ `CONSUMABLE` с настоящим складским `RESERVE` по каждому SKU. Работник должен обладать **живыми INTAKE + WAREHOUSE** на одном филиале: `GET .../booking-stock` показывает до 100 собственных синтетических SKU с `on_hand-reserved`, `POST .../appointments` принимает до восьми `materialItems`, проверяет scope/количество, Idempotency-Key и в одной PG17 транзакции сохраняет Appointment→WorkOrder→work services→stock RESERVE→classification snapshot→notification outbox. Нехватка доступного количества даёт `409 STOCK_UNAVAILABLE`; чужая позиция — `403`; старый ключ с другим составом — `409 IDEMPOTENCY_KEY_REUSED`; клиентский endpoint складские `materialItems` не принимает. UI приёмщика на 390/1280 выбирает товар/расходник и количество, не списывает их автоматически. [Полный контракт](APPOINTMENT_MATERIALS.md) и PG17/HTTP `test_pg_auto_booking_materials_atomic.py`, Playwright `auto-calendar.spec.ts`. Права WAREHOUSE не наследуются от INTAKE и тем более CLIENT; реальные цены/склады/юридическое согласие/production #119 остаются planned. #113 остаётся открытой до полного соблюдения AC.
