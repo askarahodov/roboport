@@ -181,8 +181,8 @@ def test_reschedule_idempotency_replay_mismatch_and_no_duplicate_events():
         second=reschedule_appointment(db,token,org,a,bay,
                         start+timedelta(hours=4),start+timedelta(hours=5))
         assert second != first
-        # An earlier receipt cannot advertise a booking superseded by another
-        # successful reschedule. The old key must fail closed without writes.
+        # Старый receipt не подтверждает бронь, заменённую новым переносом.
+        # Повтор прежнего ключа должен завершиться отказом без новых записей.
         with pytest.raises(AppointmentKeyConflict):
             reschedule_appointment(db,token,org,a,bay,
                             start+timedelta(hours=2),start+timedelta(hours=3),
