@@ -20,6 +20,7 @@ class CreateAppointment(BaseModel):
     employeeId: UUID | None = None
     startsAt: datetime
     endsAt: datetime
+    serviceIds: list[UUID] = []
 
 @router.post("/api/v1/dev/auto/organizations/{org_id}/appointments")
 async def create(org_id: str, request: Request):
@@ -40,7 +41,7 @@ async def create(org_id: str, request: Request):
             appointment,booking,work_order=create_appointment(
                 db,request.cookies.get("rp_session",""),org,body.locationId,
                 body.bayId,body.customerLinkId,body.startsAt,body.endsAt,body.employeeId,
-                request_key,
+                request_key, service_ids=tuple(body.serviceIds),
             )
         except AppointmentDenied:
             return _response(request,403,"FORBIDDEN")
