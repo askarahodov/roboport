@@ -122,6 +122,19 @@ def test_staff_selects_parts_and_consumables_atomically_and_replays(monkeypatch)
     assert http.post(create,json={**payload,"materialItems":[
         {**payload["materialItems"][0],"quantity":1},payload["materialItems"][1],
     ]},headers=idem).status_code==409
+    # Другой ключ/время не может повторно зарезервировать исчерпанный SKU.
+    later=datetime.fromisoformat(payload["startsAt"])+timedelta(hours=2)
+    second=http.post(create,json={
+        **payload,"startsAt":later.isoformat(),
+        "endsAt":(later+timedelta(hours=1)).isoformat(),
+        "materialItems":[{"skuId":str(part),"kind":"PART","quantity":1}],
+    },headers={**headers,"Idempotency-Key":str(uuid4())})
+    assert second.status_code==409,second.text
+    assert second.json()["code"]=="STOCK_UNAVAILABLE"
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment WHERE organization_id=%s",(org,)
+        ).fetchone()[0]==1
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
                    (grant_id,))
@@ -151,7 +164,9 @@ def test_failed_material_booking_has_no_phantom_appointment_or_stock(monkeypatch
             "SELECT count(*) FROM auto_appointment WHERE organization_id=%s",(org,)
         ).fetchone()[0]==0
         assert db.execute(
-            "SELECT count(*) FROM auto_appointment_material_selection"
+            """SELECT count(*) FROM auto_appointment_material_selection m
+               JOIN auto_work_order w ON w.id=m.work_order_id
+               WHERE w.organization_id=%s""",(org,)
         ).fetchone()[0]==0
         assert balance(db,part)==(2,0)
         assert balance(db,consumable)==(5,0)
