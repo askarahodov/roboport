@@ -8,6 +8,8 @@ const report={syntheticOnly:true,basis:'CURRENT_BOOKINGS_CALENDAR_DAY',
   timeZone:'Europe/Berlin',bayCount:1,items:[{
     localDay:'2030-03-31',daySeconds:23*3600,activeAppointments:1,
     occupiedSeconds:3600,calendarCapacitySeconds:23*3600,occupancyBasisPoints:434,
+    scheduledEmployees:2,scheduledShiftSeconds:8*3600,
+    activeAssignments:1,assignedSeconds:3600,assignmentBasisPoints:1250,
   }]};
 
 test('manager report: scoped 390/1280 light/dark and no exposed customer fields',async({page})=>{
@@ -29,6 +31,9 @@ test('manager report: scoped 390/1280 light/dark and no exposed customer fields'
   await expect(page.getByRole('table',{name:'Текущая занятость постов по локальным суткам'})).toBeVisible();
   await expect(page.getByRole('row',{name:/2030-03-31/})).toContainText('23');
   await expect(page.getByText('доступно постов: 1',{exact:false})).toBeVisible();
+  await expect(page.getByRole('columnheader',{name:'Часы смен'})).toBeVisible();
+  await expect(page.getByRole('columnheader',{name:'Доля назначений от смен'})).toBeVisible();
+  await expect(page.getByRole('row',{name:/2030-03-31/})).toContainText('12,5 %');
   expect(urls).toHaveLength(1);
   const url=new URL(urls[0]);
   expect(url.pathname).toBe('/api/v1/dev/auto/organizations/'+org+'/locations/'+loc+'/bay-occupancy');
@@ -71,6 +76,22 @@ test('report rejects malformed and out-of-scope responses without rendering bogu
     status:200,contentType:'application/json',
     body:JSON.stringify({...report,items:[{...report.items[0],occupiedSeconds:-100}]}),
   }));
+  await page.goto('/staff/auto-bay-occupancy');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByLabel('Начало периода').fill('2030-03-31');
+  await page.getByLabel('Конец периода').fill('2030-03-31');
+  await page.getByRole('button',{name:'Сформировать отчёт'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось получить отчёт');
+  await expect(page.getByRole('table')).toHaveCount(0);
+});
+
+
+test('shift report refuses self-consistent-looking but impossible assigned capacity',async({page})=>{
+  await page.route(base,route=>route.fulfill({status:200,
+    contentType:'application/json',body:JSON.stringify({
+      ...report,items:[{...report.items[0],assignedSeconds:9*3600}],
+    })}));
   await page.goto('/staff/auto-bay-occupancy');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);

@@ -6,6 +6,9 @@ type Row={
   localDay:string;daySeconds:number;activeAppointments:number;
   occupiedSeconds:number;calendarCapacitySeconds:number;
   occupancyBasisPoints:number|null;
+  scheduledEmployees:number;scheduledShiftSeconds:number;
+  activeAssignments:number;assignedSeconds:number;
+  assignmentBasisPoints:number|null;
 };
 type Report={
   syntheticOnly:true;basis:'CURRENT_BOOKINGS_CALENDAR_DAY';
@@ -21,11 +24,20 @@ function valid(value:unknown):value is Report{
     Number.isSafeInteger(r.bayCount)&&r.bayCount>=0&&
     Array.isArray(r.items)&&r.items.length<=31&&
     r.items.every(x=>x&&typeof x.localDay==='string'&&day.test(x.localDay)&&
-      [x.daySeconds,x.activeAppointments,x.occupiedSeconds,x.calendarCapacitySeconds]
+      [x.daySeconds,x.activeAppointments,x.occupiedSeconds,x.calendarCapacitySeconds,
+       x.scheduledEmployees,x.scheduledShiftSeconds,x.activeAssignments,x.assignedSeconds]
         .every(v=>Number.isSafeInteger(v)&&v>=0)&&
-      (x.occupancyBasisPoints===null||
-        Number.isSafeInteger(x.occupancyBasisPoints)&&
-        x.occupancyBasisPoints>=0&&x.occupancyBasisPoints<=10000));
+      x.occupiedSeconds<=x.calendarCapacitySeconds&&
+      x.assignedSeconds<=x.scheduledShiftSeconds&&
+      x.activeAssignments<=x.activeAppointments&&
+      (x.occupancyBasisPoints===null?
+        x.calendarCapacitySeconds===0:
+        x.calendarCapacitySeconds>0&&Number.isSafeInteger(x.occupancyBasisPoints)&&
+        x.occupancyBasisPoints>=0&&x.occupancyBasisPoints<=10000)&&
+      (x.assignmentBasisPoints===null?
+        x.scheduledShiftSeconds===0:
+        x.scheduledShiftSeconds>0&&Number.isSafeInteger(x.assignmentBasisPoints)&&
+        x.assignmentBasisPoints>=0&&x.assignmentBasisPoints<=10000));
 }
 
 /** Руководитель видит только агрегаты текущих бронирований; без VIN, PII и денег. */
@@ -79,7 +91,9 @@ export function AutoBayOccupancy(){
     <p>Только синтетический HTTPS-стенд. Отчёт показывает текущие активные записи,
       не историю финансовых операций и не фактическое время работы механиков.
       Доля считается от <strong>всех часов локальных календарных суток</strong>,
-      включая нерабочие часы; доступность постов — на момент запроса.</p>
+      включая нерабочие часы; доступность постов — на момент запроса.
+      Также показаны агрегированные часы действующих смен и назначений
+      сотрудников, но не фактически отработанные часы и не расчёт зарплаты.</p>
     <label>UUID организации <input aria-label="UUID организации"
       value={org} onChange={e=>updateOrg(e.target.value)}/></label>
     <label>UUID филиала <input aria-label="UUID филиала"
@@ -103,13 +117,22 @@ export function AutoBayOccupancy(){
         <table><caption>Текущая занятость постов по локальным суткам</caption>
           <thead><tr><th scope="col">День</th><th scope="col">Записи</th>
             <th scope="col">Занято, ч</th><th scope="col">Всего посто-часов</th>
-            <th scope="col">Доля</th></tr></thead>
+            <th scope="col">Доля</th><th scope="col">Сотрудники в сменах</th>
+            <th scope="col">Часы смен</th><th scope="col">Назначения</th>
+            <th scope="col">Часы назначений</th>
+            <th scope="col">Доля назначений от смен</th></tr></thead>
           <tbody>{report.items.map(x=><tr key={x.localDay}>
             <th scope="row">{x.localDay}</th><td>{x.activeAppointments}</td>
             <td>{hours(x.occupiedSeconds)}</td>
             <td>{hours(x.calendarCapacitySeconds)}</td>
             <td>{x.occupancyBasisPoints===null?'Нет активных постов':
               (x.occupancyBasisPoints/100).toLocaleString('ru-RU',{
+                maximumFractionDigits:2,
+              })+' %'}</td>
+            <td>{x.scheduledEmployees}</td><td>{hours(x.scheduledShiftSeconds)}</td>
+            <td>{x.activeAssignments}</td><td>{hours(x.assignedSeconds)}</td>
+            <td>{x.assignmentBasisPoints===null?'Нет действующих смен':
+              (x.assignmentBasisPoints/100).toLocaleString('ru-RU',{
                 maximumFractionDigits:2,
               })+' %'}</td>
           </tr>)}</tbody>

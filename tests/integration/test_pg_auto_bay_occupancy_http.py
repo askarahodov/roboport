@@ -78,11 +78,15 @@ def test_manager_report_tracks_current_booking_across_dst_move_and_cancel(monkey
             "activeAppointments":1,"occupiedSeconds":3600,
             "calendarCapacitySeconds":23*3600,
             "occupancyBasisPoints":3600*10000//(23*3600),
+            "scheduledEmployees":0,"scheduledShiftSeconds":0,
+            "activeAssignments":0,"assignedSeconds":0,"assignmentBasisPoints":None,
         },
         {
             "localDay":"2030-04-01","daySeconds":24*3600,
             "activeAppointments":0,"occupiedSeconds":0,
             "calendarCapacitySeconds":24*3600,"occupancyBasisPoints":0,
+            "scheduledEmployees":0,"scheduledShiftSeconds":0,
+            "activeAssignments":0,"assignedSeconds":0,"assignmentBasisPoints":None,
         },
     ]
     assert "vin" not in first.text.lower()
@@ -156,3 +160,96 @@ def test_bounded_report_validation_and_no_fake_zero_capacity_percent(monkeypatch
     assert report.json()["bayCount"]==0
     assert report.json()["items"][0]["occupancyBasisPoints"] is None
     assert report.json()["items"][0]["calendarCapacitySeconds"]==0
+
+
+def test_manager_staff_shift_and_assignment_report_tracks_current_identity(monkeypatch):
+    """One employee/one shift; moves, clear assignment and shift withdrawal."""
+    d,org,loc,bay,other,foreign,http=_fixture(monkeypatch)
+    token=d["tokens"][d["intake"]]
+    zone=ZoneInfo("Europe/Berlin")
+    start=datetime(2030,10,27,1,0,tzinfo=zone)
+    end=datetime(2030,10,27,4,0,tzinfo=zone)  # four elapsed hours on DST end
+    with psycopg.connect(DSN) as db:
+        shift=uuid4()
+        db.execute(
+            """INSERT INTO auto_staff_shift
+               (id,organization_id,location_id,user_id,starts_at,ends_at)
+               VALUES(%s,%s,%s,%s,%s,%s)""",
+            (shift,org,loc,d["intake"],start,end),
+        )
+        appointment,booking,order=create_appointment(
+            db,token,org,loc,bay,d["link"],
+            datetime(2030,10,27,1,30,tzinfo=zone),
+            datetime(2030,10,27,2,30,tzinfo=zone,fold=0),
+            d["intake"],
+        )
+    http.cookies.set("rp_session",d["tokens"][d["manager"]])
+    params={"fromDay":"2030-10-27","toDay":"2030-10-27"}
+    path=_url(org,loc)
+    initial=http.get(path,params=params)
+    assert initial.status_code==200,initial.text
+    row=initial.json()["items"][0]
+    assert row["daySeconds"]==25*3600
+    assert row["scheduledEmployees"]==1
+    assert row["scheduledShiftSeconds"]==4*3600
+    assert row["activeAssignments"]==1
+    assert row["assignedSeconds"]==3600
+    assert row["assignmentBasisPoints"]==2500
+    assert str(d["intake"]) not in initial.text
+
+    with psycopg.connect(DSN) as db:
+        reschedule_appointment(
+            db,token,org,appointment,bay,
+            datetime(2030,10,27,2,0,tzinfo=zone,fold=1),
+            datetime(2030,10,27,3,0,tzinfo=zone),
+            clear_employee=True,
+        )
+    changed=http.get(path,params=params)
+    assert changed.status_code==200,changed.text
+    row=changed.json()["items"][0]
+    assert row["scheduledEmployees"]==1
+    assert row["scheduledShiftSeconds"]==4*3600
+    assert row["activeAssignments"]==0
+    assert row["assignedSeconds"]==0
+    assert row["assignmentBasisPoints"]==0
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_staff_shift SET canceled_at=now() WHERE id=%s",(shift,))
+    withdrawn=http.get(path,params=params)
+    assert withdrawn.status_code==200,withdrawn.text
+    row=withdrawn.json()["items"][0]
+    assert row["scheduledEmployees"]==0
+    assert row["scheduledShiftSeconds"]==0
+    assert row["assignmentBasisPoints"] is None
+    assert row["activeAssignments"]==0
+    assert row["assignedSeconds"]==0
+
+
+def test_aggregate_staff_report_no_cross_branch_grants_or_raw_user_identifiers(monkeypatch):
+    d,org,loc,bay,other,foreign,http=_fixture(monkeypatch)
+    start=datetime.now(timezone.utc)+timedelta(days=4)
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """INSERT INTO auto_staff_shift
+               (id,organization_id,location_id,user_id,starts_at,ends_at)
+               VALUES(%s,%s,%s,%s,%s,%s)""",
+            (uuid4(),org,loc,d["intake"],start,start+timedelta(hours=4)),
+        )
+        other_shift=uuid4()
+        db.execute(
+            """INSERT INTO auto_staff_shift
+               (id,organization_id,location_id,user_id,starts_at,ends_at)
+               VALUES(%s,%s,%s,%s,%s,%s)""",
+            (other_shift,other,foreign,d["manager"],
+             start,start+timedelta(hours=4)),
+        )
+    day=start.astimezone(ZoneInfo("Europe/Berlin")).date().isoformat()
+    http.cookies.set("rp_session",d["tokens"][d["manager"]])
+    result=http.get(_url(org,loc),params={"fromDay":day,"toDay":day})
+    assert result.status_code==200,result.text
+    assert result.json()["items"][0]["scheduledEmployees"]==1
+    assert str(d["intake"]) not in result.text
+    assert str(d["manager"]) not in result.text
+    assert str(other_shift) not in result.text
+    assert http.get(_url(other,foreign),params={"fromDay":day,"toDay":day}).status_code==403
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    assert http.get(_url(org,loc),params={"fromDay":day,"toDay":day}).status_code==403
