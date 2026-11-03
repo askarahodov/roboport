@@ -47,3 +47,18 @@ npm run test:docs:e2e
 E2E `apps/web/e2e-docs/portal.spec.ts` проверяет фактические computed styles в Chromium, контраст и отсутствие горизонтального переполнения на **390/1280 px, Light/Dark**, достижимость пункта sidebar клавишей Tab, видимую обводку `:focus-visible` и переход по Enter. Команды запуска совпадают с основным docs smoke выше. Проверка не заменяет полный ручной WCAG-аудит со screen reader (NVDA/VoiceOver), zoom 200–400%, реальной мобильной клавиатурой и проверкой сторонних Docsify plugin/DOM при upgrade.
 
 **Граница публикации:** этот сайт раздаётся только с `127.0.0.1` для внутренних synthetic/dev задач. JavaScript/CSS пока загружаются из pinned CDN версии Docsify 5.0.0. Без CDN он не автономен; в production или офлайн его публиковать нельзя. Требования self-host/пиннинг integrity, юридическое подтверждение, accessibility/QA в целевой инфраструктуре и отдельный выпуск остаются в #119/#121. Не разрешать веб-публикацию и не выводить реальные ПДн.
+
+
+## Подтверждение полноты ролевой базы знаний — 03.11.2026
+
+Входная страница — [Быстрый старт](guides/QUICK_START.md); далее
+[FAQ](guides/FAQ.md), [матрица исходников и прав](guides/ACCESS_AND_TEST_MATRIX.md)
+и [регламент скриншотов](guides/SCREENSHOT_EVIDENCE.md).
+Реальные screenshots Docsify (8 ролей × 390/1280 × light/dark,
+плюс мобильная навигация/поиск) генерирует
+`apps/web/e2e-docs/role-screenshots.spec.ts` в `apps/web/test-results/`.
+CI публикует PNG/trace в `roboport-browser-evidence` и
+`roboport-windows-cmd-evidence` на 14 дней. Для воспроизведения нужна
+конкретная ветка/commit SHA; статус `main` может уже измениться.
+Исходные Markdown-файлы и E2E доступны для чтения, но публичный хостинг
+и независимое юридическое/безопасностное approval не включены (#119).

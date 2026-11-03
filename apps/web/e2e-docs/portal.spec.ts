@@ -50,7 +50,7 @@ test('пользовательские разделы явно разделяю�
       await expect(page.locator('.markdown-section')).toContainText('/staff/warehouse-work-orders');
     } else {
       await expect(page.locator('.markdown-section')).toContainText(
-        path === 'mechanic' ? 'Статус: частично current-dev'
+        ['administrator','mechanic'].includes(path) ? 'Статус: частично current-dev'
           : ['client', 'intake', 'manager'].includes(path)
             ? 'Статус: частично current в синтетическом dev'
             : 'Статус: planned',
@@ -192,4 +192,24 @@ test('навигация Docsify полностью доступна с клав
   await page.keyboard.press('Enter');
   await expect(page.locator('.markdown-section h1')).toBeVisible();
   await expect(page.locator('.markdown-section')).not.toContainText('404 - Not found');
+});
+
+
+test('руководство СТО, FAQ и legacy-архив не смешиваются в текущем меню',async({page})=>{
+  test.setTimeout(90_000);
+  await page.goto('/docs/');
+  const sidebar=page.locator('.sidebar-nav');
+  await expect(sidebar.locator('a[href*="guides/QUICK_START"]')).toBeVisible();
+  await expect(sidebar.locator('a[href*="guides/FAQ"]')).toBeVisible();
+  await expect(sidebar.locator('a[href*="guides/ACCESS_AND_TEST_MATRIX"]')).toBeVisible();
+  await expect(sidebar).not.toContainText('TECHNICAL_SPEC');
+  await sidebar.locator('a[href*="guides/QUICK_START"]').click();
+  await expect(page.locator('.markdown-section h1')).toContainText('Быстрый старт по ролям');
+  await expect(page.locator('.markdown-section')).toContainText('releaseAllowed');
+  await page.goto('/docs/#/guides/FAQ');
+  await expect(page.locator('.markdown-section h1')).toContainText('Частые вопросы');
+  await expect(page.locator('.markdown-section')).toContainText('403');
+  await page.goto('/docs/#/auto/LEGACY_ARCHIVE');
+  await expect(page.locator('.markdown-section h1')).toContainText('Отдельный архив');
+  await expect(page.locator('.markdown-section')).toContainText('не рабочая инструкция');
 });
