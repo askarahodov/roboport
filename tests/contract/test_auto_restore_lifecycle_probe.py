@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 from scripts.auto_restore_lifecycle_probe import (
     FIELDS, _digest, _dsn, _load, main,
@@ -55,8 +56,14 @@ def test_restore_connections_are_strictly_disposable_loopback(monkeypatch):
         "ROBOport_DATABASE_URL",
         "postgresql+psycopg://roboport:roboport@127.0.0.1:5432/roboport",
     )
-    assert _dsn("roboport").endswith(":5432/roboport")
-    assert _dsn("roboport_restored").endswith(":5432/roboport_restored")
+    for db in ("roboport","roboport_restored"):
+        parsed=conninfo_to_dict(_dsn(db))
+        assert parsed["host"]=="127.0.0.1"
+        assert parsed["hostaddr"]=="127.0.0.1"
+        assert str(parsed["port"])=="5432"
+        assert parsed["dbname"]==db
+        assert parsed["user"]=="roboport"
+        assert parsed["sslmode"]=="disable"
     with pytest.raises(ValueError):
         _dsn("production")
     for source in (
@@ -64,10 +71,28 @@ def test_restore_connections_are_strictly_disposable_loopback(monkeypatch):
         "postgresql://roboport:roboport@127.0.0.1:5432/production",
         "postgresql://roboport:roboport@127.0.0.1:5433/roboport",
         "mysql://roboport:roboport@127.0.0.1:5432/roboport",
+        "postgresql://roboport:roboport@127.0.0.1:5432/roboport?host=evil.example",
+        "postgresql://roboport:roboport@127.0.0.1:5432/roboport?dbname=production",
+        "postgresql://roboport:roboport@127.0.0.1:5432/roboport?hostaddr=198.51.100.1",
+        "postgresql://roboport:roboport@127.0.0.1:5432/roboport?service=prod",
+        "postgresql://roboport:roboport@127.0.0.1:5432/roboport?options=-c",
+        "postgresql://roboport:roboport@127.0.0.1:5432/roboport#fragment",
     ):
         monkeypatch.setenv("ROBOport_DATABASE_URL",source)
         with pytest.raises(ValueError):
             _dsn("roboport")
+
+
+def test_environment_cannot_override_restore_destination(monkeypatch):
+    value="postgresql+psycopg://roboport:roboport@127.0.0.1:5432/roboport"
+    for name in ("PGHOST","PGHOSTADDR","PGDATABASE","PGPORT",
+                 "PGSERVICE","PGSERVICEFILE","PGOPTIONS",
+                 "PGSSLMODE","PGTARGETSESSIONATTRS"):
+        monkeypatch.setenv("ROBOport_DATABASE_URL",value)
+        monkeypatch.setenv(name,"external")
+        with pytest.raises(ValueError):
+            _dsn("roboport_restored")
+        monkeypatch.delenv(name)
 
 
 def test_verification_has_no_unsafe_mutating_source_mode(tmp_path):
