@@ -74,6 +74,30 @@ def _authority(conn: psycopg.Connection,token: str,
 
 def _read_promoted(conn: psycopg.Connection,org: UUID,loc: UUID,
                    sources: SyntheticCutoverSources) -> dict:
+    # Reconcile against all three source manifests as well as the live
+    # relational provenance. A caller cannot swap the expected file hash and
+    # obtain a false success solely because row counts still match.
+    vehicle_source=conn.execute(
+        """SELECT organization_id,source_sha256,row_count
+           FROM auto_vehicle_migration_batch WHERE id=%s""",
+        (sources.vehicle_batch_id,),
+    ).fetchone()
+    service_source=conn.execute(
+        """SELECT organization_id,location_id,source_sha256,row_count
+           FROM auto_service_import_batch WHERE id=%s""",
+        (sources.service_batch_id,),
+    ).fetchone()
+    inventory_source=conn.execute(
+        """SELECT organization_id,source_sha256,row_count
+           FROM auto_migration_staging_batch WHERE id=%s""",
+        (sources.inventory_batch_id,),
+    ).fetchone()
+    if (vehicle_source is None or service_source is None
+        or inventory_source is None
+        or vehicle_source[:2]!=(org,sources.vehicle_sha256)
+        or service_source[:3]!=(org,loc,sources.service_sha256)
+        or inventory_source[:2]!=(org,sources.inventory_sha256)):
+        raise SyntheticCutoverDenied("SOURCE_MISMATCH")
     vehicle = conn.execute(
         """SELECT v.vin,v.make,v.model,line.vin,line.make,line.model,
                   line.organization_id,line.location_id
