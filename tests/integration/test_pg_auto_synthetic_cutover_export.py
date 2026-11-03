@@ -242,7 +242,12 @@ def test_manifest_self_consistent_count_and_scope_forgery_rejected(tmp_path):
     completed=subprocess.run([
         sys.executable,"scripts/auto_cutover_export_verify.py",
         "--synthetic-only",str(bundle),
-    ],capture_output=True,text=True,check=True)
+    ],capture_output=True,text=True,check=True,env={
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join((
+            str(Path.cwd()/"apps/api"), str(Path.cwd()),
+        )),
+    })
     response=json.loads(completed.stdout)
     assert response["ok"] and response["counts"]["vehicles"]==1
     assert sources.vehicle_path.read_text().splitlines()[1].split(",")[4] not in completed.stdout
