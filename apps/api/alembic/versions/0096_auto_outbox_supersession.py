@@ -26,11 +26,14 @@ def upgrade():
         IF OLD.status='SUPERSEDED' THEN
           RAISE EXCEPTION 'superseded notification is immutable';
         END IF;
+        IF TG_OP='DELETE' THEN
+          RETURN OLD;
+        END IF;
         RETURN NEW;
       END $fn$
     """)
     op.execute("""CREATE TRIGGER auto_outbox_superseded_immutable
-      BEFORE UPDATE ON notification_outbox
+      BEFORE UPDATE OR DELETE ON notification_outbox
       FOR EACH ROW EXECUTE FUNCTION guard_superseded_auto_outbox()""")
 
     # AFTER INSERT is in the same transaction as the original appointment

@@ -183,6 +183,12 @@ def test_supersession_dispatches_only_current_notification_and_preserves_audit()
                             "UPDATE notification_outbox SET status='PENDING' WHERE id=%s",
                             (event,),
                         )
+                with pytest.raises(psycopg.errors.RaiseException):
+                    with db.transaction():
+                        db.execute(
+                            "DELETE FROM notification_outbox WHERE id=%s",
+                            (event,),
+                        )
 
 
 def test_reschedule_replaces_queued_created_but_not_already_delivered_notice():
