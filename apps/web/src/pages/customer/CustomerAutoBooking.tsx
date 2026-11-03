@@ -5,7 +5,7 @@ type Resource={organizationId:string;locationId:string;customerLinkId:string;bay
   timeZone:string;vehicle:{make:string;model:string}};
 type Booking={appointmentId:string;organizationId:string;locationId:string;customerLinkId:string;
   bookingId:string;bayId:string;startsAt:string;endsAt:string;status:'SCHEDULED'|'CANCELED';
-  workOrderId:string;timeZone:string;canManage:boolean};
+  workOrderId:string;timeZone:string;canManage:boolean;serviceIds:string[]};
 type Slot={startsAt:string;endsAt:string};
 type Service={id:string;code:string;title:string;durationMinutes:number};
 type Pending={path:string;body:string;key:string|null};
@@ -65,7 +65,9 @@ export function CustomerAutoBooking(){
              uuid.test(x.bayId)&&uuid.test(x.workOrderId)&&
              typeof x.startsAt==='string'&&typeof x.endsAt==='string'&&
              (x.status==='CANCELED'||x.status==='SCHEDULED')&&
-             typeof x.timeZone==='string'&&typeof x.canManage==='boolean'))throw Error('shape');
+             typeof x.timeZone==='string'&&typeof x.canManage==='boolean'&&
+              Array.isArray(x.serviceIds)&&x.serviceIds.length<=100&&
+              x.serviceIds.every((id:unknown)=>typeof id==='string'&&uuid.test(id))))throw Error('shape');
         if(controller.signal.aborted)return;
         const incoming=rr.items as Resource[];
         setResources(incoming);setBookings(bb.items as Booking[]);
@@ -113,7 +115,7 @@ export function CustomerAutoBooking(){
     const r=scoped;
     const query=new URLSearchParams({organizationId:r.organizationId,
       locationId:r.locationId,customerLinkId:r.customerLinkId,bayId:r.bayId,localDay:day});
-    if(!target)selectedServices.forEach(id=>query.append('serviceId',id));
+    (target?target.serviceIds:selectedServices).forEach(id=>query.append('serviceId',id));
     try{
       const resp=await fetch('/api/v1/dev/auto/customer/booking/slots?'+query,{
         credentials:'include',cache:'no-store'});
@@ -223,7 +225,7 @@ export function CustomerAutoBooking(){
           </option>)}
         </select></label>
         {!target&&<fieldset aria-label="Услуги при записи (dev)"><legend>Работы по записи (необязательно)</legend>
-          <p>Выберите не более 8 услуг и не более 24 часов суммарно. Поиск учитывает полную длительность, а после включения работ самостоятельный перенос и отмена недоступны.</p>
+          <p>Выберите не более 8 услуг и не более 24 часов суммарно. Поиск учитывает полную длительность. Первоначальный выбор работ не мешает переносу и отмене до начала оформления приёмщиком, осмотра, сметы или складских операций.</p>
           {serviceState&&<p role="status">{serviceState}</p>}
           {services.map(service=><label key={service.id} style={{display:'block'}}>
             <input type="checkbox" aria-label={'Услуга '+service.code}

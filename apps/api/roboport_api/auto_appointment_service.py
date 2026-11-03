@@ -65,7 +65,7 @@ def _customer_order_pristine(conn: psycopg.Connection, appointment: UUID) -> Non
         """SELECT 1 FROM auto_work_order w
            WHERE w.appointment_id=%s
              AND NOT EXISTS (SELECT 1 FROM auto_work_order_service s
-                             WHERE s.work_order_id=w.id)
+                             WHERE s.work_order_id=w.id AND s.selection_origin<>'BOOKING')
              AND NOT EXISTS (SELECT 1 FROM auto_work_order_inspection i
                              WHERE i.work_order_id=w.id)
              AND NOT EXISTS (SELECT 1 FROM auto_work_order_estimate_revision r
@@ -290,8 +290,9 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                 for service_id in service_ids:
                     conn.execute(
                         """INSERT INTO auto_work_order_service
-                           (id,work_order_id,service_id,organization_id,location_id)
-                           VALUES(%s,%s,%s,%s,%s)""",
+                           (id,work_order_id,service_id,organization_id,location_id,
+                            selection_origin)
+                           VALUES(%s,%s,%s,%s,%s,'BOOKING')""",
                         (uuid4(), order, service_id, organization, location),
                     )
                 if material_items:
@@ -520,6 +521,20 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
                 return existing[1]
         if starts <= datetime.now(timezone.utc):
             raise AppointmentDenied("reschedule must start in future")
+        # Existing immutable selections still require enough time after a move.
+        selected_minutes = conn.execute(
+            """SELECT COALESCE(SUM(cat.duration_minutes),0)
+               FROM auto_work_order w
+               JOIN auto_work_order_service sel ON sel.work_order_id=w.id
+               JOIN auto_service_catalog cat ON cat.id=sel.service_id
+               WHERE w.appointment_id=%s AND w.organization_id=%s
+                 AND w.location_id=%s""",
+            (appointment,organization,a[0]),
+        ).fetchone()[0]
+        if selected_minutes*60 > (
+            ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)
+        ).total_seconds():
+            raise AppointmentDurationInvalid("services exceed rescheduled interval")
         old = current_appointment_booking(conn,appointment)
         previous = conn.execute(
             """SELECT id,canceled_at FROM auto_bay_booking

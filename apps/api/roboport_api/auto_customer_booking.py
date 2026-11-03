@@ -44,7 +44,7 @@ def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
                       b.id,b.bay_id,b.starts_at,b.ends_at,b.canceled_at,
                       w.id,loc.timezone_name,
                       EXISTS (SELECT 1 FROM auto_work_order_service s
-                              WHERE s.work_order_id=w.id)
+                              WHERE s.work_order_id=w.id AND s.selection_origin<>'BOOKING')
                       OR EXISTS (SELECT 1 FROM auto_work_order_inspection i
                                  WHERE i.work_order_id=w.id)
                       OR EXISTS (SELECT 1 FROM auto_work_order_estimate_revision r
@@ -59,7 +59,11 @@ def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
                             OR SUM(CASE WHEN e.action='ISSUE' THEN e.quantity
                           WHEN e.action='RETURN' THEN -e.quantity
                           ELSE 0 END) > 0
-                      ) AS started
+                      ) AS started,
+                      (SELECT COALESCE(array_agg(s.service_id ORDER BY s.service_id),
+                                       ARRAY[]::uuid[])
+                       FROM auto_work_order_service s
+                       WHERE s.work_order_id=w.id) AS service_ids
                FROM auto_appointment a
                JOIN auto_vehicle_customer_link proof ON proof.id=a.customer_link_id
                  AND proof.vehicle_id=a.vehicle_id
@@ -92,5 +96,6 @@ def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
                  "startsAt":start.isoformat(),"endsAt":end.isoformat(),
                  "status":"CANCELED" if canceled is not None else "SCHEDULED",
                  "workOrderId":str(w),"timeZone":zone,
-                 "canManage":canceled is None and not started}
-                for a,o,l,link,booking,bay,start,end,canceled,w,zone,started in rows]
+                 "canManage":canceled is None and not started,
+                 "serviceIds":[str(service) for service in service_ids]}
+                for a,o,l,link,booking,bay,start,end,canceled,w,zone,started,service_ids in rows]
