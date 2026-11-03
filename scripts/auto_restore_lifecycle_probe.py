@@ -90,7 +90,7 @@ def _graph(db: psycopg.Connection, ids: dict) -> dict:
             SELECT appointment_id,organization_id,old_booking_id,
                    new_booking_id,actor_id
             FROM auto_appointment_reschedule
-            WHERE appointment_id=%s ORDER BY created_at,id
+            WHERE appointment_id=%s ORDER BY id
         """, (appointment,)),
         "services": _rows(db, """
             SELECT ws.work_order_id,ws.service_id,ws.organization_id,
