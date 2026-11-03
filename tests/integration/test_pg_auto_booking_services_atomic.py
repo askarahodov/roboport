@@ -1,5 +1,9 @@
 """PG17 + HTTPS: выбор услуг связан с бронью и WorkOrder атомарно (#113)."""
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+import hashlib
+import json
+import pytest
 from uuid import uuid4
 
 import psycopg
@@ -157,3 +161,72 @@ def test_staff_create_booking_and_selected_service_share_one_transaction(monkeyp
                WHERE aggregate_type='auto_appointment' AND aggregate_id=%s""",
             (appointment,),
         ).fetchone()[0] == 1
+
+
+
+def test_iana_dst_elapsed_time_not_wall_clock_and_legacy_fingerprint(monkeypatch):
+    d, org, loc, bay, other, _, http = _setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        other_loc = db.execute(
+            "SELECT id FROM auto_service_location WHERE organization_id=%s LIMIT 1",
+            (other,),
+        ).fetchone()[0]
+    first, second, long, foreign = _catalog(org,loc,(other,other_loc))
+    from test_pg_auto_stock_service import grant
+    with psycopg.connect(DSN) as db:
+        grant(db, d["intake"], org, loc, "INTAKE")
+    token = d["tokens"][d["intake"]]
+    berlin = ZoneInfo("Europe/Berlin")
+    # Весной по часам 2 часа, но фактически 1 час: 75 минут не помещаются.
+    spring_start = datetime(2030,3,31,1,30,tzinfo=berlin)
+    spring_end = datetime(2030,3,31,3,30,tzinfo=berlin)
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(AppointmentDenied):
+            create_appointment(
+                db, token, org, loc, bay, d["link"],
+                spring_start, spring_end, service_ids=(first,long),
+            )
+        assert db.execute(
+            "SELECT count(*) FROM auto_bay_booking WHERE organization_id=%s", (org,)
+        ).fetchone()[0] == 0
+
+        # Осенью 01:30 → повторные 02:30 фактически 2 часа, а не один.
+        autumn_start = datetime(2030,10,27,1,30,tzinfo=berlin)
+        autumn_end = datetime(2030,10,27,2,30,tzinfo=berlin,fold=1)
+        key = uuid4()
+        appt, booking, order = create_appointment(
+            db, token, org, loc, bay, d["link"],
+            autumn_start, autumn_end, request_key=key,
+            service_ids=(first,long),
+        )
+        assert db.execute(
+            "SELECT count(*) FROM auto_work_order_service WHERE work_order_id=%s",
+            (order,),
+        ).fetchone()[0] == 2
+
+    with psycopg.connect(DSN) as db:
+        # Пустой serviceIds совместим с fingerprint прежней версии сервера.
+        start = datetime(2030,11,3,10,0,tzinfo=timezone.utc)
+        ends = start+timedelta(hours=1)
+        empty_key = uuid4()
+        created = create_appointment(
+            db, token, org, loc, bay, d["link"], start, ends,
+            request_key=empty_key,
+        )
+        expected_body = {
+            "location":str(loc),"bay":str(bay),"link":str(d["link"]),
+            "employee":None,"starts":start.isoformat(),"ends":ends.isoformat(),
+        }
+        expected = hashlib.sha256(json.dumps(
+            expected_body,sort_keys=True,separators=(",",":")
+        ).encode()).hexdigest()
+        stored = db.execute(
+            """SELECT fingerprint FROM auto_appointment_idempotency
+               WHERE organization_id=%s AND request_key=%s""",
+            (org,empty_key),
+        ).fetchone()[0]
+        assert stored == expected
+        assert create_appointment(
+            db, token, org, loc, bay, d["link"], start, ends,
+            request_key=empty_key,service_ids=(),
+        ) == created
