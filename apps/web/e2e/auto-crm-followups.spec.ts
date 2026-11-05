@@ -6,7 +6,7 @@ const actor='33333333-3333-4333-8333-333333333333';
 const leadId='44444444-4444-4444-8444-444444444444';
 const taskId='55555555-5555-4555-8555-555555555555';
 const otherTask='66666666-6666-4666-8666-666666666666';
-const crmPath='**/api/v1/dev/auto/organizations/**/crm/leads*';
+const crmPath='**/api/v1/dev/auto/organizations/**/crm/leads**';
 const lead={
   leadId,customerLinkId:'77777777-7777-4777-8777-777777777777',
   ownerId:actor,sourceCode:'WEB',status:'NEW',createdAt:'2030-01-01T00:00:00Z',
