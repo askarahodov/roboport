@@ -21,7 +21,7 @@ test('calendar denies access without showing previous tenant records',async({pag
   await expect(page.getByRole('heading',{name:'Календарь приёмщика'})).toBeVisible();
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
-  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('Доступ запрещён или dev API отключён.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Создать запись'})).toHaveCount(0);
 });
 
@@ -211,7 +211,9 @@ test('calendar ignores an old denied response after tenant changes',async({page}
   await expect(page.getByText('Записей нет.')).toBeVisible();
   await page.waitForTimeout(350);
   await expect(page.getByText('Записей нет.')).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  // The daily calendar must not replay the old tenant denial. A separate
+  // weekly aggregate may independently reject an invalid mocked payload.
+  await expect(page.getByText('Доступ запрещён или dev API отключён.')).toHaveCount(0);
 });
 
 test('calendar rejects invalid UTC calendar day before querying API',async({page})=>{
