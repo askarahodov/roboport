@@ -101,3 +101,100 @@ test('warehouse chooses scoped lot from real-shaped balance list and handles rev
   await expect(page.getByRole('alert')).toContainText('Нет доступа');
   await expect(page.getByText('SYN-33')).toHaveCount(0);
 });
+
+
+
+test('manager reviews pending warehouse count, approves it, and sees fresh empty queue',async({page})=>{
+  let hasCount=false;
+  let approved=false;
+  const approvalBodies:unknown[]=[];
+  const countId='44444444-4444-4444-8444-444444444444';
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}'}));
+  await page.route('**/stocktake/pending?*',route=>{
+    const u=new URL(route.request().url());
+    expect(u.searchParams.get('locationId')).toBe(location);
+    const rows=hasCount&&!approved?[{
+      countId,lotId:lot,article:'SYN-SKU',batchCode:'LOT-1',binCode:'BIN-A',
+      expected:3,actual:2,currentAllocated:3,stale:false,
+      reason:'Контрольный пересчёт',
+    }]:[];
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:rows,nextCountId:null,syntheticOnly:true})});
+  });
+  await page.route('**/stocktake/counts',route=>{
+    hasCount=true;
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({countId})});
+  });
+  await page.route('**/stocktake/approvals',route=>{
+    approvalBodies.push(route.request().postDataJSON());
+    approved=true;
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({approvalId:approval})});
+  });
+  await page.goto('/staff/warehouse-stocktake');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(location);
+  await page.getByRole('textbox',{name:'UUID партии'}).fill(lot);
+  await page.getByRole('textbox',{name:'Причина пересчёта'}).fill('Контрольный пересчёт');
+  await page.getByRole('button',{name:'Сохранить подсчёт'}).click();
+  await expect(page.getByText('Подсчёт:',{exact:false})).toBeVisible();
+  const queue=page.getByLabel('Ожидающие подсчёты филиала');
+  await queue.getByRole('button',{name:'Обновить ожидающие подсчёты'}).click();
+  await expect(queue).toContainText('SYN-SKU');
+  await expect(queue).toContainText('учёт 3, факт 2, сейчас 3');
+  await queue.getByRole('button',{name:'Выбрать подсчёт '+countId}).click();
+  await expect(page.getByRole('textbox',{name:'UUID подсчёта'})).toHaveValue(countId);
+  await page.getByRole('button',{name:'Утвердить корректировку'}).click();
+  await expect(page.getByText('Расхождение утверждено.',{exact:false})).toBeVisible();
+  expect(approvalBodies).toEqual([{locationId:location,countId}]);
+  await expect(queue).not.toContainText('SYN-SKU');
+  await queue.getByRole('button',{name:'Обновить ожидающие подсчёты'}).click();
+  await expect(queue).toContainText('Ожидающих подсчётов нет.');
+});
+
+test('manager review queue blocks stale counts, revocation, and foreign branch disclosure',async({page})=>{
+  const other='99999999-9999-4999-8999-999999999999';
+  let denied=false;
+  let invalid=false;
+  await page.route('**/stocktake/pending?*',route=>{
+    const u=new URL(route.request().url());
+    if(denied||u.searchParams.get('locationId')!==location)
+      return route.fulfill({status:403,contentType:'application/json',
+        body:'{"code":"FORBIDDEN"}'});
+    const items=[{
+      countId:count,lotId:lot,article:'PRIVATE-STOCK',batchCode:'LOT-2',
+      binCode:'BIN-A',expected:3,actual:2,currentAllocated:4,
+      stale:invalid?false:true,reason:'Данные требуют пересчёта',
+    }];
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items,nextCountId:null,syntheticOnly:true})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/warehouse-stocktake');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(location);
+  const queue=page.getByLabel('Ожидающие подсчёты филиала');
+  await queue.getByRole('button',{name:'Обновить ожидающие подсчёты'}).click();
+  await expect(queue).toContainText('PRIVATE-STOCK');
+  await expect(queue.getByText('Подсчёт устарел: нужен новый пересчёт.')).toBeVisible();
+  await expect(queue.getByRole('button',{name:'Выбрать подсчёт '+count})).toBeDisabled();
+  invalid=true;
+  await queue.getByRole('button',{name:'Обновить ожидающие подсчёты'}).click();
+  await expect(queue.getByRole('alert')).toContainText('Не удалось загрузить очередь');
+  await expect(queue).not.toContainText('PRIVATE-STOCK');
+  invalid=false;
+  denied=true;
+  await queue.getByRole('button',{name:'Обновить ожидающие подсчёты'}).click();
+  await expect(queue.getByRole('alert')).toContainText('Нет доступа к очереди');
+  await expect(queue.getByRole('button',{name:'Выбрать подсчёт '+count})).toHaveCount(0);
+  denied=false;
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(other);
+  await expect(queue).not.toContainText('PRIVATE-STOCK');
+  await queue.getByRole('button',{name:'Обновить ожидающие подсчёты'}).click();
+  await expect(queue.getByRole('alert')).toContainText('Нет доступа к очереди');
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(1280);
+});
