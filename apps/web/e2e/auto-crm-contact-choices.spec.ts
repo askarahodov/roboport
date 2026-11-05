@@ -119,7 +119,7 @@ test('customer CRM choices: fail-closed default, exact retry, withdrawal and sta
 });
 
 test('customer CRM preferences: invalid payload fails closed; revoked session clears form',async({page})=>{
-  let state:'valid'|'invalid'|'revoked'='invalid';
+  let state='invalid';
   await page.route(accountUrl,r=>r.fulfill({
     status:state==='revoked'?403:200,contentType:'application/json',
     body:state==='invalid'?
@@ -166,7 +166,7 @@ test('staff CRM contact preferences revocation wipes prior lead and flags',async
   await expect(staff).toContainText('Клиент отметил предпочтение');
   forbidden=true;
   await staff.getByRole('button',{name:'Проверить предпочтения клиента'}).click();
-  await expect(page.getByText('Доступ запрещён.',{exact:false})).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByLabel('Обращение')).toHaveCount(0);
   await expect(page.getByText('Клиент отметил предпочтение')).toHaveCount(0);
 });
