@@ -88,7 +88,8 @@ test('post-service review: QC-backed manual task, lost response, exact-key repla
   await create.click();
   const retry=page.getByRole('button',{name:'Повторить запрос с тем же ключом'});
   await expect(retry).toBeVisible();
-  await expect(create).toBeDisabled();
+  // Unknown POST outcome hides the new-action form: only exact-key replay remains.
+  await expect(create).toHaveCount(0);
   await retry.click();
   await expect(retry).toBeVisible();
   await retry.click();
