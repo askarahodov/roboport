@@ -12,6 +12,7 @@ import { AutoCalendar } from './pages/staff/AutoCalendar';
 import { AutoBayOccupancy } from './pages/staff/AutoBayOccupancy';
 import { AutoDemoFinanceReport } from './pages/staff/AutoDemoFinanceReport';
 import { AutoCrmLeads } from './pages/staff/AutoCrmLeads';
+import { AutoCrmFunnel } from './pages/staff/AutoCrmFunnel';
 import { AutoOrderServices } from './pages/staff/AutoOrderServices';
 import { AutoWorkshopQc } from './pages/staff/AutoWorkshopQc';
 import { AutoEstimateConsole } from './pages/shared/AutoEstimateConsole';
@@ -107,6 +108,7 @@ function App() {
         <NavLink to="/staff/auto-bay-occupancy" end>Загрузка постов (dev)</NavLink>
         <NavLink to="/staff/auto-demo-finance-report" end>Тестовая финсверка (dev)</NavLink>
         <NavLink to="/staff/auto-crm-leads" end>Обращения CRM (dev)</NavLink>
+        <NavLink to="/staff/auto-crm-funnel" end>Воронка CRM (dev)</NavLink>
         <NavLink to="/staff/auto-order-services" end>Услуги наряда (dev)</NavLink>
         <NavLink to="/staff/auto-workshop-qc" end>Осмотр и QC (dev)</NavLink>
         <NavLink to="/staff/auto-estimates" end>Сметы (dev)</NavLink>
@@ -170,6 +172,7 @@ function App() {
       <Route path="/staff/auto-bay-occupancy" element={<AutoBayOccupancy />} />
       <Route path="/staff/auto-demo-finance-report" element={<AutoDemoFinanceReport />} />
       <Route path="/staff/auto-crm-leads" element={<AutoCrmLeads />} />
+      <Route path="/staff/auto-crm-funnel" element={<AutoCrmFunnel />} />
       <Route path="/staff/auto-order-services" element={<AutoOrderServices />} />
       <Route path="/staff/auto-workshop-qc" element={<AutoWorkshopQc />} />
       <Route path="/staff/auto-estimates" element={<AutoEstimateConsole role="manager" />} />
