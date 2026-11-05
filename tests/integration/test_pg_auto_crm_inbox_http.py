@@ -81,3 +81,26 @@ def test_inbox_recheck_after_manager_role_revoked(monkeypatch):
                       WHERE user_id=%s AND location_id=%s AND role_code='MANAGER'""",
                    (d["manager"],loc))
     assert http.get(inbox(org,loc)).status_code==403
+
+
+def test_inbox_ignores_task_resolved_between_query_and_serialization(monkeypatch):
+    """READ COMMITTED race: event is committed after SELECT, before _task."""
+    from contextlib import nullcontext
+    from roboport_api import auto_crm_inbox
+
+    lead_id,task_id,org,loc=uuid4(),uuid4(),uuid4(),uuid4()
+    class Cursor:
+        def fetchall(self):
+            return [(lead_id,task_id)]
+    class Connection:
+        def transaction(self):
+            return nullcontext()
+        def execute(self,sql,params):
+            assert "NOT EXISTS" in sql
+            return Cursor()
+    monkeypatch.setattr(auto_crm_inbox,"_authority",lambda *args:(uuid4(),True))
+    monkeypatch.setattr(auto_crm_inbox,"_lead",lambda *args:None)
+    monkeypatch.setattr(auto_crm_inbox,"_task",lambda *args:{"status":"DONE"})
+    assert auto_crm_inbox.list_inbox(Connection(),"test",org,loc)=={
+        "syntheticOnly":True,"items":[],
+    }
