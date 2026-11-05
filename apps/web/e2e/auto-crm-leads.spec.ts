@@ -4,7 +4,7 @@ import {test,expect} from '@playwright/test';
 test.beforeEach(async({page})=>{
   await page.route('**/api/v1/dev/auto/organizations/**/crm/inbox',
     route=>route.fulfill({status:200,contentType:'application/json',
-      body:JSON.stringify({syntheticOnly:true,items:[]})}));
+      body:JSON.stringify({syntheticOnly:true,items:[],nextCursor:null})}));
 });
 
 
@@ -205,7 +205,7 @@ test('CRM retry revocation clears state; CSRF failure before POST needs no repla
   await page.route(path,route=>{
     if(route.request().method()==='GET')return route.fulfill({
       status:200,contentType:'application/json',
-      body:JSON.stringify({syntheticOnly:true,items:[]}),
+      body:JSON.stringify({syntheticOnly:true,items:[],nextCursor:null}),
     });
     postCount++;
     if(postCount===1)return route.abort('failed');
@@ -239,7 +239,7 @@ test('CRM retry keeps the original key when refreshing CSRF fails',async({page})
   await page.route(path,route=>{
     if(route.request().method()==='GET')return route.fulfill({
       status:200,contentType:'application/json',
-      body:JSON.stringify({syntheticOnly:true,items:[]}),
+      body:JSON.stringify({syntheticOnly:true,items:[],nextCursor:null}),
     });
     posts.push(route.request().postDataJSON());
     if(posts.length===1)return route.abort('failed');
