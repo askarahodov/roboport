@@ -42,6 +42,7 @@ const taskCodeLabels:Record<Followup['taskCode'],string>={
 const taskStatusLabels:Record<Followup['status'],string>={
   OPEN:'Открыта',DONE:'Выполнена',CANCELED:'Отменена',
 };
+type PendingTaskRequest={url:string;body:Record<string,string>;scope:string;leadId:string};
 const validIso=(v:unknown):v is string=>typeof v==='string'&&
   !Number.isNaN(Date.parse(v));
 function parseFollowup(v:unknown):Followup{
@@ -99,6 +100,7 @@ export function AutoCrmLeads(){
   const [taskDue,setTaskDue]=React.useState('');
   const [taskBusy,setTaskBusy]=React.useState(false);
   const [taskMessage,setTaskMessage]=React.useState('');
+  const [pendingTask,setPendingTask]=React.useState<PendingTaskRequest|null>(null);
   const valid=uuid.test(org)&&uuid.test(loc);
   const scope=org+':'+loc;
   const [loadedScope,setLoadedScope]=React.useState('');
@@ -146,29 +148,38 @@ export function AutoCrmLeads(){
     })();
     return ()=>controller.abort();
   },[org,loc,selected,loadedScope,status,taskRevision]);
-  async function taskMutation(url:string,body:object){
-    if(taskBusy||taskStatus!=='ready'||loadedScope!==scope)return;
+  async function taskMutation(url:string,body:Record<string,string>,retry?:PendingTaskRequest){
+    if(taskBusy||loadedScope!==scope||status!=='ready'||!selected||
+       (retry ? retry.scope!==scope||retry.leadId!==selected||
+         pendingTask?.body.requestKey!==retry.body.requestKey :
+         taskStatus!=='ready'||pendingTask!==null))return;
+    const request=retry??{url,body:{...body,requestKey:crypto.randomUUID()},scope,leadId:selected};
     setTaskBusy(true);setTaskMessage('');
     try{
       const csrf=await token();
-      const response=await fetch(url,{method:'POST',credentials:'include',cache:'no-store',
+      // Retain the exact payload even if the server commits but the response is lost.
+      setPendingTask(request);
+      const response=await fetch(request.url,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
-        body:JSON.stringify({...body,requestKey:crypto.randomUUID()})});
+        body:JSON.stringify(request.body)});
       if([401,403,404].includes(response.status)){
-        setTasks([]);setRows([]);setSelected('');setStatus('denied');return;
+        setPendingTask(null);setTasks([]);setRows([]);setSelected('');setStatus('denied');return;
       }
       if(!response.ok){
+        setPendingTask(null);
         setTaskMessage(response.status===409?
-          'Конфликт задачи. Обновите журнал, затем повторите действие.':
+          'Конфликт задачи. Обновите журнал перед новым действием.':
           'Нельзя сохранить задачу. Проверьте срок, этап и полномочия.');
+        setTaskRevision(n=>n+1);
         return;
       }
       parseFollowup(await response.json());
-      setTaskMessage('Действие сохранено в неизменяемом журнале.');
+      setPendingTask(null);
+      setTaskMessage('Действие подтверждено в неизменяемом журнале.');
       setTaskRevision(n=>n+1);
     }catch{
       setTasks([]);setTaskStatus('error');
-      setTaskMessage('Результат неизвестен. Проверьте журнал до следующей попытки.');
+      setTaskMessage('Ответ не получен. Повторите тот же запрос с сохранённым ключом; новое действие заблокировано.');
     }finally{setTaskBusy(false);}
   }
   async function mutate(url:string,body:object){
@@ -206,10 +217,10 @@ export function AutoCrmLeads(){
       источник и филиал; никакой отправки сообщений, звонков или обработки
       реальных номеров. Этап «Записан» связывается с существующей записью,
       но не означает посещение или оплату.</p>
-    <label>UUID организации <input aria-label="UUID организации" disabled={busy}
-      value={org} onChange={e=>{setRows([]);setSelected('');setStatus('idle');setOrg(e.target.value);}}/></label>
-    <label>UUID филиала <input aria-label="UUID филиала" disabled={busy}
-      value={loc} onChange={e=>{setRows([]);setSelected('');setStatus('idle');setLoc(e.target.value);}}/></label>
+    <label>UUID организации <input aria-label="UUID организации" disabled={busy||taskBusy}
+      value={org} onChange={e=>{setPendingTask(null);setRows([]);setSelected('');setStatus('idle');setOrg(e.target.value);}}/></label>
+    <label>UUID филиала <input aria-label="UUID филиала" disabled={busy||taskBusy}
+      value={loc} onChange={e=>{setPendingTask(null);setRows([]);setSelected('');setStatus('idle');setLoc(e.target.value);}}/></label>
     {status==='idle'&&<p>Укажите организацию и филиал.</p>}
     {status==='loading'&&<p role="status">Чтение обращений…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
@@ -230,8 +241,8 @@ export function AutoCrmLeads(){
         Создать обращение</button>
       <h2>Журнал обращений</h2>
       {rows.length===0?<p>Обращений пока нет.</p>:<label>Обращение
-        <select aria-label="Обращение" value={selected}
-          onChange={e=>setSelected(e.target.value)}>
+        <select aria-label="Обращение" value={selected} disabled={taskBusy}
+          onChange={e=>{setPendingTask(null);setSelected(e.target.value);}}>
           <option value="">Выберите обращение</option>
           {rows.map(x=><option value={x.leadId} key={x.leadId}>
             {leadSourceLabels[x.sourceCode]} · {leadStatusLabels[x.status]} · {x.leadId}</option>)}
@@ -280,11 +291,11 @@ export function AutoCrmLeads(){
           <ol>{tasks.map(t=><li key={t.taskId}>
             {taskCodeLabels[t.taskCode]} · {new Date(t.dueAt).toLocaleString('ru-RU')} · {taskStatusLabels[t.status]}
             {t.status==='OPEN'&&<>
-              <button type="button" disabled={taskBusy}
+              <button type="button" disabled={taskBusy||pendingTask!==null}
                 onClick={()=>void taskMutation(base+'/'+selected+'/tasks/'+t.taskId+'/events',{
                   action:'DONE',
                 })}>Выполнено</button>
-              <button type="button" disabled={taskBusy}
+              <button type="button" disabled={taskBusy||pendingTask!==null}
                 onClick={()=>void taskMutation(base+'/'+selected+'/tasks/'+t.taskId+'/events',{
                   action:'CANCELED',
                 })}>Отменить задачу</button>
@@ -300,7 +311,7 @@ export function AutoCrmLeads(){
             </select></label>
             <label>Срок задачи <input aria-label="Срок задачи" type="datetime-local"
               disabled={taskBusy} value={taskDue} onChange={e=>setTaskDue(e.target.value)}/></label>
-            <button type="button" disabled={taskBusy||!taskDue||
+            <button type="button" disabled={taskBusy||pendingTask!==null||!taskDue||
               !Number.isFinite(Date.parse(taskDue))||Date.parse(taskDue)<=Date.now()||
               Date.parse(taskDue)>Date.now()+90*86400000}
               onClick={()=>void taskMutation(base+'/'+selected+'/tasks',{
@@ -309,6 +320,10 @@ export function AutoCrmLeads(){
           </>}
         </>}
         {taskMessage&&<p role="status">{taskMessage}</p>}
+        {pendingTask&&pendingTask.scope===scope&&pendingTask.leadId===selected&&
+          status==='ready'&&<button type="button" disabled={taskBusy}
+            onClick={()=>void taskMutation(pendingTask.url,pendingTask.body,pendingTask)}>
+            Повторить запрос с тем же ключом</button>}
       </div>}
       {message&&<p role="status">{message}</p>}
     </>}
