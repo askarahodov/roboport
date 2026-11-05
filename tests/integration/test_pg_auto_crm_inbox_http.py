@@ -1,6 +1,7 @@
 """PG17/HTTPS: staff CRM inbox, role scope, proof revocation and open-only ordering."""
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
+from urllib.parse import quote
 
 import psycopg
 
@@ -43,6 +44,7 @@ def test_inbox_is_sorted_open_only_and_role_scoped(monkeypatch):
     assert response.status_code==200,response.text
     assert response.headers["cache-control"]=="no-store"
     assert response.json()["syntheticOnly"] is True
+    assert response.json()["nextCursor"] is None
     assert [(x["leadId"],x["taskId"]) for x in response.json()["items"]]==[
         (other,other_task),(lead,task),
     ]
@@ -91,7 +93,7 @@ def test_inbox_ignores_task_resolved_between_query_and_serialization(monkeypatch
     lead_id,task_id,org,loc=uuid4(),uuid4(),uuid4(),uuid4()
     class Cursor:
         def fetchall(self):
-            return [(lead_id,task_id)]
+            return [(lead_id,task_id,datetime.now(timezone.utc))]
     class Connection:
         def transaction(self):
             return nullcontext()
@@ -102,5 +104,58 @@ def test_inbox_ignores_task_resolved_between_query_and_serialization(monkeypatch
     monkeypatch.setattr(auto_crm_inbox,"_lead",lambda *args:None)
     monkeypatch.setattr(auto_crm_inbox,"_task",lambda *args:{"status":"DONE"})
     assert auto_crm_inbox.list_inbox(Connection(),"test",org,loc)=={
-        "syntheticOnly":True,"items":[],
+        "syntheticOnly":True,"items":[],"nextCursor":None,
     }
+
+
+def test_inbox_keyset_pages_full_queue_and_rechecks_scope(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http,lead=setup(monkeypatch)
+    headers=session(http,d,d["intake"])
+    created=[]
+    for day in range(1,29):
+        result=http.post(scope(org,loc,lead),headers=headers,json=task_payload(day))
+        assert result.status_code==201,result.text
+        created.append(result.json()["taskId"])
+    first=http.get(inbox(org,loc))
+    assert first.status_code==200,first.text
+    payload=first.json()
+    assert len(payload["items"])==25
+    assert payload["nextCursor"]
+    assert [r["taskId"] for r in payload["items"]]==created[:25]
+    cursor=quote(payload["nextCursor"],safe="")
+    second=http.get(inbox(org,loc)+"?cursor="+cursor)
+    assert second.status_code==200,second.text
+    assert [r["taskId"] for r in second.json()["items"]]==created[25:]
+    assert second.json()["nextCursor"] is None
+    assert not (set(r["taskId"] for r in payload["items"]) &
+                set(r["taskId"] for r in second.json()["items"]))
+    for value in ["!", "bad", "a"*181, "=", "AAA"]:
+        assert http.get(inbox(org,loc)+"?cursor="+quote(value,safe="")).status_code==422
+    assert http.get(inbox(foreign,foreign_loc)+"?cursor="+cursor).status_code==403
+    # Authorization is checked again on the second page; cursor is not a grant.
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+            (d["link"],),
+        )
+    assert http.get(inbox(org,loc)+"?cursor="+cursor).json()=={
+        "syntheticOnly":True,"items":[],"nextCursor":None,
+    }
+
+
+def test_inbox_keyset_excludes_completed_between_pages(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http,lead=setup(monkeypatch)
+    headers=session(http,d,d["intake"])
+    tasks=[]
+    for day in range(1,28):
+        response=http.post(scope(org,loc,lead),headers=headers,json=task_payload(day))
+        assert response.status_code==201,response.text
+        tasks.append(response.json()["taskId"])
+    first=http.get(inbox(org,loc)).json()
+    assert len(first["items"])==25
+    done=http.post(scope(org,loc,lead)+"/"+tasks[25]+"/events",headers=headers,
+        json={"action":"DONE","requestKey":str(uuid4())})
+    assert done.status_code==201,done.text
+    second=http.get(inbox(org,loc)+"?cursor="+first["nextCursor"])
+    assert second.status_code==200,second.text
+    assert [r["taskId"] for r in second.json()["items"]]==[tasks[26]]
