@@ -80,19 +80,21 @@ test('CRM full stage flow 390/1280 and dark, retry without PII',async({page})=>{
 });
 
 test('CRM branch switch and role revocation clear old leads',async({page})=>{
-  let forbidden=false;
-  await page.route(base,route=>route.fulfill({
-    status:forbidden?403:200,contentType:'application/json',
-    body:forbidden?'{"code":"FORBIDDEN"}':
-      JSON.stringify({syntheticOnly:true,items:[lead()]}),
-  }));
+  await page.route(base,route=>{
+    const authorized=new URL(route.request().url()).pathname.includes(
+      '/locations/'+loc+'/');
+    return route.fulfill({
+      status:authorized?200:403,contentType:'application/json',
+      body:authorized?JSON.stringify({syntheticOnly:true,items:[lead()]}):
+        '{"code":"FORBIDDEN"}',
+    });
+  });
   await page.goto('/staff/auto-crm-leads');
   await scope(page);
   await expect(page.getByRole('table')).toBeVisible();
   await page.getByRole('textbox',{name:'UUID филиала'})
     .fill('77777777-7777-4777-8777-777777777777');
   await expect(page.getByRole('table')).toHaveCount(0);
-  forbidden=true;
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByRole('table')).toHaveCount(0);
 });

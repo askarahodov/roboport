@@ -97,7 +97,21 @@ export function AutoCrmLeads(){
         setPending(null);setRevision(n=>n+1);return;
       }
       if(!response.ok)throw Error('UNKNOWN_RESULT');
-      setPending(null);setRevision(n=>n+1);
+      const raw:unknown=await response.json();
+      if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||
+        raw.syntheticOnly!==true||!('lead' in raw)||!validLead(raw.lead)||
+        !('replayed' in raw)||typeof raw.replayed!=='boolean')
+        throw Error('MALFORMED_RESULT');
+      if(scopeNow.current!==originalScope)return;
+      // The POST receipt is the authoritative committed state. Show it
+      // directly instead of racing a stale GET response across stage changes.
+      const updated=raw.lead;
+      setItems(previous=>{
+        const existing=previous.findIndex(item=>item.id===updated.id);
+        if(existing===-1)return [updated,...previous].slice(0,50);
+        return previous.map(item=>item.id===updated.id?updated:item);
+      });
+      setPending(null);
     }catch{
       if(scopeNow.current===originalScope){
         setPending({url,body,scope:originalScope});

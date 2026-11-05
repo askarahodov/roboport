@@ -95,13 +95,21 @@ export function AutoCalendar() {
   const [clearEmployee,setClearEmployee]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [pending,setPending]=React.useState<{path:string;body:string;key:string;success:string;org:string;location:string}|null>(null);
+  const calendarScopeRef=React.useRef('');
   const requestScope=React.useRef({org:'',location:''});
   requestScope.current={org:org.trim(),location:location.trim()};
   const [revision,setRevision]=React.useState(0);
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
   React.useEffect(()=>{
-    setItems([]);setHasMore(false);setNextCursor(null);setMessage('');setTarget(null);setTimeZone('UTC');
+    const calendarScope=[org.trim(),location.trim(),day].join(':');
+    const changedScope=calendarScopeRef.current!==calendarScope;
+    calendarScopeRef.current=calendarScope;
+    // A successful mutation survives refreshing the SAME calendar. Only a
+    // tenant/branch/day switch clears it. Previously re-fetch instantly erased
+    // the outcome and made idempotent retry feedback intermittent.
+    if(changedScope)setMessage('');
+    setItems([]);setHasMore(false);setNextCursor(null);setTarget(null);setTimeZone('UTC');
     if(!valid){setStatus('idle');return;}
     const controller=new AbortController();
     setStatus('loading');
