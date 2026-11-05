@@ -1,4 +1,5 @@
 import React from 'react';
+import { StaffCrmContactPreferences } from './StaffCrmContactPreferences';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Event={id:string;actorId:string;stageCode:'QUALIFIED'|'BOOKED'|'LOST';
@@ -430,6 +431,9 @@ export function AutoCrmLeads(){
       {chosen&&<div>
         <p>Ответственный: {chosen.ownerId}. Источник: {leadSourceLabels[chosen.sourceCode]}.
           Текущий этап: {leadStatusLabels[chosen.status]}.</p>
+        <StaffCrmContactPreferences key={scope+':'+selected} base={base} leadId={selected}
+          onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);
+            setStatus('denied');}}/>
         <ol>{chosen.events.map(e=><li key={e.id}>{leadStageLabels[e.stageCode]}
           {e.reasonCode?' · '+(leadReasonLabels[e.reasonCode]??'Неизвестная причина'):''}
           {e.appointmentId?' · запись '+e.appointmentId:''}</li>)}</ol>
