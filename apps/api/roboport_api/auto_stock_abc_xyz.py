@@ -128,10 +128,9 @@ def stock_abc_xyz(conn:psycopg.Connection,token:str,org:UUID,loc:UUID,
                  AND event.action IN ('ISSUE','RETURN')
                  AND event.created_at>=%s AND event.created_at<%s
                WHERE sku.organization_id=%s AND sku.location_id=%s
-               GROUP BY sku.id,sku.article,
-                        to_char(event.created_at AT TIME ZONE %s,'YYYY-MM')
+               GROUP BY 1,2,3
                ORDER BY sku.id,local_month""",
-            (branch[0],begin,end,org,loc,branch[0]),
+            (branch[0],begin,end,org,loc),
         ).fetchall()
         detail={}
         for sku,article,month,issued,returned in rows:
