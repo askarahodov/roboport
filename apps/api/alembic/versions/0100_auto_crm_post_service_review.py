@@ -1,12 +1,12 @@
 """Synthetic post-service review: one immutable CRM task per QC-passed order.
 
-Revision ID: 0100_auto_crm_post_service_review
+Revision ID: 0100_auto_crm_service_review
 Revises: 0099_auto_crm_followups
 """
 from alembic import op
 from sqlalchemy import text
 
-revision="0100_auto_crm_post_service_review"
+revision="0100_auto_crm_service_review"
 down_revision="0099_auto_crm_followups"
 branch_labels=None
 depends_on=None
