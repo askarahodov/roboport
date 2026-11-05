@@ -110,6 +110,7 @@ function App() {
         <NavLink to="/staff/auto-demo-finance-report" end>Тестовая финсверка (dev)</NavLink>
         <NavLink to="/staff/auto-crm-leads" end>Обращения CRM (dev)</NavLink>
         <NavLink to="/staff/auto-crm-funnel" end>Воронка CRM (dev)</NavLink>
+        <NavLink to="/staff/auto-stock-abc-xyz" end>ABC/XYZ склада (dev)</NavLink>
         <NavLink to="/staff/auto-order-services" end>Услуги наряда (dev)</NavLink>
         <NavLink to="/staff/auto-workshop-qc" end>Осмотр и QC (dev)</NavLink>
         <NavLink to="/staff/auto-estimates" end>Сметы (dev)</NavLink>
@@ -174,6 +175,7 @@ function App() {
       <Route path="/staff/auto-demo-finance-report" element={<AutoDemoFinanceReport />} />
       <Route path="/staff/auto-crm-leads" element={<AutoCrmLeads />} />
       <Route path="/staff/auto-crm-funnel" element={<AutoCrmFunnel />} />
+      <Route path="/staff/auto-stock-abc-xyz" element={<AutoStockAbcXyz />} />
       <Route path="/staff/auto-order-services" element={<AutoOrderServices />} />
       <Route path="/staff/auto-workshop-qc" element={<AutoWorkshopQc />} />
       <Route path="/staff/auto-estimates" element={<AutoEstimateConsole role="manager" />} />
