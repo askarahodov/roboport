@@ -1,4 +1,5 @@
 import React from 'react';
+import { CustomerCrmContactPreferences } from './CustomerCrmContactPreferences';
 
 export function CustomerSettings() {
   const [enabled,setEnabled]=React.useState(true);
@@ -66,5 +67,6 @@ export function CustomerSettings() {
     <button type="button" disabled={saving} onClick={()=>void save()}>
       {saving?'Сохранение…':'Сохранить настройки'}</button>
     {message && <p role="status">{message}</p>}
+    <CustomerCrmContactPreferences/>
   </div>;
 }
