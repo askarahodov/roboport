@@ -19,6 +19,31 @@ function parseLead(v:unknown):Lead{
       (e.appointmentId===null||uuid.test(e.appointmentId))))throw Error('shape');
   return x;
 }
+type FollowupEvent={id:string;actorId:string;action:'DONE'|'CANCELED';createdAt:string};
+type Followup={taskId:string;ownerId:string;creatorId:string;
+  taskCode:'CALL_BACK'|'CHECK_BOOKING'|'SERVICE_REVIEW';dueAt:string;createdAt:string;
+  status:'OPEN'|'DONE'|'CANCELED';event:FollowupEvent|null};
+const validIso=(v:unknown):v is string=>typeof v==='string'&&
+  !Number.isNaN(Date.parse(v));
+function parseFollowup(v:unknown):Followup{
+  if(!v||typeof v!=='object')throw Error('task');
+  const t=v as Followup;
+  if(![t.taskId,t.ownerId,t.creatorId].every(x=>typeof x==='string'&&uuid.test(x))||
+    !['CALL_BACK','CHECK_BOOKING','SERVICE_REVIEW'].includes(t.taskCode)||
+    !validIso(t.dueAt)||!validIso(t.createdAt)||
+    !['OPEN','DONE','CANCELED'].includes(t.status)||
+    (t.event===null?t.status!=='OPEN':
+      !t.event||!uuid.test(t.event.id)||!uuid.test(t.event.actorId)||
+      !validIso(t.event.createdAt)||t.event.action!==t.status))throw Error('task');
+  return t;
+}
+function parseFollowups(v:unknown):Followup[]{
+  if(!v||typeof v!=='object')throw Error('tasks');
+  const obj=v as {syntheticOnly?:unknown;items?:unknown};
+  if(obj.syntheticOnly!==true||!Array.isArray(obj.items)||obj.items.length>100)
+    throw Error('tasks');
+  return obj.items.map(parseFollowup);
+}
 function parseList(v:unknown):Lead[]{
   if(!v||typeof v!=='object'||!('syntheticOnly' in v)||
     v.syntheticOnly!==true||!('items' in v)||
@@ -48,6 +73,13 @@ export function AutoCrmLeads(){
   const [message,setMessage]=React.useState('');
   const [revision,setRevision]=React.useState(0);
   const [busy,setBusy]=React.useState(false);
+  const [tasks,setTasks]=React.useState<Followup[]>([]);
+  const [taskStatus,setTaskStatus]=React.useState<'idle'|'loading'|'ready'|'error'>('idle');
+  const [taskRevision,setTaskRevision]=React.useState(0);
+  const [taskCode,setTaskCode]=React.useState<Followup['taskCode']>('CALL_BACK');
+  const [taskDue,setTaskDue]=React.useState('');
+  const [taskBusy,setTaskBusy]=React.useState(false);
+  const [taskMessage,setTaskMessage]=React.useState('');
   const valid=uuid.test(org)&&uuid.test(loc);
   const scope=org+':'+loc;
   const [loadedScope,setLoadedScope]=React.useState('');
@@ -74,6 +106,52 @@ export function AutoCrmLeads(){
     })();
     return ()=>controller.abort();
   },[org,loc,revision,valid]);
+  React.useEffect(()=>{
+    setTasks([]);setTaskStatus('idle');setTaskMessage('');
+    if(!valid||!selected||loadedScope!==scope||status!=='ready')return;
+    const controller=new AbortController();
+    setTaskStatus('loading');
+    void (async()=>{
+      try{
+        const res=await fetch(base+'/'+encodeURIComponent(selected)+'/tasks',{
+          credentials:'include',cache:'no-store',signal:controller.signal,
+        });
+        if(controller.signal.aborted)return;
+        if([401,403,404].includes(res.status)){
+          setTasks([]);setRows([]);setSelected('');setStatus('denied');return;
+        }
+        if(!res.ok)throw Error('request');
+        const list=parseFollowups(await res.json());
+        if(!controller.signal.aborted){setTasks(list);setTaskStatus('ready');}
+      }catch{if(!controller.signal.aborted)setTaskStatus('error');}
+    })();
+    return ()=>controller.abort();
+  },[org,loc,selected,loadedScope,status,taskRevision]);
+  async function taskMutation(url:string,body:object){
+    if(taskBusy||taskStatus!=='ready'||loadedScope!==scope)return;
+    setTaskBusy(true);setTaskMessage('');
+    try{
+      const csrf=await token();
+      const response=await fetch(url,{method:'POST',credentials:'include',cache:'no-store',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+        body:JSON.stringify({...body,requestKey:crypto.randomUUID()})});
+      if([401,403,404].includes(response.status)){
+        setTasks([]);setRows([]);setSelected('');setStatus('denied');return;
+      }
+      if(!response.ok){
+        setTaskMessage(response.status===409?
+          'Конфликт задачи. Обновите журнал, затем повторите действие.':
+          'Нельзя сохранить задачу. Проверьте срок, этап и полномочия.');
+        return;
+      }
+      parseFollowup(await response.json());
+      setTaskMessage('Действие сохранено в неизменяемом журнале.');
+      setTaskRevision(n=>n+1);
+    }catch{
+      setTasks([]);setTaskStatus('error');
+      setTaskMessage('Результат неизвестен. Проверьте журнал до следующей попытки.');
+    }finally{setTaskBusy(false);}
+  }
   async function mutate(url:string,body:object){
     if(busy||status!=='ready'||loadedScope!==scope)return;
     setBusy(true);setMessage('');
@@ -170,6 +248,48 @@ export function AutoCrmLeads(){
               appointmentId:stage==='BOOKED'?appointment:null,
             })}>Сохранить этап</button>
         </>}
+      </div>}
+      {chosen&&<div aria-label="Задачи по обращению">
+        <h2>Задачи по обращению</h2>
+        <p>Внутренние задачи для ответственного. Без звонков, отправки сообщений
+          или автоматических напоминаний клиенту. Срок — локальное время браузера.</p>
+        {taskStatus==='loading'&&<p role="status">Чтение задач…</p>}
+        {taskStatus==='error'&&<p role="alert">Не удалось загрузить задачи. Обновите список.</p>}
+        {taskStatus==='ready'&&<>
+          <button type="button" disabled={taskBusy}
+            onClick={()=>setTaskRevision(n=>n+1)}>Обновить задачи</button>
+          <ol>{tasks.map(t=><li key={t.taskId}>
+            {t.taskCode} · {new Date(t.dueAt).toLocaleString('ru-RU')} · {t.status}
+            {t.status==='OPEN'&&<>
+              <button type="button" disabled={taskBusy}
+                onClick={()=>void taskMutation(base+'/'+selected+'/tasks/'+t.taskId+'/events',{
+                  action:'DONE',
+                })}>Выполнено</button>
+              <button type="button" disabled={taskBusy}
+                onClick={()=>void taskMutation(base+'/'+selected+'/tasks/'+t.taskId+'/events',{
+                  action:'CANCELED',
+                })}>Отменить задачу</button>
+            </>}
+          </li>)}</ol>
+          {tasks.length===0&&<p>Задач пока нет.</p>}
+          {!['BOOKED','LOST'].includes(chosen.status)&&<>
+            <label>Тип задачи <select aria-label="Тип задачи" disabled={taskBusy}
+              value={taskCode} onChange={e=>setTaskCode(e.target.value as Followup['taskCode'])}>
+              <option value="CALL_BACK">Связаться позже (без автоотправки)</option>
+              <option value="CHECK_BOOKING">Проверить запись</option>
+              <option value="SERVICE_REVIEW">Проверить запрос на обслуживание</option>
+            </select></label>
+            <label>Срок задачи <input aria-label="Срок задачи" type="datetime-local"
+              disabled={taskBusy} value={taskDue} onChange={e=>setTaskDue(e.target.value)}/></label>
+            <button type="button" disabled={taskBusy||!taskDue||
+              !Number.isFinite(Date.parse(taskDue))||Date.parse(taskDue)<=Date.now()||
+              Date.parse(taskDue)>Date.now()+90*86400000}
+              onClick={()=>void taskMutation(base+'/'+selected+'/tasks',{
+                taskCode,dueAt:new Date(taskDue).toISOString(),
+              })}>Создать задачу</button>
+          </>}
+        </>}
+        {taskMessage&&<p role="status">{taskMessage}</p>}
       </div>}
       {message&&<p role="status">{message}</p>}
     </>}
