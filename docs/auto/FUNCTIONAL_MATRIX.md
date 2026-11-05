@@ -152,3 +152,7 @@
 ### #171 — агрегированная воронка событий бронирования (current-dev)
 
 MANAGER-only сводка по филиалу за 1–31 локальных суток: события `CREATED` / `BOOKING_CANCELED` / `auto_appointment_reschedule` по дню регистрации и актуальные scheduledStarts / distinct scheduledCustomers / repeatBookingCustomers по дню **текущего** начала. Проверка PG17 на два appointments, перенос, отмену, отсутствие дублирования клиентов, BOLA и отзыв роли; Playwright на экране `/staff/auto-bay-occupancy`. **Это не фактические визиты, оплаченные услуги, CRM-конверсия и production отчётность.** [Методология](REPORTING.md). Финальные AC #171 остаются открыты.
+
+### #170/#171 — менеджерская сверка двух synthetic журналов (current-dev)
+
+Отдельный отчёт MANAGER по дням локальной регистрации: CHARGE/CREDIT **без валюты** и SIM_PAYMENT/SIM_REFUND **только тестовые RUB**, count sealed previews; отрицательные междневные net допустимы и **не** обозначают остаток по заказу. Никаких PII, реальные деньги/платежи/кассы не введены. Полный сценарий PG17 от QC PASS до test refund+replay+seal, frontend и Playwright 390/1280. [Документация](DEMO_FINANCE_REPORT.md). Полный finance/BI #170/#171 и legal gate #119 **не закрыты**.
