@@ -69,6 +69,8 @@ test('manager complete ABC/XYZ: 29 SKU pages, returns, 390/1280/dark and keyboar
   await expect(load).toBeDisabled();
   await scope(page);
   const months=completedMonths();
+  await panel.getByLabel('С месяца').fill(months[0]);
+  await panel.getByLabel('По месяц').fill(months[2]);
   await expect(panel.getByLabel('С месяца')).toHaveValue(months[0]);
   await expect(panel.getByLabel('По месяц')).toHaveValue(months[2]);
   await load.focus();
@@ -146,6 +148,9 @@ test('manager ABC/XYZ rejects inconsistent and tampered item response fail close
   });
   await page.goto('/staff/auto-stock-abc-xyz');
   await scope(page);
+  const months=completedMonths();
+  await page.getByLabel('С месяца').fill(months[0]);
+  await page.getByLabel('По месяц').fill(months[2]);
   const load=page.getByRole('button',{name:'Построить ABC/XYZ'});
   await load.click();
   await expect(page.getByLabel('Результаты ABC XYZ')).toBeVisible();
