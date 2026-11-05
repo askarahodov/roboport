@@ -155,10 +155,12 @@ export function AutoCrmLeads(){
          taskStatus!=='ready'||pendingTask!==null))return;
     const request=retry??{url,body:{...body,requestKey:crypto.randomUUID()},scope,leadId:selected};
     setTaskBusy(true);setTaskMessage('');
+    let submitted=false;
     try{
       const csrf=await token();
       // Retain the exact payload even if the server commits but the response is lost.
       setPendingTask(request);
+      submitted=true;
       const response=await fetch(request.url,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
         body:JSON.stringify(request.body)});
@@ -178,12 +180,17 @@ export function AutoCrmLeads(){
       setTaskMessage('Действие подтверждено в неизменяемом журнале.');
       setTaskRevision(n=>n+1);
     }catch{
-      setTasks([]);setTaskStatus('error');
-      setTaskMessage('Ответ не получен. Повторите тот же запрос с сохранённым ключом; новое действие заблокировано.');
+      if(!submitted){
+        setPendingTask(null);
+        setTaskMessage('Не удалось получить CSRF. Запрос не отправлен; обновите задачи и повторите действие.');
+      }else{
+        setTasks([]);setTaskStatus('error');
+        setTaskMessage('Ответ не получен. Повторите тот же запрос с сохранённым ключом; новое действие заблокировано.');
+      }
     }finally{setTaskBusy(false);}
   }
   async function mutate(url:string,body:object){
-    if(busy||status!=='ready'||loadedScope!==scope)return;
+    if(busy||pendingTask!==null||status!=='ready'||loadedScope!==scope)return;
     setBusy(true);setMessage('');
     try{
       const csrf=await token();
@@ -236,7 +243,7 @@ export function AutoCrmLeads(){
         <option value="WALK_IN">Личное обращение</option><option value="WEB">Сайт</option>
         <option value="PHONE">Звонок (только метка, без телефонии)</option>
       </select></label>
-      <button type="button" disabled={busy||!uuid.test(link)}
+      <button type="button" disabled={busy||pendingTask!==null||!uuid.test(link)}
         onClick={()=>void mutate(base,{customerLinkId:link,sourceCode:source})}>
         Создать обращение</button>
       <h2>Журнал обращений</h2>
@@ -269,7 +276,7 @@ export function AutoCrmLeads(){
             <option value="NO_RESPONSE">Нет ответа</option>
             <option value="OTHER">Другое</option>
           </select></label>}
-          <button type="button" disabled={busy||
+          <button type="button" disabled={busy||pendingTask!==null||
             (chosen.status==='NEW'&&stage==='BOOKED')||
             (chosen.status==='QUALIFIED'&&stage==='QUALIFIED')||
             (stage==='BOOKED'&&!uuid.test(appointment))}
