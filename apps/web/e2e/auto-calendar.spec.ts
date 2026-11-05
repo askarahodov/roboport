@@ -823,7 +823,7 @@ test('weekly calendar: seven local days, DST, drilldown, revoke, 390 and 1280',a
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
   await page.getByLabel('День филиала').fill(start);
   const overview=page.getByLabel('Обзор недели филиала');
-  await expect(overview).toContainText('Часовой пояс:');
+  await expect(overview).toContainText('часовой пояс:');
   await expect(overview).toContainText('2030-03-31');
   await expect(overview).toContainText('2 записей, 1 занятых постов');
   await expect(overview.getByRole('button',{name:'Показать день 2030-04-01'})).toBeVisible();
