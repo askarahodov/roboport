@@ -189,8 +189,12 @@ export function AutoCrmLeads(){
       setTaskRevision(n=>n+1);
     }catch{
       if(!submitted){
-        setPendingTask(null);
-        setTaskMessage('Не удалось получить CSRF. Запрос не отправлен; обновите задачи и повторите действие.');
+        if(!retry){
+          setPendingTask(null);
+          setTaskMessage('Не удалось получить CSRF. Запрос не отправлен; обновите задачи и повторите действие.');
+        }else{
+          setTaskMessage('Не удалось обновить CSRF. Исходный запрос сохранён; повторите его с тем же ключом.');
+        }
       }else{
         setTasks([]);setTaskStatus('error');
         setTaskMessage('Ответ не получен. Повторите тот же запрос с сохранённым ключом; новое действие заблокировано.');
@@ -237,8 +241,12 @@ export function AutoCrmLeads(){
       setMessage('Изменение подтверждено. История обновлена.');
     }catch{
       if(!submitted){
-        setPendingLead(null);
-        setMessage('Не удалось получить CSRF. Запрос не отправлен.');
+        if(!retry){
+          setPendingLead(null);
+          setMessage('Не удалось получить CSRF. Запрос не отправлен.');
+        }else{
+          setMessage('Не удалось обновить CSRF. Исходный запрос сохранён; повторите его с тем же ключом.');
+        }
       }else{
         setMessage('Ответ не получен. Повторите запрос с тем же ключом; другие изменения заблокированы.');
       }
