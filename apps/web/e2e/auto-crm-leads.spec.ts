@@ -62,9 +62,9 @@ test('CRM creates and qualifies synthetic lead with CSRF, 390/1280 dark',async({
   await page.getByRole('button',{name:'Создать обращение'}).click();
   await expect(page.getByLabel('Обращение')).toBeVisible();
   await page.getByLabel('Обращение').selectOption(lead);
-  await expect(page.getByText('Текущий этап: NEW.',{exact:false})).toBeVisible();
+  await expect(page.getByText('Текущий этап: Новое.',{exact:false})).toBeVisible();
   await page.getByRole('button',{name:'Сохранить этап'}).click();
-  await expect(page.getByText('Текущий этап: QUALIFIED.',{exact:false})).toBeVisible();
+  await expect(page.getByText('Текущий этап: Обработано.',{exact:false})).toBeVisible();
   expect(posted).toHaveLength(2);
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);

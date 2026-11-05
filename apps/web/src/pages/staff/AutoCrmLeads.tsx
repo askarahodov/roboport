@@ -23,6 +23,25 @@ type FollowupEvent={id:string;actorId:string;action:'DONE'|'CANCELED';createdAt:
 type Followup={taskId:string;ownerId:string;creatorId:string;
   taskCode:'CALL_BACK'|'CHECK_BOOKING'|'SERVICE_REVIEW';dueAt:string;createdAt:string;
   status:'OPEN'|'DONE'|'CANCELED';event:FollowupEvent|null};
+const leadSourceLabels:Record<Lead['sourceCode'],string>={
+  WEB:'Сайт',PHONE:'Звонок',WALK_IN:'Личное обращение',
+};
+const leadStatusLabels:Record<Lead['status'],string>={
+  NEW:'Новое',QUALIFIED:'Обработано',BOOKED:'Записан',LOST:'Отказ',
+};
+const leadStageLabels:Record<Event['stageCode'],string>={
+  QUALIFIED:'Обработано',BOOKED:'Записан',LOST:'Отказ',
+};
+const leadReasonLabels:Record<string,string>={
+  PRICE:'Стоимость',TIMING:'Время',NO_RESPONSE:'Нет ответа',OTHER:'Другое',
+};
+const taskCodeLabels:Record<Followup['taskCode'],string>={
+  CALL_BACK:'Связаться позже',CHECK_BOOKING:'Проверить запись',
+  SERVICE_REVIEW:'Проверить запрос на обслуживание',
+};
+const taskStatusLabels:Record<Followup['status'],string>={
+  OPEN:'Открыта',DONE:'Выполнена',CANCELED:'Отменена',
+};
 const validIso=(v:unknown):v is string=>typeof v==='string'&&
   !Number.isNaN(Date.parse(v));
 function parseFollowup(v:unknown):Followup{
@@ -215,13 +234,13 @@ export function AutoCrmLeads(){
           onChange={e=>setSelected(e.target.value)}>
           <option value="">Выберите обращение</option>
           {rows.map(x=><option value={x.leadId} key={x.leadId}>
-            {x.sourceCode} · {x.status} · {x.leadId}</option>)}
+            {leadSourceLabels[x.sourceCode]} · {leadStatusLabels[x.status]} · {x.leadId}</option>)}
         </select></label>}
       {chosen&&<div>
-        <p>Ответственный: {chosen.ownerId}. Источник: {chosen.sourceCode}.
-          Текущий этап: {chosen.status}.</p>
-        <ol>{chosen.events.map(e=><li key={e.id}>{e.stageCode}
-          {e.reasonCode?' · '+e.reasonCode:''}
+        <p>Ответственный: {chosen.ownerId}. Источник: {leadSourceLabels[chosen.sourceCode]}.
+          Текущий этап: {leadStatusLabels[chosen.status]}.</p>
+        <ol>{chosen.events.map(e=><li key={e.id}>{leadStageLabels[e.stageCode]}
+          {e.reasonCode?' · '+(leadReasonLabels[e.reasonCode]??'Неизвестная причина'):''}
           {e.appointmentId?' · запись '+e.appointmentId:''}</li>)}</ol>
         {!['BOOKED','LOST'].includes(chosen.status)&&<>
           <h3>Следующий этап</h3>
@@ -259,7 +278,7 @@ export function AutoCrmLeads(){
           <button type="button" disabled={taskBusy}
             onClick={()=>setTaskRevision(n=>n+1)}>Обновить задачи</button>
           <ol>{tasks.map(t=><li key={t.taskId}>
-            {t.taskCode} · {new Date(t.dueAt).toLocaleString('ru-RU')} · {t.status}
+            {taskCodeLabels[t.taskCode]} · {new Date(t.dueAt).toLocaleString('ru-RU')} · {taskStatusLabels[t.status]}
             {t.status==='OPEN'&&<>
               <button type="button" disabled={taskBusy}
                 onClick={()=>void taskMutation(base+'/'+selected+'/tasks/'+t.taskId+'/events',{
