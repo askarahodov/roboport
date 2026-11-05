@@ -111,3 +111,56 @@ def test_bad_timezone_rejected_without_workshop_records():
         assert db.execute(
             "SELECT timezone_name FROM auto_service_location WHERE id=%s",(loc,)
         ).fetchone()[0] == "UTC"
+
+
+
+def test_week_calendar_complete_dst_current_booking_and_live_revocation(monkeypatch):
+    """One week overview counts only current active bookings of an INTAKE branch."""
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d,org,loc,bay=_setup_zone()
+    token=d["tokens"][d["intake"]]
+    start_day="2030-03-31"  # spring DST: 23h, not a fixed UTC day
+    with psycopg.connect(DSN) as db:
+        start,end,zone=local_day_window(db,token,org,loc,start_day)
+        assert (end.astimezone(timezone.utc)-start.astimezone(timezone.utc))==timedelta(hours=23)
+        a1,_,_=create_appointment(db,token,org,loc,bay,d["link"],
+                                  start+timedelta(minutes=20),
+                                  start+timedelta(minutes=50))
+        # Crosses local midnight and therefore appears on both days.
+        a2,_,_=create_appointment(db,token,org,loc,bay,d["link"],
+                                  end-timedelta(minutes=20),
+                                  end+timedelta(minutes=20))
+    client=TestClient(app,base_url="https://127.0.0.1")
+    path=f"/api/v1/dev/auto/organizations/{org}/calendar/week"
+    args={"locationId":str(loc),"localDay":start_day}
+    assert client.get(path,params=args).status_code==403
+    client.cookies.set("rp_session",d["tokens"][d["manager"]])
+    assert client.get(path,params=args).status_code==403
+    client.cookies.set("rp_session",token)
+    response=client.get(path,params=args)
+    assert response.status_code==200,response.text
+    assert response.headers["cache-control"]=="no-store"
+    data=response.json()
+    assert data["syntheticOnly"] is True
+    assert data["timeZone"]=="Europe/Berlin"
+    assert data["fromDay"]==start_day
+    assert len(data["items"])==7
+    assert data["items"][0]=={"localDay":"2030-03-31",
+                             "appointments":2,"occupiedBays":1}
+    assert data["items"][1]=={"localDay":"2030-04-01",
+                             "appointments":1,"occupiedBays":1}
+    assert all(item["appointments"]==0 and item["occupiedBays"]==0
+               for item in data["items"][2:])
+    for secret in (str(a1),str(a2),str(d["vehicle"]),str(d["ca"]),str(d["intake"])):
+        assert secret not in response.text
+    assert client.get(path,params={**args,"localDay":"2030-02-30"}).status_code==422
+    assert client.get(path,params={**args,"localDay":"9999-12-31"}).status_code==422
+    assert client.get(path,params={**args,"locationId":str(uuid4())}).status_code==403
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """UPDATE auto_organization_role_grant SET revoked_at=now()
+               WHERE organization_id=%s AND location_id=%s AND user_id=%s
+                 AND role_code='INTAKE'""",(org,loc,d["intake"]))
+    assert client.get(path,params=args).status_code==403
