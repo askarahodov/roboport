@@ -113,7 +113,9 @@ export function AutoStockAbcXyz(){
   function clear(){active.current?.abort();setReport(null);setStatus('idle');setOffset(0);}
   const span=month.test(from)&&month.test(to)?monthIndex(to)-monthIndex(from)+1:NaN;
   const valid=uuid.test(org)&&uuid.test(loc)&&Number.isInteger(span)&&
-    span>=3&&span<=12&&monthIndex(to)<nowIndex();
+    span>=3&&span<=12;
+  // Closed-month eligibility depends on the branch IANA time zone, not UTC.
+  // The scoped server checks this and returns 422 when a local month is open.
   async function load(targetOffset:number){
     if(!valid)return;
     active.current?.abort();
