@@ -210,8 +210,13 @@ test('manager downloads complete scoped CSV and revoke blocks export fail closed
   const months=completedMonths();
   await page.getByLabel('С месяца').fill(months[0]);
   await page.getByLabel('По месяц').fill(months[2]);
-  await page.getByRole('button',{name:'Построить ABC/XYZ'}).click();
+  await expect(page.getByLabel('С месяца')).toHaveValue(months[0]);
+  await expect(page.getByLabel('По месяц')).toHaveValue(months[2]);
+  const load=page.getByRole('button',{name:'Построить ABC/XYZ'});
+  await expect(load).toBeEnabled();
+  await load.click();
   const results=page.getByLabel('Результаты ABC XYZ');
+  await expect(results).toBeVisible();
   await expect(results.getByRole('table').locator('tbody tr')).toHaveCount(25);
   const downloadPromise=page.waitForEvent('download');
   await results.getByRole('button',{name:'Скачать весь отчёт CSV'}).click();
