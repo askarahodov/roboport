@@ -44,7 +44,7 @@ test('customer CRM choices: fail-closed default, exact retry, withdrawal and sta
     requests.push(input);
     expect(route.request().headers()['x-csrf-token']).toBe('dev-csrf');
     expect(input.channelCode).toBe('CALL');
-    expect(input.expectedRevision).toBe(version===0?0:1);
+    expect(input.expectedRevision).toBe(requests.length<=2?0:1);
     if(first){first=false;enabled=true;version=1;
       return route.fulfill({status:503,body:'Temporarily unavailable'});}
     if(requests.length===2)return route.fulfill({
