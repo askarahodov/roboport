@@ -91,7 +91,7 @@ def create_followup(conn,token,org,loc,lead_id,key,code,due_at):
                     """INSERT INTO auto_crm_followup_task
                        (id,lead_id,owner_id,creator_id,task_code,due_at,request_key)
                        VALUES(%s,%s,%s,%s,%s,%s,%s)""",
-                    (ident,lead_id,lead[2],actor,code,due_at),
+                    (ident,lead_id,lead[2],actor,code,due_at,key),
                 )
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation) as exc:
