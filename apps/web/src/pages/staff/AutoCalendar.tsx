@@ -33,6 +33,13 @@ const validUtcDay=(day:string)=>{
   return !Number.isNaN(value.getTime())&&value.toISOString().slice(0,10)===day;
 };
 
+const shiftWeek=(day:string,days:number):string|null=>{
+  if(!validUtcDay(day))return null;
+  const timestamp=Date.parse(day+'T00:00:00Z')+days*86400000;
+  const next=new Date(timestamp).toISOString().slice(0,10);
+  return validUtcDay(next)?next:null;
+};
+
 const validIsoInstant=(value:string)=>{
   const match=/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-](\d{2}):(\d{2}))$/i.exec(value);
   if(!match||!validUtcDay(match[1]))return false;
@@ -74,10 +81,14 @@ export function AutoCalendar() {
   const [org,setOrg]=React.useState('');
   const [location,setLocation]=React.useState('');
   const [day,setDay]=React.useState(()=>new Date().toISOString().slice(0,10));
+  const [weekStart,setWeekStart]=React.useState(()=>new Date().toISOString().slice(0,10));
   const [timeZone,setTimeZone]=React.useState('UTC');
   const [items,setItems]=React.useState<Entry[]>([]);
   const [week,setWeek]=React.useState<WeekReport|null>(null);
   const [weekStatus,setWeekStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
+  const [exportingWeek,setExportingWeek]=React.useState(false);
+  const [weekExportError,setWeekExportError]=React.useState('');
+  const weekExportRequest=React.useRef<AbortController|null>(null);
   const [hasMore,setHasMore]=React.useState(false);
   const [cursor,setCursor]=React.useState<{startsAt:string;appointmentId:string}|null>(null);
   const [nextCursor,setNextCursor]=React.useState<{startsAt:string;appointmentId:string}|null>(null);
@@ -109,13 +120,20 @@ export function AutoCalendar() {
   const [revision,setRevision]=React.useState(0);
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
+  const weekValid=uuid.test(org.trim())&&uuid.test(location.trim())&&
+    validUtcDay(weekStart);
+  React.useEffect(()=>{
+    weekExportRequest.current?.abort();
+    setExportingWeek(false);setWeekExportError('');
+    return ()=>weekExportRequest.current?.abort();
+  },[org,location,weekStart]);
   React.useEffect(()=>{
     setWeek(null);
-    if(!valid){setWeekStatus('idle');return;}
+    if(!weekValid){setWeekStatus('idle');return;}
     const controller=new AbortController();
     setWeekStatus('loading');
     const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+'/calendar/week';
-    const query=new URLSearchParams({locationId:location.trim(),localDay:day});
+    const query=new URLSearchParams({locationId:location.trim(),localDay:weekStart});
     void fetch(path+'?'+query,{credentials:'include',cache:'no-store',
       signal:controller.signal}).then(async response=>{
       if(controller.signal.aborted)return;
@@ -124,8 +142,8 @@ export function AutoCalendar() {
       const data:unknown=await response.json();
       if(!data||typeof data!=='object')throw Error('weekly body');
       const report=data as Partial<WeekReport>;
-      const first=new Date(day+'T00:00:00Z');
-      if(report.syntheticOnly!==true||report.fromDay!==day||
+      const first=new Date(weekStart+'T00:00:00Z');
+      if(report.syntheticOnly!==true||report.fromDay!==weekStart||
         typeof report.timeZone!=='string'||report.timeZone.length<1||
         report.timeZone.length>64||!Array.isArray(report.items)||
         report.items.length!==7||!report.items.every((item,i)=>
@@ -138,7 +156,7 @@ export function AutoCalendar() {
       if(!controller.signal.aborted){setWeek(report as WeekReport);setWeekStatus('ready');}
     }).catch(()=>{if(!controller.signal.aborted)setWeekStatus('error');});
     return ()=>controller.abort();
-  },[org,location,day,revision,valid]);
+  },[org,location,weekStart,revision,weekValid]);
   React.useEffect(()=>{
     setItems([]);setHasMore(false);setNextCursor(null);setTarget(null);setTimeZone('UTC');
     if(!valid){setStatus('idle');return;}
@@ -412,12 +430,46 @@ export function AutoCalendar() {
     Date.parse(form.ends)>Date.parse(form.starts)&&
     Date.parse(form.ends)-Date.parse(form.starts)<=86400000&&
     Date.parse(form.starts)>Date.now();
+  async function downloadWeek(){
+    if(!week||weekStatus!=='ready'||week.fromDay!==weekStart||exportingWeek)return;
+    weekExportRequest.current?.abort();
+    const request=new AbortController();
+    weekExportRequest.current=request;
+    setWeekExportError('');setExportingWeek(true);
+    const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
+      '/calendar/week/export';
+    const query=new URLSearchParams({locationId:location.trim(),localDay:weekStart});
+    try{
+      const response=await fetch(path+'?'+query,{
+        credentials:'include',cache:'no-store',signal:request.signal,
+      });
+      if(request.signal.aborted)return;
+      if([401,403,404].includes(response.status)){
+        setWeek(null);setWeekStatus('denied');return;
+      }
+      if(response.status===422){setWeek(null);setWeekStatus('error');return;}
+      if(!response.ok||!response.headers.get('content-type')?.startsWith('text/csv'))
+        throw Error('invalid export response');
+      const file=await response.blob();
+      if(request.signal.aborted)return;
+      const objectUrl=URL.createObjectURL(file);
+      const link=document.createElement('a');
+      link.href=objectUrl;link.download='auto-calendar-week.csv';
+      document.body.appendChild(link);link.click();link.remove();
+      window.setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
+    }catch{
+      if(!request.signal.aborted)
+        setWeekExportError('Не удалось скачать недельный CSV. Повторите запрос.');
+    }finally{
+      if(!request.signal.aborted)setExportingWeek(false);
+    }
+  }
   return <section aria-label="Календарь приёмщика (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>Календарь приёмщика</h1>
     <p>Синтетический HTTPS-стенд. Поиск записей и свободных окон — по местным суткам филиала с учётом перевода часов. Поле ISO содержит абсолютное время для бронирования. Реальных клиентов не добавляйте.</p>
     <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>{setMessage('');resetPage();setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>{setMessage('');resetPage();setLocation(e.target.value);}}/></label>
-    <label>День филиала <input aria-label="День филиала" type="date" value={day} onChange={e=>{setMessage('');resetPage();setDay(e.target.value);}}/></label>
+    <label>День филиала <input aria-label="День филиала" type="date" value={day} onChange={e=>{setMessage('');resetPage();setDay(e.target.value);setWeekStart(e.target.value);}}/></label>
     <fieldset aria-label="График работы филиала (dev)">
       <legend>Часы работы и закрытые даты</legend>
       <p>Настройка для филиала по его часовому поясу. Просмотр: INTAKE/MANAGER; изменение: только MANAGER. Без настройки dev-режим сохраняет старые круглосуточные кандидаты и не готов к production.</p>
@@ -467,14 +519,29 @@ export function AutoCalendar() {
         по местным суткам филиала. Запись через полночь учитывается
         в каждом затронутом дне. Это не число выполненных ремонтов
         и не свободные окна для брони.</p>
+      <nav aria-label="Навигация по неделям">
+        <button type="button" disabled={!weekValid||!shiftWeek(weekStart,-7)}
+          onClick={()=>{const next=shiftWeek(weekStart,-7);if(next)setWeekStart(next);}}>
+          Предыдущие семь дней
+        </button>
+        <button type="button" disabled={!weekValid||!shiftWeek(weekStart,7)}
+          onClick={()=>{const next=shiftWeek(weekStart,7);if(next)setWeekStart(next);}}>
+          Следующие семь дней
+        </button>
+      </nav>
       {weekStatus==='loading'&&<p role="status">Загрузка недели…</p>}
       {weekStatus==='idle'&&<p>Укажите филиал и дату начала недели.</p>}
       {weekStatus==='denied'&&<p role="alert">Нет доступа к обзору недели.</p>}
       {weekStatus==='error'&&<p role="alert">Не удалось получить обзор недели.
         <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить обзор</button>
       </p>}
+      {weekExportError&&<p role="alert">{weekExportError}</p>}
       {weekStatus==='ready'&&week&&<>
         <p>С {week.fromDay}, часовой пояс: {week.timeZone}.</p>
+        <button type="button" disabled={exportingWeek}
+          onClick={()=>void downloadWeek()}>
+          {exportingWeek?'Подготовка CSV…':'Скачать неделю в CSV'}
+        </button>
         <ul>{week.items.map(item=><li key={item.localDay}>
           <button type="button" aria-label={'Показать день '+item.localDay}
             onClick={()=>{resetPage();setDay(item.localDay);setMessage('');}}>

@@ -866,3 +866,70 @@ test('weekly calendar rejects forged aggregate fields and never retains stale va
   await expect(overview.getByRole('alert')).toContainText('Не удалось получить обзор недели');
   await expect(overview).not.toContainText('1 запись');
 });
+
+
+test('weekly planning: paging, day drilldown, complete CSV and revoked export',async({page})=>{
+  const seen:string[]=[];
+  let denyExport=false;
+  await page.route(base,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:'{"items":[],"hasMore":false,"timeZone":"Europe/Berlin"}',
+  }));
+  await page.route('**/calendar/week?*',route=>{
+    const query=new URL(route.request().url()).searchParams;
+    const from=query.get('localDay')??'';
+    seen.push(from);
+    const first=new Date(from+'T00:00:00Z');
+    const items=Array.from({length:7},(_,i)=>({
+      localDay:new Date(first.getTime()+i*86400000).toISOString().slice(0,10),
+      appointments:i===0?2:i===1?1:0,occupiedBays:i<=1?1:0,
+    }));
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,timeZone:'Europe/Berlin',fromDay:from,items})});
+  });
+  const exported:string[]=[];
+  await page.route('**/calendar/week/export?*',route=>{
+    const query=new URL(route.request().url()).searchParams;
+    exported.push(query.toString());
+    if(denyExport)return route.fulfill({status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'});
+    return route.fulfill({status:200,contentType:'text/csv; charset=utf-8',
+      headers:{'content-disposition':'attachment; filename="auto-calendar-week.csv"'},
+      body:'\ufeffДата филиала;Действующие записи;Занятые посты\r\n2030-11-03;2;1'});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByLabel('День филиала').fill('2030-10-27');
+  const panel=page.getByLabel('Обзор недели филиала');
+  await expect(panel).toContainText('С 2030-10-27, часовой пояс: Europe/Berlin');
+  const nav=panel.getByRole('navigation',{name:'Навигация по неделям'});
+  await nav.getByRole('button',{name:'Следующие семь дней'}).click();
+  await expect(panel).toContainText('С 2030-11-03, часовой пояс: Europe/Berlin');
+  await expect(page.getByLabel('День филиала')).toHaveValue('2030-10-27');
+  await panel.getByRole('button',{name:'Показать день 2030-11-04'}).click();
+  await expect(page.getByLabel('День филиала')).toHaveValue('2030-11-04');
+  // Opening one day must not unexpectedly jump the weekly planning range.
+  await expect(panel).toContainText('С 2030-11-03, часовой пояс: Europe/Berlin');
+  const downloadPromise=page.waitForEvent('download');
+  await panel.getByRole('button',{name:'Скачать неделю в CSV'}).click();
+  const file=await downloadPromise;
+  expect(file.suggestedFilename()).toBe('auto-calendar-week.csv');
+  expect(exported).toHaveLength(1);
+  expect(new URLSearchParams(exported[0]).get('localDay')).toBe('2030-11-03');
+  expect(new URLSearchParams(exported[0]).get('locationId')).toBe(loc);
+  await expect(panel.getByRole('button',{name:'Скачать неделю в CSV'})).toBeEnabled();
+  denyExport=true;
+  await panel.getByRole('button',{name:'Скачать неделю в CSV'}).click();
+  await expect(panel.getByRole('alert')).toContainText('Нет доступа к обзору недели');
+  await expect(panel.getByRole('button',{name:'Скачать неделю в CSV'})).toHaveCount(0);
+  await expect(panel).not.toContainText('2 записи');
+  await nav.getByRole('button',{name:'Предыдущие семь дней'}).click();
+  await expect(panel).toContainText('С 2030-10-27, часовой пояс: Europe/Berlin');
+  expect(seen).toContain('2030-10-27');
+  expect(seen).toContain('2030-11-03');
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(1280);
+});
