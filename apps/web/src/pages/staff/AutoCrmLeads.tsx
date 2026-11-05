@@ -173,7 +173,10 @@ export function AutoCrmLeads(){
     return ()=>controller.abort();
   },[org,loc,revision,valid,leadCursor]);
   React.useEffect(()=>{
-    setTasks([]);setTaskStatus('idle');setTaskMessage('');
+    setTaskMessage('');
+  },[scope,selected]);
+  React.useEffect(()=>{
+    setTasks([]);setTaskStatus('idle');
     if(!valid||!selected||loadedScope!==scope||status!=='ready')return;
     const controller=new AbortController();
     setTaskStatus('loading');
