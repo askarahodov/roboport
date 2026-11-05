@@ -13,6 +13,7 @@ import { AutoBayOccupancy } from './pages/staff/AutoBayOccupancy';
 import { AutoDemoFinanceReport } from './pages/staff/AutoDemoFinanceReport';
 import { AutoCrmLeads } from './pages/staff/AutoCrmLeads';
 import { AutoCrmFunnel } from './pages/staff/AutoCrmFunnel';
+import { AutoStockAbcXyz } from './pages/staff/AutoStockAbcXyz';
 import { AutoOrderServices } from './pages/staff/AutoOrderServices';
 import { AutoWorkshopQc } from './pages/staff/AutoWorkshopQc';
 import { AutoEstimateConsole } from './pages/shared/AutoEstimateConsole';
