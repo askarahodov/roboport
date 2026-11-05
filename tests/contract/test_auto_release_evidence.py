@@ -54,12 +54,18 @@ def test_unsafe_urls_and_invalid_timestamps_block():
         "https://github.com/has space",
         "http://github.com/example/review",
         "https://[::1]/review",
+        "https://127.1/review",
+        "https://0177.0.0.1/review",
+        "https://0x7f.0.0.1/review",
+        "https://192.168.1/review",
     ):
         item = complete()
         item["gates"]["ci_main"]["evidence_url"] = url
         assert "ci_main" in validate_evidence(item), url
 
     for date in ("not-a-date", "2026-10-30", "2026-10-30T10:00:00",
+                 "2026-10-30x10:00:00Z", "2026-10-30 10:00:00Z",
+                 "2026-10-30T10:00Z", "2026-10-30T10:00:00.1234567Z",
                  "2026-10-30T11:00:00+01:00", "2026-13-30T10:00:00Z"):
         item = complete()
         item["approved_at"] = date
@@ -95,3 +101,17 @@ def test_evidence_urls_allow_public_https_hosts_without_verifying_their_truth():
         item = complete()
         item["gates"]["ci_main"]["evidence_url"] = url
         assert validate_evidence(item) == ()
+
+
+def test_canonical_utc_timestamp_with_seconds_and_microseconds_is_accepted():
+    for timestamp in ("2026-10-30T10:00:00Z",
+                      "2026-10-30T10:00:00.123456Z"):
+        item = complete()
+        item["approved_at"] = timestamp
+        assert validate_evidence(item) == ()
+
+
+def test_numeric_dns_aliases_rejected_but_numeric_subdomain_is_allowed():
+    item = complete()
+    item["gates"]["ci_main"]["evidence_url"] = "https://123.docs.python.org/3/"
+    assert validate_evidence(item) == ()
