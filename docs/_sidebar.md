@@ -32,6 +32,7 @@
   - [Пакетный synthetic cutover (разработчикам/QA)](/auto/SYNTHETIC_CUTOVER.md)
   - [Загрузка постов: методика и API (dev)](/auto/REPORTING.md)
   - [Условные журналы и тестовая финсверка (dev)](/auto/DEMO_FINANCE_REPORT.md)
+  - [CRM: обращения, этапы и запись (dev)](/auto/CRM.md)
   - [Каталоги запчастей](/auto/PARTS_CATALOG.md)
   - [Технологии](/TECH_STACK.md)
   - [Локальная разработка](/operations/DEV_ENVIRONMENT.md)
