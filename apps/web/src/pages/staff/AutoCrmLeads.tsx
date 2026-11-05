@@ -43,6 +43,7 @@ const taskStatusLabels:Record<Followup['status'],string>={
   OPEN:'Открыта',DONE:'Выполнена',CANCELED:'Отменена',
 };
 type PendingTaskRequest={url:string;body:Record<string,string>;scope:string;leadId:string};
+type PendingLeadRequest={url:string;body:Record<string,unknown>;scope:string;leadId:string|null};
 const validIso=(v:unknown):v is string=>typeof v==='string'&&
   !Number.isNaN(Date.parse(v));
 function parseFollowup(v:unknown):Followup{
@@ -101,6 +102,7 @@ export function AutoCrmLeads(){
   const [taskBusy,setTaskBusy]=React.useState(false);
   const [taskMessage,setTaskMessage]=React.useState('');
   const [pendingTask,setPendingTask]=React.useState<PendingTaskRequest|null>(null);
+  const [pendingLead,setPendingLead]=React.useState<PendingLeadRequest|null>(null);
   const valid=uuid.test(org)&&uuid.test(loc);
   const scope=org+':'+loc;
   const [loadedScope,setLoadedScope]=React.useState('');
@@ -149,7 +151,7 @@ export function AutoCrmLeads(){
     return ()=>controller.abort();
   },[org,loc,selected,loadedScope,status,taskRevision]);
   async function taskMutation(url:string,body:Record<string,string>,retry?:PendingTaskRequest){
-    if(taskBusy||loadedScope!==scope||status!=='ready'||!selected||
+    if(taskBusy||pendingLead!==null||loadedScope!==scope||status!=='ready'||!selected||
        (retry ? retry.scope!==scope||retry.leadId!==selected||
          pendingTask?.body.requestKey!==retry.body.requestKey :
          taskStatus!=='ready'||pendingTask!==null))return;
@@ -187,31 +189,50 @@ export function AutoCrmLeads(){
       setTaskRevision(n=>n+1);
     }catch{
       if(!submitted){
-        setPendingTask(null);
-        setTaskMessage('Не удалось получить CSRF. Запрос не отправлен; обновите задачи и повторите действие.');
+        if(!retry){
+          setPendingTask(null);
+          setTaskMessage('Не удалось получить CSRF. Запрос не отправлен; обновите задачи и повторите действие.');
+        }else{
+          setTaskMessage('Не удалось обновить CSRF. Исходный запрос сохранён; повторите его с тем же ключом.');
+        }
       }else{
         setTasks([]);setTaskStatus('error');
         setTaskMessage('Ответ не получен. Повторите тот же запрос с сохранённым ключом; новое действие заблокировано.');
       }
     }finally{setTaskBusy(false);}
   }
-  async function mutate(url:string,body:object){
-    if(busy||pendingTask!==null||status!=='ready'||loadedScope!==scope)return;
+  async function mutate(url:string,body:Record<string,unknown>,retry?:PendingLeadRequest){
+    if(busy||taskBusy||pendingTask!==null||status!=='ready'||loadedScope!==scope||
+       (retry ? retry.scope!==scope||pendingLead?.body.requestKey!==retry.body.requestKey||
+         (retry.leadId!==null&&selected!==retry.leadId) :
+         pendingLead!==null))return;
+    const request=retry??{url,body:{...body,requestKey:crypto.randomUUID()},
+      scope,leadId:url.endsWith('/stages')?selected:null};
     setBusy(true);setMessage('');
+    let submitted=false;
     try{
       const csrf=await token();
-      const r=await fetch(url,{method:'POST',credentials:'include',cache:'no-store',
+      setPendingLead(request);
+      submitted=true;
+      const r=await fetch(request.url,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
-        body:JSON.stringify({...body,requestKey:crypto.randomUUID()})});
+        body:JSON.stringify(request.body)});
       if([401,403,404].includes(r.status)){
-        setRows([]);setSelected('');setStatus('denied');return;
+        setPendingLead(null);setPendingTask(null);setRows([]);setSelected('');setStatus('denied');return;
       }
-      if(!r.ok){setMessage(r.status===409?
-        'Конфликт или повторная запись. Обновите список перед новой операцией.':
-        'Операция не выполнена. Проверьте связь и права.');return;}
-      // POST returns the authoritative audit state. Update in-place to avoid
-      // losing the selected lead while re-fetching its list.
+      if(r.status>=500){
+        setMessage('Сервер не подтвердил результат. Повторите запрос с тем же ключом.');
+        return;
+      }
+      if(!r.ok){
+        setPendingLead(null);
+        setMessage(r.status===409?
+          'Конфликт или повторная запись. Сверьте журнал перед новой операцией.':
+          'Операция отклонена. Проверьте связь и права.');
+        return;
+      }
       const updated=parseLead(await r.json());
+      setPendingLead(null);
       setRows(current=>{
         const rest=current.filter(x=>x.leadId!==updated.leadId);
         return [updated,...rest].slice(0,50);
@@ -219,8 +240,16 @@ export function AutoCrmLeads(){
       setSelected(updated.leadId);
       setMessage('Изменение подтверждено. История обновлена.');
     }catch{
-      setRows([]);setSelected('');setStatus('error');
-      setMessage('Результат неизвестен; проверьте журнал до повтора.');
+      if(!submitted){
+        if(!retry){
+          setPendingLead(null);
+          setMessage('Не удалось получить CSRF. Запрос не отправлен.');
+        }else{
+          setMessage('Не удалось обновить CSRF. Исходный запрос сохранён; повторите его с тем же ключом.');
+        }
+      }else{
+        setMessage('Ответ не получен. Повторите запрос с тем же ключом; другие изменения заблокированы.');
+      }
     }finally{setBusy(false);}
   }
   const chosen=rows.find(x=>x.leadId===selected);
@@ -231,9 +260,9 @@ export function AutoCrmLeads(){
       реальных номеров. Этап «Записан» связывается с существующей записью,
       но не означает посещение или оплату.</p>
     <label>UUID организации <input aria-label="UUID организации" disabled={busy||taskBusy}
-      value={org} onChange={e=>{setPendingTask(null);setRows([]);setSelected('');setStatus('idle');setOrg(e.target.value);}}/></label>
+      value={org} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" disabled={busy||taskBusy}
-      value={loc} onChange={e=>{setPendingTask(null);setRows([]);setSelected('');setStatus('idle');setLoc(e.target.value);}}/></label>
+      value={loc} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setLoc(e.target.value);}}/></label>
     {status==='idle'&&<p>Укажите организацию и филиал.</p>}
     {status==='loading'&&<p role="status">Чтение обращений…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
@@ -249,12 +278,12 @@ export function AutoCrmLeads(){
         <option value="WALK_IN">Личное обращение</option><option value="WEB">Сайт</option>
         <option value="PHONE">Звонок (только метка, без телефонии)</option>
       </select></label>
-      <button type="button" disabled={busy||pendingTask!==null||!uuid.test(link)}
+      <button type="button" disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null||!uuid.test(link)}
         onClick={()=>void mutate(base,{customerLinkId:link,sourceCode:source})}>
         Создать обращение</button>
       <h2>Журнал обращений</h2>
       {rows.length===0?<p>Обращений пока нет.</p>:<label>Обращение
-        <select aria-label="Обращение" value={selected} disabled={taskBusy}
+        <select aria-label="Обращение" value={selected} disabled={taskBusy||busy||pendingLead!==null}
           onChange={e=>{setPendingTask(null);setSelected(e.target.value);}}>
           <option value="">Выберите обращение</option>
           {rows.map(x=><option value={x.leadId} key={x.leadId}>
@@ -282,7 +311,7 @@ export function AutoCrmLeads(){
             <option value="NO_RESPONSE">Нет ответа</option>
             <option value="OTHER">Другое</option>
           </select></label>}
-          <button type="button" disabled={busy||pendingTask!==null||
+          <button type="button" disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null||
             (chosen.status==='NEW'&&stage==='BOOKED')||
             (chosen.status==='QUALIFIED'&&stage==='QUALIFIED')||
             (stage==='BOOKED'&&!uuid.test(appointment))}
@@ -304,11 +333,11 @@ export function AutoCrmLeads(){
           <ol>{tasks.map(t=><li key={t.taskId}>
             {taskCodeLabels[t.taskCode]} · {new Date(t.dueAt).toLocaleString('ru-RU')} · {taskStatusLabels[t.status]}
             {t.status==='OPEN'&&<>
-              <button type="button" disabled={taskBusy||pendingTask!==null}
+              <button type="button" disabled={taskBusy||busy||pendingLead!==null||pendingTask!==null}
                 onClick={()=>void taskMutation(base+'/'+selected+'/tasks/'+t.taskId+'/events',{
                   action:'DONE',
                 })}>Выполнено</button>
-              <button type="button" disabled={taskBusy||pendingTask!==null}
+              <button type="button" disabled={taskBusy||busy||pendingLead!==null||pendingTask!==null}
                 onClick={()=>void taskMutation(base+'/'+selected+'/tasks/'+t.taskId+'/events',{
                   action:'CANCELED',
                 })}>Отменить задачу</button>
@@ -324,7 +353,7 @@ export function AutoCrmLeads(){
             </select></label>
             <label>Срок задачи <input aria-label="Срок задачи" type="datetime-local"
               disabled={taskBusy} value={taskDue} onChange={e=>setTaskDue(e.target.value)}/></label>
-            <button type="button" disabled={taskBusy||pendingTask!==null||!taskDue||
+            <button type="button" disabled={taskBusy||busy||pendingLead!==null||pendingTask!==null||!taskDue||
               !Number.isFinite(Date.parse(taskDue))||Date.parse(taskDue)<=Date.now()||
               Date.parse(taskDue)>Date.now()+90*86400000}
               onClick={()=>void taskMutation(base+'/'+selected+'/tasks',{
@@ -339,6 +368,9 @@ export function AutoCrmLeads(){
             Повторить запрос с тем же ключом</button>}
       </div>}
       {message&&<p role="status">{message}</p>}
+      {pendingLead&&pendingLead.scope===scope&&status==='ready'&&<button type="button"
+        disabled={busy||taskBusy} onClick={()=>void mutate(pendingLead.url,pendingLead.body,pendingLead)}>
+        Повторить операцию CRM с тем же ключом</button>}
     </>}
   </section>;
 }

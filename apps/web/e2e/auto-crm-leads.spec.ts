@@ -118,3 +118,139 @@ test('CRM booked stage requires a scoped appointment UUID and qualified stage',a
   await page.getByRole('textbox',{name:'UUID записи'}).fill(appointment);
   await expect(page.getByRole('button',{name:'Сохранить этап'})).toBeEnabled();
 });
+
+test('CRM create survives lost response and 503 using one immutable request key',async({page})=>{
+  const posts:any[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route(path,route=>{
+    const request=route.request();
+    if(request.method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:posts.length?[item('NEW')]:[]}),
+    });
+    posts.push(request.postDataJSON());
+    expect(request.headers()['x-csrf-token']).toBe('synthetic-csrf');
+    if(posts.length===1)return route.abort('failed');
+    if(posts.length===2)return route.fulfill({status:503,body:'Unavailable'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({replayed:true,...item('NEW')})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('UUID подтверждённой связи').fill(link);
+  await page.getByRole('button',{name:'Создать обращение'}).click();
+  const retry=page.getByRole('button',{name:'Повторить операцию CRM с тем же ключом'});
+  await expect(retry).toBeVisible();
+  await expect(page.getByRole('button',{name:'Создать обращение'})).toBeDisabled();
+  await retry.click();
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByLabel('Обращение')).toBeVisible();
+  await expect(retry).toHaveCount(0);
+  expect(posts).toHaveLength(3);
+  expect(posts[0]).toEqual(posts[1]);
+  expect(posts[1]).toEqual(posts[2]);
+});
+
+test('CRM stage replay keeps exact payload after lost response and blocks parallel mutations',async({page})=>{
+  let qualified=false;const posts:any[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route(path,route=>{
+    const request=route.request();
+    if(request.method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[item(qualified?'QUALIFIED':'NEW',
+        qualified?[event('QUALIFIED',null,null)]:[])]}),
+    });
+    posts.push(request.postDataJSON());
+    if(posts.length===1){qualified=true;return route.abort('failed');}
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({replayed:true,...item('QUALIFIED',[event('QUALIFIED',null,null)])})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Обращение').selectOption(lead);
+  await page.getByRole('button',{name:'Сохранить этап'}).click();
+  const retry=page.getByRole('button',{name:'Повторить операцию CRM с тем же ключом'});
+  await expect(retry).toBeVisible();
+  await expect(page.getByRole('button',{name:'Сохранить этап'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Создать обращение'})).toBeDisabled();
+  await expect(page.getByLabel('Обращение')).toBeDisabled();
+  await retry.click();
+  await expect(page.getByText('Текущий этап: Обработано.',{exact:false})).toBeVisible();
+  await expect(retry).toHaveCount(0);
+  expect(posts).toHaveLength(2);
+  expect(posts[0]).toEqual(posts[1]);
+});
+
+test('CRM retry revocation clears state; CSRF failure before POST needs no replay',async({page})=>{
+  let csrfCount=0;let postCount=0;
+  await page.route('**/api/v1/auth/csrf',route=>{
+    csrfCount++;
+    return route.fulfill({status:csrfCount===1?503:200,
+      contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'});
+  });
+  await page.route(path,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[]}),
+    });
+    postCount++;
+    if(postCount===1)return route.abort('failed');
+    return route.fulfill({status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('UUID подтверждённой связи').fill(link);
+  const create=page.getByRole('button',{name:'Создать обращение'});
+  await create.click();
+  await expect(page.getByRole('status')).toContainText('Запрос не отправлен');
+  const retry=page.getByRole('button',{name:'Повторить операцию CRM с тем же ключом'});
+  await expect(retry).toHaveCount(0);
+  expect(postCount).toBe(0);
+  await create.click();
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(retry).toHaveCount(0);
+  expect(postCount).toBe(2);
+});
+
+test('CRM retry keeps the original key when refreshing CSRF fails',async({page})=>{
+  let csrfCalls=0;const posts:any[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>{
+    csrfCalls++;
+    return route.fulfill({status:csrfCalls===2?503:200,
+      contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'});
+  });
+  await page.route(path,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[]}),
+    });
+    posts.push(route.request().postDataJSON());
+    if(posts.length===1)return route.abort('failed');
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({replayed:true,...item('NEW')})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('UUID подтверждённой связи').fill(link);
+  await page.getByRole('button',{name:'Создать обращение'}).click();
+  const retry=page.getByRole('button',{name:'Повторить операцию CRM с тем же ключом'});
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByText('Не удалось обновить CSRF',{exact:false})).toBeVisible();
+  await expect(retry).toBeVisible();
+  await expect(page.getByRole('button',{name:'Создать обращение'})).toBeDisabled();
+  expect(posts).toHaveLength(1);
+  await retry.click();
+  await expect(retry).toHaveCount(0);
+  expect(posts).toHaveLength(2);
+  expect(posts[0]).toEqual(posts[1]);
+});
