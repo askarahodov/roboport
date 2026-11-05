@@ -47,5 +47,9 @@ def list_inbox(conn, token, org, loc):
         for lead_id,task_id in rows:
             # Re-validate every item via the same protected single-lead read.
             _lead(conn, org, loc, lead_id, actor, manager)
-            items.append({"leadId":str(lead_id),**_task(conn, lead_id, task_id)})
+            task=_task(conn, lead_id, task_id)
+            # Another authorized employee may resolve the task between
+            # SELECT and serialization under READ COMMITTED.
+            if task["status"]=="OPEN":
+                items.append({"leadId":str(lead_id),**task})
         return {"syntheticOnly":True,"items":items}
