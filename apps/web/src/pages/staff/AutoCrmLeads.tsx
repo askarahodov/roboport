@@ -22,7 +22,7 @@ function parseLead(v:unknown):Lead{
 type FollowupEvent={id:string;actorId:string;action:'DONE'|'CANCELED';createdAt:string};
 type Followup={taskId:string;ownerId:string;creatorId:string;
   taskCode:'CALL_BACK'|'CHECK_BOOKING'|'SERVICE_REVIEW';dueAt:string;createdAt:string;
-  status:'OPEN'|'DONE'|'CANCELED';event:FollowupEvent|null};
+  status:'OPEN'|'DONE'|'CANCELED';event:FollowupEvent|null;originWorkOrderId?:string|null};
 const leadSourceLabels:Record<Lead['sourceCode'],string>={
   WEB:'Сайт',PHONE:'Звонок',WALK_IN:'Личное обращение',
 };
@@ -71,6 +71,7 @@ function parseFollowup(v:unknown):Followup{
   if(![t.taskId,t.ownerId,t.creatorId].every(x=>typeof x==='string'&&uuid.test(x))||
     !['CALL_BACK','CHECK_BOOKING','SERVICE_REVIEW'].includes(t.taskCode)||
     !validIso(t.dueAt)||!validIso(t.createdAt)||
+    !(t.originWorkOrderId==null||(typeof t.originWorkOrderId==='string'&&uuid.test(t.originWorkOrderId)))||
     !['OPEN','DONE','CANCELED'].includes(t.status)||
     (t.event===null?t.status!=='OPEN':
       !t.event||!uuid.test(t.event.id)||!uuid.test(t.event.actorId)||
@@ -125,6 +126,8 @@ export function AutoCrmLeads(){
   const [taskRevision,setTaskRevision]=React.useState(0);
   const [taskCode,setTaskCode]=React.useState<Followup['taskCode']>('CALL_BACK');
   const [taskDue,setTaskDue]=React.useState('');
+  const [reviewOrder,setReviewOrder]=React.useState('');
+  const [reviewDue,setReviewDue]=React.useState('');
   const [taskBusy,setTaskBusy]=React.useState(false);
   const [taskMessage,setTaskMessage]=React.useState('');
   const [inbox,setInbox]=React.useState<InboxTask[]>([]);
@@ -467,6 +470,7 @@ export function AutoCrmLeads(){
             onClick={()=>setTaskRevision(n=>n+1)}>Обновить задачи</button>
           <ol>{tasks.map(t=><li key={t.taskId}>
             {taskCodeLabels[t.taskCode]} · {new Date(t.dueAt).toLocaleString('ru-RU')} · {taskStatusLabels[t.status]}
+            {t.originWorkOrderId&&<> · Наряд: {t.originWorkOrderId}</>}
             {t.status==='OPEN'&&<>
               <button type="button" disabled={taskBusy||busy||pendingLead!==null||pendingTask!==null}
                 onClick={()=>void taskMutation(base+'/'+selected+'/tasks/'+t.taskId+'/events',{
@@ -479,6 +483,29 @@ export function AutoCrmLeads(){
             </>}
           </li>)}</ol>
           {tasks.length===0&&<p>Задач пока нет.</p>}
+          {chosen.status==='BOOKED'&&<>
+            <h3>Контроль после выполненного ремонта</h3>
+            <p>Создайте одну внутреннюю задачу на выполненный заказ-наряд.
+              Сервер проверит связанный визит, завершённые работы и независимый QC PASS.
+              Никаких сообщений клиенту не отправляется.</p>
+            <label>UUID выполненного заказ-наряда <input
+              aria-label="UUID выполненного заказ-наряда"
+              disabled={taskBusy||busy||pendingTask!==null}
+              value={reviewOrder} onChange={e=>setReviewOrder(e.target.value)}/></label>
+            <label>Срок контроля после ремонта <input type="datetime-local"
+              aria-label="Срок контроля после ремонта"
+              disabled={taskBusy||busy||pendingTask!==null}
+              value={reviewDue} onChange={e=>setReviewDue(e.target.value)}/></label>
+            <button type="button"
+              disabled={taskBusy||busy||pendingLead!==null||pendingTask!==null||
+                !uuid.test(reviewOrder)||!reviewDue||
+                !Number.isFinite(Date.parse(reviewDue))||
+                Date.parse(reviewDue)<=Date.now()||
+                Date.parse(reviewDue)>Date.now()+90*86400000}
+              onClick={()=>void taskMutation(base+'/'+selected+'/service-review',{
+                workOrderId:reviewOrder,dueAt:new Date(reviewDue).toISOString(),
+              })}>Запланировать контроль после ремонта</button>
+          </>}
           {!['BOOKED','LOST'].includes(chosen.status)&&<>
             <label>Тип задачи <select aria-label="Тип задачи" disabled={taskBusy}
               value={taskCode} onChange={e=>setTaskCode(e.target.value as Followup['taskCode'])}>
