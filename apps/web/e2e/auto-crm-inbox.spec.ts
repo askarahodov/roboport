@@ -34,7 +34,7 @@ test('staff CRM inbox: overdue task opens lead outside limited list, DONE refres
   });
   await page.route(inbox,route=>route.fulfill({
     status:200,contentType:'application/json',
-    body:JSON.stringify({syntheticOnly:true,items:done?[]:[row]}),
+    body:JSON.stringify({syntheticOnly:true,items:done?[]:[row],nextCursor:null}),
   }));
   await page.route(tasks,route=>{
     if(route.request().method()==='GET')return route.fulfill({
@@ -76,7 +76,7 @@ test('CRM inbox denies revoked access and wipes previous queue on scope switch',
     body:JSON.stringify({syntheticOnly:true,items:[]})}));
   await page.route(inbox,route=>route.fulfill({
     status:denied?403:200,contentType:'application/json',
-    body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({syntheticOnly:true,items:[row]}),
+    body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({syntheticOnly:true,items:[row],nextCursor:null}),
   }));
   await page.goto('/staff/auto-crm-leads');
   await scope(page);
@@ -96,7 +96,7 @@ test('CRM inbox malformed or oversized response fails closed',async({page})=>{
     body:JSON.stringify({syntheticOnly:true,items:[]})}));
   await page.route(inbox,route=>route.fulfill({
     status:200,contentType:'application/json',
-    body:JSON.stringify({syntheticOnly:true,items:[{...row,leadId:'not-a-uuid'}]}),
+    body:JSON.stringify({syntheticOnly:true,items:[{...row,leadId:'not-a-uuid'}],nextCursor:null}),
   }));
   await page.goto('/staff/auto-crm-leads');
   await scope(page);
