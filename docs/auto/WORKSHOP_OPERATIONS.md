@@ -88,3 +88,37 @@ consent, цены, материалы, QC и роль механика, а та�
 ## Выполнение одобренной сметы (current-dev)
 
 После согласования клиентом конкретной версии WorkOrder менеджер может начать исполнение, механик фиксирует факт трудозатрат по каждой согласованной услуге, кладовщик выдаёт зарезервированные партии, механик подтверждает получение, а затем завершает этап работ. Только после этого допускается независимый QC другим исполнителем. Подробные шаги и ограничения: [Выполнение, материалы и QC](EXECUTION.md). Даже после PASS выдача/оплата по-прежнему planned.
+
+
+## Недельный обзор календаря — current-dev (#113)
+
+\`GET /api/v1/dev/auto/organizations/{org}/calendar/week?locationId={loc}&localDay=2030-03-31\`
+— только HTTPS loopback synthetic API с live \`INTAKE\` grant
+для указанной организации и филиала.
+
+Ответ \`Cache-Control:no-store\`: \`syntheticOnly=true\`,
+\`timeZone\`, \`fromDay\` и семь \`items[]\`, каждый с
+\`localDay\`, \`appointments\`, \`occupiedBays\`.
+PostgreSQL строит семь IANA-local полуинтервалов,
+включая летнее/зимнее время (23/25-часовые сутки).
+\`appointments\` — число текущих неотменённых броней
+с пересечением местных суток; при переносе учитывается только
+последняя активная бронь. \`occupiedBays\` — число разных
+постов с этими бронями за день. Бронь через полночь
+законно учитывается в двух днях. Это не суммарные уникальные
+Appointment, не факт обслуживания и не гарантированные
+свободные слоты.
+
+Запрос выполняется в tenant/location-scoped транзакции
+после live role-check и доступности филиала, возвращает только
+агрегаты без customer/vehicle/VIN/WorkOrder/employee UUID.
+Неверные параметры/диапазон дат → \`422\`; чужой,
+отключённый филиал или отзыв INTAKE → \`403\`.
+UI автоматически убирает старую неделю при смене
+scope, ошибке и недействительном JSON.
+
+Проверки: \`test_week_calendar_complete_dst_current_booking_and_live_revocation\`
+в \`tests/integration/test_pg_auto_calendar_local_day.py\`;
+Playwright \`weekly calendar\` в \`apps/web/e2e/auto-calendar.spec.ts\`.
+Миграции и production OpenAPI не меняются; полный #113 и
+release gate #119 остаются открытыми.
