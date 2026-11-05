@@ -101,7 +101,7 @@ export function AutoCalendar() {
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
   React.useEffect(()=>{
-    setItems([]);setHasMore(false);setNextCursor(null);setMessage('');setTarget(null);setTimeZone('UTC');
+    setItems([]);setHasMore(false);setNextCursor(null);setTarget(null);setTimeZone('UTC');
     if(!valid){setStatus('idle');return;}
     const controller=new AbortController();
     setStatus('loading');
@@ -112,7 +112,7 @@ export function AutoCalendar() {
     void fetch(path+'?'+query,{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async response=>{
         if(controller.signal.aborted)return;
-        if([401,403,404].includes(response.status)){setStatus('denied');return;}
+        if([401,403,404].includes(response.status)){setMessage('');setStatus('denied');return;}
         if(!response.ok)throw new Error();
         const data:unknown=await response.json();
         if(!data||typeof data!=='object'||!('items' in data)||!Array.isArray(data.items)||
@@ -376,9 +376,9 @@ export function AutoCalendar() {
   return <section aria-label="Календарь приёмщика (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>Календарь приёмщика</h1>
     <p>Синтетический HTTPS-стенд. Поиск записей и свободных окон — по местным суткам филиала с учётом перевода часов. Поле ISO содержит абсолютное время для бронирования. Реальных клиентов не добавляйте.</p>
-    <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>{resetPage();setOrg(e.target.value);}}/></label>
-    <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>{resetPage();setLocation(e.target.value);}}/></label>
-    <label>День филиала <input aria-label="День филиала" type="date" value={day} onChange={e=>{resetPage();setDay(e.target.value);}}/></label>
+    <label>UUID организации <input aria-label="UUID организации" value={org} onChange={e=>{setMessage('');resetPage();setOrg(e.target.value);}}/></label>
+    <label>UUID филиала <input aria-label="UUID филиала" value={location} onChange={e=>{setMessage('');resetPage();setLocation(e.target.value);}}/></label>
+    <label>День филиала <input aria-label="День филиала" type="date" value={day} onChange={e=>{setMessage('');resetPage();setDay(e.target.value);}}/></label>
     <fieldset aria-label="График работы филиала (dev)">
       <legend>Часы работы и закрытые даты</legend>
       <p>Настройка для филиала по его часовому поясу. Просмотр: INTAKE/MANAGER; изменение: только MANAGER. Без настройки dev-режим сохраняет старые круглосуточные кандидаты и не готов к production.</p>

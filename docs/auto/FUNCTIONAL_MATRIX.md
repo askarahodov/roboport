@@ -156,3 +156,7 @@ MANAGER-only сводка по филиалу за 1–31 локальных с�
 ### #170/#171 — менеджерская сверка двух synthetic журналов (current-dev)
 
 Отдельный отчёт MANAGER по дням локальной регистрации: CHARGE/CREDIT **без валюты** и SIM_PAYMENT/SIM_REFUND **только тестовые RUB**, count sealed previews; отрицательные междневные net допустимы и **не** обозначают остаток по заказу. Никаких PII, реальные деньги/платежи/кассы не введены. Полный сценарий PG17 от QC PASS до test refund+replay+seal, frontend и Playwright 390/1280. [Документация](DEMO_FINANCE_REPORT.md). Полный finance/BI #170/#171 и legal gate #119 **не закрыты**.
+
+### #169 — тестовый реестр лидов с audit и booking-link (current-dev)
+
+Добавлены `auto_crm_lead` и immutable `auto_crm_lead_stage` (миграция `0098`), закрытый scoped HTTPS API, экран `/staff/auto-crm-leads`. Полный поток создание → dedupe/replay → QUALIFIED → BOOKED с подтверждённым appointment либо LOST с причиной. Уникальность `org/location/link/source`, живое proof/role, автор INTAKE или MANAGER, PostgreSQL concurrency/immutable и Playwright 390/1280. **Без реальных ПДн, consent, отписки или отправки любых сообщений**; полный #169 и #119 остаются OPEN. [Инструкция](CRM.md).
