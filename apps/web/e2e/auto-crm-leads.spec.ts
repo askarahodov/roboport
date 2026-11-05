@@ -220,3 +220,37 @@ test('CRM retry revocation clears state; CSRF failure before POST needs no repla
   await expect(retry).toHaveCount(0);
   expect(postCount).toBe(2);
 });
+
+test('CRM retry keeps the original key when refreshing CSRF fails',async({page})=>{
+  let csrfCalls=0;const posts:any[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>{
+    csrfCalls++;
+    return route.fulfill({status:csrfCalls===2?503:200,
+      contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'});
+  });
+  await page.route(path,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[]}),
+    });
+    posts.push(route.request().postDataJSON());
+    if(posts.length===1)return route.abort('failed');
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({replayed:true,...item('NEW')})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('UUID подтверждённой связи').fill(link);
+  await page.getByRole('button',{name:'Создать обращение'}).click();
+  const retry=page.getByRole('button',{name:'Повторить операцию CRM с тем же ключом'});
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByText('Не удалось обновить CSRF',{exact:false})).toBeVisible();
+  await expect(retry).toBeVisible();
+  await expect(page.getByRole('button',{name:'Создать обращение'})).toBeDisabled();
+  expect(posts).toHaveLength(1);
+  await retry.click();
+  await expect(retry).toHaveCount(0);
+  expect(posts).toHaveLength(2);
+  expect(posts[0]).toEqual(posts[1]);
+});
