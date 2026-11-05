@@ -89,14 +89,14 @@ def read_staff_choices(conn,token,org,loc,lead_id):
         # With multiple active accounts for the same customer, *every*
         # account must explicitly opt into a channel before it appears true.
         rows=conn.execute(
-            """SELECT DISTINCT acl.user_id FROM account_customer_link acl
+            """SELECT acl.user_id FROM account_customer_link acl
                JOIN user_role role ON role.user_id=acl.user_id
                WHERE acl.customer_id=%s AND acl.revoked_at IS NULL
                  AND role.role_code='CLIENT' AND role.revoked_at IS NULL
                  AND (role.expires_at IS NULL OR role.expires_at>now())
                FOR SHARE OF acl,role""",(customer[0],),
         ).fetchall()
-        users=[row[0] for row in rows]
+        users=list(dict.fromkeys(row[0] for row in rows))
         if not users:
             return {"syntheticOnly":True,"sendAllowed":False,
                     "channels":{code:False for code in CHANNELS}}
