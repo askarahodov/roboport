@@ -189,3 +189,23 @@ PG17: `PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_st
 **Отдельная финансовая атрибуция, не денежная выплата:** принятая входящая стоимость и входной НДС считаются только по `auto_stock_receipt_valuation` исходного прихода. `purchase_net_attributed_minor = unit_net_minor × quantity`; распределение входного НДС — разница накопленных целочисленных долей исходного `purchase_vat_total_minor`, чтобы два частичных возврата не округляли одну и ту же копейку дважды. На одну оценённую партию нельзя зачесть возвраты более исходного приходного количества, даже если на складе уже есть новые поставки. Не пересчитываются продажная цена, НДС к возмещению, кредит-нота или признание поставщиком.
 
 Доступен закрытый синтетический API `POST /api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns` с `locationId,sourceReceiptId,quantity,reason,supplierReference`; утверждение `.../supplier-returns/approvals` с `locationId,documentId`. Оба шага требуют CSRF, `Idempotency-Key`, действующей сессии/branch grant. Экран `/staff/warehouse-supplier-returns`. Исторический прямой `record_auto_stock_lot_disposition` остаётся synthetic legacy route, поэтому этот процесс **не является обязательным для каждого возможного supplier return в БД**. Production accounting/credit note, source-lot provenance для смешанных приходов, права непривилегированной DB роли, реальные заказы поставщиков и юридический gate #119 — planned; исходная #168 OPEN.
+
+
+## Обзор складских выдач для руководителя (current-dev, #171)
+
+Действующие append-only `auto_stock_event` действия
+`ISSUE` и `RETURN` теперь используются
+**только для чтения** в управленческом
+`/staff/auto-stock-abc-xyz`.
+Доступ: live scoped MANAGER; это не новое
+право WAREHOUSE, не изменение остатков,
+не бухгалтерская себестоимость
+и не расчёт заказа поставщику.
+Доступны 3–12 полностью завершённых
+локальных месяцев, классификация
+ABC по валовому количеству выдач
+и XYZ по их месячной вариации,
+пагинация по 25 SKU с общими итогами.
+`RETURN` учитывается в отдельном
+показателе периода без искажения XYZ.
+[Полный словарь и PG17/Playwright](REPORTING.md).
