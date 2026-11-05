@@ -159,3 +159,27 @@ test('manager ABC/XYZ rejects inconsistent and tampered item response fail close
   await expect(page.getByRole('alert')).toContainText('Не удалось получить ABC/XYZ');
   await expect(page.getByLabel('Результаты ABC XYZ')).toHaveCount(0);
 });
+
+
+test('ABC/XYZ never rejects a locally closed month by using UTC browser time',async({page})=>{
+  let calls=0;
+  await page.route(routePath,route=>{
+    calls++;
+    return route.fulfill({status:422,contentType:'application/json',
+      body:'{"code":"INVALID_INPUT"}'});
+  });
+  await page.goto('/staff/auto-stock-abc-xyz');
+  await scope(page);
+  const now=new Date();
+  const utcIndex=now.getUTCFullYear()*12+now.getUTCMonth();
+  await page.getByLabel('С месяца').fill(monthLabel(utcIndex-2));
+  await page.getByLabel('По месяц').fill(monthLabel(utcIndex));
+  // In a west-of-UTC branch the current UTC month may still be the
+  // previous, already closed, local month. Only the server knows.
+  const load=page.getByRole('button',{name:'Построить ABC/XYZ'});
+  await expect(load).toBeEnabled();
+  await load.click();
+  await expect(page.getByRole('alert')).toContainText('Нужны от 3 до 12 завершённых месяцев');
+  expect(calls).toBe(1);
+  await expect(page.getByLabel('Результаты ABC XYZ')).toHaveCount(0);
+});
