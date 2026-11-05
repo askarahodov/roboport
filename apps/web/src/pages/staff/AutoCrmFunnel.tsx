@@ -64,8 +64,15 @@ export function AutoCrmFunnel(){
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'invalid'|'error'>('idle');
   const [report,setReport]=React.useState<Report|null>(null);
   const controller=React.useRef<AbortController|null>(null);
-  React.useEffect(()=>()=>controller.current?.abort(),[]);
-  function clear(){controller.current?.abort();setReport(null);setStatus('idle');}
+  const exportController=React.useRef<AbortController|null>(null);
+  const [exporting,setExporting]=React.useState(false);
+  const [exportError,setExportError]=React.useState('');
+  React.useEffect(()=>()=>{controller.current?.abort();exportController.current?.abort();},[]);
+  function clear(){
+    controller.current?.abort();exportController.current?.abort();
+    setExporting(false);setExportError('');
+    setReport(null);setStatus('idle');
+  }
   const span=(Date.parse(to+'T00:00:00Z')-Date.parse(from+'T00:00:00Z'))/86400000+1;
   const canLoad=uuid.test(org)&&uuid.test(loc)&&day.test(from)&&day.test(to)&&
     Number.isInteger(span)&&span>=1&&span<=31;
@@ -88,6 +95,38 @@ export function AutoCrmFunnel(){
       const parsed=parse(await response.json(),from,to);
       if(!pending.signal.aborted){setReport(parsed);setStatus('ready');}
     }catch{if(!pending.signal.aborted)setStatus('error');}
+  }
+  async function downloadCsv(){
+    if(!report||status!=='ready'||exporting)return;
+    exportController.current?.abort();
+    const current=new AbortController();exportController.current=current;
+    setExportError('');setExporting(true);
+    const query=new URLSearchParams({fromDay:from,toDay:to});
+    const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
+      '/locations/'+encodeURIComponent(loc)+'/crm/funnel/export?'+query;
+    try{
+      const response=await fetch(url,{
+        credentials:'include',cache:'no-store',signal:current.signal,
+      });
+      if(current.signal.aborted)return;
+      if([401,403,404].includes(response.status)){
+        setReport(null);setStatus('denied');return;
+      }
+      if(response.status===422){setReport(null);setStatus('invalid');return;}
+      if(!response.ok||!response.headers.get('content-type')?.startsWith('text/csv'))
+        throw Error('bad export');
+      const blob=await response.blob();
+      if(current.signal.aborted)return;
+      const objectUrl=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=objectUrl;a.download='auto-crm-funnel.csv';
+      document.body.appendChild(a);a.click();a.remove();
+      window.setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
+    }catch{
+      if(!current.signal.aborted)setExportError('Не удалось скачать CSV. Повторите попытку.');
+    }finally{
+      if(!current.signal.aborted)setExporting(false);
+    }
   }
   return <section aria-label="Управленческая воронка CRM (dev)">
     <h1>Воронка обращений CRM</h1>
@@ -112,12 +151,17 @@ export function AutoCrmFunnel(){
     {status==='denied'&&<p role="alert">Доступ запрещён: требуется роль руководителя данного филиала.</p>}
     {status==='invalid'&&<p role="alert">Период отчёта некорректен.</p>}
     {status==='error'&&<p role="alert">Не удалось получить воронку CRM. Повторите запрос.</p>}
+    {exportError&&<p role="alert">{exportError}</p>}
     {status==='ready'&&report&&<section aria-label="Результаты воронки CRM">
       <p>Часовой пояс филиала: {report.timeZone}. Основа: действующие
         подтверждённые обращения, созданные за выбранный период.</p>
       <p role="status">Всего обращений: {fmt(report.summary.total)}.
         Записан: {fmt(report.summary.booked)}.
         Доля записанных: {percent(report.summary.bookedBasisPoints)}.</p>
+      <button type="button" disabled={exporting}
+        onClick={()=>void downloadCsv()}>
+        {exporting?'Подготовка CSV…':'Скачать воронку CRM в CSV'}
+      </button>
       <div style={{overflowX:'auto'}}>
         <table>
           <caption>Текущие этапы по источникам обращений</caption>

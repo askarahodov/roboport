@@ -5,13 +5,15 @@ its stage is the CURRENT last recorded stage, not its state on that day.
 Only live verified vehicle links are counted, and no person, vehicle, lead,
 appointment, owner, price or contact identifier is returned.
 """
+import csv
+from io import StringIO
 from datetime import date,datetime,timedelta,timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
 
 import psycopg
 from fastapi import APIRouter,Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse,Response
 
 from .auto_org_authority import organization_role_allows
 from .auto_vehicle_claim_http import _request_dsn,_response
@@ -174,3 +176,46 @@ def get_crm_funnel(org_id:str,loc_id:str,request:Request,
     except FunnelInvalid:
         return _response(request,422,"INVALID_INPUT")
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+def _funnel_csv(report:dict)->str:
+    """A complete manager-only aggregate, with no identifiers or free-text fields."""
+    names={"ALL":"Все источники","WEB":"Сайт",
+           "PHONE":"Звонок","WALK_IN":"Личное обращение"}
+    output=StringIO(newline="")
+    writer=csv.writer(output,delimiter=";",lineterminator="\r\n")
+    writer.writerow(("Источник","Всего","Новое","Обработано","Записан",
+                     "Отказ","Доля записанных (б.п.)","Отказ: стоимость",
+                     "Отказ: сроки","Отказ: нет ответа","Отказ: прочее"))
+    for row in (report["summary"],*report["items"]):
+        writer.writerow((names[row["sourceCode"]],row["total"],row["new"],
+                         row["qualified"],row["booked"],row["lost"],
+                         row["bookedBasisPoints"] if row["bookedBasisPoints"] is not None else "",
+                         *(row["lossReasons"][key] for key in REASONS)))
+    return "\ufeff"+output.getvalue()
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/funnel/export")
+def export_crm_funnel(org_id:str,loc_id:str,request:Request,
+                      fromDay:str,toDay:str):
+    """Never export a stale browser report: recheck live grants and proof links."""
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(loc_id)
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    try:
+        with psycopg.connect(dsn) as db:
+            report=crm_funnel(db,request.cookies.get("rp_session",""),
+                              org,loc,fromDay,toDay)
+    except FunnelDenied:
+        return _response(request,403,"FORBIDDEN")
+    except FunnelInvalid:
+        return _response(request,422,"INVALID_INPUT")
+    return Response(content=_funnel_csv(report),media_type="text/csv; charset=utf-8",
+                    headers={"Cache-Control":"no-store",
+                             "X-Content-Type-Options":"nosniff",
+                             "Content-Disposition":
+                             'attachment; filename="auto-crm-funnel.csv"'})
