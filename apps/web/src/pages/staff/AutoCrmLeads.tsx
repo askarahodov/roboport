@@ -405,7 +405,7 @@ export function AutoCrmLeads(){
         onClick={()=>void mutate(base,{customerLinkId:link,sourceCode:source})}>
         Создать обращение</button>
       <h2>Журнал обращений</h2>
-      {rows.length===0?<p>На этой странице обращений нет.</p>:<label>Обращение
+      {rows.length===0?<p>{leadCursor?'На этой странице обращений нет.':'Обращений пока нет.'}</p>:<label>Обращение
         <select aria-label="Обращение" value={selected} disabled={taskBusy||busy||pendingLead!==null}
           onChange={e=>{setPendingTask(null);setSelected(e.target.value);}}>
           <option value="">Выберите обращение</option>
