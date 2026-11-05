@@ -36,8 +36,10 @@ def upgrade():
           RAISE EXCEPTION 'CRM contact choices are immutable'; END IF;
         -- Direct DB INSERTs must serialize the same identity as HTTP writers,
         -- and cannot backdate history, impersonate a revoked CLIENT or skip versions.
-        PERFORM 1 FROM app_user WHERE id=NEW.user_id FOR UPDATE;
-        IF NOT FOUND OR NOT EXISTS (
+        PERFORM pg_advisory_xact_lock(
+          hashtextextended(NEW.user_id::text,10101)
+        );
+        IF NOT EXISTS (
           SELECT 1 FROM user_role role
           WHERE role.user_id=NEW.user_id AND role.role_code='CLIENT'
             AND role.revoked_at IS NULL
