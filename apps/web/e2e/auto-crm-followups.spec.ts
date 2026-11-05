@@ -167,6 +167,8 @@ test('lost create and finish responses replay exact keys without duplicate event
   const retry=page.getByRole('button',{name:'Повторить запрос с тем же ключом'});
   await expect(retry).toBeVisible();
   await expect(page.getByRole('button',{name:'Создать задачу'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Сохранить этап'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Создать обращение'})).toBeDisabled();
   await retry.click();
   await expect(page.getByRole('button',{name:'Выполнено'})).toBeVisible();
   expect(creates).toHaveLength(2);
@@ -209,4 +211,34 @@ test('revoked access on exact-key retry clears pending state and task details',a
   await expect(retry).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Создать задачу'})).toHaveCount(0);
   expect(attempts).toBe(2);
+});
+
+test('CSRF failure before sending does not trap user in uncertain replay',async({page})=>{
+  let csrfAttempts=0;let taskPosts=0;
+  await page.route('**/api/v1/auth/csrf',route=>{
+    csrfAttempts++;
+    return route.fulfill({status:csrfAttempts===1?503:200,
+      contentType:'application/json',body:'{"csrfToken":"demo-csrf"}'});
+  });
+  await leadRoute(page);
+  await page.route(taskBase,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[]}),
+    });
+    taskPosts++;
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({...taskItem,replayed:false})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Срок задачи').fill(localDue());
+  await page.getByRole('button',{name:'Создать задачу'}).click();
+  await expect(page.getByRole('status')).toContainText('Не удалось получить CSRF');
+  await expect(page.getByRole('button',{name:'Повторить запрос с тем же ключом'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Создать задачу'})).toBeEnabled();
+  expect(taskPosts).toBe(0);
+  await page.getByRole('button',{name:'Создать задачу'}).click();
+  await expect(page.getByRole('status')).toContainText('Действие подтверждено');
+  expect(taskPosts).toBe(1);
 });
