@@ -1,4 +1,6 @@
 """PG17 + HTTPS: manager-only CRM source/status funnel of live lead cohorts."""
+import csv
+from io import StringIO
 from datetime import datetime,timedelta,timezone
 from uuid import UUID,uuid4
 from zoneinfo import ZoneInfo
@@ -7,6 +9,7 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from roboport_api.main import app
+from roboport_api.auto_crm_funnel import _funnel_csv
 from roboport_api.auto_crm_leads import create_lead,transition_lead
 from roboport_api.auto_appointment_service import create_appointment
 from test_pg_auto_bay_occupancy_http import _fixture
@@ -200,3 +203,67 @@ def test_funnel_berlin_dst_23_hour_day_counts_local_cohort_boundaries(monkeypatc
                                "toDay":"2030-04-01"}).json()
     assert total["summary"]["total"]==4
     assert total["summary"]["new"]==4
+
+
+
+def test_crm_funnel_export_full_aggregate_and_revocation(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    zone=ZoneInfo("Europe/Berlin")
+    day=datetime.now(zone).date().isoformat()
+    query={"fromDay":day,"toDay":day}
+    export=URL(org,loc)+"/export"
+    assert http.get(export,params=query).status_code==403
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    assert http.get(export,params=query).status_code==403
+
+    with psycopg.connect(DSN) as db:
+        token=d["tokens"][d["intake"]]
+        lead=create_lead(db,token,org,loc,d["link"],"WEB",uuid4())
+        ident=UUID(lead["leadId"])
+        transition_lead(db,token,org,loc,ident,uuid4(),"LOST","PRICE",None)
+
+    http.cookies.set("rp_session",d["tokens"][d["manager"]])
+    response=http.get(export,params=query)
+    assert response.status_code==200,response.text
+    assert response.headers["cache-control"]=="no-store"
+    assert response.headers["x-content-type-options"]=="nosniff"
+    assert response.headers["content-disposition"].endswith(
+        'filename="auto-crm-funnel.csv"')
+    assert response.text.startswith("\ufeffИсточник;Всего;")
+    rows=list(csv.reader(StringIO(response.text.removeprefix("\ufeff")),delimiter=";"))
+    assert len(rows)==5 and all(len(row)==11 for row in rows)
+    assert rows[0][0]=="Источник"
+    assert rows[1]==["Все источники","1","0","0","0","1","",
+                      "1","0","0","0"]
+    assert rows[2]==["Сайт","1","0","0","0","1","0",
+                      "1","0","0","0"]
+    assert rows[3][0]=="Звонок" and rows[3][1]=="0"
+    assert rows[4][0]=="Личное обращение" and rows[4][1]=="0"
+    for private in (str(d["ca"]),str(d["vehicle"]),str(ident),str(d["intake"])):
+        assert private not in response.text
+
+    assert http.get(URL(foreign,foreign_loc)+"/export",params=query).status_code==403
+    assert http.get(export,params={"fromDay":day,"toDay":"invalid"}).status_code==422
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+                   (d["link"],))
+    after=http.get(export,params=query)
+    assert after.status_code==200
+    updated=list(csv.reader(StringIO(after.text.removeprefix("\ufeff")),delimiter=";"))
+    assert updated[1][1]=="0"
+    assert updated[2][1]=="0"
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+                      WHERE organization_id=%s AND location_id=%s
+                        AND user_id=%s AND role_code='MANAGER'""",
+                   (org,loc,d["manager"]))
+    assert http.get(export,params=query).status_code==403
+
+
+def test_crm_funnel_csv_empty_cohort_keeps_zero_and_blank_conversion():
+    from roboport_api.auto_crm_funnel import _blank,_finish
+    report={"summary":_finish(_blank("ALL")),
+            "items":[_finish(_blank(source)) for source in ("WEB","PHONE","WALK_IN")]}
+    rows=list(csv.reader(StringIO(_funnel_csv(report).removeprefix("\ufeff")),delimiter=";"))
+    assert len(rows)==5
+    assert all(row[1]=="0" and row[6]=="" for row in rows[1:])
