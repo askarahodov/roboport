@@ -275,3 +275,38 @@ test('unknown result survives HTTP 503 and replays original key on next retry',a
   expect(requests[1]).toEqual(requests[0]);
   expect(requests[2]).toEqual(requests[0]);
 });
+
+test('CRM task retry preserves key if CSRF refresh fails after uncertain POST',async({page})=>{
+  let csrfCalls=0;const posts:any[]=[];let created=false;
+  await page.route('**/api/v1/auth/csrf',route=>{
+    csrfCalls++;
+    return route.fulfill({status:csrfCalls===2?503:200,
+      contentType:'application/json',body:'{"csrfToken":"demo-csrf"}'});
+  });
+  await leadRoute(page);
+  await page.route(taskBase,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:created?[taskItem]:[]}),
+    });
+    posts.push(route.request().postDataJSON());
+    if(posts.length===1){created=true;return route.abort('failed');}
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({...taskItem,replayed:true})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Срок задачи').fill(localDue());
+  await page.getByRole('button',{name:'Создать задачу'}).click();
+  const retry=page.getByRole('button',{name:'Повторить запрос с тем же ключом'});
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByText('Не удалось обновить CSRF',{exact:false})).toBeVisible();
+  await expect(retry).toBeVisible();
+  expect(posts).toHaveLength(1);
+  await retry.click();
+  await expect(page.getByRole('button',{name:'Выполнено'})).toBeVisible();
+  await expect(retry).toHaveCount(0);
+  expect(posts).toHaveLength(2);
+  expect(posts[0]).toEqual(posts[1]);
+});
