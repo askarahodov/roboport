@@ -289,12 +289,12 @@ def test_csv_escapes_spreadsheet_formulas_and_handles_malformed_article_text():
         {"skuId":str(uuid4()),"article":text,"grossIssued":1,
          "grossReturned":0,"netPeriod":1,"abc":"A","xyz":"Z",
          "variationBasisPoints":14142,"monthlyIssued":[1,0,0]}
-        for text in ("=HYPERLINK(\\"http://bad\\")","+SUM(1,2)",
-                     "  -1","\\t@external","normal;quoted\\nrow")
+        for text in ("=2+2","+SUM(1,2)",
+                     "  -1","\t@external","normal;quoted\nrow")
     ]}
     rows=list(csv.reader(StringIO(_csv_report(report).removeprefix("\ufeff")),delimiter=";"))
     assert [row[1] for row in rows[1:]]==[
-        "'=HYPERLINK(\\"http://bad\\")","'+SUM(1,2)",
+        "'=2+2","'+SUM(1,2)",
         "'  -1","' @external","normal;quoted row",
     ]
     assert len(rows)==6 and all(len(row)==11 for row in rows)
