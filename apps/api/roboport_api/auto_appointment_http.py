@@ -4,7 +4,7 @@ from uuid import UUID
 from typing import Literal
 import psycopg
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, ValidationError, Field
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
@@ -210,6 +210,38 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
             return _response(request,409,"RESOURCE_BUSY")
     return JSONResponse(content={"status":"RESCHEDULED","bookingId":str(booking)},
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/calendar/week/export")
+def export_calendar_week(org_id: str, request: Request, locationId: str,
+                         localDay: str):
+    """Re-authorize on export, never trust a previously displayed summary."""
+    from .auto_calendar import (
+        calendar_week_summary, calendar_week_csv, CalendarDenied, CalendarInvalid,
+    )
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        org, loc = UUID(org_id), UUID(locationId)
+    except (ValueError, TypeError):
+        return _response(request, 422, "INVALID_INPUT")
+    try:
+        with psycopg.connect(dsn) as db:
+            report = calendar_week_summary(
+                db, request.cookies.get("rp_session", ""), org, loc, localDay,
+            )
+    except CalendarDenied:
+        return _response(request, 403, "FORBIDDEN")
+    except CalendarInvalid:
+        return _response(request, 422, "INVALID_INPUT")
+    return Response(
+        content=calendar_week_csv(report), media_type="text/csv; charset=utf-8",
+        headers={"Cache-Control": "no-store",
+                 "X-Content-Type-Options": "nosniff",
+                 "Content-Disposition":
+                     'attachment; filename="auto-calendar-week.csv"'},
+    )
 
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/calendar/week")
