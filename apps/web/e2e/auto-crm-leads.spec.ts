@@ -6,7 +6,7 @@ const link='33333333-3333-4333-8333-333333333333';
 const lead='44444444-4444-4444-8444-444444444444';
 const owner='55555555-5555-4555-8555-555555555555';
 const appointment='66666666-6666-4666-8666-666666666666';
-const path='**/api/v1/dev/auto/organizations/**/crm/leads*';
+const path='**/api/v1/dev/auto/organizations/**/crm/leads**';
 const item=(stage:'NEW'|'QUALIFIED'|'BOOKED'|'LOST',events:unknown[]=[])=>({
   leadId:lead,customerLinkId:link,ownerId:owner,
   sourceCode:'WEB',status:stage,syntheticOnly:true,
