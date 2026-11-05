@@ -200,6 +200,44 @@ def test_no_silent_cap_capacity_is_explicit_conflict(monkeypatch):
     assert "items" not in result.json()
 
 
+def test_capacity_probe_rejects_before_event_aggregation(monkeypatch):
+    """No expensive history join when the branch catalogue already exceeds cap."""
+    from contextlib import nullcontext
+    from uuid import uuid4
+    import roboport_api.auto_stock_abc_xyz as module
+
+    class Result:
+        def __init__(self,rows):
+            self.rows=rows
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+        def fetchall(self):
+            return self.rows
+
+    class ProbeConnection:
+        def __init__(self):
+            self.queries=[]
+        def transaction(self):
+            return nullcontext()
+        def execute(self,sql,params):
+            self.queries.append(sql)
+            if "SELECT timezone_name" in sql:
+                return Result([("Europe/Berlin",)])
+            if "SELECT id FROM auto_stock_sku" in sql:
+                assert params[-1]==3
+                return Result([(uuid4(),),(uuid4(),),(uuid4(),)])
+            raise AssertionError("aggregate query must never execute above capacity")
+
+    monkeypatch.setattr(module,"organization_role_allows",lambda *a,**k:True)
+    monkeypatch.setattr(module,"MAX_SKUS",2)
+    conn=ProbeConnection()
+    months=last_months()
+    with pytest.raises(module.StockReportCapacity):
+        module.stock_abc_xyz(conn,"",uuid4(),uuid4(),months[0],months[-1])
+    assert len(conn.queries)==2
+    assert not any("auto_stock_event" in query for query in conn.queries)
+
+
 def test_exact_integer_cv_boundaries_and_abc_of_zero_volume():
     assert _variation([0,0,0])==(None,None)
     assert _variation([60,60,60])==(0,"X")
