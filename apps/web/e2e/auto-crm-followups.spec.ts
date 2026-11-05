@@ -123,3 +123,155 @@ test('follow-up malformed status/event response is fail closed',async({page})=>{
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить задачи');
   await expect(page.getByRole('button',{name:'Создать задачу'})).toHaveCount(0);
 });
+
+test('lost create and finish responses replay exact keys without duplicate events',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"demo-csrf"}',
+  }));
+  await leadRoute(page);
+  let created=false;let done=false;
+  const creates:any[]=[];const finishes:any[]=[];
+  await page.route(taskBase,route=>{
+    const req=route.request();
+    if(req.method()==='GET'){
+      const item=done?{...taskItem,status:'DONE',event:{
+        id:'77777777-7777-4777-8777-777777777777',actorId:owner,
+        action:'DONE',createdAt:new Date().toISOString(),
+      }}:taskItem;
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({syntheticOnly:true,items:created?[item]:[]})});
+    }
+    expect(req.headers()['x-csrf-token']).toBe('demo-csrf');
+    const body=req.postDataJSON();
+    if(req.url().endsWith('/events')){
+      finishes.push(body);
+      expect(body.action).toBe('DONE');
+      if(finishes.length===1){done=true;return route.abort('failed');}
+    }else{
+      creates.push(body);
+      expect(body.taskCode).toBe('CALL_BACK');
+      if(creates.length===1){created=true;return route.abort('failed');}
+    }
+    const item=done?{...taskItem,status:'DONE',event:{
+      id:'77777777-7777-4777-8777-777777777777',actorId:owner,
+      action:'DONE',createdAt:new Date().toISOString(),
+    }}:taskItem;
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({...item,replayed:true})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await expect(page.getByText('Задач пока нет.')).toBeVisible();
+  await page.getByLabel('Срок задачи').fill(localDue());
+  await page.getByRole('button',{name:'Создать задачу'}).click();
+  const retry=page.getByRole('button',{name:'Повторить запрос с тем же ключом'});
+  await expect(retry).toBeVisible();
+  await expect(page.getByRole('button',{name:'Создать задачу'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Сохранить этап'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Создать обращение'})).toBeDisabled();
+  await retry.click();
+  await expect(page.getByRole('button',{name:'Выполнено'})).toBeVisible();
+  expect(creates).toHaveLength(2);
+  expect(creates[0]).toEqual(creates[1]);
+  await page.getByRole('button',{name:'Выполнено'}).click();
+  await expect(retry).toBeVisible();
+  await retry.click();
+  const finished=page.locator('[aria-label="Задачи по обращению"] ol > li').first();
+  await expect(finished).toContainText('Выполнена');
+  await expect(page.getByRole('button',{name:'Выполнено'})).toHaveCount(0);
+  expect(finishes).toHaveLength(2);
+  expect(finishes[0]).toEqual(finishes[1]);
+  expect(creates[0].requestKey).not.toBe(finishes[0].requestKey);
+});
+
+test('revoked access on exact-key retry clears pending state and task details',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"demo-csrf"}',
+  }));
+  await leadRoute(page);
+  let attempts=0;
+  await page.route(taskBase,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[]}),
+    });
+    attempts++;
+    if(attempts===1)return route.abort('failed');
+    return route.fulfill({status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Срок задачи').fill(localDue());
+  await page.getByRole('button',{name:'Создать задачу'}).click();
+  const retry=page.getByRole('button',{name:'Повторить запрос с тем же ключом'});
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(retry).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Создать задачу'})).toHaveCount(0);
+  expect(attempts).toBe(2);
+});
+
+test('CSRF failure before sending does not trap user in uncertain replay',async({page})=>{
+  let csrfAttempts=0;let taskPosts=0;
+  await page.route('**/api/v1/auth/csrf',route=>{
+    csrfAttempts++;
+    return route.fulfill({status:csrfAttempts===1?503:200,
+      contentType:'application/json',body:'{"csrfToken":"demo-csrf"}'});
+  });
+  await leadRoute(page);
+  await page.route(taskBase,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[]}),
+    });
+    taskPosts++;
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({...taskItem,replayed:false})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Срок задачи').fill(localDue());
+  await page.getByRole('button',{name:'Создать задачу'}).click();
+  await expect(page.getByRole('status')).toContainText('Не удалось получить CSRF');
+  await expect(page.getByRole('button',{name:'Повторить запрос с тем же ключом'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Создать задачу'})).toBeEnabled();
+  expect(taskPosts).toBe(0);
+  await page.getByRole('button',{name:'Создать задачу'}).click();
+  await expect.poll(()=>taskPosts).toBe(1);
+  await expect(page.getByRole('button',{name:'Повторить запрос с тем же ключом'})).toHaveCount(0);
+});
+
+test('unknown result survives HTTP 503 and replays original key on next retry',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"demo-csrf"}',
+  }));
+  await leadRoute(page);
+  const requests:any[]=[];
+  await page.route(taskBase,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:requests.length>0?[taskItem]:[]}),
+    });
+    requests.push(route.request().postDataJSON());
+    if(requests.length===1)return route.abort('failed');
+    if(requests.length===2)return route.fulfill({status:503,body:'Unavailable'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({...taskItem,replayed:true})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Срок задачи').fill(localDue());
+  await page.getByRole('button',{name:'Создать задачу'}).click();
+  const retry=page.getByRole('button',{name:'Повторить запрос с тем же ключом'});
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByText('Сервер не подтвердил результат',{exact:false})).toBeVisible();
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByRole('button',{name:'Выполнено'})).toBeVisible();
+  expect(requests).toHaveLength(3);
+  expect(requests[1]).toEqual(requests[0]);
+  expect(requests[2]).toEqual(requests[0]);
+});
