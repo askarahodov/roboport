@@ -114,3 +114,8 @@ POST /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/leads/{lead}/stage
 коммуникации, сервисные напоминания и рекомендации, safe provider
 adapters (SMS/email/телефония), сделки и real CRM lifecycle.
 Эти функции не маскируются тестовыми source labels.
+
+
+## Ручные задачи по обращению (current-dev, #169)
+
+После выбора обращения в `/staff/auto-crm-leads` открывается встроенный список задач с назначенным сроком, видом, ответственным и неизменяемым исходом DONE/CANCELED. Виды `CALLBACK_NOT_SENT`, `CHECK_DOCUMENTS`, `CONFIRM_BOOKING`, `SERVICE_REVIEW_NOT_SENT` **не инициируют** реальных звонков, писем или SMS. Повтор POST с тем же ключом не дублирует задачу, двойное закрытие запрещает PG17. Живая филиальная роль и verified proof обязательны на каждом запросе; при отзыве доступа 403. [Пошаговый сценарий и негативные тесты](CRM_FOLLOWUPS.md). Полный CRM contact/consent/outbound остаётся planned.

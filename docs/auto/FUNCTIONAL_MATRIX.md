@@ -160,3 +160,8 @@ MANAGER-only сводка по филиалу за 1–31 локальных с�
 ### #169 — тестовый реестр лидов с audit и booking-link (current-dev)
 
 Добавлены `auto_crm_lead` и immutable `auto_crm_lead_stage` (миграция `0098`), закрытый scoped HTTPS API, экран `/staff/auto-crm-leads`. Полный поток создание → dedupe/replay → QUALIFIED → BOOKED с подтверждённым appointment либо LOST с причиной. Уникальность `org/location/link/source`, живое proof/role, автор INTAKE или MANAGER, PostgreSQL concurrency/immutable и Playwright 390/1280. **Без реальных ПДн, consent, отписки или отправки любых сообщений**; полный #169 и #119 остаются OPEN. [Инструкция](CRM.md).
+
+
+### #169 — внутренние CRM follow-up задачи (current-dev)
+
+В существующем CRM кабинете появились отдельные immutable `auto_crm_followup_task` по локальному `due_on` и одноразовые terminal `auto_crm_followup_event` DONE/CANCELED с кодом отмены. Сквозной маршрут INTAKE/MANAGER, live verified customer proof, CSRF, advisory lock, dedup, idempotency, PG17 конкурентность, 390/1280 и негативные Playwright проверки. Звонки, SMS, email, согласие на контакт, отписка, автоматический scheduler, фактический CRM revenue и production по-прежнему `planned`. [Документация](CRM_FOLLOWUPS.md).

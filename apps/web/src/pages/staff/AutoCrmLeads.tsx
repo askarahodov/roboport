@@ -1,4 +1,5 @@
 import React from 'react';
+import { AutoCrmFollowups } from './AutoCrmFollowups';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Event={id:string;actorId:string;stageCode:'QUALIFIED'|'BOOKED'|'LOST';
@@ -170,6 +171,7 @@ export function AutoCrmLeads(){
               appointmentId:stage==='BOOKED'?appointment:null,
             })}>Сохранить этап</button>
         </>}
+        <AutoCrmFollowups org={org} loc={loc} lead={chosen.leadId}/>
       </div>}
       {message&&<p role="status">{message}</p>}
     </>}

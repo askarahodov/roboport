@@ -18,6 +18,8 @@
 - **Реализовано в dev**
   - [Связь клиента с автомобилем](/auto/VEHICLE_OWNERSHIP.md)
   - [История заказ-нарядов клиента и сметы](/auto/CUSTOMER_HISTORY.md)
+  - [CRM обращения и стадии (dev)](/auto/CRM.md)
+  - [CRM задачи по обращениям (dev)](/auto/CRM_FOLLOWUPS.md)
   - [Услуги автомобильного заказ-наряда](/auto/WORKSHOP_OPERATIONS.md)
   - [Версии и согласование автомобильной сметы](/auto/ESTIMATES.md)
   - [Работы, детали и независимый QC](/auto/EXECUTION.md)
