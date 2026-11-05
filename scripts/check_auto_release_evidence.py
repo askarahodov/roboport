@@ -73,7 +73,7 @@ def _valid_approval_time(raw: object) -> bool:
     # representations; approval evidence requires unambiguous UTC seconds.
     if (type(raw) is not str or
         re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:"
-                     r"[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z", raw) is None):
+                     r"[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z", raw) is None):
         return False
     try:
         stamp = datetime.fromisoformat(raw)
