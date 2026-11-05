@@ -74,7 +74,7 @@ export function WarehouseStocktake(){
     const seq=++queueRequest.current;
     const requested={org:org.trim(),location:location.trim()};
     setQueue([]);setQueueStatus('loading');
-    setNextCount(null);
+    setNextCount(null);setCountId('');
     const query=new URLSearchParams({locationId:requested.location,limit:'20'});
     if(after)query.set('afterCountId',after);
     try{
@@ -161,6 +161,7 @@ export function WarehouseStocktake(){
         queueRequest.current+=1;
         setQueue([]);setQueueStatus('idle');setNextCount(null);
         setQueueCursor(null);setCountId('');
+        void loadPending();
       }
       setMessage(snapshot.kind==='count'?'Подсчёт сохранён. Остатки пока не изменены.':
         'Расхождение утверждено. Складские проводки записаны. Обновите очередь.');
