@@ -318,6 +318,22 @@ test('CRM journal refuses malformed cursor and clears previous lead after 403',a
   await page.getByRole('button',{name:'Обновить список'}).click();
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить обращения');
   await expect(page.getByLabel('Обращение')).toHaveCount(0);
-  invalid=false;
-  await page.getByRole('button',{name:'Обновить список'}).click().catch(()=>{});
+});
+ 
+test('CRM journal reauthorizes page request after initial successful page',async({page})=>{
+  await page.route(path,route=>{
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    return route.fulfill({status:cursor?403:200,
+      contentType:'application/json',body:cursor?
+        '{"code":"FORBIDDEN"}':JSON.stringify({
+          syntheticOnly:true,items:[item('NEW')],nextCursor:'next-page',
+        })});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await expect(page.getByLabel('Обращение')).toBeVisible();
+  await page.getByLabel('Страницы журнала CRM')
+    .getByRole('button',{name:'Следующая страница обращений'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByLabel('Обращение')).toHaveCount(0);
 });
