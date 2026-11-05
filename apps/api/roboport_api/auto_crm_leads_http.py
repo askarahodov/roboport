@@ -51,14 +51,14 @@ def _error(request,exc):
 
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/leads")
-def crm_leads(org_id:str,loc_id:str,request:Request):
+def crm_leads(org_id:str,loc_id:str,request:Request,cursor:str|None=None):
     scoped=_context(request,org_id,loc_id)
     if isinstance(scoped,JSONResponse):
         return scoped
     dsn,(org,loc)=scoped
     with psycopg.connect(dsn) as db:
         try:
-            result=list_leads(db,request.cookies.get("rp_session",""),org,loc)
+            result=list_leads(db,request.cookies.get("rp_session",""),org,loc,cursor)
         except (LeadDenied,LeadConflict) as exc:
             return _error(request,exc)
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
