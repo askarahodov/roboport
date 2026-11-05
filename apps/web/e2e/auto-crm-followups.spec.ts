@@ -4,7 +4,7 @@ import {test,expect} from '@playwright/test';
 test.beforeEach(async({page})=>{
   await page.route('**/api/v1/dev/auto/organizations/**/crm/inbox',
     route=>route.fulfill({status:200,contentType:'application/json',
-      body:JSON.stringify({syntheticOnly:true,items:[]})}));
+      body:JSON.stringify({syntheticOnly:true,items:[],nextCursor:null})}));
 });
 
 
@@ -201,7 +201,7 @@ test('revoked access on exact-key retry clears pending state and task details',a
   await page.route(taskBase,route=>{
     if(route.request().method()==='GET')return route.fulfill({
       status:200,contentType:'application/json',
-      body:JSON.stringify({syntheticOnly:true,items:[]}),
+      body:JSON.stringify({syntheticOnly:true,items:[],nextCursor:null}),
     });
     attempts++;
     if(attempts===1)return route.abort('failed');
@@ -232,7 +232,7 @@ test('CSRF failure before sending does not trap user in uncertain replay',async(
   await page.route(taskBase,route=>{
     if(route.request().method()==='GET')return route.fulfill({
       status:200,contentType:'application/json',
-      body:JSON.stringify({syntheticOnly:true,items:[]}),
+      body:JSON.stringify({syntheticOnly:true,items:[],nextCursor:null}),
     });
     taskPosts++;
     return route.fulfill({status:201,contentType:'application/json',
