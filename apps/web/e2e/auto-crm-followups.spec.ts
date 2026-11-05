@@ -77,7 +77,9 @@ test('follow-up: create then DONE with CSRF, 390/1280, dark',async({page})=>{
   await page.getByRole('button',{name:'Создать задачу'}).click();
   await expect(page.getByRole('button',{name:'Выполнено'})).toBeVisible();
   await page.getByRole('button',{name:'Выполнено'}).click();
-  await expect(page.getByText('CALL_BACK',{exact:false})).toBeVisible();
+  await expect(page.getByText('Связаться позже',{exact:false})).toBeVisible();
+  await expect(page.getByText('Выполнена',{exact:false})).toBeVisible();
+  await expect(page.getByText('CALL_BACK',{exact:false})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Выполнено'})).toHaveCount(0);
   expect(posts).toHaveLength(2);
   await page.setViewportSize({width:1280,height:800});
