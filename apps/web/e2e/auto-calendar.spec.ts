@@ -827,7 +827,7 @@ test('weekly calendar: seven local days, DST, drilldown, revoke, 390 and 1280',a
   const overview=page.getByLabel('Обзор недели филиала');
   await expect(overview).toContainText('часовой пояс:');
   await expect(overview).toContainText('2030-03-31');
-  await expect(overview).toContainText('2 записей, 1 занятых постов');
+  await expect(overview).toContainText('2 записи, 1 занятый пост');
   await expect(overview.getByRole('button',{name:'Показать день 2030-04-01'})).toBeVisible();
   expect(calls.some(url=>url.includes('localDay=2030-03-31'))).toBe(true);
   await overview.getByRole('button',{name:'Показать день 2030-04-01'}).click();
@@ -837,7 +837,7 @@ test('weekly calendar: seven local days, DST, drilldown, revoke, 390 and 1280',a
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(other);
   await expect(overview.getByRole('alert')).toContainText('Нет доступа');
-  await expect(overview).not.toContainText('2 записей');
+  await expect(overview).not.toContainText('2 записи');
   await expect(overview.getByRole('button',{name:'Показать день 2030-04-01'})).toHaveCount(0);
 });
 
@@ -860,9 +860,9 @@ test('weekly calendar rejects forged aggregate fields and never retains stale va
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
   const overview=page.getByLabel('Обзор недели филиала');
-  await expect(overview).toContainText('1 записей');
+  await expect(overview).toContainText('1 запись');
   tampered=true;
   await page.getByLabel('День филиала').fill('2030-01-02');
   await expect(overview.getByRole('alert')).toContainText('Не удалось получить обзор недели');
-  await expect(overview).not.toContainText('1 записей');
+  await expect(overview).not.toContainText('1 запись');
 });
