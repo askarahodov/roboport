@@ -20,7 +20,6 @@ export function StaffCrmContactPreferences({
 }:{base:string;leadId:string;onDenied:()=>void}){
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'error'|'denied'>('idle');
   const [data,setData]=React.useState<Snapshot|null>(null);
-  const [revision,setRevision]=React.useState(0);
   React.useEffect(()=>{
     setStatus('idle');setData(null);
   },[leadId,base]);
@@ -54,7 +53,7 @@ export function StaffCrmContactPreferences({
     <p>Просмотр только для сотрудников с доступом к обращению.
       Это не согласие на маркетинг и не право на реальную отправку.</p>
     <button type="button" disabled={status==='loading'}
-      onClick={()=>{setRevision(n=>n+1);void load();}}>
+      onClick={()=>void load()}>
       Проверить предпочтения клиента</button>
     {status==='loading'&&<p role="status">Проверка действующих прав и выбора…</p>}
     {status==='error'&&<p role="status">Не удалось проверить предпочтения.
