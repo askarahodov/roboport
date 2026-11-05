@@ -17,7 +17,7 @@ ACTIONS=("DONE","CANCELED")
 def _task(conn,lead_id,task_id):
     row=conn.execute(
         """SELECT t.id,t.owner_id,t.creator_id,t.task_code,t.due_at,
-                  t.created_at,e.id,e.actor_id,e.action,e.created_at
+                  t.created_at,e.id,e.actor_id,e.action,e.created_at,t.origin_work_order_id
            FROM auto_crm_followup_task t
            LEFT JOIN auto_crm_followup_event e ON e.task_id=t.id
            WHERE t.id=%s AND t.lead_id=%s FOR SHARE OF t""",
@@ -25,11 +25,12 @@ def _task(conn,lead_id,task_id):
     ).fetchone()
     if row is None:
         raise LeadDenied("FORBIDDEN")
-    ident,owner,creator,code,due,created,e_id,e_actor,e_action,e_created=row
+    ident,owner,creator,code,due,created,e_id,e_actor,e_action,e_created,origin=row
     return {
         "taskId":str(ident),"ownerId":str(owner),"creatorId":str(creator),
         "taskCode":code,"dueAt":due.isoformat(),"createdAt":created.isoformat(),
         "status":e_action if e_action else "OPEN",
+        "originWorkOrderId":str(origin) if origin else None,
         "event":None if e_id is None else {
             "id":str(e_id),"actorId":str(e_actor),
             "action":e_action,"createdAt":e_created.isoformat(),
@@ -53,9 +54,11 @@ def list_followups(conn,token,org,loc,lead_id):
         return {"syntheticOnly":True,"items":[_task(conn,lead_id,r[0]) for r in rows]}
 
 
-def create_followup(conn,token,org,loc,lead_id,key,code,due_at):
+def create_followup(conn,token,org,loc,lead_id,key,code,due_at,origin_work_order_id=None):
     if (any(type(x) is not UUID for x in (lead_id,key))
             or code not in TASK_CODES
+            or (origin_work_order_id is not None and
+                (type(origin_work_order_id) is not UUID or code!='SERVICE_REVIEW'))
             or type(due_at) is not datetime
             or due_at.tzinfo is None or due_at.utcoffset() is None):
         raise LeadDenied("INVALID_INPUT")
@@ -71,12 +74,12 @@ def create_followup(conn,token,org,loc,lead_id,key,code,due_at):
         )
         lead=_lead(conn,org,loc,lead_id,actor,manager)
         existing=conn.execute(
-            """SELECT id,lead_id,creator_id,task_code,due_at
+            """SELECT id,lead_id,creator_id,task_code,due_at,origin_work_order_id
                FROM auto_crm_followup_task WHERE request_key=%s""",
             (key,),
         ).fetchone()
         if existing:
-            if (existing[1:] != (lead_id,actor,code,due_at)):
+            if (existing[1:] != (lead_id,actor,code,due_at,origin_work_order_id)):
                 raise LeadConflict("KEY_REUSED")
             return {"replayed":True,**_task(conn,lead_id,existing[0])}
         if conn.execute(
@@ -89,9 +92,9 @@ def create_followup(conn,token,org,loc,lead_id,key,code,due_at):
             with conn.transaction():
                 conn.execute(
                     """INSERT INTO auto_crm_followup_task
-                       (id,lead_id,owner_id,creator_id,task_code,due_at,request_key)
-                       VALUES(%s,%s,%s,%s,%s,%s,%s)""",
-                    (ident,lead_id,lead[2],actor,code,due_at,key),
+                       (id,lead_id,owner_id,creator_id,task_code,due_at,request_key,origin_work_order_id)
+                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (ident,lead_id,lead[2],actor,code,due_at,key,origin_work_order_id),
                 )
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation) as exc:
@@ -144,3 +147,16 @@ def resolve_followup(conn,token,org,loc,lead_id,task_id,key,action):
                 psycopg.errors.CheckViolation) as exc:
             raise LeadConflict("TRANSITION_CONFLICT") from exc
         return {"replayed":False,**_task(conn,lead_id,task_id)}
+
+
+def create_post_service_review(conn,token,org,loc,lead_id,key,work_order_id,due_at):
+    """One staff-planned SERVICE_REVIEW after booked order FINISH and independent QC PASS.
+
+    The DB trigger enforces booking lineage, live proof and QC atomically;
+    a unique work_order_id makes competing different-key creates conflict.
+    """
+    if type(work_order_id) is not UUID:
+        raise LeadDenied("INVALID_INPUT")
+    return create_followup(
+        conn,token,org,loc,lead_id,key,"SERVICE_REVIEW",due_at,work_order_id,
+    )
