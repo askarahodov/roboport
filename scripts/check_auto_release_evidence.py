@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sys
 import ipaddress
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 from pathlib import Path
@@ -53,6 +54,12 @@ def _safe_evidence_url(raw: object) -> bool:
             return ipaddress.ip_address(host).is_global
         except ValueError:
             labels = host.split(".")
+            # Numeric IPv4 aliases such as 127.1 or 0x7f.0.0.1 may
+            # resolve as loopback even when ipaddress rejects their syntax.
+            # Never treat those forms as public DNS names.
+            if all(re.fullmatch(r"(?:[0-9]+|0[xX][0-9a-fA-F]+)", part)
+                   for part in labels):
+                return False
             return (len(labels) >= 2 and all(part and part.isascii() and
                     all(ch.isalnum() or ch == "-" for ch in part) and
                     not part.startswith("-") and not part.endswith("-")
@@ -62,7 +69,11 @@ def _safe_evidence_url(raw: object) -> bool:
 
 
 def _valid_approval_time(raw: object) -> bool:
-    if type(raw) is not str or not raw.endswith("Z"):
+    # datetime.fromisoformat accepts non-RFC separators and truncated
+    # representations; approval evidence requires unambiguous UTC seconds.
+    if (type(raw) is not str or
+        re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:"
+                     r"[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z", raw) is None):
         return False
     try:
         stamp = datetime.fromisoformat(raw)
