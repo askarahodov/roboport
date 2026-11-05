@@ -5,7 +5,7 @@
 ## Как запускать с текущим `main`
 
 1. Получите **актуальный полный SHA** `main` в GitHub и `run_id` завершённого workflow `.github/workflows/ci.yml`, запущенного именно событием `push` для этого SHA. Должны быть **все пять** job `postgres`, `api`, `web`, `browser-e2e`, `windows-cmd` со статусом `completed/success`.
-2. Подготовьте файл `evidence.json` **локально и только с разрешёнными ссылками**, соответствующий структуре `scripts/check_auto_release_evidence.py`: ровно восемь направлений `auto_e2e`, `tenant_admin_acl`, `legacy_cutover_restore`, `privacy_consent`, `parts_licensing`, `payments_compliance`, `monitoring_rollback`, `ci_main`. Потребуются реальный независимый `approved_by`, `approved_at` и доказательства; фиктивные значения недопустимы при фактическом релизе. Валидатор проверяет лишь формат полей и ссылки.
+2. Подготовьте файл `evidence.json` **локально и только с разрешёнными ссылками**, соответствующий структуре `scripts/check_auto_release_evidence.py`: ровно восемь направлений `auto_e2e`, `tenant_admin_acl`, `legacy_cutover_restore`, `privacy_consent`, `parts_licensing`, `payments_compliance`, `monitoring_rollback`, `ci_main`. Потребуются реальный независимый `approved_by`, `approved_at` и доказательства; фиктивные значения недопустимы при фактическом релизе. Валидатор проверяет лишь формат полей и ссылки. Он отклоняет localhost, частные IP и зарезервированные/непубличные DNS-зоны (`.local`, `.internal`, `.test`, `.example`, `.invalid`, `.onion`, `.localhost`); это синтаксический фильтр, **не** проверка DNS, доступности ссылки или полномочий подписанта.
 3. В каталоге проекта выполните (здесь `SHA`, `RUN_ID` — **метапеременные, не реальные подтверждения**):
 
 ```bash

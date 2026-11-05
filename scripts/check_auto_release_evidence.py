@@ -37,7 +37,17 @@ def _safe_evidence_url(raw: object) -> bool:
                 or url.password is not None or url.port not in (None, 443)
                 or not url.path or url.path == "/"):
             return False
-        if host.lower() in ("localhost", "localhost.localdomain") or host.endswith(".localhost"):
+        # A well-formed DNS name is not necessarily externally reviewable.
+        # Reject reserved/private namespaces without resolving DNS or fetching evidence.
+        host_lower = host.lower()
+        blocked_suffixes = (
+            "localhost", "localhost.localdomain", "local", "internal", "test", "example",
+            "invalid", "onion",
+        )
+        if host_lower.endswith(".") or any(
+            host_lower == suffix or host_lower.endswith("." + suffix)
+            for suffix in blocked_suffixes
+        ):
             return False
         try:
             return ipaddress.ip_address(host).is_global
