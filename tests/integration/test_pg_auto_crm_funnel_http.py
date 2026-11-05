@@ -233,7 +233,7 @@ def test_crm_funnel_export_full_aggregate_and_revocation(monkeypatch):
     rows=list(csv.reader(StringIO(response.text.removeprefix("\ufeff")),delimiter=";"))
     assert len(rows)==5 and all(len(row)==11 for row in rows)
     assert rows[0][0]=="Источник"
-    assert rows[1]==["Все источники","1","0","0","0","1","",
+    assert rows[1]==["Все источники","1","0","0","0","1","0",
                       "1","0","0","0"]
     assert rows[2]==["Сайт","1","0","0","0","1","0",
                       "1","0","0","0"]
