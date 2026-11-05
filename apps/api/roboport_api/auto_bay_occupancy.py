@@ -202,6 +202,67 @@ def bay_occupancy(conn: psycopg.Connection, token: str, *,
                      AND f.created_at >= %s AND f.created_at < %s""",
                 (organization_id, location_id, start, end),
             ).fetchone()[0]
+            # Appointment lifecycle: event timestamps are authoritative.
+            # A move is ONE event, never a new created appointment.
+            created_count, canceled_count = conn.execute(
+                """SELECT COUNT(*) FILTER (WHERE ev.action='CREATED')::bigint,
+                          COUNT(*) FILTER (WHERE ev.action='BOOKING_CANCELED')::bigint
+                   FROM auto_appointment_event ev
+                   JOIN auto_appointment a ON a.id=ev.appointment_id
+                   WHERE a.organization_id=%s AND a.location_id=%s
+                     AND ev.recorded_at >= %s AND ev.recorded_at < %s""",
+                (organization_id, location_id, start, end),
+            ).fetchone()
+            moved_count = conn.execute(
+                """SELECT COUNT(*)::bigint FROM auto_appointment_reschedule r
+                   JOIN auto_appointment a ON a.id=r.appointment_id
+                   WHERE a.organization_id=%s AND a.location_id=%s
+                     AND r.organization_id=a.organization_id
+                     AND r.created_at >= %s AND r.created_at < %s""",
+                (organization_id, location_id, start, end),
+            ).fetchone()[0]
+            # Repeat BOOKING, not a completed physical visit. Compare the
+            # current appointment against ALL prior appointments of the same
+            # synthetic customer in THIS branch, including canceled ones.
+            # Do not expose the underlying customer identifiers.
+            starts_count, customers_count, repeats_count = conn.execute(
+                """SELECT COUNT(*)::bigint,
+                          COUNT(DISTINCT link.customer_id)::bigint,
+                          COUNT(DISTINCT link.customer_id) FILTER (
+                            WHERE EXISTS (
+                              SELECT 1 FROM auto_appointment previous
+                              JOIN auto_vehicle_customer_link prev_link
+                                ON prev_link.id=previous.customer_link_id
+                              WHERE previous.organization_id=a.organization_id
+                                AND previous.location_id=a.location_id
+                                AND prev_link.customer_id=link.customer_id
+                                AND (previous.created_at,previous.id)<
+                                    (a.created_at,a.id)
+                            )
+                          )::bigint
+                   FROM auto_appointment a
+                   JOIN auto_vehicle_customer_link link
+                     ON link.id=a.customer_link_id
+                   JOIN LATERAL (
+                     SELECT COALESCE(
+                        (SELECT r.new_booking_id FROM auto_appointment_reschedule r
+                         WHERE r.appointment_id=a.id
+                         ORDER BY r.created_at DESC,r.id DESC LIMIT 1),
+                        a.booking_id
+                     ) AS booking_id
+                   ) latest ON TRUE
+                   JOIN auto_bay_booking b ON b.id=latest.booking_id
+                   JOIN auto_work_bay bay ON bay.id=b.bay_id
+                     AND bay.organization_id=a.organization_id
+                     AND bay.location_id=a.location_id
+                     AND bay.disabled_at IS NULL
+                   WHERE a.organization_id=%s AND a.location_id=%s
+                     AND b.organization_id=a.organization_id
+                     AND b.location_id=a.location_id
+                     AND b.canceled_at IS NULL
+                     AND b.starts_at >= %s AND b.starts_at < %s""",
+                (organization_id, location_id, start, end),
+            ).fetchone()
             capacity = bay_count * day_seconds
             # Never claim this is operating-hours utilization: denominator
             # includes the WHOLE local calendar day, including closed hours.
@@ -222,6 +283,12 @@ def bay_occupancy(conn: psycopg.Connection, token: str, *,
                 "recordedLaborEntries": labor_count,
                 "recordedLaborMinutes": labor_minutes,
                 "finishedExecutions": finished_count,
+                "createdAppointments": created_count,
+                "canceledAppointments": canceled_count,
+                "rescheduleEvents": moved_count,
+                "scheduledStarts": starts_count,
+                "scheduledCustomers": customers_count,
+                "repeatBookingCustomers": repeats_count,
             })
         return {
             "items":items, "timeZone":row[0], "bayCount":bay_count,
