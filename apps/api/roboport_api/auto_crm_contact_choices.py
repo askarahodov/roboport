@@ -54,7 +54,10 @@ def change_customer_choice(conn,token,channel,enabled,expected_revision,key):
         actor=_client(conn,token)
         # Serialize preference changes and exact-key retries across requests.
         # Revoke of CLIENT role is serialized through the shared role lock.
-        conn.execute("SELECT id FROM app_user WHERE id=%s FOR UPDATE",(actor,))
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s,10101))",
+            (str(actor),),
+        )
         prior=conn.execute(
             """SELECT user_id,channel_code,enabled,version
                FROM auto_crm_contact_choice_event WHERE request_key=%s""",(key,),
