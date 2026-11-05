@@ -156,3 +156,8 @@ MANAGER-only сводка по филиалу за 1–31 локальных с�
 ### #170/#171 — менеджерская сверка двух synthetic журналов (current-dev)
 
 Отдельный отчёт MANAGER по дням локальной регистрации: CHARGE/CREDIT **без валюты** и SIM_PAYMENT/SIM_REFUND **только тестовые RUB**, count sealed previews; отрицательные междневные net допустимы и **не** обозначают остаток по заказу. Никаких PII, реальные деньги/платежи/кассы не введены. Полный сценарий PG17 от QC PASS до test refund+replay+seal, frontend и Playwright 390/1280. [Документация](DEMO_FINANCE_REPORT.md). Полный finance/BI #170/#171 и legal gate #119 **не закрыты**.
+
+
+### #169 — CRM обращение и жизненный цикл (current-dev)
+
+Новый synthetic-only scoped INTAKE/MANAGER модуль: отдельная immutable `auto_crm_lead`, append-only `auto_crm_lead_stage_event`, одноразовая связь `auto_crm_lead_booking` с Appointment, FSM NEW→CONTACTED→BOOKED→WON / LOST с обязательной стандартной причиной, owner+source+dedup+requestKey+конкурентный advisory-lock; DB guards не позволяют обходить tenant через link, менять audit или стадии. HTTP GET/POST с live RBAC/CSRF, React UI с безопасным retry и 390/1280 Playwright, PG17 полный путь и отрицательные тесты. **Нет** реальных ПДн, звонков/SMS/email/согласий, CRM-задач, повторных реальных визитов, доставки, платежей: остаются planned до #119. [Роли/доказательства](CRM.md).
