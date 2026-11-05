@@ -129,7 +129,7 @@ test('service-review rejects not finished QC, revoked 403 and invalid payload',a
   expect(postCount).toBe(0);
   await page.getByLabel('UUID выполненного заказ-наряда').fill(order);
   await create.click();
-  await expect(page.getByRole('status')).toContainText('Конфликт задачи');
+  await expect(page.getByLabel('Задачи по обращению').getByRole('status')).toContainText('Конфликт задачи');
   outcome=403;
   await create.click();
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
