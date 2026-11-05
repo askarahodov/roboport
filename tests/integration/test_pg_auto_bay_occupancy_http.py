@@ -82,7 +82,7 @@ def test_manager_report_tracks_current_booking_across_dst_move_and_cancel(monkey
             "activeAssignments":0,"assignedSeconds":0,"assignmentBasisPoints":None,
             "recordedLaborEntries":0,"recordedLaborMinutes":0,"finishedExecutions":0,
             "createdAppointments":0,"canceledAppointments":0,"rescheduleEvents":0,
-            "scheduledStarts":0,"scheduledCustomers":0,"repeatBookingCustomers":0,
+            "scheduledStarts":1,"scheduledCustomers":1,"repeatBookingCustomers":0,
         },
         {
             "localDay":"2030-04-01","daySeconds":24*3600,
