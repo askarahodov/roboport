@@ -1,4 +1,6 @@
 """Bounded synthetic staff calendar; no customer personal data in responses."""
+import csv
+from io import StringIO
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from uuid import UUID
@@ -151,3 +153,13 @@ def calendar_week_summary(conn: psycopg.Connection, token: str, org: UUID,
                 for i in range(7)
             ],
         }
+
+
+def calendar_week_csv(report: dict) -> str:
+    """Fixed-schema CSV with only branch-local dates and aggregate integers."""
+    output = StringIO(newline="")
+    writer = csv.writer(output, delimiter=";", lineterminator="\r\n")
+    writer.writerow(("Дата филиала", "Действующие записи", "Занятые посты"))
+    for row in report["items"]:
+        writer.writerow((row["localDay"], row["appointments"], row["occupiedBays"]))
+    return "\ufeff" + output.getvalue()
