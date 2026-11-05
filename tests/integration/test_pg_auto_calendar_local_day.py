@@ -1,4 +1,6 @@
 """Проверка IANA зон филиала, локального дня и DST без tenant leakage."""
+import csv
+from io import StringIO
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -164,3 +166,54 @@ def test_week_calendar_complete_dst_current_booking_and_live_revocation(monkeypa
                WHERE organization_id=%s AND location_id=%s AND user_id=%s
                  AND role_code='INTAKE'""",(org,loc,d["intake"]))
     assert client.get(path,params=args).status_code==403
+
+
+def test_week_csv_export_all_seven_days_and_live_authorization(monkeypatch):
+    """CSV must be recalculated with current grants and no appointment identifiers."""
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d, org, loc, bay = _setup_zone()
+    token = d["tokens"][d["intake"]]
+    with psycopg.connect(DSN) as db:
+        start, end, _ = local_day_window(db, token, org, loc, "2030-10-27")
+        assert end.astimezone(timezone.utc) - start.astimezone(timezone.utc) == timedelta(hours=25)
+        appointment, _, work = create_appointment(
+            db, token, org, loc, bay, d["link"],
+            start + timedelta(minutes=20), start + timedelta(minutes=50),
+        )
+    client = TestClient(app, base_url="https://127.0.0.1")
+    url = f"/api/v1/dev/auto/organizations/{org}/calendar/week/export"
+    params = {"locationId": str(loc), "localDay": "2030-10-27"}
+    assert client.get(url, params=params).status_code == 403
+    client.cookies.set("rp_session", d["tokens"][d["manager"]])
+    assert client.get(url, params=params).status_code == 403
+    client.cookies.set("rp_session", token)
+    response = client.get(url, params=params)
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="auto-calendar-week.csv"'
+    )
+    assert response.text.startswith("\ufeffДата филиала;")
+    rows = list(csv.reader(StringIO(response.text.removeprefix("\ufeff")), delimiter=";"))
+    assert len(rows) == 8 and all(len(row) == 3 for row in rows)
+    assert rows[0] == ["Дата филиала", "Действующие записи", "Занятые посты"]
+    assert rows[1] == ["2030-10-27", "1", "1"]
+    assert rows[2] == ["2030-10-28", "0", "0"]
+    assert rows[-1] == ["2030-11-02", "0", "0"]
+    for secret in (str(appointment), str(work), str(d["vehicle"]),
+                   str(d["ca"]), str(d["intake"]), str(bay)):
+        assert secret not in response.text
+    assert client.get(url, params={**params, "localDay": "2030-02-30"}).status_code == 422
+    assert client.get(url, params={**params, "locationId": str(uuid4())}).status_code == 403
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """UPDATE auto_organization_role_grant SET revoked_at=now()
+               WHERE organization_id=%s AND location_id=%s AND user_id=%s
+                 AND role_code='INTAKE'""", (org, loc, d["intake"]),
+        )
+    denied = client.get(url, params=params)
+    assert denied.status_code == 403
+    assert "Дата филиала" not in denied.text
