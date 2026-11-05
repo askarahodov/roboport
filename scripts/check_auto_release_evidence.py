@@ -41,7 +41,7 @@ def _safe_evidence_url(raw: object) -> bool:
         # Reject reserved/private namespaces without resolving DNS or fetching evidence.
         host_lower = host.lower()
         blocked_suffixes = (
-            "localhost", "local", "internal", "test", "example",
+            "localhost", "localhost.localdomain", "local", "internal", "test", "example",
             "invalid", "onion",
         )
         if host_lower.endswith(".") or any(
