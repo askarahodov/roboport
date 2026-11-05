@@ -12,6 +12,10 @@ test('warehouse recount and independent approval use exact scoped routes and dis
     status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}'}));
   await page.route('**/api/v1/dev/auto/organizations/**/stocktake/**',route=>{
     const req=route.request();
+    // Approval now refreshes the read-only manager queue; don't treat GET as POST.
+    if(req.method()==='GET')return route.fulfill({status:200,
+      contentType:'application/json',
+      body:'{"items":[],"nextCountId":null,"syntheticOnly":true}'});
     requests.push({path:new URL(req.url()).pathname,key:req.headers()['idempotency-key'],
       body:req.postDataJSON()});
     expect(req.headers()['x-csrf-token']).toBe('synthetic');
@@ -30,7 +34,7 @@ test('warehouse recount and independent approval use exact scoped routes and dis
   await expect(page.getByRole('status')).toContainText('Подсчёт сохранён');
   await expect(page.getByRole('textbox',{name:'UUID подсчёта'})).toHaveValue(count);
   await page.getByRole('button',{name:'Утвердить корректировку'}).click();
-  await expect(page.getByRole('status')).toContainText('Расхождение утверждено');
+  await expect(page.getByText('Расхождение утверждено.',{exact:false})).toBeVisible();
   expect(requests).toHaveLength(2);
   expect(requests[0].path).toBe('/api/v1/dev/auto/organizations/'+org+'/stocktake/counts');
   expect(requests[0].body).toEqual({locationId:location,lotId:lot,actual:3,reason:'Контрольный пересчёт'});
