@@ -209,3 +209,35 @@ ABC по валовому количеству выдач
 `RETURN` учитывается в отдельном
 показателе периода без искажения XYZ.
 [Полный словарь и PG17/Playwright](REPORTING.md).
+
+
+## Очередь ожидающих инвентаризаций — synthetic dev (#168)
+
+Read-only endpoint:
+
+GET /api/v1/dev/auto/organizations/{org}/stocktake/pending?locationId={loc}&limit=20&afterCountId={uuid}
+
+Возвращает не более 20 записей и nextCountId (или null),
+syntheticOnly=true; Cache-Control:no-store. Сортировка по
+UUID count_id, keyset-pagination. Строка содержит countId,
+lotId, article, batchCode, binCode, expected, actual,
+currentAllocated, stale, reason; actor UUID, idempotency key
+и персональные данные не отдаются. Нет непроверенных
+межфилиальных записей: SQL включает организацию, филиал,
+активность и отсутствие записи об утверждении, а live
+MANAGER authorization выполняется до чтения. WAREHOUSE
+без MANAGER, чужой филиал, отозванная роль → 403;
+неверный UUID или limit вне 1..50 → 422. Только HTTPS
+loopback; production OpenAPI и миграции не меняются.
+
+Руководитель выбирает countId из очереди, но сам POST
+/stocktake/approvals **не доверяет** очереди и заново
+проверяет права, независимость maker/checker, неустаревший
+expected и целостность запаса. stale=true лишь подсказка
+для обновления подсчёта; не гарантия успешного approve.
+Утверждение переводит расхождение в immutable ledger,
+затем UI обновляет очередь; счёт исчезает. Отзыв доступа
+очищает данные. PG17 и Playwright проверяют 403/422,
+пагинацию, утверждение, устаревший count, no PII и revoke.
+Полный склад #168 и release gate #119 остаются OPEN.
+

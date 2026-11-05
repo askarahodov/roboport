@@ -112,6 +112,35 @@ def get_lots(org_id: str, request: Request, locationId: str,
     },headers={"Cache-Control":"no-store"})
 
 
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/stocktake/pending")
+def get_pending_counts(org_id: str, request: Request, locationId: str,
+                       limit: int = 20, afterCountId: str | None = None):
+    """Live manager-only queue: count is not an authorization to approve."""
+    from .auto_stock_lot_stocktake import pending_stock_lot_counts
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(locationId)
+        cursor=UUID(afterCountId) if afterCountId is not None else None
+        if not 1 <= limit <= 50:
+            raise ValueError("invalid page size")
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            items,next_id=pending_stock_lot_counts(
+                db,request.cookies.get("rp_session",""),
+                org,loc,limit,cursor)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(content={
+        "items":items,"nextCountId":str(next_id) if next_id else None,
+        "syntheticOnly":True,
+    },headers={"Cache-Control":"no-store"})
+
+
 class ReceiptDraftBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     locationId: UUID

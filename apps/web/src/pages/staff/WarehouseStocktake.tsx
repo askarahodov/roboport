@@ -4,6 +4,9 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Pending={path:string;key:string;body:string;kind:'count'|'approval';org:string;location:string};
 type Result={countId?:string;approvalId?:string};
 type LotRow={lotId:string;article:string;batchCode:string;binCode:string;allocated:number;onHand:number;reserved:number};
+type QueueRow={countId:string;lotId:string;article:string;batchCode:string;
+  binCode:string;expected:number;actual:number;currentAllocated:number;
+  stale:boolean;reason:string};
 
 export function WarehouseStocktake(){
   const [org,setOrg]=React.useState('');
@@ -16,13 +19,23 @@ export function WarehouseStocktake(){
   const [lots,setLots]=React.useState<LotRow[]>([]);
   const [lotsStatus,setLotsStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [nextLot,setNextLot]=React.useState<string|null>(null);
+  const [queue,setQueue]=React.useState<QueueRow[]>([]);
+  const [queueStatus,setQueueStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
+  const [nextCount,setNextCount]=React.useState<string|null>(null);
+  const [queueCursor,setQueueCursor]=React.useState<string|null>(null);
+  const queueRequest=React.useRef(0);
   const [lotCursor,setLotCursor]=React.useState<string|null>(null);
   const [message,setMessage]=React.useState('');
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [result,setResult]=React.useState<Result|null>(null);
   const context=React.useRef({org:'',location:''});
   context.current={org:org.trim(),location:location.trim()};
-  React.useEffect(()=>{setMessage('');setPending(null);setResult(null);setLots([]);setLotsStatus('idle');setNextLot(null);setLotCursor(null);},[org,location]);
+  React.useEffect(()=>{
+    queueRequest.current+=1;setQueue([]);setQueueStatus('idle');
+    setNextCount(null);setQueueCursor(null);setCountId('');
+    setMessage('');setPending(null);setResult(null);setLots([]);
+    setLotsStatus('idle');setNextLot(null);setLotCursor(null);
+  },[org,location]);
   const scopeValid=uuid.test(org.trim())&&uuid.test(location.trim());
   const countValid=scopeValid&&uuid.test(lot.trim())&&/^(0|[1-9][0-9]*)$/.test(actual)&&
     Number(actual)<=1000000000&&reason.trim().length>=3&&reason.trim().length<=240;
@@ -55,6 +68,50 @@ export function WarehouseStocktake(){
       setLotCursor(after);setLotsStatus('ready');
     }catch{if(context.current.org===requested.org&&context.current.location===requested.location)
       setLotsStatus('error');}
+  }
+  async function loadPending(after:string|null=null){
+    if(!scopeValid||queueStatus==='loading')return;
+    const seq=++queueRequest.current;
+    const requested={org:org.trim(),location:location.trim()};
+    setQueue([]);setQueueStatus('loading');
+    setNextCount(null);setCountId('');
+    const query=new URLSearchParams({locationId:requested.location,limit:'20'});
+    if(after)query.set('afterCountId',after);
+    try{
+      const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(requested.org)+
+        '/stocktake/pending?'+query;
+      const response=await fetch(url,{credentials:'include',cache:'no-store'});
+      if(seq!==queueRequest.current||context.current.org!==requested.org||
+         context.current.location!==requested.location)return;
+      if([401,403,404].includes(response.status)){setQueueStatus('denied');setCountId('');return;}
+      if(!response.ok)throw Error('unavailable');
+      const raw:unknown=await response.json();
+      if(!raw||typeof raw!=='object')throw Error('shape');
+      const data=raw as {items?:unknown;nextCountId?:unknown;syntheticOnly?:unknown};
+      if(data.syntheticOnly!==true||!Array.isArray(data.items)||
+        data.items.length>20||!data.items.every((rawItem:unknown)=>{
+          if(!rawItem||typeof rawItem!=='object')return false;
+          const row=rawItem as Record<string,unknown>;
+          return uuid.test(String(row.countId))&&uuid.test(String(row.lotId))&&
+            ['article','batchCode','binCode'].every(key=>
+              typeof row[key]==='string'&&(row[key] as string).length>0)&&
+            typeof row.reason==='string'&&row.reason.length>=3&&
+            row.reason.length<=240&&
+            ['expected','actual','currentAllocated'].every(key=>
+              Number.isSafeInteger(row[key])&&Number(row[key])>=0)&&
+            typeof row.stale==='boolean'&&
+            row.stale===(row.expected!==row.currentAllocated);
+        })||!(data.nextCountId===null||
+             (typeof data.nextCountId==='string'&&uuid.test(data.nextCountId))))
+        throw Error('invalid queue');
+      setQueue(data.items as QueueRow[]);
+      setQueueCursor(after);
+      setNextCount(data.nextCountId as string|null);
+      setQueueStatus('ready');
+    }catch{
+      if(seq===queueRequest.current&&context.current.org===requested.org&&
+         context.current.location===requested.location)setQueueStatus('error');
+    }
   }
   async function submit(kind:'count'|'approval',retry?:Pending){
     if(busy)return;
@@ -99,8 +156,15 @@ export function WarehouseStocktake(){
       const value=(payload as Record<string,string>)[field];
       setResult({[field]:value});setPending(null);
       if(snapshot.kind==='count')setCountId(value);
+      if(snapshot.kind==='approval'){
+        // A new server read is needed: never retain a now-approved queue row.
+        queueRequest.current+=1;
+        setQueue([]);setQueueStatus('idle');setNextCount(null);
+        setQueueCursor(null);setCountId('');
+        void loadPending();
+      }
       setMessage(snapshot.kind==='count'?'Подсчёт сохранён. Остатки пока не изменены.':
-        'Расхождение утверждено. Складские проводки записаны.');
+        'Расхождение утверждено. Складские проводки записаны. Обновите очередь.');
     }catch{
       if(snapshot.org===context.current.org&&snapshot.location===context.current.location){
         setPending(snapshot);
@@ -145,6 +209,29 @@ export function WarehouseStocktake(){
     </section>
     <section aria-label="Утвердить инвентаризацию">
       <h2>2. Независимо утвердить расхождение</h2>
+      <section aria-label="Ожидающие подсчёты филиала">
+        <h3>Очередь подсчётов для менеджера</h3>
+        <p>Только MANAGER филиала. Проверяйте партии, ожидаемый и фактический
+          остатки. Устаревшие подсчёты требуют повторного пересчёта.
+          Подсчёт нельзя утвердить собственным пользователем.</p>
+        <button type="button" disabled={!scopeValid||busy||queueStatus==='loading'}
+          onClick={()=>void loadPending()}>Обновить ожидающие подсчёты</button>
+        {queueStatus==='loading'&&<p role="status">Загрузка подсчётов…</p>}
+        {queueStatus==='denied'&&<p role="alert">Нет доступа к очереди подсчётов филиала.</p>}
+        {queueStatus==='error'&&<p role="alert">Не удалось загрузить очередь подсчётов.</p>}
+        {queueStatus==='ready'&&(queue.length?<ul>{queue.map(row=><li key={row.countId}>
+          <strong>{row.article}</strong> · партия {row.batchCode} · ячейка {row.binCode}
+          {' — '}учёт {row.expected}, факт {row.actual}, сейчас {row.currentAllocated}
+          <p>Причина: {row.reason}</p>
+          {row.stale&&<p>Подсчёт устарел: нужен новый пересчёт.</p>}
+          <button type="button" disabled={busy||row.stale||!!pending}
+            onClick={()=>setCountId(row.countId)}>Выбрать подсчёт {row.countId}</button>
+        </li>)}</ul>:<p>Ожидающих подсчётов нет.</p>)}
+        {queueStatus==='ready'&&nextCount&&<button type="button" disabled={busy}
+          onClick={()=>void loadPending(nextCount)}>Следующая страница подсчётов</button>}
+        {queueStatus==='ready'&&queueCursor&&<button type="button" disabled={busy}
+          onClick={()=>void loadPending()}>Первая страница подсчётов</button>}
+      </section>
       <p>Для утверждения нужен другой сотрудник с ролью MANAGER. При изменившемся остатке потребуется новый подсчёт.</p>
       <label>UUID подсчёта <input value={countId} onChange={e=>setCountId(e.target.value)}
         aria-label="UUID подсчёта"/></label>

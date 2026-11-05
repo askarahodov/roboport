@@ -116,3 +116,80 @@ def test_stocktake_cannot_approve_loss_of_registered_serial_as_http_500(monkeypa
         assert approved.status_code==409,approved.text
         with psycopg.connect(DSN) as db:
             assert allocated(db,lot)==1 and balance(db,item)==(1,0)
+
+
+
+def test_manager_pending_count_queue_full_lifecycle_pagination_and_scope(monkeypatch):
+    """Two independent stocktake counts → queue → approval → stale remaining."""
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,item,lot,_=setup(db,d,4)
+        another_org,another_loc,_,another_lot,_=setup(db,d,2)
+        grant_id=grant(db,d["manager"],org,loc,"MANAGER")
+    root=f"/api/v1/dev/auto/organizations/{org}/stocktake"
+    queue_url=root+"/pending"
+    params={"locationId":str(loc)}
+    count_body={"locationId":str(loc),"lotId":str(lot),
+                "actual":2,"reason":"Расхождение после пересчёта"}
+    with TestClient(app,base_url="https://127.0.0.1") as client:
+        assert client.get(queue_url,params=params).status_code==403
+        client.cookies.set("rp_session",d["tokens"][d["intake"]])
+        assert client.get(queue_url,params=params).status_code==403
+        client.cookies.set("rp_session",d["tokens"][d["manager"]])
+        empty=client.get(queue_url,params=params)
+        assert empty.status_code==200 and empty.json()=={
+            "items":[],"nextCountId":None,"syntheticOnly":True}
+        a=post(client,d,d["intake"],root+"/counts",count_body)
+        b=post(client,d,d["intake"],root+"/counts",
+               {**count_body,"reason":"Проверочный второй подсчёт"})
+        assert a.status_code==201 and b.status_code==201
+        ids={a.json()["countId"],b.json()["countId"]}
+        client.cookies.set("rp_session",d["tokens"][d["manager"]])
+        first=client.get(queue_url,params={**params,"limit":1})
+        assert first.status_code==200,first.text
+        assert first.headers["cache-control"]=="no-store"
+        assert len(first.json()["items"])==1
+        assert first.json()["nextCountId"]==first.json()["items"][0]["countId"]
+        second=client.get(queue_url,params={**params,"limit":1,
+            "afterCountId":first.json()["nextCountId"]})
+        assert second.status_code==200,second.text
+        assert second.json()["nextCountId"] is None
+        assert {first.json()["items"][0]["countId"],
+                second.json()["items"][0]["countId"]}==ids
+        full=client.get(queue_url,params=params)
+        assert full.status_code==200
+        assert len(full.json()["items"])==2
+        for row in full.json()["items"]:
+            assert row["lotId"]==str(lot)
+            assert row["expected"]==0
+            assert row["actual"]==2
+            assert row["currentAllocated"]==0
+            assert row["stale"] is False
+            assert "requestId" not in row and "countedBy" not in row
+        assert str(d["intake"]) not in full.text
+        assert str(d["vehicle"]) not in full.text
+        assert client.get(queue_url,params={**params,"limit":0}).status_code==422
+        assert client.get(queue_url,params={**params,"limit":51}).status_code==422
+        assert client.get(queue_url,params={**params,"afterCountId":"bad"}).status_code==422
+        assert client.get(queue_url,params={"locationId":str(another_loc)}).status_code==403
+        assert client.get(f"/api/v1/dev/auto/organizations/{another_org}/stocktake/pending",
+                          params={"locationId":str(another_loc)}).status_code==403
+
+        count_id=first.json()["items"][0]["countId"]
+        approved=post(client,d,d["manager"],root+"/approvals",
+                      {"locationId":str(loc),"countId":count_id})
+        assert approved.status_code==201,approved.text
+        after=client.get(queue_url,params=params)
+        assert after.status_code==200,after.text
+        assert len(after.json()["items"])==1
+        assert after.json()["items"][0]["countId"] != count_id
+        assert after.json()["items"][0]["stale"] is True
+        assert after.json()["items"][0]["currentAllocated"]==2
+        with psycopg.connect(DSN) as db:
+            assert allocated(db,lot)==2
+            db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
+                       (grant_id,))
+        assert client.get(queue_url,params=params).status_code==403
