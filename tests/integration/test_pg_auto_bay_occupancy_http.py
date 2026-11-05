@@ -96,7 +96,10 @@ def test_manager_report_tracks_current_booking_across_dst_move_and_cancel(monkey
         },
     ]
     assert "vin" not in first.text.lower()
-    assert "customer" not in first.text.lower()
+    # Aggregate field names contain "Customers"; identity fields do not.
+    assert '"customerId"' not in first.text
+    assert '"customerLinkId"' not in first.text
+    assert str(d["link"]) not in first.text
     assert str(d["vehicle"]) not in first.text
     assert str(ident) not in first.text and str(order) not in first.text
     with psycopg.connect(DSN) as db:
