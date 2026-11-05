@@ -102,7 +102,9 @@ test('customer CRM choices: fail-closed default, exact retry, withdrawal and sta
   await section.getByLabel('Звонки').uncheck();
   await section.getByRole('button',{name:'Записать выбор: Звонки'}).click();
   await expect(section.getByLabel('Звонки')).not.toBeChecked();
-  expect(requests).toHaveLength(3);
+  // The checkbox updates optimistically before the POST route runs.
+  // Wait for the actual HTTP mutation, not only the local input state.
+  await expect.poll(()=>requests.length).toBe(3);
   const last=requests[2] as {requestKey:string;expectedRevision:number};
   expect(last.expectedRevision).toBe(1);
   expect(last.requestKey).not.toBe((requests[0] as {requestKey:string}).requestKey);
