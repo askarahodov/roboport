@@ -21,7 +21,7 @@ test('calendar denies access without showing previous tenant records',async({pag
   await expect(page.getByRole('heading',{name:'Календарь приёмщика'})).toBeVisible();
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
-  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('Доступ запрещён или dev API отключён.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Создать запись'})).toHaveCount(0);
 });
 
@@ -211,7 +211,9 @@ test('calendar ignores an old denied response after tenant changes',async({page}
   await expect(page.getByText('Записей нет.')).toBeVisible();
   await page.waitForTimeout(350);
   await expect(page.getByText('Записей нет.')).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  // The daily calendar must not replay the old tenant denial. A separate
+  // weekly aggregate may independently reject an invalid mocked payload.
+  await expect(page.getByText('Доступ запрещён или dev API отключён.')).toHaveCount(0);
 });
 
 test('calendar rejects invalid UTC calendar day before querying API',async({page})=>{
@@ -791,4 +793,76 @@ test('staff cancellation retry reuses exact key after a lost response',async({pa
   await page.getByRole('button',{name:'Повторить запрос с тем же ключом'}).click();
   await expect(page.getByText('Запись отменена.')).toBeVisible();
   expect(count).toBe(2);
+});
+
+
+test('weekly calendar: seven local days, DST, drilldown, revoke, 390 and 1280',async({page})=>{
+  const other='99999999-9999-4999-8999-999999999999';
+  const calls:string[]=[];
+  const start='2030-03-31';
+  await page.route(base,route=>route.fulfill({status:200,contentType:'application/json',
+    body:'{"items":[],"hasMore":false,"timeZone":"Europe/Berlin"}'}));
+  await page.route('**/calendar/week?*',route=>{
+    const u=new URL(route.request().url());
+    calls.push(u.pathname+'?'+u.searchParams);
+    if(u.searchParams.get('locationId')!==loc)
+      return route.fulfill({status:403,contentType:'application/json',
+        body:'{"code":"FORBIDDEN"}'});
+    const from=u.searchParams.get('localDay')??'';
+    const first=new Date(from+'T00:00:00Z');
+    const items=Array.from({length:7},(_,i)=>({
+      localDay:new Date(first.getTime()+i*86400000).toISOString().slice(0,10),
+      appointments:i===0?2:i===1?1:0,
+      occupiedBays:i<=1?1:0,
+    }));
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,timeZone:'Europe/Berlin',
+        fromDay:from,items})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByLabel('День филиала').fill(start);
+  const overview=page.getByLabel('Обзор недели филиала');
+  await expect(overview).toContainText('часовой пояс:');
+  await expect(overview).toContainText('2030-03-31');
+  await expect(overview).toContainText('2 записи, 1 занятый пост');
+  await expect(overview.getByRole('button',{name:'Показать день 2030-04-01'})).toBeVisible();
+  expect(calls.some(url=>url.includes('localDay=2030-03-31'))).toBe(true);
+  await overview.getByRole('button',{name:'Показать день 2030-04-01'}).click();
+  await expect(page.getByLabel('День филиала')).toHaveValue('2030-04-01');
+  await expect(overview.getByRole('button',{name:'Показать день 2030-04-01'})).toBeVisible();
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(other);
+  await expect(overview.getByRole('alert')).toContainText('Нет доступа');
+  await expect(overview).not.toContainText('2 записи');
+  await expect(overview.getByRole('button',{name:'Показать день 2030-04-01'})).toHaveCount(0);
+});
+
+test('weekly calendar rejects forged aggregate fields and never retains stale values',async({page})=>{
+  let tampered=false;
+  await page.route(base,route=>route.fulfill({status:200,contentType:'application/json',
+    body:'{"items":[],"hasMore":false,"timeZone":"Europe/Berlin"}'}));
+  await page.route('**/calendar/week?*',route=>{
+    const u=new URL(route.request().url());
+    const first=new Date((u.searchParams.get('localDay')??'2030-01-01')+'T00:00:00Z');
+    const items=Array.from({length:7},(_,i)=>({
+      localDay:new Date(first.getTime()+i*86400000).toISOString().slice(0,10),
+      appointments:i===0?1:0,occupiedBays:i===0?(tampered?2:1):0,
+    }));
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,timeZone:'UTC',
+        fromDay:u.searchParams.get('localDay'),items})});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const overview=page.getByLabel('Обзор недели филиала');
+  await expect(overview).toContainText('1 запись');
+  tampered=true;
+  await page.getByLabel('День филиала').fill('2030-01-02');
+  await expect(overview.getByRole('alert')).toContainText('Не удалось получить обзор недели');
+  await expect(overview).not.toContainText('1 запись');
 });

@@ -212,6 +212,33 @@ async def reschedule(org_id: str, appointment_id: str, request: Request):
                         headers={"Cache-Control":"no-store"})
 
 
+@router.get("/api/v1/dev/auto/organizations/{org_id}/calendar/week")
+def read_calendar_week(org_id: str, request: Request, locationId: str,
+                       localDay: str):
+    """Current scoped bookings on seven branch-local days; dev-only/no PII."""
+    from .auto_calendar import (
+        calendar_week_summary, CalendarDenied, CalendarInvalid,
+    )
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        org, loc = UUID(org_id), UUID(locationId)
+    except (ValueError, TypeError):
+        return _response(request, 422, "INVALID_INPUT")
+    try:
+        with psycopg.connect(dsn) as db:
+            report = calendar_week_summary(
+                db, request.cookies.get("rp_session", ""),
+                org, loc, localDay,
+            )
+    except CalendarDenied:
+        return _response(request, 403, "FORBIDDEN")
+    except CalendarInvalid:
+        return _response(request, 422, "INVALID_INPUT")
+    return JSONResponse(content=report,headers={"Cache-Control":"no-store"})
+
+
 @router.get("/api/v1/dev/auto/organizations/{org_id}/calendar")
 def read_calendar(org_id: str, request: Request, locationId: str,
                   startsAt: str | None = None, endsAt: str | None = None,
