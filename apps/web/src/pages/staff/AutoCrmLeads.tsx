@@ -88,7 +88,14 @@ export function AutoCrmLeads(){
       if(!r.ok){setMessage(r.status===409?
         'Конфликт или повторная запись. Обновите список перед новой операцией.':
         'Операция не выполнена. Проверьте связь и права.');return;}
-      setRevision(x=>x+1);
+      // POST returns the authoritative audit state. Update in-place to avoid
+      // losing the selected lead while re-fetching its list.
+      const updated=parseLead(await r.json());
+      setRows(current=>{
+        const rest=current.filter(x=>x.leadId!==updated.leadId);
+        return [updated,...rest].slice(0,50);
+      });
+      setSelected(updated.leadId);
       setMessage('Изменение подтверждено. История обновлена.');
     }catch{
       setRows([]);setSelected('');setStatus('error');
@@ -111,6 +118,8 @@ export function AutoCrmLeads(){
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
     {status==='error'&&<p role="alert">Не удалось загрузить обращения.</p>}
     {status==='ready'&&loadedScope===scope&&<>
+      <button type="button" disabled={busy} onClick={()=>setRevision(n=>n+1)}>
+        Обновить список</button>
       <h2>Новое обращение</h2>
       <label>UUID подтверждённой связи <input aria-label="UUID подтверждённой связи"
         disabled={busy} value={link} onChange={e=>setLink(e.target.value)}/></label>
