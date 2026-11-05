@@ -11,6 +11,8 @@ const report={syntheticOnly:true,basis:'CURRENT_BOOKINGS_CALENDAR_DAY',
     scheduledEmployees:2,scheduledShiftSeconds:8*3600,
     activeAssignments:1,assignedSeconds:3600,assignmentBasisPoints:1250,
     recordedLaborEntries:2,recordedLaborMinutes:73,finishedExecutions:1,
+    createdAppointments:4,canceledAppointments:1,rescheduleEvents:2,
+    scheduledStarts:3,scheduledCustomers:2,repeatBookingCustomers:1,
   }]};
 
 test('manager report: scoped 390/1280 light/dark and no exposed customer fields',async({page})=>{
@@ -36,6 +38,8 @@ test('manager report: scoped 390/1280 light/dark and no exposed customer fields'
   await expect(page.getByRole('columnheader',{name:'Доля назначений от смен'})).toBeVisible();
   await expect(page.getByRole('columnheader',{name:'Минуты по журналу'})).toBeVisible();
   await expect(page.getByRole('columnheader',{name:'Завершено исполнений'})).toBeVisible();
+  await expect(page.getByRole('columnheader',{name:'Переносы'})).toBeVisible();
+  await expect(page.getByRole('columnheader',{name:'Повторные бронирования'})).toBeVisible();
   await expect(page.getByRole('row',{name:/2030-03-31/})).toContainText('73');
   await expect(page.getByRole('row',{name:/2030-03-31/})).toContainText('12,5 %');
   expect(urls).toHaveLength(1);
@@ -123,6 +127,23 @@ test('manager labor metrics reject negative minutes and clear report after reloa
   await page.getByRole('button',{name:'Сформировать отчёт'}).click();
   await expect(page.getByRole('table')).toBeVisible();
   invalid=true;
+  await page.getByRole('button',{name:'Сформировать отчёт'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось получить отчёт');
+  await expect(page.getByRole('table')).toHaveCount(0);
+});
+
+
+test('visit funnel fails closed for impossible repeat-customer aggregate',async({page})=>{
+  await page.route(base,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({...report,items:[{...report.items[0],
+      repeatBookingCustomers:4}]}),
+  }));
+  await page.goto('/staff/auto-bay-occupancy');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByLabel('Начало периода').fill('2030-03-31');
+  await page.getByLabel('Конец периода').fill('2030-03-31');
   await page.getByRole('button',{name:'Сформировать отчёт'}).click();
   await expect(page.getByRole('alert')).toContainText('Не удалось получить отчёт');
   await expect(page.getByRole('table')).toHaveCount(0);

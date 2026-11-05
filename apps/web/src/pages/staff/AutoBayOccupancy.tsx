@@ -10,6 +10,8 @@ type Row={
   activeAssignments:number;assignedSeconds:number;
   assignmentBasisPoints:number|null;
   recordedLaborEntries:number;recordedLaborMinutes:number;finishedExecutions:number;
+  createdAppointments:number;canceledAppointments:number;rescheduleEvents:number;
+  scheduledStarts:number;scheduledCustomers:number;repeatBookingCustomers:number;
 };
 type Report={
   syntheticOnly:true;basis:'CURRENT_BOOKINGS_CALENDAR_DAY';
@@ -27,11 +29,15 @@ function valid(value:unknown):value is Report{
     r.items.every(x=>x&&typeof x.localDay==='string'&&day.test(x.localDay)&&
       [x.daySeconds,x.activeAppointments,x.occupiedSeconds,x.calendarCapacitySeconds,
        x.scheduledEmployees,x.scheduledShiftSeconds,x.activeAssignments,x.assignedSeconds,
-       x.recordedLaborEntries,x.recordedLaborMinutes,x.finishedExecutions]
+       x.recordedLaborEntries,x.recordedLaborMinutes,x.finishedExecutions,
+       x.createdAppointments,x.canceledAppointments,x.rescheduleEvents,
+       x.scheduledStarts,x.scheduledCustomers,x.repeatBookingCustomers]
         .every(v=>Number.isSafeInteger(v)&&v>=0)&&
       x.occupiedSeconds<=x.calendarCapacitySeconds&&
       x.assignedSeconds<=x.scheduledShiftSeconds&&
       x.activeAssignments<=x.activeAppointments&&
+      x.scheduledCustomers<=x.scheduledStarts&&
+      x.repeatBookingCustomers<=x.scheduledCustomers&&
       (x.occupancyBasisPoints===null?
         x.calendarCapacitySeconds===0:
         x.calendarCapacitySeconds>0&&Number.isSafeInteger(x.occupancyBasisPoints)&&
@@ -97,7 +103,10 @@ export function AutoBayOccupancy(){
       Также показаны агрегированные часы действующих смен и назначений
       сотрудников, но не фактически отработанные часы и не расчёт зарплаты.
       Отдельно выводятся неизменяемые записи трудозатрат и завершений
-      исполнения: их дата — момент регистрации события в филиале, не дата записи.</p>
+      исполнения: их дата — момент регистрации события в филиале, не дата записи.
+      Создания, отмены и переносы считаются по журналам событий, а запланированные
+      начала и повторные бронирования — по текущим активным записям.
+      Эти показатели не доказывают фактический визит клиента.</p>
     <label>UUID организации <input aria-label="UUID организации"
       value={org} onChange={e=>updateOrg(e.target.value)}/></label>
     <label>UUID филиала <input aria-label="UUID филиала"
@@ -126,7 +135,10 @@ export function AutoBayOccupancy(){
             <th scope="col">Часы назначений</th>
             <th scope="col">Доля назначений от смен</th>
             <th scope="col">Записи труда</th><th scope="col">Минуты по журналу</th>
-            <th scope="col">Завершено исполнений</th></tr></thead>
+            <th scope="col">Завершено исполнений</th>
+            <th scope="col">Новые записи</th><th scope="col">Отмены</th>
+            <th scope="col">Переносы</th><th scope="col">Начала записей</th>
+            <th scope="col">Клиенты по записям</th><th scope="col">Повторные бронирования</th></tr></thead>
           <tbody>{report.items.map(x=><tr key={x.localDay}>
             <th scope="row">{x.localDay}</th><td>{x.activeAppointments}</td>
             <td>{hours(x.occupiedSeconds)}</td>
@@ -143,6 +155,9 @@ export function AutoBayOccupancy(){
               })+' %'}</td>
             <td>{x.recordedLaborEntries}</td><td>{x.recordedLaborMinutes}</td>
             <td>{x.finishedExecutions}</td>
+            <td>{x.createdAppointments}</td><td>{x.canceledAppointments}</td>
+            <td>{x.rescheduleEvents}</td><td>{x.scheduledStarts}</td>
+            <td>{x.scheduledCustomers}</td><td>{x.repeatBookingCustomers}</td>
           </tr>)}</tbody>
         </table>
       </div>

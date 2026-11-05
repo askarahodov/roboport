@@ -81,6 +81,8 @@ def test_manager_report_tracks_current_booking_across_dst_move_and_cancel(monkey
             "scheduledEmployees":0,"scheduledShiftSeconds":0,
             "activeAssignments":0,"assignedSeconds":0,"assignmentBasisPoints":None,
             "recordedLaborEntries":0,"recordedLaborMinutes":0,"finishedExecutions":0,
+            "createdAppointments":0,"canceledAppointments":0,"rescheduleEvents":0,
+            "scheduledStarts":0,"scheduledCustomers":0,"repeatBookingCustomers":0,
         },
         {
             "localDay":"2030-04-01","daySeconds":24*3600,
@@ -89,6 +91,8 @@ def test_manager_report_tracks_current_booking_across_dst_move_and_cancel(monkey
             "scheduledEmployees":0,"scheduledShiftSeconds":0,
             "activeAssignments":0,"assignedSeconds":0,"assignmentBasisPoints":None,
             "recordedLaborEntries":0,"recordedLaborMinutes":0,"finishedExecutions":0,
+            "createdAppointments":0,"canceledAppointments":0,"rescheduleEvents":0,
+            "scheduledStarts":0,"scheduledCustomers":0,"repeatBookingCustomers":0,
         },
     ]
     assert "vin" not in first.text.lower()
@@ -331,3 +335,105 @@ def test_immutable_recorded_labor_and_finish_report_full_execution_lifecycle(mon
     assert http.get(path,params={
         "fromDay":finish_date,"toDay":finish_date,
     }).status_code==403
+
+
+def test_booking_funnel_immutable_events_vs_current_repeat_bookings(monkeypatch):
+    """One original client books twice, moves the second and cancels first.
+
+    Event day is creation/mutation day; scheduled day is CURRENT bay start.
+    A prior canceled booking still qualifies as a prior booking, not a visit.
+    """
+    d,org,loc,bay,other,foreign,http=_fixture(monkeypatch)
+    token=d["tokens"][d["intake"]]
+    zone=ZoneInfo("Europe/Berlin")
+    base=datetime.now(timezone.utc)+timedelta(days=15)
+    day1=datetime.combine(base.astimezone(zone).date(),datetime.min.time(),
+                          tzinfo=zone)+timedelta(hours=11)
+    day2=day1+timedelta(days=1)
+    day3=day1+timedelta(days=2)
+    with psycopg.connect(DSN) as db:
+        first,old1,_=create_appointment(
+            db,token,org,loc,bay,d["link"],day1,day1+timedelta(hours=1),
+        )
+    # Independent committed transactions give a real ordering of two
+    # appointments even though created_at defaults to transaction now().
+    with psycopg.connect(DSN) as db:
+        second,old2,_=create_appointment(
+            db,token,org,loc,bay,d["link"],day2,day2+timedelta(hours=1),
+        )
+        event_day=db.execute(
+            """SELECT recorded_at FROM auto_appointment_event
+               WHERE appointment_id=%s AND action='CREATED'""",
+            (first,),
+        ).fetchone()[0].astimezone(zone).date().isoformat()
+        reschedule_appointment(
+            db,token,org,second,bay,day3,day3+timedelta(hours=1),
+        )
+        assert cancel_appointment(db,token,org,first)=="CANCELED"
+    http.cookies.set("rp_session",d["tokens"][d["manager"]])
+    url=_url(org,loc)
+    lifecycle=http.get(url,params={"fromDay":event_day,"toDay":event_day})
+    assert lifecycle.status_code==200,lifecycle.text
+    row=lifecycle.json()["items"][0]
+    assert row["createdAppointments"]==2
+    assert row["rescheduleEvents"]==1
+    assert row["canceledAppointments"]==1
+    assert row["scheduledStarts"]==0
+    assert row["scheduledCustomers"]==0
+    assert row["repeatBookingCustomers"]==0
+    active_day=day3.date().isoformat()
+    future=http.get(url,params={"fromDay":active_day,"toDay":active_day})
+    assert future.status_code==200,future.text
+    daily=future.json()["items"][0]
+    assert daily["createdAppointments"]==0
+    assert daily["canceledAppointments"]==0
+    assert daily["rescheduleEvents"]==0
+    assert daily["scheduledStarts"]==1
+    assert daily["scheduledCustomers"]==1
+    assert daily["repeatBookingCustomers"]==1
+    assert daily["activeAppointments"]==1
+    assert daily["occupiedSeconds"]==3600
+    previous=http.get(url,params={
+        "fromDay":day2.date().isoformat(),"toDay":day2.date().isoformat(),
+    })
+    assert previous.json()["items"][0]["scheduledStarts"]==0
+    for secret in (str(first),str(second),str(d["link"]),str(d["vehicle"])):
+        assert secret not in lifecycle.text and secret not in future.text
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    assert http.get(url,params={"fromDay":active_day,"toDay":active_day}).status_code==403
+    http.cookies.set("rp_session",d["tokens"][d["manager"]])
+    assert http.get(_url(other,foreign),params={
+        "fromDay":active_day,"toDay":active_day,
+    }).status_code==403
+
+
+def test_booking_funnel_does_not_treat_repeat_move_as_new_customer_visit(monkeypatch):
+    d,org,loc,bay,_,_,http=_fixture(monkeypatch)
+    token=d["tokens"][d["intake"]]
+    zone=ZoneInfo("Europe/Berlin")
+    start=(datetime.now(timezone.utc)+timedelta(days=18)).astimezone(zone)
+    start=start.replace(hour=12,minute=0,second=0,microsecond=0)
+    with psycopg.connect(DSN) as db:
+        appointment,original,_=create_appointment(
+            db,token,org,loc,bay,d["link"],start,start+timedelta(minutes=45),
+        )
+    http.cookies.set("rp_session",d["tokens"][d["manager"]])
+    url=_url(org,loc)
+    before=http.get(url,params={
+        "fromDay":start.date().isoformat(),"toDay":start.date().isoformat(),
+    })
+    assert before.json()["items"][0]["scheduledCustomers"]==1
+    assert before.json()["items"][0]["repeatBookingCustomers"]==0
+    with psycopg.connect(DSN) as db:
+        reschedule_appointment(
+            db,token,org,appointment,bay,
+            start+timedelta(hours=2),start+timedelta(hours=2,minutes=45),
+        )
+    moved=http.get(url,params={
+        "fromDay":start.date().isoformat(),"toDay":start.date().isoformat(),
+    })
+    row=moved.json()["items"][0]
+    assert row["scheduledStarts"]==1
+    assert row["scheduledCustomers"]==1
+    assert row["repeatBookingCustomers"]==0
+    assert row["activeAppointments"]==1
