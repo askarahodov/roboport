@@ -1,6 +1,6 @@
 import React from 'react';
 
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const kinds=['CALLBACK_NOT_SENT','CHECK_DOCUMENTS','CONFIRM_BOOKING',
   'SERVICE_REVIEW_NOT_SENT'] as const;
 const reasons=['NO_LONGER_NEEDED','DUPLICATE','OTHER'] as const;
