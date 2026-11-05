@@ -84,11 +84,15 @@ function parseFollowups(v:unknown):Followup[]{
     throw Error('tasks');
   return obj.items.map(parseFollowup);
 }
-function parseList(v:unknown):Lead[]{
+type LeadPage={items:Lead[];nextCursor:string|null};
+function parseList(v:unknown):LeadPage{
   if(!v||typeof v!=='object'||!('syntheticOnly' in v)||
     v.syntheticOnly!==true||!('items' in v)||
-    !Array.isArray(v.items)||v.items.length>50)throw Error('shape');
-  return v.items.map(parseLead);
+    !Array.isArray(v.items)||v.items.length>25)throw Error('shape');
+  const next='nextCursor' in v?v.nextCursor:null;
+  if(!(next===null||(typeof next==='string'&&next.length>0&&
+       next.length<=180&&/^[A-Za-z0-9_-]+$/.test(next))))throw Error('shape');
+  return {items:v.items.map(parseLead),nextCursor:next};
 }
 async function token(){
   const res=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',
@@ -109,6 +113,9 @@ export function AutoCrmLeads(){
   const [appointment,setAppointment]=React.useState('');
   const [selected,setSelected]=React.useState('');
   const [rows,setRows]=React.useState<Lead[]>([]);
+  const [leadCursor,setLeadCursor]=React.useState<string|null>(null);
+  const [leadHistory,setLeadHistory]=React.useState<(string|null)[]>([]);
+  const [leadNext,setLeadNext]=React.useState<string|null>(null);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [message,setMessage]=React.useState('');
   const [revision,setRevision]=React.useState(0);
@@ -146,18 +153,21 @@ export function AutoCrmLeads(){
     setStatus('loading');
     void (async()=>{
       try{
-        const res=await fetch(base,{credentials:'include',cache:'no-store',
-          signal:controller.signal});
+        const res=await fetch(base+
+          (leadCursor?'?cursor='+encodeURIComponent(leadCursor):''),{
+            credentials:'include',cache:'no-store',signal:controller.signal,
+          });
         if(controller.signal.aborted)return;
         if([401,403,404].includes(res.status)){setStatus('denied');return;}
         if(!res.ok)throw Error('request');
         const parsed=parseList(await res.json());
         if(controller.signal.aborted)return;
-        setRows(parsed);setLoadedScope(scope);setStatus('ready');
+        setRows(parsed.items);setLeadNext(parsed.nextCursor);
+        setLoadedScope(scope);setStatus('ready');
       }catch{if(!controller.signal.aborted)setStatus('error');}
     })();
     return ()=>controller.abort();
-  },[org,loc,revision,valid]);
+  },[org,loc,revision,valid,leadCursor]);
   React.useEffect(()=>{
     setTasks([]);setTaskStatus('idle');setTaskMessage('');
     if(!valid||!selected||loadedScope!==scope||status!=='ready')return;
@@ -339,15 +349,17 @@ export function AutoCrmLeads(){
       реальных номеров. Этап «Записан» связывается с существующей записью,
       но не означает посещение или оплату.</p>
     <label>UUID организации <input aria-label="UUID организации" disabled={busy||taskBusy}
-      value={org} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setInboxCursor(null);setInboxHistory([]);setOrg(e.target.value);}}/></label>
+      value={org} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setInboxCursor(null);setInboxHistory([]);setLeadCursor(null);setLeadHistory([]);setLeadNext(null);setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" disabled={busy||taskBusy}
-      value={loc} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setInboxCursor(null);setInboxHistory([]);setLoc(e.target.value);}}/></label>
+      value={loc} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setInboxCursor(null);setInboxHistory([]);setLeadCursor(null);setLeadHistory([]);setLeadNext(null);setLoc(e.target.value);}}/></label>
     {status==='idle'&&<p>Укажите организацию и филиал.</p>}
     {status==='loading'&&<p role="status">Чтение обращений…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
     {status==='error'&&<p role="alert">Не удалось загрузить обращения.</p>}
     {status==='ready'&&loadedScope===scope&&<>
-      <button type="button" disabled={busy} onClick={()=>setRevision(n=>n+1)}>
+      <button type="button" disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null}
+        onClick={()=>{setLeadCursor(null);setLeadHistory([]);setLeadNext(null);
+          setSelected('');setRevision(n=>n+1);}}>
         Обновить список</button>
       <div aria-label="Очередь CRM">
         <h2>Очередь открытых задач филиала</h2>
@@ -393,13 +405,25 @@ export function AutoCrmLeads(){
         onClick={()=>void mutate(base,{customerLinkId:link,sourceCode:source})}>
         Создать обращение</button>
       <h2>Журнал обращений</h2>
-      {rows.length===0?<p>Обращений пока нет.</p>:<label>Обращение
+      {rows.length===0?<p>{leadCursor?'На этой странице обращений нет.':'Обращений пока нет.'}</p>:<label>Обращение
         <select aria-label="Обращение" value={selected} disabled={taskBusy||busy||pendingLead!==null}
           onChange={e=>{setPendingTask(null);setSelected(e.target.value);}}>
           <option value="">Выберите обращение</option>
           {rows.map(x=><option value={x.leadId} key={x.leadId}>
             {leadSourceLabels[x.sourceCode]} · {leadStatusLabels[x.status]} · {x.leadId}</option>)}
         </select></label>}
+      <div aria-label="Страницы журнала CRM">
+        {leadHistory.length>0&&<button type="button"
+          disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null}
+          onClick={()=>{setSelected('');setLeadNext(null);
+            setLeadCursor(leadHistory[leadHistory.length-1]);
+            setLeadHistory(h=>h.slice(0,-1));}}>Предыдущая страница обращений</button>}
+        {leadNext&&<button type="button"
+          disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null}
+          onClick={()=>{setSelected('');setLeadNext(null);
+            setLeadHistory(h=>[...h,leadCursor]);setLeadCursor(leadNext);
+          }}>Следующая страница обращений</button>}
+      </div>
       {chosen&&<div>
         <p>Ответственный: {chosen.ownerId}. Источник: {leadSourceLabels[chosen.sourceCode]}.
           Текущий этап: {leadStatusLabels[chosen.status]}.</p>

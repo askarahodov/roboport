@@ -262,3 +262,78 @@ test('CRM retry keeps the original key when refreshing CSRF fails',async({page})
   expect(posts).toHaveLength(2);
   expect(posts[0]).toEqual(posts[1]);
 });
+
+
+test('CRM journal paginates 28 leads, opens later page and resets on refresh',async({page})=>{
+  const leads=Array.from({length:28},(_,i)=>({
+    ...item('NEW'),
+    leadId:'aaaaaaaa-aaaa-4aaa-8aaa-'+String(i+1).padStart(12,'0'),
+  }));
+  const seen:string[]=[];
+  await page.route(path,route=>{
+    if(route.request().method()!=='GET')return route.abort();
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    seen.push(cursor??'FIRST');
+    const part=cursor?leads.slice(25):leads.slice(0,25);
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:part,
+        nextCursor:cursor?null:'page-after-25'})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const journal=page.getByLabel('Страницы журнала CRM');
+  await expect(page.getByLabel('Обращение').locator('option')).toHaveCount(26);
+  await journal.getByRole('button',{name:'Следующая страница обращений'}).click();
+  await expect(page.getByLabel('Обращение').locator('option')).toHaveCount(4);
+  await page.getByLabel('Обращение').selectOption(leads[27].leadId);
+  await expect(page.getByText('Текущий этап: Новое.',{exact:false})).toBeVisible();
+  await journal.getByRole('button',{name:'Предыдущая страница обращений'}).click();
+  await expect(page.getByLabel('Обращение').locator('option')).toHaveCount(26);
+  await page.getByRole('button',{name:'Обновить список'}).click();
+  await expect(journal.getByRole('button',{name:'Предыдущая страница обращений'}))
+    .toHaveCount(0);
+  expect(seen).toContain('page-after-25');
+  expect(seen.at(-1)).toBe('FIRST');
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});
+
+test('CRM journal refuses malformed cursor and clears previous lead after 403',async({page})=>{
+  let invalid=false;let denied=false;
+  await page.route(path,route=>{
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    return route.fulfill({status:denied?403:200,
+      contentType:'application/json',body:denied?
+        '{"code":"FORBIDDEN"}':JSON.stringify({
+          syntheticOnly:true,items:[item('NEW')],
+          nextCursor:invalid?'../../../bad':cursor?null:'page-2',
+        })});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const journal=page.getByLabel('Страницы журнала CRM');
+  await expect(page.getByLabel('Обращение')).toBeVisible();
+  invalid=true;
+  await page.getByRole('button',{name:'Обновить список'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить обращения');
+  await expect(page.getByLabel('Обращение')).toHaveCount(0);
+});
+ 
+test('CRM journal reauthorizes page request after initial successful page',async({page})=>{
+  await page.route(path,route=>{
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    return route.fulfill({status:cursor?403:200,
+      contentType:'application/json',body:cursor?
+        '{"code":"FORBIDDEN"}':JSON.stringify({
+          syntheticOnly:true,items:[item('NEW')],nextCursor:'next-page',
+        })});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await expect(page.getByLabel('Обращение')).toBeVisible();
+  await page.getByLabel('Страницы журнала CRM')
+    .getByRole('button',{name:'Следующая страница обращений'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByLabel('Обращение')).toHaveCount(0);
+});

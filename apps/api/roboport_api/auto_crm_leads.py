@@ -4,6 +4,9 @@ No phones, message payloads or outbound integrations. Stages are append-only;
 DB trigger independently enforces ordering and WorkOrder booking lineage.
 """
 from uuid import UUID, uuid4
+from datetime import datetime
+import base64
+import binascii
 import psycopg
 
 from .auto_org_authority import organization_role_allows
@@ -160,15 +163,73 @@ def lead_detail(conn,token,org,loc,ident):
         return _state(conn,_lead(conn,org,loc,ident,actor,manager))
 
 
-def list_leads(conn,token,org,loc):
+LEAD_PAGE_SIZE=25
+
+
+def _decode_lead_cursor(cursor):
+    if cursor is None:
+        return None
+    if type(cursor) is not str or not (1<=len(cursor)<=180):
+        raise LeadDenied("INVALID_INPUT")
+    try:
+        raw=base64.urlsafe_b64decode(cursor+"="*(-len(cursor)%4))
+        if len(raw)>130 or base64.urlsafe_b64encode(raw).decode().rstrip("=")!=cursor:
+            raise ValueError("non-canonical")
+        stamp,ident=raw.decode("ascii").split("|")
+        created=datetime.fromisoformat(stamp)
+        key=UUID(ident)
+        if (created.tzinfo is None or created.utcoffset() is None
+                or str(key)!=ident):
+            raise ValueError("invalid")
+        return created,key
+    except (ValueError,UnicodeDecodeError,binascii.Error,TypeError) as exc:
+        raise LeadDenied("INVALID_INPUT") from exc
+
+
+def _encode_lead_cursor(stamp,ident):
+    return base64.urlsafe_b64encode(
+        (stamp.isoformat()+"|"+str(ident)).encode("ascii")
+    ).decode().rstrip("=")
+
+
+def list_leads(conn,token,org,loc,cursor=None):
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
+        after=_decode_lead_cursor(cursor)
+        # Proof and tenant checks must precede LIMIT, not merely filter
+        # an already truncated page in Python.
         rows=conn.execute(
-            """SELECT id,customer_link_id,owner_id,source_code,request_key,created_at
-               FROM auto_crm_lead WHERE organization_id=%s AND location_id=%s
-                 AND (%s OR owner_id=%s)
-               ORDER BY created_at DESC,id DESC LIMIT 50""",
-            (org,loc,manager,actor),
+            """SELECT lead.id,lead.customer_link_id,lead.owner_id,
+                      lead.source_code,lead.request_key,lead.created_at
+               FROM auto_crm_lead lead
+               WHERE lead.organization_id=%s AND lead.location_id=%s
+                 AND (%s OR lead.owner_id=%s)
+                 AND (%s::timestamptz IS NULL OR
+                      (lead.created_at,lead.id)<(%s::timestamptz,%s::uuid))
+                 AND EXISTS (
+                   SELECT 1 FROM auto_vehicle_customer_link p
+                   JOIN auto_vehicle_location_binding b
+                     ON b.vehicle_id=p.vehicle_id AND b.location_id=lead.location_id
+                   JOIN auto_service_location l
+                     ON l.id=b.location_id AND l.organization_id=lead.organization_id
+                     AND l.disabled_at IS NULL
+                   JOIN auto_organization o ON o.id=l.organization_id
+                     AND o.disabled_at IS NULL
+                   WHERE p.id=lead.customer_link_id AND p.verified_at IS NOT NULL
+                     AND p.verified_by IS NOT NULL AND p.revoked_at IS NULL
+                 )
+               ORDER BY lead.created_at DESC,lead.id DESC LIMIT %s""",
+            (org,loc,manager,actor,after[0] if after else None,
+             after[0] if after else None,after[1] if after else None,
+             LEAD_PAGE_SIZE+1),
         ).fetchall()
-        return {"syntheticOnly":True,"items":[_state(conn,row) for row in rows
-                if _proof(conn,org,loc,row[1])]}
+        page=rows[:LEAD_PAGE_SIZE]
+        # Every row is rechecked before serializing: revocation between
+        # the SELECT and _state must not expose stale customer data.
+        items=[_state(conn,_lead(conn,org,loc,row[0],actor,manager))
+               for row in page]
+        next_cursor=(
+            _encode_lead_cursor(page[-1][5],page[-1][0])
+            if len(rows)>LEAD_PAGE_SIZE else None
+        )
+        return {"syntheticOnly":True,"items":items,"nextCursor":next_cursor}
