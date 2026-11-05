@@ -103,6 +103,18 @@ def stock_abc_xyz(conn:psycopg.Connection,token:str,org:UUID,loc:UUID,
             raise StockReportInvalid("PERIOD_MUST_USE_3_TO_12_CLOSED_MONTHS")
         months=[_month_string(index) for index in range(first,last+1)]
         begin,end=_start_of_month(first,zone),_start_of_month(last+1,zone)
+        # Fail fast before joining potentially large event history. Probe at
+        # most MAX_SKUS + 1 identifiers instead of COUNT(*)/aggregating events.
+        # Read-committed snapshots can change between statements, so keep
+        # the defensive limit check while materializing aggregates below.
+        candidate_ids=conn.execute(
+            """SELECT id FROM auto_stock_sku
+               WHERE organization_id=%s AND location_id=%s
+               LIMIT %s""",
+            (org,loc,MAX_SKUS+1),
+        ).fetchall()
+        if len(candidate_ids)>MAX_SKUS:
+            raise StockReportCapacity("too many SKUs for one report")
         # One SQL snapshot for all SKUs and all movement events; include
         # zero-use SKUs without amplifying other warehouse event classes.
         # SKU article is synthetic-only; no customer, order or vendor joins.
