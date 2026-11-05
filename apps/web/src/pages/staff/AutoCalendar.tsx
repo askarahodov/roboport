@@ -16,6 +16,8 @@ const fromClock=(value:string)=>{
   const [h,m]=value.split(':').map(Number);
   return h===24&&m!==0?NaN:h*60+m;
 };
+type WeekItem={localDay:string;appointments:number;occupiedBays:number};
+type WeekReport={syntheticOnly:true;timeZone:string;fromDay:string;items:WeekItem[]};
 type Entry = { appointmentId:string; bookingId:string; bayId:string;
   startsAt:string; endsAt:string; workOrderId:string; employeeId:string|null };
 type Form = { bay:string; link:string; employee:string; starts:string; ends:string };
@@ -69,6 +71,8 @@ export function AutoCalendar() {
   const [day,setDay]=React.useState(()=>new Date().toISOString().slice(0,10));
   const [timeZone,setTimeZone]=React.useState('UTC');
   const [items,setItems]=React.useState<Entry[]>([]);
+  const [week,setWeek]=React.useState<WeekReport|null>(null);
+  const [weekStatus,setWeekStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [hasMore,setHasMore]=React.useState(false);
   const [cursor,setCursor]=React.useState<{startsAt:string;appointmentId:string}|null>(null);
   const [nextCursor,setNextCursor]=React.useState<{startsAt:string;appointmentId:string}|null>(null);
@@ -100,6 +104,36 @@ export function AutoCalendar() {
   const [revision,setRevision]=React.useState(0);
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
+  React.useEffect(()=>{
+    setWeek(null);
+    if(!valid){setWeekStatus('idle');return;}
+    const controller=new AbortController();
+    setWeekStatus('loading');
+    const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+'/calendar/week';
+    const query=new URLSearchParams({locationId:location.trim(),localDay:day});
+    void fetch(path+'?'+query,{credentials:'include',cache:'no-store',
+      signal:controller.signal}).then(async response=>{
+      if(controller.signal.aborted)return;
+      if([401,403,404].includes(response.status)){setWeekStatus('denied');return;}
+      if(!response.ok)throw Error('weekly status');
+      const data:unknown=await response.json();
+      if(!data||typeof data!=='object')throw Error('weekly body');
+      const report=data as Partial<WeekReport>;
+      const first=new Date(day+'T00:00:00Z');
+      if(report.syntheticOnly!==true||report.fromDay!==day||
+        typeof report.timeZone!=='string'||report.timeZone.length<1||
+        report.timeZone.length>64||!Array.isArray(report.items)||
+        report.items.length!==7||!report.items.every((item,i)=>
+          item&&item.localDay===new Date(first.getTime()+i*86400000)
+            .toISOString().slice(0,10)&&
+          Number.isSafeInteger(item.appointments)&&item.appointments>=0&&
+          Number.isSafeInteger(item.occupiedBays)&&item.occupiedBays>=0&&
+          item.occupiedBays<=item.appointments))
+        throw Error('invalid weekly aggregates');
+      if(!controller.signal.aborted){setWeek(report as WeekReport);setWeekStatus('ready');}
+    }).catch(()=>{if(!controller.signal.aborted)setWeekStatus('error');});
+    return ()=>controller.abort();
+  },[org,location,day,revision,valid]);
   React.useEffect(()=>{
     setItems([]);setHasMore(false);setNextCursor(null);setTarget(null);setTimeZone('UTC');
     if(!valid){setStatus('idle');return;}
@@ -422,6 +456,29 @@ export function AutoCalendar() {
           onClick={()=>setOpeningRevision(n=>n+1)}>Перезагрузить график</button>
       </>}
     </fieldset>
+    <section aria-label="Обзор недели филиала">
+      <h2>Брони на семь дней</h2>
+      <p>Только текущие неотменённые бронирования и число занятых постов
+        по местным суткам филиала. Запись через полночь учитывается
+        в каждом затронутом дне. Это не число выполненных ремонтов
+        и не свободные окна для брони.</p>
+      {weekStatus==='loading'&&<p role="status">Загрузка недели…</p>}
+      {weekStatus==='idle'&&<p>Укажите филиал и дату начала недели.</p>}
+      {weekStatus==='denied'&&<p role="alert">Нет доступа к обзору недели.</p>}
+      {weekStatus==='error'&&<p role="alert">Не удалось получить обзор недели.
+        <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить обзор</button>
+      </p>}
+      {weekStatus==='ready'&&week&&<>
+        <p>С {week.fromDay}, часовой пояс: {week.timeZone}.</p>
+        <ul>{week.items.map(item=><li key={item.localDay}>
+          <button type="button" aria-label={'Показать день '+item.localDay}
+            onClick={()=>{resetPage();setDay(item.localDay);setMessage('');}}>
+            {item.localDay}
+          </button>
+          {' — '}{item.appointments} записей, {item.occupiedBays} занятых постов
+        </li>)}</ul>
+      </>}
+    </section>
     {status==='idle'&&<p>Укажите организацию, филиал и день.</p>}
     {status==='loading'&&<p role="status">Загрузка календаря…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или dev API отключён.</p>}
