@@ -167,6 +167,12 @@ export function AutoCrmLeads(){
       if([401,403,404].includes(response.status)){
         setPendingTask(null);setTasks([]);setRows([]);setSelected('');setStatus('denied');return;
       }
+      if(response.status>=500){
+        // Unknown server outcome: retain the exact request until an explicit replay.
+        setTasks([]);setTaskStatus('error');
+        setTaskMessage('Сервер не подтвердил результат. Повторите запрос с тем же ключом.');
+        return;
+      }
       if(!response.ok){
         setPendingTask(null);
         setTaskMessage(response.status===409?
