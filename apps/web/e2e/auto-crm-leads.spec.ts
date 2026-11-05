@@ -1,4 +1,12 @@
 import {test,expect} from '@playwright/test';
+ 
+// These tests exercise lead/task behavior; the new inbox has its own E2E suite.
+test.beforeEach(async({page})=>{
+  await page.route('**/api/v1/dev/auto/organizations/**/crm/inbox',
+    route=>route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[]})}));
+});
+
 
 const org='11111111-1111-4111-8111-111111111111';
 const loc='22222222-2222-4222-8222-222222222222';

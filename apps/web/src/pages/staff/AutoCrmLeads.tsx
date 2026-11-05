@@ -42,6 +42,20 @@ const taskCodeLabels:Record<Followup['taskCode'],string>={
 const taskStatusLabels:Record<Followup['status'],string>={
   OPEN:'Открыта',DONE:'Выполнена',CANCELED:'Отменена',
 };
+type InboxTask=Followup&{leadId:string};
+function parseInbox(v:unknown):InboxTask[]{
+  if(!v||typeof v!=='object')throw Error('inbox');
+  const x=v as {syntheticOnly?:unknown;items?:unknown};
+  if(x.syntheticOnly!==true||!Array.isArray(x.items)||x.items.length>100)
+    throw Error('inbox');
+  return x.items.map((item:unknown)=>{
+    if(!item||typeof item!=='object'||!('leadId' in item)||
+       typeof item.leadId!=='string'||!uuid.test(item.leadId))throw Error('inbox');
+    const task=parseFollowup(item);
+    if(task.status!=='OPEN'||task.event!==null)throw Error('inbox');
+    return {...task,leadId:item.leadId};
+  });
+}
 type PendingTaskRequest={url:string;body:Record<string,string>;scope:string;leadId:string};
 type PendingLeadRequest={url:string;body:Record<string,unknown>;scope:string;leadId:string|null};
 const validIso=(v:unknown):v is string=>typeof v==='string'&&
@@ -101,10 +115,17 @@ export function AutoCrmLeads(){
   const [taskDue,setTaskDue]=React.useState('');
   const [taskBusy,setTaskBusy]=React.useState(false);
   const [taskMessage,setTaskMessage]=React.useState('');
+  const [inbox,setInbox]=React.useState<InboxTask[]>([]);
+  const [inboxStatus,setInboxStatus]=React.useState<'idle'|'loading'|'ready'|'error'>('idle');
+  const [inboxRevision,setInboxRevision]=React.useState(0);
+  const [inboxOpening,setInboxOpening]=React.useState(false);
+  const [inboxMessage,setInboxMessage]=React.useState('');
   const [pendingTask,setPendingTask]=React.useState<PendingTaskRequest|null>(null);
   const [pendingLead,setPendingLead]=React.useState<PendingLeadRequest|null>(null);
   const valid=uuid.test(org)&&uuid.test(loc);
   const scope=org+':'+loc;
+  const scopeRef=React.useRef(scope);
+  scopeRef.current=scope;
   const [loadedScope,setLoadedScope]=React.useState('');
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
     '/locations/'+encodeURIComponent(loc)+'/crm/leads';
@@ -150,6 +171,53 @@ export function AutoCrmLeads(){
     })();
     return ()=>controller.abort();
   },[org,loc,selected,loadedScope,status,taskRevision]);
+  React.useEffect(()=>{
+    setInbox([]);setInboxStatus('idle');setInboxMessage('');
+    if(!valid||loadedScope!==scope||status!=='ready')return;
+    const controller=new AbortController();
+    setInboxStatus('loading');
+    void (async()=>{
+      try{
+        const response=await fetch('/api/v1/dev/auto/organizations/'+
+          encodeURIComponent(org)+'/locations/'+encodeURIComponent(loc)+'/crm/inbox',{
+            credentials:'include',cache:'no-store',signal:controller.signal,
+          });
+        if(controller.signal.aborted)return;
+        if([401,403,404].includes(response.status)){
+          setInbox([]);setRows([]);setSelected('');setStatus('denied');return;
+        }
+        if(!response.ok)throw Error('inbox');
+        const items=parseInbox(await response.json());
+        if(!controller.signal.aborted){setInbox(items);setInboxStatus('ready');}
+      }catch{if(!controller.signal.aborted)setInboxStatus('error');}
+    })();
+    return ()=>controller.abort();
+  },[org,loc,valid,loadedScope,status,inboxRevision,taskRevision,revision]);
+
+  async function openInboxLead(leadId:string){
+    if(inboxOpening||busy||taskBusy||pendingLead!==null||pendingTask!==null||
+       status!=='ready'||loadedScope!==scope)return;
+    const existing=rows.find(x=>x.leadId===leadId);
+    if(existing){setSelected(leadId);setInboxMessage('');return;}
+    setInboxOpening(true);setInboxMessage('');
+    try{
+      const response=await fetch(base+'/'+encodeURIComponent(leadId),{
+        credentials:'include',cache:'no-store',
+      });
+      if(scopeRef.current!==scope)return;
+      if([401,403,404].includes(response.status)){
+        setInbox([]);setRows([]);setSelected('');setStatus('denied');return;
+      }
+      if(!response.ok)throw Error('lead');
+      const lead=parseLead(await response.json());
+      if(scopeRef.current!==scope)return;
+      if(lead.leadId!==leadId)throw Error('lead');
+      setRows(current=>[lead,...current.filter(x=>x.leadId!==leadId)].slice(0,50));
+      setSelected(leadId);
+    }catch{
+      if(scopeRef.current===scope)setInboxMessage('Не удалось открыть обращение из очереди.');
+    }finally{setInboxOpening(false);}
+  }
   async function taskMutation(url:string,body:Record<string,string>,retry?:PendingTaskRequest){
     if(taskBusy||pendingLead!==null||loadedScope!==scope||status!=='ready'||!selected||
        (retry ? retry.scope!==scope||retry.leadId!==selected||
@@ -187,6 +255,7 @@ export function AutoCrmLeads(){
       setPendingTask(null);
       setTaskMessage('Действие подтверждено в неизменяемом журнале.');
       setTaskRevision(n=>n+1);
+      setInboxRevision(n=>n+1);
     }catch{
       if(!submitted){
         if(!retry){
@@ -239,6 +308,7 @@ export function AutoCrmLeads(){
       });
       setSelected(updated.leadId);
       setMessage('Изменение подтверждено. История обновлена.');
+      setInboxRevision(n=>n+1);
     }catch{
       if(!submitted){
         if(!retry){
@@ -270,6 +340,26 @@ export function AutoCrmLeads(){
     {status==='ready'&&loadedScope===scope&&<>
       <button type="button" disabled={busy} onClick={()=>setRevision(n=>n+1)}>
         Обновить список</button>
+      <div aria-label="Очередь CRM">
+        <h2>Очередь открытых задач филиала</h2>
+        <p>Только внутренние задачи. Сначала просроченные, затем ближайшие по сроку.
+          Видимость зависит от действующей роли и подтверждённой связи с автомобилем.</p>
+        <button type="button" disabled={busy||taskBusy||inboxOpening}
+          onClick={()=>setInboxRevision(n=>n+1)}>Обновить очередь</button>
+        {inboxStatus==='loading'&&<p role="status">Чтение очереди…</p>}
+        {inboxStatus==='error'&&<p role="alert">Не удалось загрузить очередь.
+          Проверьте права и обновите очередь.</p>}
+        {inboxStatus==='ready'&&inbox.length===0&&<p>Открытых задач нет.</p>}
+        {inboxStatus==='ready'&&<ol>{inbox.map(task=><li key={task.taskId}>
+          {taskCodeLabels[task.taskCode]} ·
+          {new Date(task.dueAt).toLocaleString('ru-RU')} ·
+          {Date.parse(task.dueAt)<Date.now()?'Просрочена':'Запланирована'}
+          <button type="button"
+            disabled={inboxOpening||busy||taskBusy||pendingLead!==null||pendingTask!==null}
+            onClick={()=>void openInboxLead(task.leadId)}>Открыть обращение</button>
+        </li>)}</ol>}
+        {inboxMessage&&<p role="alert">{inboxMessage}</p>}
+      </div>
       <h2>Новое обращение</h2>
       <label>UUID подтверждённой связи <input aria-label="UUID подтверждённой связи"
         disabled={busy} value={link} onChange={e=>setLink(e.target.value)}/></label>
