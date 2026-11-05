@@ -11,7 +11,7 @@ const row={taskId:task,leadId:lead,ownerId:owner,creatorId:owner,
   taskCode:'CALL_BACK',dueAt:due,createdAt:due,status:'OPEN',event:null};
 const leadItem={leadId:lead,customerLinkId:link,ownerId:owner,
   sourceCode:'WEB',status:'NEW',syntheticOnly:true,events:[],createdAt:due};
-const inbox='**/api/v1/dev/auto/organizations/**/crm/inbox';
+const inbox='**/api/v1/dev/auto/organizations/**/crm/inbox**';
 const leads='**/api/v1/dev/auto/organizations/**/crm/leads**';
 const tasks='**/api/v1/dev/auto/organizations/**/crm/leads/*/tasks**';
 
@@ -34,7 +34,7 @@ test('staff CRM inbox: overdue task opens lead outside limited list, DONE refres
   });
   await page.route(inbox,route=>route.fulfill({
     status:200,contentType:'application/json',
-    body:JSON.stringify({syntheticOnly:true,items:done?[]:[row]}),
+    body:JSON.stringify({syntheticOnly:true,items:done?[]:[row],nextCursor:null}),
   }));
   await page.route(tasks,route=>{
     if(route.request().method()==='GET')return route.fulfill({
@@ -76,7 +76,7 @@ test('CRM inbox denies revoked access and wipes previous queue on scope switch',
     body:JSON.stringify({syntheticOnly:true,items:[]})}));
   await page.route(inbox,route=>route.fulfill({
     status:denied?403:200,contentType:'application/json',
-    body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({syntheticOnly:true,items:[row]}),
+    body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({syntheticOnly:true,items:[row],nextCursor:null}),
   }));
   await page.goto('/staff/auto-crm-leads');
   await scope(page);
@@ -96,10 +96,67 @@ test('CRM inbox malformed or oversized response fails closed',async({page})=>{
     body:JSON.stringify({syntheticOnly:true,items:[]})}));
   await page.route(inbox,route=>route.fulfill({
     status:200,contentType:'application/json',
-    body:JSON.stringify({syntheticOnly:true,items:[{...row,leadId:'not-a-uuid'}]}),
+    body:JSON.stringify({syntheticOnly:true,items:[{...row,leadId:'not-a-uuid'}],nextCursor:null}),
   }));
   await page.goto('/staff/auto-crm-leads');
   await scope(page);
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить очередь');
   await expect(page.getByRole('button',{name:'Открыть обращение'})).toHaveCount(0);
+});
+
+test('CRM inbox: next/previous pages, refresh resets cursor, 390/1280',async({page})=>{
+  const taskIds=Array.from({length:27},(_,i)=>
+    'aaaaaaaa-aaaa-4aaa-8aaa-'+String(i+1).padStart(12,'0'));
+  const rows=taskIds.map((taskId,i)=>({...row,taskId,
+    dueAt:new Date(Date.now()+(i+1)*86400000).toISOString()}));
+  const seenQueries:string[]=[];
+  await page.route(leads,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,items:[]}),
+  }));
+  await page.route(inbox,route=>{
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    seenQueries.push(cursor??'FIRST');
+    const items=cursor?rows.slice(25):rows.slice(0,25);
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items,
+        nextCursor:cursor?null:'cursor-page-2'})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const queue=page.getByLabel('Очередь CRM');
+  await expect(queue.locator('ol > li')).toHaveCount(25);
+  await queue.getByRole('button',{name:'Следующая страница'}).click();
+  await expect(queue.locator('ol > li')).toHaveCount(2);
+  await expect(queue.getByRole('button',{name:'Предыдущая страница'})).toBeVisible();
+  await queue.getByRole('button',{name:'Предыдущая страница'}).click();
+  await expect(queue.locator('ol > li')).toHaveCount(25);
+  await queue.getByRole('button',{name:'Обновить очередь'}).click();
+  await expect(queue.getByRole('button',{name:'Предыдущая страница'})).toHaveCount(0);
+  expect(seenQueries).toContain('cursor-page-2');
+  expect(seenQueries.at(-1)).toBe('FIRST');
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});
+
+test('CRM inbox: invalid nextCursor fails closed, previous tasks cleared on 403',async({page})=>{
+  await page.route(leads,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,items:[]}),
+  }));
+  let malformed=false;
+  await page.route(inbox,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,items:[row],
+      nextCursor:malformed?'../../../malicious':null}),
+  }));
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const queue=page.getByLabel('Очередь CRM');
+  await expect(queue.getByRole('button',{name:'Открыть обращение'})).toBeVisible();
+  malformed=true;
+  await queue.getByRole('button',{name:'Обновить очередь'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить очередь');
+  await expect(queue.getByRole('button',{name:'Открыть обращение'})).toHaveCount(0);
 });

@@ -43,18 +43,23 @@ const taskStatusLabels:Record<Followup['status'],string>={
   OPEN:'Открыта',DONE:'Выполнена',CANCELED:'Отменена',
 };
 type InboxTask=Followup&{leadId:string};
-function parseInbox(v:unknown):InboxTask[]{
+type InboxPage={items:InboxTask[];nextCursor:string|null};
+function parseInbox(v:unknown):InboxPage{
   if(!v||typeof v!=='object')throw Error('inbox');
-  const x=v as {syntheticOnly?:unknown;items?:unknown};
-  if(x.syntheticOnly!==true||!Array.isArray(x.items)||x.items.length>100)
+  const x=v as {syntheticOnly?:unknown;items?:unknown;nextCursor?:unknown};
+  if(x.syntheticOnly!==true||!Array.isArray(x.items)||x.items.length>25||
+     !(x.nextCursor===null||(typeof x.nextCursor==='string'&&
+       x.nextCursor.length>0&&x.nextCursor.length<=180&&
+       /^[A-Za-z0-9_-]+$/.test(x.nextCursor))))
     throw Error('inbox');
-  return x.items.map((item:unknown)=>{
+  const items=x.items.map((item:unknown)=>{
     if(!item||typeof item!=='object'||!('leadId' in item)||
        typeof item.leadId!=='string'||!uuid.test(item.leadId))throw Error('inbox');
     const task=parseFollowup(item);
     if(task.status!=='OPEN'||task.event!==null)throw Error('inbox');
     return {...task,leadId:item.leadId};
   });
+  return {items,nextCursor:x.nextCursor as string|null};
 }
 type PendingTaskRequest={url:string;body:Record<string,string>;scope:string;leadId:string};
 type PendingLeadRequest={url:string;body:Record<string,unknown>;scope:string;leadId:string|null};
@@ -118,6 +123,9 @@ export function AutoCrmLeads(){
   const [inbox,setInbox]=React.useState<InboxTask[]>([]);
   const [inboxStatus,setInboxStatus]=React.useState<'idle'|'loading'|'ready'|'error'>('idle');
   const [inboxRevision,setInboxRevision]=React.useState(0);
+  const [inboxCursor,setInboxCursor]=React.useState<string|null>(null);
+  const [inboxHistory,setInboxHistory]=React.useState<(string|null)[]>([]);
+  const [inboxNext,setInboxNext]=React.useState<string|null>(null);
   const [inboxOpening,setInboxOpening]=React.useState(false);
   const [inboxMessage,setInboxMessage]=React.useState('');
   const [pendingTask,setPendingTask]=React.useState<PendingTaskRequest|null>(null);
@@ -172,14 +180,15 @@ export function AutoCrmLeads(){
     return ()=>controller.abort();
   },[org,loc,selected,loadedScope,status,taskRevision]);
   React.useEffect(()=>{
-    setInbox([]);setInboxStatus('idle');setInboxMessage('');
+    setInbox([]);setInboxNext(null);setInboxStatus('idle');setInboxMessage('');
     if(!valid||loadedScope!==scope||status!=='ready')return;
     const controller=new AbortController();
     setInboxStatus('loading');
     void (async()=>{
       try{
         const response=await fetch('/api/v1/dev/auto/organizations/'+
-          encodeURIComponent(org)+'/locations/'+encodeURIComponent(loc)+'/crm/inbox',{
+          encodeURIComponent(org)+'/locations/'+encodeURIComponent(loc)+'/crm/inbox'+
+          (inboxCursor?'?cursor='+encodeURIComponent(inboxCursor):''),{
             credentials:'include',cache:'no-store',signal:controller.signal,
           });
         if(controller.signal.aborted)return;
@@ -187,12 +196,12 @@ export function AutoCrmLeads(){
           setInbox([]);setRows([]);setSelected('');setStatus('denied');return;
         }
         if(!response.ok)throw Error('inbox');
-        const items=parseInbox(await response.json());
-        if(!controller.signal.aborted){setInbox(items);setInboxStatus('ready');}
+        const page=parseInbox(await response.json());
+        if(!controller.signal.aborted){setInbox(page.items);setInboxNext(page.nextCursor);setInboxStatus('ready');}
       }catch{if(!controller.signal.aborted)setInboxStatus('error');}
     })();
     return ()=>controller.abort();
-  },[org,loc,valid,loadedScope,status,inboxRevision,taskRevision,revision]);
+  },[org,loc,valid,loadedScope,status,inboxRevision,inboxCursor,taskRevision,revision]);
 
   async function openInboxLead(leadId:string){
     if(inboxOpening||busy||taskBusy||pendingLead!==null||pendingTask!==null||
@@ -255,7 +264,7 @@ export function AutoCrmLeads(){
       setPendingTask(null);
       setTaskMessage('Действие подтверждено в неизменяемом журнале.');
       setTaskRevision(n=>n+1);
-      setInboxRevision(n=>n+1);
+      setInboxCursor(null);setInboxHistory([]);setInboxRevision(n=>n+1);
     }catch{
       if(!submitted){
         if(!retry){
@@ -308,7 +317,7 @@ export function AutoCrmLeads(){
       });
       setSelected(updated.leadId);
       setMessage('Изменение подтверждено. История обновлена.');
-      setInboxRevision(n=>n+1);
+      setInboxCursor(null);setInboxHistory([]);setInboxRevision(n=>n+1);
     }catch{
       if(!submitted){
         if(!retry){
@@ -330,9 +339,9 @@ export function AutoCrmLeads(){
       реальных номеров. Этап «Записан» связывается с существующей записью,
       но не означает посещение или оплату.</p>
     <label>UUID организации <input aria-label="UUID организации" disabled={busy||taskBusy}
-      value={org} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setOrg(e.target.value);}}/></label>
+      value={org} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setInboxCursor(null);setInboxHistory([]);setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" disabled={busy||taskBusy}
-      value={loc} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setLoc(e.target.value);}}/></label>
+      value={loc} onChange={e=>{setPendingTask(null);setPendingLead(null);setRows([]);setSelected('');setStatus('idle');setInboxCursor(null);setInboxHistory([]);setLoc(e.target.value);}}/></label>
     {status==='idle'&&<p>Укажите организацию и филиал.</p>}
     {status==='loading'&&<p role="status">Чтение обращений…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
@@ -345,7 +354,7 @@ export function AutoCrmLeads(){
         <p>Только внутренние задачи. Сначала просроченные, затем ближайшие по сроку.
           Видимость зависит от действующей роли и подтверждённой связи с автомобилем.</p>
         <button type="button" disabled={busy||taskBusy||inboxOpening}
-          onClick={()=>setInboxRevision(n=>n+1)}>Обновить очередь</button>
+          onClick={()=>{setInboxCursor(null);setInboxHistory([]);setInboxRevision(n=>n+1);}}>Обновить очередь</button>
         {inboxStatus==='loading'&&<p role="status">Чтение очереди…</p>}
         {inboxStatus==='error'&&<p role="alert">Не удалось загрузить очередь.
           Проверьте права и обновите очередь.</p>}
@@ -358,6 +367,18 @@ export function AutoCrmLeads(){
             disabled={inboxOpening||busy||taskBusy||pendingLead!==null||pendingTask!==null}
             onClick={()=>void openInboxLead(task.leadId)}>Открыть обращение</button>
         </li>)}</ol>}
+        {inboxStatus==='ready'&&<div>
+          {inboxHistory.length>0&&<button type="button" disabled={inboxOpening||busy||taskBusy}
+            onClick={()=>{
+              setInboxCursor(inboxHistory[inboxHistory.length-1]);
+              setInboxHistory(current=>current.slice(0,-1));
+            }}>Предыдущая страница</button>}
+          {inboxNext&&<button type="button" disabled={inboxOpening||busy||taskBusy}
+            onClick={()=>{
+              setInboxHistory(current=>[...current,inboxCursor]);
+              setInboxCursor(inboxNext);
+            }}>Следующая страница</button>}
+        </div>}
         {inboxMessage&&<p role="alert">{inboxMessage}</p>}
       </div>
       <h2>Новое обращение</h2>
