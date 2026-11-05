@@ -170,3 +170,92 @@ def test_concurrent_same_key_create_and_one_lead_per_source(monkeypatch):
         ).fetchone()[0]==1
         with pytest.raises(LeadConflict):
             create_lead(db,d["tokens"][d["intake"]],org,loc,d["link"],"PHONE",uuid4())
+
+
+def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeypatch):
+    """A real PG17 tenant has >25 leads; all must be reachable without a gap."""
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    base=url(org,loc)
+    session(http,d,d["intake"])
+    original=http.post(base,headers={
+        "Origin":"https://127.0.0.1","X-CSRF-Token":d["csrf"][d["intake"]],
+    },json={"customerLinkId":str(d["link"]),"sourceCode":"WEB",
+            "requestKey":str(uuid4())})
+    assert original.status_code==201,original.text
+    with psycopg.connect(DSN) as db:
+        # Each distinct verified synthetic vehicle+customer proof produces
+        # a separate immutable lead; no real customer or production records.
+        for _ in range(27):
+            vehicle,link,lead=uuid4(),uuid4(),uuid4()
+            db.execute("INSERT INTO auto_vehicle(id,make,model) VALUES(%s,'Synthetic','Test')",
+                       (vehicle,))
+            db.execute(
+                """INSERT INTO auto_vehicle_customer_link
+                   (id,vehicle_id,customer_id,verified_at,verified_by)
+                   VALUES(%s,%s,%s,now(),%s)""",
+                (link,vehicle,d["ca"],d["manager"]),
+            )
+            db.execute(
+                "INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) "
+                "VALUES(%s,%s)",(vehicle,loc),
+            )
+            db.execute(
+                """INSERT INTO auto_crm_lead
+                   (id,organization_id,location_id,customer_link_id,owner_id,
+                    source_code,request_key)
+                   VALUES(%s,%s,%s,%s,%s,'WALK_IN',%s)""",
+                (lead,org,loc,link,d["intake"],uuid4()),
+            )
+        expected=[str(r[0]) for r in db.execute(
+            """SELECT id FROM auto_crm_lead WHERE organization_id=%s
+               AND location_id=%s ORDER BY created_at DESC,id DESC""",
+            (org,loc),
+        ).fetchall()]
+    first=http.get(base)
+    assert first.status_code==200,first.text
+    assert first.headers["cache-control"]=="no-store"
+    page1=first.json()
+    assert len(page1["items"])==25 and page1["nextCursor"]
+    second=http.get(base,params={"cursor":page1["nextCursor"]})
+    assert second.status_code==200,second.text
+    page2=second.json()
+    assert len(page2["items"])==3 and page2["nextCursor"] is None
+    ids=[x["leadId"] for x in page1["items"]+page2["items"]]
+    assert ids==expected
+    assert len(set(ids))==28
+
+    # Cursor is a position, never an authorization or tenant grant.
+    assert http.get(url(foreign,foreign_loc),params={
+        "cursor":page1["nextCursor"],
+    }).status_code==403
+    for bad in ("!", "a"*181, "====", "invalid"):
+        assert http.get(base,params={"cursor":bad}).status_code==422
+    http.cookies.set("rp_session",d["tokens"][d["client_a"]])
+    assert http.get(base,params={"cursor":"invalid"}).status_code==403
+    session(http,d,d["intake"])
+    with psycopg.connect(DSN) as db:
+        # Revoke a proof from the second page; the next request must
+        # filter it before pagination and never leak a stale row.
+        victim=page2["items"][0]["customerLinkId"]
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() "
+                   "WHERE id=%s",(victim,))
+    after=http.get(base,params={"cursor":page1["nextCursor"]})
+    assert after.status_code==200,after.text
+    assert len(after.json()["items"])==2
+    assert victim not in after.text
+
+
+def test_lead_cursor_roundtrip_order_and_noncanonical_rejected():
+    from datetime import datetime,timezone
+    from uuid import UUID
+    from roboport_api.auto_crm_leads import (
+        _decode_lead_cursor,_encode_lead_cursor,LeadDenied,
+    )
+    date=datetime(2030,10,27,2,30,tzinfo=timezone.utc)
+    key=UUID("11111111-1111-4111-8111-111111111111")
+    cursor=_encode_lead_cursor(date,key)
+    assert _decode_lead_cursor(cursor)==(date,key)
+    for changed in (cursor+"=",cursor.lower(),cursor+"_", "eA"):
+        if changed!=cursor:
+            with pytest.raises(LeadDenied):
+                _decode_lead_cursor(changed)
