@@ -41,9 +41,9 @@ def _encode_cursor(due,ident):
 
 
 def list_inbox(conn,token,org,loc,cursor=None):
-    after=_decode_cursor(cursor)
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
+        after=_decode_cursor(cursor)
         # Limit AFTER filtering proof/tenant/owner/open status, not before.
         # The keyset is stable across concurrent inserts/resolutions;
         # each page rechecks current scope and proof independently.
