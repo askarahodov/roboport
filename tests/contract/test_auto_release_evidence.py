@@ -75,7 +75,22 @@ def test_future_approval_and_malformed_dns_block():
                 "https://example..com/review",
                 "https://example.com./review",
                 "https://github.com/review#fragment",
-                "https://bad_host.example/review"):
+                "https://bad_host.example/review",
+                "https://audit.internal/approval",
+                "https://docs.example.test/approval",
+                "https://company.local/approval",
+                "https://audit.invalid/approval",
+                "https://hidden.onion/approval",
+                "https://sub.localhost/approval",
+                "https://docs.example./approval"):
         item = complete()
         item["gates"]["ci_main"]["evidence_url"] = url
         assert "ci_main" in validate_evidence(item), url
+
+
+def test_evidence_urls_allow_public_https_hosts_without_verifying_their_truth():
+    for url in ("https://github.com/example/repo/actions",
+                "https://docs.python.org/3/library/urllib.parse.html"):
+        item = complete()
+        item["gates"]["ci_main"]["evidence_url"] = url
+        assert validate_evidence(item) == ()
