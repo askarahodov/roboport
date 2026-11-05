@@ -9,6 +9,11 @@ type OpeningPolicy={configured:boolean;version:number;timeZone:string;
   closedDates:string[];syntheticOnly:true};
 type OpeningDraft={weekday:number;open:string;close:string};
 const weekdays=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+const russianCount=(n:number,one:string,few:string,many:string)=>{
+  const tens=n%100,ones=n%10;
+  return tens>=11&&tens<=14?many:
+    ones===1?one:ones>=2&&ones<=4?few:many;
+};
 const toClock=(minutes:number)=>String(Math.floor(minutes/60)).padStart(2,'0')+':'+
   String(minutes%60).padStart(2,'0');
 const fromClock=(value:string)=>{
@@ -475,7 +480,8 @@ export function AutoCalendar() {
             onClick={()=>{resetPage();setDay(item.localDay);setMessage('');}}>
             {item.localDay}
           </button>
-          {' — '}{item.appointments} записей, {item.occupiedBays} занятых постов
+          {' — '}{item.appointments} {russianCount(item.appointments,'запись','записи','записей')}, {' '}
+          {item.occupiedBays} {russianCount(item.occupiedBays,'занятый пост','занятых поста','занятых постов')}
         </li>)}</ul>
       </>}
     </section>
