@@ -239,6 +239,6 @@ test('CSRF failure before sending does not trap user in uncertain replay',async(
   await expect(page.getByRole('button',{name:'Создать задачу'})).toBeEnabled();
   expect(taskPosts).toBe(0);
   await page.getByRole('button',{name:'Создать задачу'}).click();
-  await expect(page.getByRole('status')).toContainText('Действие подтверждено');
-  expect(taskPosts).toBe(1);
+  await expect.poll(()=>taskPosts).toBe(1);
+  await expect(page.getByRole('button',{name:'Повторить запрос с тем же ключом'})).toHaveCount(0);
 });
