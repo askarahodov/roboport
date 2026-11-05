@@ -130,3 +130,57 @@ test('CRM funnel malformed and inconsistent reports fail closed without stale to
   await page.getByLabel('UUID организации').fill(other);
   await expect(page.getByLabel('Результаты воронки CRM')).toHaveCount(0);
 });
+
+
+test('CRM funnel CSV: whole manager aggregate, fresh scope and 403 revoke',async({page})=>{
+  let revoked=false;
+  const exports:string[]=[];
+  await page.route(routePath,route=>{
+    const u=new URL(route.request().url());
+    const from=u.searchParams.get('fromDay')??'';
+    const to=u.searchParams.get('toDay')??'';
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify(full(from,to))});
+  });
+  await page.route('**/crm/funnel/export?*',route=>{
+    const u=new URL(route.request().url());
+    exports.push(u.pathname+'?'+u.searchParams.toString());
+    if(revoked)return route.fulfill({status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'});
+    const csv=['Источник;Всего;Новое;Обработано;Записан;Отказ;Доля записанных (б.п.)',
+      'Все источники;4;1;1;1;1;2500',
+      'Сайт;2;1;0;1;0;5000',
+      'Звонок;1;0;1;0;0;0',
+      'Личное обращение;1;0;0;0;1;0'].join('\r\n');
+    return route.fulfill({status:200,contentType:'text/csv; charset=utf-8',
+      headers:{'content-disposition':'attachment; filename="auto-crm-funnel.csv"'},
+      body:'\ufeff'+csv});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-funnel');
+  await scope(page);
+  const view=page.getByLabel('Управленческая воронка CRM (dev)');
+  const load=view.getByRole('button',{name:'Построить воронку CRM'});
+  await expect(load).toBeEnabled();
+  await load.click();
+  const results=page.getByLabel('Результаты воронки CRM');
+  await expect(results.getByRole('table',{
+    name:'Текущие этапы по источникам обращений'}).locator('tbody tr')).toHaveCount(4);
+  const downloadPromise=page.waitForEvent('download');
+  await results.getByRole('button',{name:'Скачать воронку CRM в CSV'}).click();
+  const file=await downloadPromise;
+  expect(file.suggestedFilename()).toBe('auto-crm-funnel.csv');
+  expect(exports).toHaveLength(1);
+  expect(exports[0]).toContain('/locations/'+loc+'/crm/funnel/export?');
+  expect(exports[0]).toContain('fromDay=');
+  expect(exports[0]).toContain('toDay=');
+  await expect(results.getByRole('button',{name:'Скачать воронку CRM в CSV'})).toBeEnabled();
+  revoked=true;
+  await results.getByRole('button',{name:'Скачать воронку CRM в CSV'}).click();
+  await expect(view.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(results).toHaveCount(0);
+  expect(exports).toHaveLength(2);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(1280);
+});
