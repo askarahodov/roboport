@@ -54,7 +54,9 @@ export function AutoCrmLeads(){
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
     '/locations/'+encodeURIComponent(loc)+'/crm/leads';
   React.useEffect(()=>{
-    setRows([]);setSelected('');setStatus('idle');setLoadedScope('');
+    // Keep the selected lead during same-branch refresh (e.g. after a
+    // stage change). Clearing on scope changes is immediate in inputs below.
+    setRows([]);setStatus('idle');setLoadedScope('');
     if(!valid)return;
     const controller=new AbortController();
     setStatus('loading');
@@ -101,9 +103,9 @@ export function AutoCrmLeads(){
       реальных номеров. Этап «Записан» связывается с существующей записью,
       но не означает посещение или оплату.</p>
     <label>UUID организации <input aria-label="UUID организации" disabled={busy}
-      value={org} onChange={e=>setOrg(e.target.value)}/></label>
+      value={org} onChange={e=>{setRows([]);setSelected('');setStatus('idle');setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" disabled={busy}
-      value={loc} onChange={e=>setLoc(e.target.value)}/></label>
+      value={loc} onChange={e=>{setRows([]);setSelected('');setStatus('idle');setLoc(e.target.value);}}/></label>
     {status==='idle'&&<p>Укажите организацию и филиал.</p>}
     {status==='loading'&&<p role="status">Чтение обращений…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}

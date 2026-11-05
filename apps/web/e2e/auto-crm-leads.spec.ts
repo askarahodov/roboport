@@ -83,9 +83,9 @@ test('CRM revoked scope clears previous lead and denies staff operations',async(
   await page.goto('/staff/auto-crm-leads');
   await scope(page);
   await expect(page.getByLabel('Обращение')).toBeVisible();
+  denied=true;
   await page.getByRole('textbox',{name:'UUID филиала'})
     .fill('88888888-8888-4888-8888-888888888888');
-  denied=true;
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByLabel('Обращение')).toHaveCount(0);
   await expect(page.getByText('Текущий этап:',{exact:false})).toHaveCount(0);
