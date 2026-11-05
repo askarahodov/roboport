@@ -183,3 +183,51 @@ test('ABC/XYZ never rejects a locally closed month by using UTC browser time',as
   expect(calls).toBe(1);
   await expect(page.getByLabel('Результаты ABC XYZ')).toHaveCount(0);
 });
+
+
+test('manager downloads complete scoped CSV and revoke blocks export fail closed',async({page})=>{
+  const queried:string[]=[];
+  let forbidden=false;
+  await page.route(routePath,route=>{
+    const u=new URL(route.request().url());
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify(body(u.searchParams.get('fromMonth')??'',
+        u.searchParams.get('toMonth')??'',0))});
+  });
+  await page.route('**/stock-abc-xyz/export?*',route=>{
+    const u=new URL(route.request().url());
+    queried.push(u.pathname+'?'+u.searchParams);
+    if(forbidden)return route.fulfill({status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'});
+    const lines=['SKU UUID;Артикул;Выдано',
+      ...items.map(row=>row.skuId+';'+row.article+';'+row.grossIssued)];
+    return route.fulfill({status:200,contentType:'text/csv; charset=utf-8',
+      headers:{'content-disposition':'attachment; filename="auto-stock-abc-xyz.csv"'},
+      body:'\ufeff'+lines.join('\r\n')});
+  });
+  await page.goto('/staff/auto-stock-abc-xyz');
+  await scope(page);
+  const months=completedMonths();
+  await page.getByLabel('С месяца').fill(months[0]);
+  await page.getByLabel('По месяц').fill(months[2]);
+  await expect(page.getByLabel('С месяца')).toHaveValue(months[0]);
+  await expect(page.getByLabel('По месяц')).toHaveValue(months[2]);
+  const load=page.getByRole('button',{name:'Построить ABC/XYZ'});
+  await expect(load).toBeEnabled();
+  await load.click();
+  const results=page.getByLabel('Результаты ABC XYZ');
+  await expect(results).toBeVisible();
+  await expect(results.getByRole('table').locator('tbody tr')).toHaveCount(25);
+  const downloadPromise=page.waitForEvent('download');
+  await results.getByRole('button',{name:'Скачать весь отчёт CSV'}).click();
+  const download=await downloadPromise;
+  expect(download.suggestedFilename()).toBe('auto-stock-abc-xyz.csv');
+  expect(queried).toHaveLength(1);
+  expect(queried[0]).toContain('/locations/'+loc+'/stock-abc-xyz/export?');
+  expect(queried[0]).toContain('fromMonth='+months[0]);
+  forbidden=true;
+  await results.getByRole('button',{name:'Скачать весь отчёт CSV'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByLabel('Результаты ABC XYZ')).toHaveCount(0);
+  expect(queried).toHaveLength(2);
+});

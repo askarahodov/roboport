@@ -109,8 +109,17 @@ export function AutoStockAbcXyz(){
     'idle'|'loading'|'ready'|'denied'|'invalid'|'capacity'|'error'
   >('idle');
   const active=React.useRef<AbortController|null>(null);
-  React.useEffect(()=>()=>active.current?.abort(),[]);
-  function clear(){active.current?.abort();setReport(null);setStatus('idle');setOffset(0);}
+  const exportActive=React.useRef<AbortController|null>(null);
+  const [exporting,setExporting]=React.useState(false);
+  const [exportError,setExportError]=React.useState('');
+  React.useEffect(()=>()=>{
+    active.current?.abort();exportActive.current?.abort();
+  },[]);
+  function clear(){
+    active.current?.abort();exportActive.current?.abort();
+    setExporting(false);setExportError('');
+    setReport(null);setStatus('idle');setOffset(0);
+  }
   const span=month.test(from)&&month.test(to)?monthIndex(to)-monthIndex(from)+1:NaN;
   const valid=uuid.test(org)&&uuid.test(loc)&&Number.isInteger(span)&&
     span>=3&&span<=12;
@@ -139,6 +148,40 @@ export function AutoStockAbcXyz(){
       const result=parse(await response.json(),from,to,targetOffset);
       if(!controller.signal.aborted){setOffset(targetOffset);setReport(result);setStatus('ready');}
     }catch{if(!controller.signal.aborted)setStatus('error');}
+  }
+  async function downloadCsv(){
+    if(!report||status!=='ready'||exporting)return;
+    exportActive.current?.abort();
+    const controller=new AbortController();
+    exportActive.current=controller;
+    setExporting(true);setExportError('');
+    const query=new URLSearchParams({fromMonth:from,toMonth:to});
+    const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
+      '/locations/'+encodeURIComponent(loc)+'/stock-abc-xyz/export?'+query;
+    try{
+      const response=await fetch(url,{
+        credentials:'include',cache:'no-store',signal:controller.signal,
+      });
+      if(controller.signal.aborted)return;
+      if([401,403,404].includes(response.status)){
+        setReport(null);setStatus('denied');return;
+      }
+      if(response.status===409){setReport(null);setStatus('capacity');return;}
+      if(response.status===422){setReport(null);setStatus('invalid');return;}
+      if(!response.ok||!response.headers.get('content-type')?.startsWith('text/csv'))
+        throw Error('export');
+      const blob=await response.blob();
+      if(controller.signal.aborted)return;
+      const objectUrl=URL.createObjectURL(blob);
+      const link=document.createElement('a');
+      link.href=objectUrl;link.download='auto-stock-abc-xyz.csv';
+      document.body.appendChild(link);link.click();link.remove();
+      window.setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
+    }catch{
+      if(!controller.signal.aborted)setExportError('Не удалось скачать CSV. Повторите запрос.');
+    }finally{
+      if(!controller.signal.aborted)setExporting(false);
+    }
   }
   return <section aria-label="Операционный ABC XYZ склада (dev)">
     <h1>ABC/XYZ-анализ выдач запчастей</h1>
@@ -169,6 +212,7 @@ export function AutoStockAbcXyz(){
     {status==='capacity'&&<p role="alert">В филиале слишком много SKU для этого отчёта.
       Ничего не было скрыто: расчёт прекращён целиком.</p>}
     {status==='error'&&<p role="alert">Не удалось получить ABC/XYZ. Повторите запрос.</p>}
+    {exportError&&<p role="alert">{exportError}</p>}
     {status==='ready'&&report&&<section aria-label="Результаты ABC XYZ">
       <p>Период: {report.fromMonth} — {report.toMonth}, зона {report.timeZone}.
         Всего SKU: {fmt(report.summary.skuCount)}, с выдачами:
@@ -182,6 +226,10 @@ export function AutoStockAbcXyz(){
         Y {fmt(report.summary.classCounts.Y)},
         Z {fmt(report.summary.classCounts.Z)}.
         Без выдач: {fmt(report.summary.classCounts.none)}.</p>
+      <button type="button" disabled={exporting}
+        onClick={()=>void downloadCsv()}>
+        {exporting?'Подготовка CSV…':'Скачать весь отчёт CSV'}
+      </button>
       <div style={{overflowX:'auto'}}>
         <table>
           <caption>Все позиции склада по количеству выдач, 25 на страницу</caption>

@@ -5,6 +5,8 @@ XYZ: coefficient of variation of monthly gross issued units over 3..12
 fully completed branch-local calendar months. RETURN is reported separately.
 No customer, work-order, supplier, employee or price data leaves this API.
 """
+import csv
+from io import StringIO
 from datetime import datetime,timezone
 from math import isqrt
 from uuid import UUID
@@ -12,7 +14,7 @@ from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
 
 import psycopg
 from fastapi import APIRouter,Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse,Response
 
 from .auto_org_authority import organization_role_allows
 from .auto_vehicle_claim_http import _request_dsn,_response
@@ -74,7 +76,8 @@ def _variation(monthly):
 
 
 def stock_abc_xyz(conn:psycopg.Connection,token:str,org:UUID,loc:UUID,
-                  first_month:str,last_month:str,offset:int=0):
+                  first_month:str,last_month:str,offset:int=0,
+                  include_all:bool=False):
     if (type(org) is not UUID or type(loc) is not UUID or
         type(offset) is not int or offset<0 or offset>1_000_000 or
         offset%PAGE_SIZE):
@@ -182,8 +185,9 @@ def stock_abc_xyz(conn:psycopg.Connection,token:str,org:UUID,loc:UUID,
             row["variationBasisPoints"],row["xyz"]=_variation(row["monthlyIssued"])
             counts[row["abc"]]+=1
             counts[row["xyz"]]+=1
-        page=ranked[offset:offset+PAGE_SIZE]
-        next_offset=(offset+PAGE_SIZE if offset+PAGE_SIZE<len(ranked) else None)
+        page=ranked if include_all else ranked[offset:offset+PAGE_SIZE]
+        next_offset=(None if include_all or offset+PAGE_SIZE>=len(ranked)
+                     else offset+PAGE_SIZE)
         return {
             "syntheticOnly":True,
             "basis":"GROSS_ISSUE_UNITS_CLOSED_MONTHS",
@@ -227,3 +231,53 @@ def get_stock_abc_xyz(org_id:str,loc_id:str,request:Request,
     except StockReportCapacity:
         return _response(request,409,"REPORT_LIMIT")
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+def _csv_article(value:str)->str:
+    """Keep articles as plain spreadsheet text, never executable formulas."""
+    clean="".join(" " if ord(ch)<32 or ord(ch)==127 else ch for ch in value)
+    if clean.lstrip(" \ufeff").startswith(("=","+","-","@")):
+        return "'"+clean
+    return clean
+
+
+def _csv_report(report:dict)->str:
+    """Complete branch-scoped UTF-8 CSV (semicolon for RU spreadsheet locales)."""
+    output=StringIO(newline="")
+    writer=csv.writer(output,delimiter=";",lineterminator="\r\n")
+    writer.writerow(("SKU UUID","Артикул","Выдано","Возвращено","Разница",
+                     "ABC","XYZ","Вариация (б.п.)",*report["months"]))
+    for item in report["items"]:
+        writer.writerow((item["skuId"],_csv_article(item["article"]),
+                         item["grossIssued"],item["grossReturned"],item["netPeriod"],
+                         item["abc"] or "",item["xyz"] or "",
+                         item["variationBasisPoints"] if item["variationBasisPoints"] is not None else "",
+                         *item["monthlyIssued"]))
+    return "\ufeff"+output.getvalue()
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/stock-abc-xyz/export")
+def export_stock_abc_xyz(org_id:str,loc_id:str,request:Request,
+                         fromMonth:str,toMonth:str):
+    """Full current synthetic report, no partial CSV on missing authority/cap."""
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(loc_id)
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    try:
+        with psycopg.connect(dsn) as db:
+            result=stock_abc_xyz(db,request.cookies.get("rp_session",""),
+                                 org,loc,fromMonth,toMonth,include_all=True)
+    except StockReportDenied:
+        return _response(request,403,"FORBIDDEN")
+    except StockReportInvalid:
+        return _response(request,422,"INVALID_INPUT")
+    except StockReportCapacity:
+        return _response(request,409,"REPORT_LIMIT")
+    return Response(content=_csv_report(result),media_type="text/csv; charset=utf-8",
+                    headers={"Cache-Control":"no-store",
+                             "X-Content-Type-Options":"nosniff",
+                             "Content-Disposition":'attachment; filename="auto-stock-abc-xyz.csv"'})

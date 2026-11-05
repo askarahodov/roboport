@@ -1,4 +1,6 @@
 """PG17: complete manager warehouse ABC/XYZ over closed months, no money or PII."""
+import csv
+from io import StringIO
 from datetime import datetime
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -6,7 +8,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 import pytest
 
-from roboport_api.auto_stock_abc_xyz import _variation,_month_string
+from roboport_api.auto_stock_abc_xyz import _variation,_month_string,_csv_report
 from test_pg_auto_bay_occupancy_http import _fixture
 from test_pg_auto_stock_ledger import sku,record
 from test_pg_auto_work_order_stock import work_order
@@ -246,3 +248,53 @@ def test_exact_integer_cv_boundaries_and_abc_of_zero_volume():
     # X 10% and Y 25% threshold boundary comparisons use integer maths.
     assert _variation([9,10,11])[1]=="X"
     assert _variation([10,10,16])[1]=="Y"
+
+
+def test_entire_branch_csv_export_is_authenticated_complete_and_scoped(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        months,ids=seed(db,d,org,loc,bay)
+    path=url(org,loc)+"/export"
+    params={"fromMonth":months[0],"toMonth":months[-1]}
+    assert http.get(path,params=params).status_code==403
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    assert http.get(path,params=params).status_code==403
+    http.cookies.set("rp_session",d["tokens"][d["manager"]])
+    response=http.get(path,params=params)
+    assert response.status_code==200,response.text
+    assert response.headers["cache-control"]=="no-store"
+    assert response.headers["x-content-type-options"]=="nosniff"
+    assert response.headers["content-disposition"].endswith('filename="auto-stock-abc-xyz.csv"')
+    assert response.text.startswith("\ufeffSKU UUID;Артикул;")
+    rows=list(csv.reader(StringIO(response.text.removeprefix("\ufeff")),delimiter=";"))
+    assert len(rows)==30  # header and all 29 SKU, not the first page only
+    assert rows[0][-3:]==months
+    assert len(rows[0])==11
+    assert len({row[0] for row in rows[1:]})==29
+    assert rows[1][0]==ids["A"] and rows[1][2]=="180"
+    assert rows[3][0]==ids["C"] and rows[3][4]=="40"
+    assert rows[3][-3:]==["12","15","18"]
+    assert http.get(url(foreign,foreign_loc)+"/export",params=params).status_code==403
+    assert http.get(path,params={"fromMonth":"2026-01","toMonth":"2026-01"}).status_code==422
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+                      WHERE organization_id=%s AND location_id=%s
+                        AND user_id=%s AND role_code='MANAGER'""",
+                   (org,loc,d["manager"]))
+    assert http.get(path,params=params).status_code==403
+
+
+def test_csv_escapes_spreadsheet_formulas_and_handles_malformed_article_text():
+    report={"months":["2026-06","2026-07","2026-08"],"items":[
+        {"skuId":str(uuid4()),"article":text,"grossIssued":1,
+         "grossReturned":0,"netPeriod":1,"abc":"A","xyz":"Z",
+         "variationBasisPoints":14142,"monthlyIssued":[1,0,0]}
+        for text in ("=2+2","+SUM(1,2)",
+                     "  -1","\t@external","normal;quoted\nrow")
+    ]}
+    rows=list(csv.reader(StringIO(_csv_report(report).removeprefix("\ufeff")),delimiter=";"))
+    assert [row[1] for row in rows[1:]]==[
+        "'=2+2","'+SUM(1,2)",
+        "'  -1","' @external","normal;quoted row",
+    ]
+    assert len(rows)==6 and all(len(row)==11 for row in rows)
