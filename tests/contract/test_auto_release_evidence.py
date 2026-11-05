@@ -82,6 +82,7 @@ def test_future_approval_and_malformed_dns_block():
                 "https://audit.invalid/approval",
                 "https://hidden.onion/approval",
                 "https://sub.localhost/approval",
+                "https://localhost.localdomain/approval",
                 "https://docs.example./approval"):
         item = complete()
         item["gates"]["ci_main"]["evidence_url"] = url
