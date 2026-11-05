@@ -11,7 +11,7 @@ const row={taskId:task,leadId:lead,ownerId:owner,creatorId:owner,
   taskCode:'CALL_BACK',dueAt:due,createdAt:due,status:'OPEN',event:null};
 const leadItem={leadId:lead,customerLinkId:link,ownerId:owner,
   sourceCode:'WEB',status:'NEW',syntheticOnly:true,events:[],createdAt:due};
-const inbox='**/api/v1/dev/auto/organizations/**/crm/inbox';
+const inbox='**/api/v1/dev/auto/organizations/**/crm/inbox**';
 const leads='**/api/v1/dev/auto/organizations/**/crm/leads**';
 const tasks='**/api/v1/dev/auto/organizations/**/crm/leads/*/tasks**';
 
