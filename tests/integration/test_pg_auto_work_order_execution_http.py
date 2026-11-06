@@ -188,6 +188,18 @@ def test_full_approved_execution_stock_handoff_and_independent_qc(monkeypatch):
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
                 db.execute("DELETE FROM auto_work_order_labor_entry WHERE service_id=%s",(service,))
+    # Even exact existing receipts cannot bypass a revoked vehicle/customer link.
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+                   (d["link"],))
+    mech=session(http,d,d["manager"])
+    assert post(http,base+"/labor",mech,labor_key,
+                serviceId=str(service),actualMinutes=32).status_code==403
+    assert post(http,base+"/materials/receive",mech,receipt_key,
+                issueId=issue).status_code==403
+    warehouse=session(http,d,d["intake"])
+    assert post(http,base+"/materials/issue",warehouse,issue_key,
+                lotId=str(lot),quantity=1).status_code==403
 
 
 def test_declined_stale_and_revoked_proof_block_execution(monkeypatch):
