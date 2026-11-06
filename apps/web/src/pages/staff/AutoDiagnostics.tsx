@@ -23,8 +23,7 @@ function parse(raw:unknown):State{
      !s.items.every(x=>x&&[x.id,x.serviceId,x.actorId].every(v=>typeof v==='string'&&uuid.test(v))&&
        ['NO_FAULT','MAINTENANCE_DUE','FAULT_CONFIRMED','FURTHER_CHECK'].includes(x.findingCode)&&
        ['ROUTINE','SOON','URGENT'].includes(x.severityCode)&&
-       typeof x.createdAt==='string'&&Number.isFinite(Date.parse(x.createdAt))||
-       !x))
+       typeof x.createdAt==='string'&&Number.isFinite(Date.parse(x.createdAt))))
     throw Error('invalid diagnostics');
   return s;
 }
