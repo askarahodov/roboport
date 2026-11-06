@@ -38,7 +38,26 @@ def test_closed_http_create_cancel_and_isolation(monkeypatch):
     created=client.post(url,json=data,headers=keyed)
     assert created.status_code==201,created.text
     ident=created.json()["appointmentId"]
-    assert client.post(url,json=data,headers=keyed).json()==created.json()
+    replay=client.post(url,json=data,headers=keyed)
+    assert replay.status_code==201, replay.text
+    assert replay.json()==created.json()
+    assert replay.headers["cache-control"]=="no-store"
+    # Один ключ — один fingerprint. Даже при смене только времени
+    # повтор не должен возвращать receipt исходной брони.
+    changed={**data,"startsAt":(starts+timedelta(hours=2)).isoformat(),
+                  "endsAt":(starts+timedelta(hours=3)).isoformat()}
+    collision=client.post(url,json=changed,headers=keyed)
+    assert collision.status_code==409, collision.text
+    assert collision.json()["code"]=="IDEMPOTENCY_KEY_REUSED"
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment_idempotency WHERE organization_id=%s AND request_key=%s",
+            (org,UUID(keyed["Idempotency-Key"])),
+        ).fetchone()==(1,)
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment WHERE organization_id=%s AND customer_link_id=%s",
+            (org,d["link"]),
+        ).fetchone()==(1,)
     assert client.post(url,json=data,headers=headers).status_code==409
     cancel=f"{url}/{ident}/cancel"
     assert client.post(f"{wrong}/{ident}/cancel",headers=headers).status_code==403
