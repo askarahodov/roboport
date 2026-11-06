@@ -2,7 +2,9 @@
 
 Никакой доступ по VIN; собственность проверяется по оригинальной verified-связи.
 """
+import hashlib
 from uuid import UUID
+from .keyset_cursor import encode_cursor, decode_cursor
 import psycopg
 
 from .auto_customer_orders import _actor, CustomerOrderDenied
@@ -36,9 +38,17 @@ def bookable_resources(conn: psycopg.Connection, token: str) -> list[dict]:
                 for o,l,p,b,make,model,tz in rows]
 
 
-def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
+def my_appointments(conn: psycopg.Connection, token: str, *, cursor: str | None = None) -> dict:
+    """Keyset page of at most 50 owned appointments; recheck live ACL per page."""
+    if cursor is not None and (type(cursor) is not str or not cursor or len(cursor) > 256):
+        raise ValueError("INVALID_CURSOR")
     with conn.transaction():
         actor = _actor(conn, token)
+        scope = hashlib.sha256(("customer-bookings:v1:" + str(actor)).encode()).hexdigest()[:32]
+        try:
+            position = decode_cursor(cursor, scope, token) if cursor is not None else None
+        except ValueError:
+            raise ValueError("INVALID_CURSOR") from None
         rows = conn.execute(
             """SELECT a.id,a.organization_id,a.location_id,a.customer_link_id,
                       b.id,b.bay_id,b.starts_at,b.ends_at,b.canceled_at,
@@ -88,14 +98,20 @@ def my_appointments(conn: psycopg.Connection, token: str) -> list[dict]:
                ) latest ON TRUE
                JOIN auto_bay_booking b ON b.id=latest.current_id
                  AND b.organization_id=org.id AND b.location_id=loc.id
-               ORDER BY b.starts_at DESC,a.id DESC LIMIT 50""",
-            (actor,),
+               AND (%s::timestamptz IS NULL OR (b.starts_at,a.id)<(%s::timestamptz,%s::uuid))
+               ORDER BY b.starts_at DESC,a.id DESC LIMIT 51""",
+            (actor, position[0] if position else None,
+             position[0] if position else None, position[1] if position else None),
         ).fetchall()
-        return [{"appointmentId":str(a),"organizationId":str(o),"locationId":str(l),
+        page = rows[:50]
+        next_cursor = (encode_cursor(page[-1][6], page[-1][0], scope, token)
+                       if len(rows) > 50 else None)
+        return {"items":[{"appointmentId":str(a),"organizationId":str(o),"locationId":str(l),
                  "customerLinkId":str(link),"bookingId":str(booking),"bayId":str(bay),
                  "startsAt":start.isoformat(),"endsAt":end.isoformat(),
                  "status":"CANCELED" if canceled is not None else "SCHEDULED",
                  "workOrderId":str(w),"timeZone":zone,
                  "canManage":canceled is None and not started,
                  "serviceIds":[str(service) for service in service_ids]}
-                for a,o,l,link,booking,bay,start,end,canceled,w,zone,started,service_ids in rows]
+                for a,o,l,link,booking,bay,start,end,canceled,w,zone,started,service_ids in page],
+                "nextCursor": next_cursor, "syntheticOnly": True}
