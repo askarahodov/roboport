@@ -166,3 +166,26 @@ PG17 CI теперь не ограничивается импортными stag
 ## Единый сценарий синтетического cutover автомобиля, услуг и склада (#172, current-dev)
 
 `0094_auto_inventory_activation` хранит неизменяемую связь каждого `SKU/STOCK` staged row с созданным `auto_stock_sku` и, для положительных количеств, физическим `RECEIPT` из ledger. Внутренний `rehearse_synthetic_cutover` требует оба scoped MANAGER+WAREHOUSE и отдельный synthetic flag, в **одной транзакции** выполняет три checksum-verified staging, vehicle/service/stock activation и независимую сверку. При ошибке любого этапа — rollback всего пакета; повтор атомарно проверяет исходные байты, identity lineage и RBAC, без удвоения остатков. Тесты включают чужой филиал, отзыв полномочий, конфликт услуги/SKU, immutable SQL, конкуренцию и отсутствие owner/history связи при VIN match. [Источник прав и эксплуатационных ограничений](SYNTHETIC_CUTOVER.md). Реальные клиентские данные/документы/XLSX-прямой импорт/закупочные стоимости, approved cutover/backup/RPO/RTO остаются planned и запрещены до #119/#172.
+
+
+## Контракт времени записи: ошибки данных не маскируются отказом доступа (current-dev, #113)
+
+Закрытые synthetic HTTP endpoints создания и переноса записи как для приёмщика
+(`/api/v1/dev/auto/organizations/{org}/appointments` и
+`/appointments/{id}/reschedule`), так и для клиента
+(`/api/v1/dev/auto/customer/booking/appointments` и
+`/appointments/{id}/reschedule`) требуют `startsAt` и `endsAt`
+с явным UTC offset, `endsAt > startsAt` и интервал не более 24 часов
+по фактическим UTC instant. На timezone-naive, нулевой, обратный
+или более чем 24-часовой интервал возвращается **422 `INVALID_INPUT`**
+до начала DB mutation — не ложный `403 FORBIDDEN`. Права сессии, CSRF,
+tenant/branch ACL и запрет прошлого времени продолжают проверяться
+отдельно; в частности, `403` не превращается в `422` при реальном
+отсутствии доступа. PG17 HTTP проверки на все четыре операции и отсутствие
+phantom Appointment/Reschedule находятся в
+`tests/integration/test_pg_auto_appointment_http.py`,
+`test_pg_auto_reschedule_http.py`,
+`test_pg_auto_customer_booking_http.py`.
+
+Это нормализация **только dev/synthetic API**, не release approval
+и не завершение всего #113. Production gate #119 остаётся закрытым.
