@@ -34,6 +34,22 @@ def test_closed_http_create_cancel_and_isolation(monkeypatch):
     headers={"Origin":"https://127.0.0.1","X-CSRF-Token":d["csrf"][d["intake"]]}
     wrong=f"/api/v1/dev/auto/organizations/{other}/appointments"
     assert client.post(wrong,json=data,headers=headers).status_code==403
+    # Неверный интервал — именно 422, без записи в БД и без подмены 403.
+    for wrong_time in (
+        {**data, "startsAt": starts.replace(tzinfo=None).isoformat()},
+        {**data, "endsAt": starts.isoformat()},
+        {**data, "endsAt": (starts-timedelta(minutes=1)).isoformat()},
+        {**data, "endsAt": (starts+timedelta(hours=25)).isoformat()},
+    ):
+        rejected=client.post(url,json=wrong_time,headers={
+            **headers,"Idempotency-Key":str(uuid4())})
+        assert rejected.status_code==422,rejected.text
+        assert rejected.json()["code"]=="INVALID_INPUT"
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment WHERE organization_id=%s",
+            (org,),
+        ).fetchone()==(0,)
     keyed={**headers,"Idempotency-Key":str(uuid4())}
     created=client.post(url,json=data,headers=keyed)
     assert created.status_code==201,created.text
