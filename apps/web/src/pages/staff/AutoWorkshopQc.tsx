@@ -100,6 +100,7 @@ export function AutoWorkshopQc() {
       if(key==='qc'){
         queueSequence.current+=1;
         setQueue(emptyQueue());
+        void loadQueue(null,true);
       }
     }catch{
       if(currentScope===scope){
@@ -117,9 +118,9 @@ export function AutoWorkshopQc() {
     queueSequence.current+=1;
     setQueue(emptyQueue());
   },[org,loc]);
-  async function loadQueue(after:string|null=null){
-    if(!uuid.test(org.trim())||!uuid.test(loc.trim())||busy||
-       queue.status==='loading')return;
+  async function loadQueue(after:string|null=null,force=false){
+    if(!uuid.test(org.trim())||!uuid.test(loc.trim())||
+       (!force&&(busy||queue.status==='loading')))return;
     const seq=++queueSequence.current;
     const branch={...currentBranch.current};
     setQueue({...emptyQueue(),status:'loading'});
