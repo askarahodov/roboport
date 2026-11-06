@@ -178,8 +178,9 @@ def pending_work_order_qc(conn, token, org, loc, limit=20, after_order_id=None):
     Selection is advisory. QC POST independently locks the work order and
     revalidates maker-checker, work completion and current proof.
     """
-    if (type(token) is not str or not token.strip()
-            or type(org) is not UUID or type(loc) is not UUID
+    if type(token) is not str or not token.strip():
+        raise InspectionDenied("FORBIDDEN")
+    if (type(org) is not UUID or type(loc) is not UUID
             or type(limit) is not int or not 1<=limit<=50
             or (after_order_id is not None and type(after_order_id) is not UUID)):
         raise InspectionDenied("INVALID_INPUT")
