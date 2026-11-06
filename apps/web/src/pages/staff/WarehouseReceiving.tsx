@@ -4,6 +4,12 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Kind='draft'|'accept'|'valuation';
 type Pending={kind:Kind;path:string;key:string;body:string;org:string;location:string};
 type Item={lotId:string;article:string;batchCode:string;binCode:string;allocated:number;onHand:number;reserved:number};
+type Stage='accept'|'value';
+type ReviewItem={documentId:string;lotId:string;article:string;batchCode:string;
+  binCode:string;quantity:number;sourceReference:string};
+type Review={items:ReviewItem[];nextDocumentId:string|null;cursor:string|null;
+  status:'idle'|'loading'|'ready'|'denied'|'error'};
+const emptyReview=():Review=>({items:[],nextDocumentId:null,cursor:null,status:'idle'});
 
 export function WarehouseReceiving(){
   const [org,setOrg]=React.useState('');
@@ -23,11 +29,19 @@ export function WarehouseReceiving(){
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [lots,setLots]=React.useState<Item[]>([]);
+  const [reviews,setReviews]=React.useState<Record<Stage,Review>>({
+    accept:emptyReview(),value:emptyReview(),
+  });
+  const readSequence=React.useRef({accept:0,value:0});
   const [listState,setListState]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const context=React.useRef({org:'',location:''});
   context.current={org:org.trim(),location:location.trim()};
-  React.useEffect(()=>{setPending(null);setMessage('');setLots([]);
-    setListState('idle');setDocumentId('');setAcceptanceId('');setValuationId('');},[org,location]);
+  React.useEffect(()=>{
+    readSequence.current.accept+=1;readSequence.current.value+=1;
+    setReviews({accept:emptyReview(),value:emptyReview()});
+    setPending(null);setMessage('');setLots([]);
+    setListState('idle');setDocumentId('');setAcceptanceId('');setValuationId('');
+  },[org,location]);
   const validScope=uuid.test(org.trim())&&uuid.test(location.trim());
   const validDraft=validScope&&uuid.test(lot.trim())&&
     /^(0|[1-9][0-9]*)$/.test(quantity)&&Number(quantity)>0&&
@@ -67,6 +81,55 @@ export function WarehouseReceiving(){
       setLots(payload.items as Item[]);setListState('ready');
     }catch{if(scope.org===context.current.org&&scope.location===context.current.location)
       setListState('error');}
+  }
+  async function loadReview(stage:Stage,after:string|null=null){
+    if(!validScope||busy||reviews[stage].status==='loading')return;
+    const seq=++readSequence.current[stage];
+    const scope={...context.current};
+    setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'loading'}}));
+    const params=new URLSearchParams({
+      locationId:scope.location,stage,limit:'20',
+    });
+    if(after)params.set('afterDocumentId',after);
+    try{
+      const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(scope.org)+
+        '/warehouse/receipts/pending?'+params.toString();
+      const response=await fetch(url,{credentials:'include',cache:'no-store'});
+      if(seq!==readSequence.current[stage]||context.current.org!==scope.org||
+         context.current.location!==scope.location)return;
+      if([401,403,404].includes(response.status)){
+        setDocumentId('');
+        setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'denied'}}));
+        return;
+      }
+      if(!response.ok)throw Error('unavailable');
+      const raw:unknown=await response.json();
+      if(!raw||typeof raw!=='object')throw Error('bad response');
+      const data=raw as {stage?:unknown;syntheticOnly?:unknown;items?:unknown;
+        nextDocumentId?:unknown};
+      if(data.stage!==stage||data.syntheticOnly!==true||
+        !Array.isArray(data.items)||data.items.length>20||
+        !data.items.every((entry:unknown)=>{
+          if(!entry||typeof entry!=='object')return false;
+          const item=entry as Record<string,unknown>;
+          return uuid.test(String(item.documentId))&&uuid.test(String(item.lotId))&&
+            ['article','batchCode','binCode','sourceReference'].every(key=>
+              typeof item[key]==='string'&&(item[key] as string).length>0&&
+              (item[key] as string).length<=160)&&
+            Number.isSafeInteger(item.quantity)&&Number(item.quantity)>=1&&
+            Number(item.quantity)<=1_000_000_000;
+        })||!(data.nextDocumentId===null||
+          (typeof data.nextDocumentId==='string'&&uuid.test(data.nextDocumentId))))
+        throw Error('invalid queue');
+      setReviews(prev=>({...prev,[stage]:{
+        status:'ready',items:data.items as ReviewItem[],
+        nextDocumentId:data.nextDocumentId as string|null,cursor:after,
+      }}));
+    }catch{
+      if(seq===readSequence.current[stage]&&context.current.org===scope.org&&
+         context.current.location===scope.location)
+        setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'error'}}));
+    }
   }
   async function submit(kind:Kind,retry?:Pending){
     if(busy||(!retry&&pending))return;
@@ -116,6 +179,12 @@ export function WarehouseReceiving(){
       if(snap.kind==='draft')setDocumentId((body as Record<string,string>)[field]);
       else if(snap.kind==='accept')setAcceptanceId((body as Record<string,string>)[field]);
       else setValuationId((body as Record<string,string>)[field]);
+      if(snap.kind==='accept'||snap.kind==='valuation'){
+        readSequence.current.accept+=1;readSequence.current.value+=1;
+        setReviews({accept:emptyReview(),value:emptyReview()});
+        // Never keep a document listed after it has changed stage.
+        // Manager explicitly refreshes both queues from the live database.
+      }
       setPending(null);
       setMessage(snap.kind==='draft'?'Документ создан. Остатки пока не изменены.':
         snap.kind==='accept'?'Приёмка подтверждена другим сотрудником. Остатки обновлены.':
@@ -155,6 +224,31 @@ export function WarehouseReceiving(){
     </section>
     <section aria-label="Подтвердить приёмку">
       <h2>2. Подтвердить другим сотрудником</h2>
+      <section aria-label="Документы на подтверждение прихода">
+        <h3>Черновики к независимой приёмке</h3>
+        <p>Очередь доступна только MANAGER филиала. Отдельный сотрудник
+          проверяет партию, количество и номер источника.</p>
+        <button type="button" disabled={!validScope||busy||reviews.accept.status==='loading'}
+          onClick={()=>void loadReview('accept')}>Показать черновики</button>
+        {reviews.accept.status==='loading'&&<p role="status">Загрузка черновиков…</p>}
+        {reviews.accept.status==='denied'&&<p role="alert">Нет доступа к черновикам филиала.</p>}
+        {reviews.accept.status==='error'&&<p role="alert">Не удалось загрузить черновики.</p>}
+        {reviews.accept.status==='ready'&&(reviews.accept.items.length?
+          <ul>{reviews.accept.items.map(item=><li key={item.documentId}>
+            <strong>{item.article}</strong> · {item.batchCode} · ячейка {item.binCode}
+            {' — '}{item.quantity} шт. · документ {item.sourceReference}
+            <button type="button" disabled={busy||!!pending}
+              onClick={()=>setDocumentId(item.documentId)}>
+              Выбрать черновик {item.documentId}</button>
+          </li>)}</ul>:<p>Черновиков к приёмке нет.</p>)}
+        {reviews.accept.status==='ready'&&reviews.accept.nextDocumentId&&
+          <button type="button" disabled={busy}
+            onClick={()=>void loadReview('accept',reviews.accept.nextDocumentId)}>
+            Следующие черновики</button>}
+        {reviews.accept.status==='ready'&&reviews.accept.cursor&&
+          <button type="button" disabled={busy}
+            onClick={()=>void loadReview('accept')}>Первая страница черновиков</button>}
+      </section>
       <p>Используйте отдельную сессию MANAGER. Самостоятельное подтверждение не допускается.</p>
       <label>UUID приходного документа <input aria-label="UUID приходного документа"
         value={documentId} onChange={e=>setDocumentId(e.target.value)}/></label>
@@ -163,6 +257,31 @@ export function WarehouseReceiving(){
     </section>
     <section aria-label="Закупочная стоимость и НДС">
       <h2>3. Зафиксировать закупочную стоимость (MANAGER)</h2>
+      <section aria-label="Принятые документы без оценки">
+        <h3>Очередь документов для оценки закупки</h3>
+        <p>Только подтверждённые, но ещё не оценённые приходы этого филиала.
+          Выбор документа не заменяет проверку прав и независимость оценщика.</p>
+        <button type="button" disabled={!validScope||busy||reviews.value.status==='loading'}
+          onClick={()=>void loadReview('value')}>Показать документы без оценки</button>
+        {reviews.value.status==='loading'&&<p role="status">Загрузка документов для оценки…</p>}
+        {reviews.value.status==='denied'&&<p role="alert">Нет доступа к документам для оценки.</p>}
+        {reviews.value.status==='error'&&<p role="alert">Не удалось загрузить очередь оценки.</p>}
+        {reviews.value.status==='ready'&&(reviews.value.items.length?
+          <ul>{reviews.value.items.map(item=><li key={item.documentId}>
+            <strong>{item.article}</strong> · {item.batchCode} · ячейка {item.binCode}
+            {' — '}{item.quantity} шт. · документ {item.sourceReference}
+            <button type="button" disabled={busy||!!pending}
+              onClick={()=>setDocumentId(item.documentId)}>
+              Выбрать для оценки {item.documentId}</button>
+          </li>)}</ul>:<p>Документов без оценки нет.</p>)}
+        {reviews.value.status==='ready'&&reviews.value.nextDocumentId&&
+          <button type="button" disabled={busy}
+            onClick={()=>void loadReview('value',reviews.value.nextDocumentId)}>
+            Следующие документы для оценки</button>}
+        {reviews.value.status==='ready'&&reviews.value.cursor&&
+          <button type="button" disabled={busy}
+            onClick={()=>void loadReview('value')}>Первая страница оценки</button>}
+      </section>
       <p>Суммы вводятся в минимальных единицах валюты, НДС отдельно. Это не цена продажи и не расчёт налоговой ставки.</p>
       <label>Валюта ISO <input aria-label="Валюта ISO" maxLength={3} value={currency}
         onChange={e=>setCurrency(e.target.value.toUpperCase())}/></label>
