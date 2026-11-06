@@ -109,8 +109,9 @@ def upgrade():
           THEN RAISE EXCEPTION 'invalid damage codes'; END IF;
         END LOOP;
 
-        IF (SELECT count(DISTINCT d->>'areaCode'||'/'||d->>'damageCode')
-            FROM jsonb_array_elements(NEW.damages) d)
+        IF (SELECT count(DISTINCT (e.value->>'areaCode') || '/' ||
+                                   (e.value->>'damageCode'))
+            FROM jsonb_array_elements(NEW.damages) AS e(value))
             <> jsonb_array_length(NEW.damages)
         THEN RAISE EXCEPTION 'duplicate damage'; END IF;
 
@@ -124,8 +125,8 @@ def upgrade():
               ('PRESENT','MISSING','DAMAGED','NOT_CHECKED')
           THEN RAISE EXCEPTION 'invalid inventory code'; END IF;
         END LOOP;
-        IF (SELECT count(DISTINCT i->>'itemCode')
-            FROM jsonb_array_elements(NEW.inventory) i)<>5
+        IF (SELECT count(DISTINCT e.value->>'itemCode')
+            FROM jsonb_array_elements(NEW.inventory) AS e(value))<>5
         THEN RAISE EXCEPTION 'incomplete inventory checklist'; END IF;
 
         FOR p IN SELECT value FROM jsonb_array_elements(NEW.photo_meta)
