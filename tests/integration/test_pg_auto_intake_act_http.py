@@ -168,9 +168,18 @@ def test_private_intake_photos_versions_client_scope_replay_and_qc_lock(monkeypa
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
                    (intake_grant,))
+    # The test fixture grants this employee both INTAKE and MECHANIC:
+    # loss of INTAKE removes write, but live MECHANIC still grants read.
+    assert publish(http,staff,path,act,key).status_code==403
+    assert http.get(path).status_code==200
+    assert http.get(photo_url).status_code==200
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+           WHERE organization_id=%s AND user_id=%s
+             AND role_code='MECHANIC' AND revoked_at IS NULL""",
+           (org,d["intake"]))
     assert http.get(path).status_code==403
     assert http.get(photo_url).status_code==403
-    assert publish(http,staff,path,act,key).status_code==403
     token_as(http,d,d["client_a"])
     assert http.get(path).status_code==200
     with psycopg.connect(DSN) as db:
