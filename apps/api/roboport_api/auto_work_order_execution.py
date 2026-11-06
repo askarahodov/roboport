@@ -125,22 +125,33 @@ def labor_execution(conn,token,org,loc,order,service_id,minutes,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_scope(conn,token,org,loc,order,("MECHANIC",))
+        execution_row=conn.execute("""
+           SELECT id FROM auto_work_order_execution WHERE work_order_id=%s
+        """,(order,)).fetchone()
+        # A lost 201 can be safely replayed even after finish/QC. Verify the
+        # original actor, order, service and payload before checking workflow
+        # status; never create a fresh entry after the execution is closed.
+        prior=conn.execute("""
+           SELECT execution_id,service_id,actual_minutes,actor_id,request_key
+           FROM auto_work_order_labor_entry WHERE request_key=%s
+        """,(request_key,)).fetchone()
+        if prior:
+            if (execution_row is None or
+                    prior!=(execution_row[0],service_id,minutes,actor,request_key)):
+                raise ExecutionConflict("LABOR_IMMUTABLE")
+            return {"ok":True,"replayed":True,**_state(conn,order)}
         state=_state(conn,order)
         if state["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
         if str(service_id) not in [v["serviceId"] for v in state["requiredServices"]]:
             raise ExecutionConflict("SERVICE_NOT_APPROVED")
-        execution=conn.execute("""
-           SELECT id FROM auto_work_order_execution WHERE work_order_id=%s
-        """,(order,)).fetchone()[0]
-        prior=conn.execute("""
-           SELECT service_id,actual_minutes,actor_id,request_key
-           FROM auto_work_order_labor_entry WHERE execution_id=%s AND service_id=%s
+        execution=execution_row[0]
+        existing=conn.execute("""
+           SELECT 1 FROM auto_work_order_labor_entry
+           WHERE execution_id=%s AND service_id=%s
         """,(execution,service_id)).fetchone()
-        if prior:
-            if prior!=(service_id,minutes,actor,request_key):
-                raise ExecutionConflict("LABOR_IMMUTABLE")
-            return {"ok":True,"replayed":True,**_state(conn,order)}
+        if existing:
+            raise ExecutionConflict("LABOR_IMMUTABLE")
         conn.execute("""
           INSERT INTO auto_work_order_labor_entry
           (id,execution_id,service_id,actor_id,actual_minutes,request_key)
@@ -154,6 +165,15 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         _scope(conn,token,org,loc,order,("WAREHOUSE",))
+        prior=conn.execute("""
+           SELECT id,work_order_id,lot_id,quantity
+           FROM auto_stock_lot_work_order_issue WHERE request_id=%s
+        """,(request_key,)).fetchone()
+        if prior:
+            if (prior[1],prior[2],prior[3])!=(order,lot_id,quantity):
+                raise ExecutionConflict("STOCK_CONFLICT")
+            return {"ok":True,"replayed":True,"issueId":str(prior[0]),
+                    **_state(conn,order)}
         if _state(conn,order)["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
         try:
@@ -163,29 +183,40 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
             raise ExecutionDenied("FORBIDDEN") from None
         except AutoStockConflict:
             raise ExecutionConflict("STOCK_CONFLICT") from None
-        return {"ok":True,"issueId":str(issue),**_state(conn,order)}
+        return {"ok":True,"replayed":False,"issueId":str(issue),
+                **_state(conn,order)}
 
 
 def receive_material(conn,token,org,loc,order,issue_id,request_key):
     if type(issue_id) is not UUID or type(request_key) is not UUID:
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
-        _scope(conn,token,org,loc,order,("MECHANIC",))
-        if _state(conn,order)["status"]!="IN_PROGRESS":
-            raise ExecutionConflict("NOT_IN_PROGRESS")
+        actor=_scope(conn,token,org,loc,order,("MECHANIC",))
         match=conn.execute("""
            SELECT id FROM auto_stock_lot_work_order_issue
            WHERE id=%s AND work_order_id=%s
         """,(issue_id,order)).fetchone()
         if match is None:
             raise ExecutionDenied("FORBIDDEN")
+        prior=conn.execute("""
+           SELECT id,issue_id,received_by FROM auto_stock_mechanic_handoff
+           WHERE request_id=%s
+        """,(request_key,)).fetchone()
+        if prior:
+            if (prior[1],prior[2])!=(issue_id,actor):
+                raise ExecutionConflict("HANDOFF_CONFLICT")
+            return {"ok":True,"replayed":True,"handoffId":str(prior[0]),
+                    **_state(conn,order)}
+        if _state(conn,order)["status"]!="IN_PROGRESS":
+            raise ExecutionConflict("NOT_IN_PROGRESS")
         try:
             receipt=acknowledge_mechanic_handoff(conn,token,org,loc,issue_id,request_key)
         except AutoStockDenied:
             raise ExecutionDenied("FORBIDDEN") from None
         except AutoStockConflict:
             raise ExecutionConflict("HANDOFF_CONFLICT") from None
-        return {"ok":True,"handoffId":str(receipt),**_state(conn,order)}
+        return {"ok":True,"replayed":False,"handoffId":str(receipt),
+                **_state(conn,order)}
 
 
 def finish_execution(conn,token,org,loc,order,request_key):
