@@ -183,3 +183,84 @@ def test_concurrent_independent_qc_pass_allows_only_one_final_decision(monkeypat
         assert db.execute("""SELECT count(*) FROM auto_work_order_qc_event
                              WHERE work_order_id=%s AND result='PASS'""",
                           (order,)).fetchone()[0]==1
+
+
+
+def test_qc_manager_queue_scoped_first_fail_pass_and_pagination(monkeypatch):
+    """Current eligible WorkOrders, not historical passed/cancelled or other branches."""
+    d,org,loc,bay,order,_,start,_,foreign_loc,_,mechanic_grant=scenario()
+    with psycopg.connect(DSN) as db:
+        _,_,second=create_appointment(db,d["tokens"][d["intake"]],
+            org,loc,bay,d["link"],start+timedelta(hours=2),
+            start+timedelta(hours=3))
+    client=client_setup(monkeypatch)
+    base=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+    queue=base+"/inspection-qc/pending"
+    assert client.get(queue).status_code==403
+    intake=token_as(client,d,d["intake"])
+    assert client.get(queue).status_code==200  # intake also holds MECHANIC
+    assert client.get(queue).json()["items"]==[]
+    for work_order in (order,second):
+        _,inspect,_=target(org,loc,work_order)
+        assert client.post(inspect,headers=intake,json=inspection()).status_code==201
+
+    # The inspector also has the MECHANIC grant but cannot review own work.
+    assert client.get(queue).json()["items"]==[]
+    mechanic=token_as(client,d,d["manager"])
+    first=client.get(queue,params={"limit":1})
+    assert first.status_code==200,first.text
+    assert first.headers["cache-control"]=="no-store"
+    assert first.json()["syntheticOnly"] is True
+    assert len(first.json()["items"])==1
+    cursor=first.json()["nextOrderId"]
+    assert cursor==first.json()["items"][0]["orderId"]
+    second_page=client.get(queue,params={"limit":1,"afterOrderId":cursor})
+    assert second_page.status_code==200,second_page.text
+    assert second_page.json()["nextOrderId"] is None
+    ids={first.json()["items"][0]["orderId"],
+         second_page.json()["items"][0]["orderId"]}
+    assert ids=={str(order),str(second)}
+    assert all(row["status"]=="PENDING_QC" and row["lastFindingCode"]=="NONE"
+               for row in first.json()["items"]+second_page.json()["items"])
+    for personal in (str(d["vehicle"]),str(d["ca"]),str(d["manager"])):
+        assert personal not in first.text
+    assert client.get(queue,params={"limit":0}).status_code==422
+    assert client.get(queue,params={"limit":51}).status_code==422
+    assert client.get(queue,params={"afterOrderId":"bad"}).status_code==422
+    foreign=queue.replace(str(loc),str(foreign_loc))
+    assert client.get(foreign).status_code==403
+
+    _,_,qc=target(org,loc,order)
+    failed=client.post(qc,headers=mechanic,json={"requestKey":str(uuid4()),
+                "result":"FAIL","findingCode":"REWORK"})
+    assert failed.status_code==201,failed.text
+    changed=client.get(queue)
+    assert changed.status_code==200,changed.text
+    assert {row["orderId"] for row in changed.json()["items"]}==ids
+    assert next(row for row in changed.json()["items"]
+                if row["orderId"]==str(order))["status"]=="FAIL"
+    passed=client.post(qc,headers=mechanic,json={"requestKey":str(uuid4()),
+                "result":"PASS","findingCode":"NONE"})
+    assert passed.status_code==201,passed.text
+    after=client.get(queue)
+    assert after.status_code==200
+    assert [row["orderId"] for row in after.json()["items"]]==[str(second)]
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
+                   (mechanic_grant,))
+    assert client.get(queue).status_code==403
+
+
+def test_qc_queue_excludes_revoked_proof_and_cancelled_appointment(monkeypatch):
+    d,org,loc,bay,order,appt,_,_,_,_,_=scenario()
+    client=client_setup(monkeypatch)
+    _,inspect,_=target(org,loc,order)
+    intake=token_as(client,d,d["intake"])
+    assert client.post(inspect,headers=intake,json=inspection()).status_code==201
+    token_as(client,d,d["manager"])
+    queue=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/inspection-qc/pending"
+    assert [row["orderId"] for row in client.get(queue).json()["items"]]==[str(order)]
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+                   (d["link"],))
+    assert client.get(queue).json()["items"]==[]
