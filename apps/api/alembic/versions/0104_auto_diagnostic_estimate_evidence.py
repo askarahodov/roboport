@@ -1,12 +1,12 @@
 """Immutable structured diagnostic findings bound to exact customer quote versions.
 
-Revision ID: 0104_auto_diagnostic_estimate_evidence
+Revision ID: 0104_auto_diagnostic_evidence
 Revises: 0103_auto_qc_rework_evidence
 Synthetic-only diagnostic records. Not a signed act or medical/technical certification.
 """
 from alembic import op
 
-revision="0104_auto_diagnostic_estimate_evidence"
+revision="0104_auto_diagnostic_evidence"
 down_revision="0103_auto_qc_rework_evidence"
 branch_labels=None
 depends_on=None
