@@ -256,3 +256,40 @@ GET /api/v1/dev/auto/organizations/{org}/warehouse/receipts/pending?locationId={
 Сортировка по UUID документа, cursor-pagination до 20 по умолчанию (1–50), не по времени создания. Отозванные права и чужой scope → 403, неверный UUID/limit/stage → 422. Обе очереди перечитываются после успешных POST. Возможны гонки между чтением и мутацией; серверный POST независимо проверяет другого создателя, актуальную роль, физическую атомарность и отсутствие повтора. Выбор в очереди **не** является разрешением на запись. Фиксация оценки отдельно от физического остатка. Все транзакционные проверки и idempotency сохранены.
 
 Контрактные PG17 тесты: `tests/integration/test_pg_auto_receipt_http.py`; Playwright: `apps/web/e2e/warehouse-receiving.spec.ts`. Нет миграций или production OpenAPI; synthetic-only до #119.
+
+
+## Очередь возвратов поставщику для MANAGER — synthetic dev (#168)
+
+```text
+GET /api/v1/dev/auto/organizations/{org}/warehouse/supplier-returns/pending?locationId={loc}&limit=20&afterDocumentId={uuid}
+```
+
+Read-only private `GET` с `Cache-Control:no-store`;
+`syntheticOnly=true`, `items[]`, `nextDocumentId`.
+В каждой строке `documentId`, `sourceReceiptId`, `lotId`,
+`article`, `batchCode`, `binCode`, `quantity`, `reason`,
+`supplierReference`. Личных UUID авторов, клиентов, VIN,
+ключей идемпотентности и платёжных реквизитов нет.
+
+SQL читает только активные документы данного org/location,
+которые опираются на принятый и оценённый входной приход,
+**ещё не утверждены** и были созданы другим сотрудником.
+Live MANAGER grant и личность текущей сессии проверяются
+**до выборки**. Пагинация по UUID документа: 20 по умолчанию,
+1–50 разрешено, курсор `afterDocumentId`. Не заявляется
+хронологический порядок или атомарный снимок между страницами.
+Отзыв роли/чужой филиал/нет сессии → 403; некорректные
+UUID и limit → 422. GET **никогда** не выполняет списание.
+
+Выбор документа из UI — не разрешение на POST: действие
+`/warehouse/supplier-returns/approvals` заново проверяет
+разделение WAREHOUSE/независимого MANAGER, неизменяемые
+документы, уникальность idempotency key, источник закупочной
+стоимости, наличие товара и серийный учёт в транзакции.
+Утверждённый акт не возвращается в очередь. После POST
+UI перечитывает очередь с сервера и очищает старый выбор.
+PG17: `tests/integration/test_pg_auto_stock_supplier_return_http.py`;
+Playwright: `apps/web/e2e/warehouse-supplier-returns.spec.ts`.
+DDL/публичный production API не меняются. Это не кредит-нота,
+реальная выплата поставщика или юридически принятый НДС;
+релизная задача #119 остаётся OPEN.
