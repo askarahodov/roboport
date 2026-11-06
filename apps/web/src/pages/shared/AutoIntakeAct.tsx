@@ -165,7 +165,7 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
       setMessage('Результат неизвестен. Повторите тот же запрос с исходным ключом.');
     }finally{setBusy(false);}
   }
-  const canWrite=role==='staff'&&ready&&!busy&&!pending&&
+  const canWrite=role==='staff'&&ready&&data!==null&&!busy&&!pending&&
     data.inspection!==null&&!data.locked&&data.latestVersion<20&&
     (!damages.length||photos.length>0);
   const last=data?.items.at(-1);
