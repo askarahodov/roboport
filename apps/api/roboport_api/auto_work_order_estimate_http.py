@@ -21,11 +21,19 @@ class Price(BaseModel):
     amountMinor: int=Field(ge=0,le=10**12)
 
 
+class LaborRate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    serviceId: UUID
+    qualificationCode: str=Field(pattern="^(GENERAL|DIAGNOSTIC|MASTER)$")
+    rateMinorPerHour: int=Field(ge=0,le=10**10,strict=True)
+
+
 class Publish(BaseModel):
     model_config=ConfigDict(extra="forbid")
     requestKey: UUID
     expectedVersion: int=Field(ge=0,le=29)
-    prices: list[Price]=Field(min_length=1,max_length=50)
+    prices: list[Price] | None=Field(default=None,min_length=1,max_length=50)
+    laborRates: list[LaborRate] | None=Field(default=None,min_length=1,max_length=50)
 
 
 class Decision(BaseModel):
@@ -91,6 +99,8 @@ async def publish(org_id:str,loc_id:str,order_id:str,request:Request):
         body=Publish.model_validate(await request.json())
     except (ValueError,TypeError,ValidationError,UnicodeDecodeError):
         return _response(request,422,"INVALID_INPUT")
+    if (body.prices is None)==(body.laborRates is None):
+        return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as conn:
         if not _mutation_ok(request,conn):
             return _response(request,403,"FORBIDDEN")
@@ -99,7 +109,11 @@ async def publish(org_id:str,loc_id:str,order_id:str,request:Request):
                 org,loc,order,request_key=body.requestKey,
                 expected_version=body.expectedVersion,
                 prices=[{"serviceId":p.serviceId,"amountMinor":p.amountMinor}
-                        for p in body.prices])
+                        for p in body.prices] if body.prices is not None else None,
+                labor_rates=[{"serviceId":p.serviceId,
+                              "qualificationCode":p.qualificationCode,
+                              "rateMinorPerHour":p.rateMinorPerHour}
+                             for p in body.laborRates] if body.laborRates is not None else None)
         except (AutoEstimateDenied,AutoEstimateConflict) as exc:
             return _error(request,exc)
     return JSONResponse(status_code=200 if data["replayed"] else 201,

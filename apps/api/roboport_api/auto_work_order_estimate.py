@@ -113,20 +113,39 @@ def read_auto_estimates(conn,token,org,loc,order):
         return _estimate_state(conn,order)
 
 
-def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_version,prices):
+def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_version,
+                          prices=None,labor_rates=None):
+    """Manual prices or server-calculated norm-hour prices; never both.
+
+    Each rated line contains the exact rate, qualification category and source
+    duration that the customer approves. A category is a proposed tariff, NOT
+    evidence of a real mechanic's accredited qualification.
+    """
+    rated=labor_rates is not None
+    selected=labor_rates if rated else prices
     if (type(request_key) is not UUID or type(expected_version) is not int or
-        not 0<=expected_version<30 or type(prices) is not list or
-        not 1<=len(prices)<=50):
+        not 0<=expected_version<30 or
+        (prices is None)==(labor_rates is None) or
+        type(selected) is not list or not 1<=len(selected)<=50):
         raise AutoEstimateDenied("INVALID_INPUT")
     supplied={}
-    for price in prices:
-        if (type(price) is not dict or set(price)!={"serviceId","amountMinor"} or
-            type(price["serviceId"]) is not UUID or
-            type(price["amountMinor"]) is not int or
-            not 0<=price["amountMinor"]<=10**12 or
-            price["serviceId"] in supplied):
+    for item in selected:
+        if type(item) is not dict or type(item.get("serviceId")) is not UUID:
             raise AutoEstimateDenied("INVALID_INPUT")
-        supplied[price["serviceId"]]=price["amountMinor"]
+        service=item["serviceId"]
+        if service in supplied:
+            raise AutoEstimateDenied("INVALID_INPUT")
+        if rated:
+            if (set(item)!={"serviceId","qualificationCode","rateMinorPerHour"} or
+                item["qualificationCode"] not in ("GENERAL","DIAGNOSTIC","MASTER") or
+                type(item["rateMinorPerHour"]) is not int or
+                not 0<=item["rateMinorPerHour"]<=10**10):
+                raise AutoEstimateDenied("INVALID_INPUT")
+        elif (set(item)!={"serviceId","amountMinor"} or
+              type(item["amountMinor"]) is not int or
+              not 0<=item["amountMinor"]<=10**12):
+            raise AutoEstimateDenied("INVALID_INPUT")
+        supplied[service]=item
     with conn.transaction():
         actor=_staff_and_scope(conn,token,org,loc,order)
         services=conn.execute("""
@@ -140,9 +159,20 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
         """,(order,org,loc)).fetchall()
         if len(services)>50 or len(services)!=len(supplied) or set(v[0] for v in services)!=set(supplied):
             raise AutoEstimateConflict("SERVICE_SET_CHANGED")
-        lines=[{"serviceId":str(i),"code":code,"title":title,
-                "durationMinutes":duration,"amountMinor":supplied[i]}
-               for i,code,title,duration in services]
+        lines=[]
+        for i,code,title,duration in services:
+            line={"serviceId":str(i),"code":code,"title":title,
+                  "durationMinutes":duration}
+            if rated:
+                rate=supplied[i]["rateMinorPerHour"]
+                # Half-up to the nearest kopeck, with only bounded integers.
+                line.update({"pricingMethod":"NORM_HOUR",
+                             "qualificationCode":supplied[i]["qualificationCode"],
+                             "rateMinorPerHour":rate,
+                             "amountMinor":(duration*rate+30)//60})
+            else:
+                line["amountMinor"]=supplied[i]["amountMinor"]
+            lines.append(line)
         total=sum(item["amountMinor"] for item in lines)
         if total>10**12:
             raise AutoEstimateDenied("INVALID_INPUT")

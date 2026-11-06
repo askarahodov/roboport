@@ -2,7 +2,9 @@ import React from 'react';
 import { Link,useSearchParams } from 'react-router-dom';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-type Line={serviceId:string;code:string;title:string;durationMinutes:number;amountMinor:number};
+type Qualification='GENERAL'|'DIAGNOSTIC'|'MASTER';
+type Line={serviceId:string;code:string;title:string;durationMinutes:number;amountMinor:number;
+  pricingMethod?:'NORM_HOUR';qualificationCode?:Qualification;rateMinorPerHour?:number};
 type Revision={id:string;version:number;totalMinor:number;currency:'RUB';digest:string;
   lines:Line[];decision:'APPROVED'|'DECLINED'|null;createdAt:string;decidedAt:string|null;
   clarificationId?:string|null;clarificationReason?:'PRICE'|'WORK_SCOPE'|'TIMING'|'OTHER'|null;
@@ -40,7 +42,15 @@ function parseEstimate(raw:unknown):Estimates{
         e.lines.every((line:unknown)=>line!==null&&typeof line==='object'&&
           'code' in line&&typeof line.code==='string'&&
           'title' in line&&typeof line.title==='string'&&
-          'amountMinor' in line&&typeof line.amountMinor==='number');
+          'amountMinor' in line&&typeof line.amountMinor==='number'&&
+          (!('pricingMethod' in line)||(
+            line.pricingMethod==='NORM_HOUR'&&
+            'qualificationCode' in line&&['GENERAL','DIAGNOSTIC','MASTER'].includes(String(line.qualificationCode))&&
+            'rateMinorPerHour' in line&&typeof line.rateMinorPerHour==='number'&&
+            Number.isSafeInteger(line.rateMinorPerHour)&&line.rateMinorPerHour>=0&&line.rateMinorPerHour<=1e10&&
+            'durationMinutes' in line&&typeof line.durationMinutes==='number'&&
+            Number.isInteger(line.durationMinutes)&&line.durationMinutes>=5&&line.durationMinutes<=1440&&
+            line.amountMinor===Math.floor((line.durationMinutes*line.rateMinorPerHour+30)/60))));
     }))throw Error('invalid estimate');
   return value as Estimates;
 }
@@ -65,6 +75,9 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   const [data,setData]=React.useState<Estimates|null>(null);
   const [services,setServices]=React.useState<Service[]>([]);
   const [prices,setPrices]=React.useState<Record<string,string>>({});
+  const [pricingMode,setPricingMode]=React.useState<'MANUAL'|'NORM_HOUR'>('MANUAL');
+  const [rates,setRates]=React.useState<Record<string,string>>({});
+  const [qualifications,setQualifications]=React.useState<Record<string,Qualification>>({});
   const [revision,setRevision]=React.useState(0);
   const [busy,setBusy]=React.useState(false);
   const [pending,setPending]=React.useState<Pending|null>(null);
@@ -79,6 +92,7 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   React.useEffect(()=>{
     setStatus(valid?'loading':'idle');setData(null);setServices([]);
     setScopeLoaded('');setMessage('');setPending(null);setPrices({});
+    setRates({});setQualifications({});
     if(!valid)return;
     const controller=new AbortController();
     const routes=[base+'/estimates'];
@@ -126,13 +140,22 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   }
 
   const latest=data?.items[data.items.length-1];
+  function computedAmount(s:Service):number{
+    const raw=pricingMode==='MANUAL'?(prices[s.id]??''):(rates[s.id]??'');
+    if(!/^(0|[1-9][0-9]*)$/.test(raw))return NaN;
+    const value=Number(raw);
+    if(!Number.isSafeInteger(value))return NaN;
+    if(pricingMode==='MANUAL')return value<=1e12?value:NaN;
+    if(value>1e10||!Number.isInteger(s.durationMinutes)||
+      s.durationMinutes<5||s.durationMinutes>1440)return NaN;
+    return Math.floor((s.durationMinutes*value+30)/60);
+  }
+  const amounts=services.map(computedAmount);
   const canPublish=role==='manager'&&ready&&!busy&&!pending&&services.length>0&&
     !(latest?.clarificationId&&!latest.clarificationResolution)&&
-    !data?.items.some(item=>item.decision!==null)&&services.every(s=>{
-      const raw=prices[s.id]??'';
-      const amount=Number(raw);
-      return raw.trim()!==''&&Number.isSafeInteger(amount)&&amount>=0&&amount<=1e12;
-    })&&services.reduce((sum,s)=>sum+Number(prices[s.id]??'0'),0)<=1e12;
+    !data?.items.some(item=>item.decision!==null)&&
+    amounts.every(amount=>Number.isSafeInteger(amount)&&amount>=0&&amount<=1e12)&&
+    amounts.reduce((sum,amount)=>sum+amount,0)<=1e12;
   return <section aria-label="Автомобильные сметы (dev)"
     style={{maxWidth:'76rem',margin:'2rem auto'}}>
     <h1>{role==='manager'?'Сметы заказ-наряда (dev)':'Согласование сметы (dev)'}</h1>
@@ -167,6 +190,11 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
           </section>}
           <ul>{item.lines.map(line=><li key={line.serviceId}>
             {line.code} — {line.title}: {line.amountMinor} коп.
+            {line.pricingMethod==='NORM_HOUR'&&<p>
+              Расчёт по нормо-часу: {line.durationMinutes} мин. ×
+              {' '}{line.rateMinorPerHour} коп./час · категория {line.qualificationCode}.
+              Округление до копейки (0,5 вверх).
+            </p>}
           </li>)}</ul>
           {role==='client'&&item.version===data.latestVersion&&!item.decision&&!pending&&
             <div>
@@ -213,17 +241,55 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
           event.preventDefault();if(!canPublish)return;
           void send(base+'/estimates',JSON.stringify({
             requestKey:crypto.randomUUID(),expectedVersion:data.latestVersion,
-            prices:services.map(service=>({serviceId:service.id,
-              amountMinor:Number(prices[service.id])})),
+            ...(pricingMode==='MANUAL'?{
+              prices:services.map(service=>({serviceId:service.id,
+                amountMinor:Number(prices[service.id])})),
+            }:{
+              laborRates:services.map(service=>({serviceId:service.id,
+                qualificationCode:qualifications[service.id]??'GENERAL',
+                rateMinorPerHour:Number(rates[service.id])})),
+            }),
           }));
         }}>
           <h2>Новая неизменяемая версия</h2>
-          {services.map(s=><label key={s.id}>{s.code} — {s.title}, стоимость (коп.)
-            <input type="number" min="0" max="1000000000000" step="1"
-              aria-label={'Стоимость услуги '+s.code}
-              value={prices[s.id]??''} onChange={e=>setPrices(prev=>({
-                ...prev,[s.id]:e.target.value,
-              }))}/></label>)}
+          <label>Способ расчёта стоимости
+            <select aria-label="Способ расчёта стоимости" value={pricingMode}
+              onChange={e=>setPricingMode(e.target.value as 'MANUAL'|'NORM_HOUR')}>
+              <option value="MANUAL">Ручная стоимость услуги</option>
+              <option value="NORM_HOUR">По нормо-часу и тарифной категории</option>
+            </select>
+          </label>
+          {pricingMode==='NORM_HOUR'&&<p>Основа расчёта — плановые минуты выбранной
+            услуги. Категория — тарифная предпосылка, не подтверждение квалификации
+            сотрудника. Сервер пересчитывает каждую сумму и сохраняет ставку в версии.</p>}
+          {services.map(s=><div key={s.id}>
+            {pricingMode==='MANUAL'?<label>{s.code} — {s.title}, стоимость (коп.)
+              <input type="number" min="0" max="1000000000000" step="1"
+                aria-label={'Стоимость услуги '+s.code}
+                value={prices[s.id]??''} onChange={e=>setPrices(prev=>({
+                  ...prev,[s.id]:e.target.value,
+                }))}/></label>:<>
+              <p>{s.code} — {s.title} · план {s.durationMinutes} мин.</p>
+              <label>Категория тарифа {s.code}
+                <select aria-label={'Категория тарифа '+s.code}
+                  value={qualifications[s.id]??'GENERAL'}
+                  onChange={e=>setQualifications(prev=>({
+                    ...prev,[s.id]:e.target.value as Qualification,
+                  }))}>
+                  <option value="GENERAL">Общий</option>
+                  <option value="DIAGNOSTIC">Диагностика</option>
+                  <option value="MASTER">Мастер</option>
+                </select>
+              </label>
+              <label>Ставка нормо-часа {s.code}, коп./час
+                <input aria-label={'Ставка нормо-часа '+s.code} type="number"
+                  min="0" max="10000000000" step="1" value={rates[s.id]??''}
+                  onChange={e=>setRates(prev=>({...prev,[s.id]:e.target.value}))}/>
+              </label>
+              <p>Расчёт {s.code}: {Number.isSafeInteger(computedAmount(s))?
+                computedAmount(s)+' коп.':'укажите целую ставку'}</p>
+            </>}
+          </div>)}
           <button type="submit" disabled={!canPublish}>Опубликовать версию</button>
         </form>}
       {role==='manager'&&<p>Перед публикацией:
