@@ -40,7 +40,9 @@ def _encode_cursor(due,ident):
     ).decode().rstrip("=")
 
 
-def list_inbox(conn,token,org,loc,cursor=None):
+def list_inbox(conn,token,org,loc,cursor=None,mode="ALL"):
+    if mode not in ("ALL","OVERDUE") or type(mode) is not str:
+        raise LeadDenied("INVALID_INPUT")
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
         after=_decode_cursor(cursor)
@@ -68,13 +70,14 @@ def list_inbox(conn,token,org,loc,cursor=None):
                  AND proof.verified_at IS NOT NULL
                  AND proof.verified_by IS NOT NULL
                  AND proof.revoked_at IS NULL
+                 AND (%s='ALL' OR t.due_at<now())
                  AND (%s::timestamptz IS NULL OR (t.due_at,t.id)>(%s::timestamptz,%s::uuid))
                  AND NOT EXISTS (
                    SELECT 1 FROM auto_crm_followup_event event
                    WHERE event.task_id=t.id
                  )
                ORDER BY t.due_at,t.id LIMIT %s""",
-            (org,loc,manager,actor,
+            (org,loc,manager,actor,mode,
              after[0] if after else None,
              after[0] if after else None,
              after[1] if after else None,
