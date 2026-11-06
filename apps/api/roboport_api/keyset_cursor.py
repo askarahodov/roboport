@@ -46,3 +46,43 @@ def decode_cursor(cursor: str, state: str | None, token: str) -> tuple[datetime,
         return stamp, ticket
     except (UnicodeError, TypeError, OverflowError, KeyError, json.JSONDecodeError) as exc:
         raise ValueError("invalid cursor") from exc
+
+
+def encode_triplet_cursor(position: tuple[UUID, UUID, UUID], state: str, token: str) -> str:
+    """Opaque signed keyset for three UUID sort columns (synthetic resources)."""
+    if (type(position) is not tuple or len(position) != 3
+            or any(type(value) is not UUID for value in position)
+            or not state or not token):
+        raise ValueError("invalid cursor position")
+    raw = json.dumps([str(value) for value in position], separators=(",", ":")).encode()
+    signature = hmac.new(_KEY, token.encode() + b":" + state.encode() + b":" + raw,
+                         hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(raw + signature).decode().rstrip("=")
+
+
+def decode_triplet_cursor(cursor: str, state: str, token: str) -> tuple[UUID, UUID, UUID]:
+    if (type(cursor) is not str or not cursor or len(cursor) > 256
+            or not state or not token):
+        raise ValueError("invalid cursor")
+    try:
+        blob = base64.b64decode(cursor + "=" * (-len(cursor) % 4),
+                                altchars=b"-_", validate=True)
+        if (base64.urlsafe_b64encode(blob).decode().rstrip("=") != cursor
+                or len(blob) <= 32):
+            raise ValueError("noncanonical cursor")
+        raw, signature = blob[:-32], blob[-32:]
+        expected = hmac.new(_KEY, token.encode() + b":" + state.encode() + b":" + raw,
+                            hashlib.sha256).digest()
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError("wrong cursor signature")
+        payload = json.loads(raw)
+        if (type(payload) is not list or len(payload) != 3
+                or any(type(item) is not str or len(item) != 36 for item in payload)):
+            raise ValueError("invalid cursor payload")
+        position = tuple(UUID(item) for item in payload)
+        if [str(value) for value in position] != payload:
+            raise ValueError("noncanonical cursor payload")
+        return position
+    except (ValueError, UnicodeError, TypeError, OverflowError,
+            json.JSONDecodeError, __import__("binascii").Error) as exc:
+        raise ValueError("invalid cursor") from exc
