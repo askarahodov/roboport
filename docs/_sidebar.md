@@ -28,6 +28,7 @@
   - [Продукт и функции](/auto/PRODUCT.md)
   - [Архитектура и безопасность](/auto/ARCHITECTURE.md)
   - [Функциональная матрица](/auto/FUNCTIONAL_MATRIX.md)
+  - [Постраничная сверка справки AutoDealer и GAP-задачи](/auto/AUTODEALER_PAGE_AUDIT.md)
   - [Дорожная карта полного автосервиса](/auto/FEATURE_ROADMAP.md)
   - [Пакетный synthetic cutover (разработчикам/QA)](/auto/SYNTHETIC_CUTOVER.md)
   - [Загрузка постов: методика и API (dev)](/auto/REPORTING.md)

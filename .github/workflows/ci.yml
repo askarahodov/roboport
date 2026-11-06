@@ -183,6 +183,8 @@ jobs:
       - run: python scripts/check_contract.py
       - name: Validate Markdown local links and heading anchors
         run: python scripts/check_docs_links.py
+      - name: Validate AutoDealer page coverage and GAP ownership
+        run: python scripts/check_autodealer_audit.py
       - run: python -m openapi_spec_validator contracts/openapi.yaml
       - name: Validate isolated synthetic auto OpenAPI
         run: python -m openapi_spec_validator contracts/auto-dev-openapi.yaml
