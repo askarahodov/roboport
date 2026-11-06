@@ -9,6 +9,7 @@ from .auth_http import _mutation_ok
 from .auto_work_order_estimate import (
     AutoEstimateDenied, AutoEstimateConflict,
     read_auto_estimates, publish_auto_estimate, decide_auto_estimate,
+    request_estimate_clarification, resolve_estimate_clarification,
 )
 
 router=APIRouter(include_in_schema=False)
@@ -32,6 +33,20 @@ class Decision(BaseModel):
     revisionId: UUID
     requestKey: UUID
     decision: str
+
+
+class Clarification(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    revisionId: UUID
+    requestKey: UUID
+    reasonCode: str=Field(pattern="^(PRICE|WORK_SCOPE|TIMING|OTHER)$")
+
+
+class ClarificationResolution(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    revisionId: UUID
+    requestKey: UUID
+    resolutionCode: str=Field(pattern="^(EXPLAINED|NEW_VERSION_REQUIRED)$")
 
 
 def _scope(request,org_id,loc_id,order_id):
@@ -108,6 +123,54 @@ async def decision(org_id:str,loc_id:str,order_id:str,request:Request):
             data=decide_auto_estimate(conn,request.cookies.get("rp_session",""),
                 org,loc,order,revision_id=body.revisionId,
                 request_key=body.requestKey,decision=body.decision)
+        except (AutoEstimateDenied,AutoEstimateConflict) as exc:
+            return _error(request,exc)
+    return JSONResponse(status_code=200 if data["replayed"] else 201,
+                        content=data,headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/estimates/clarification")
+async def ask_clarification(org_id:str,loc_id:str,order_id:str,request:Request):
+    values=_scope(request,org_id,loc_id,order_id)
+    if isinstance(values,JSONResponse):
+        return values
+    dsn,org,loc,order=values
+    try:
+        body=Clarification.model_validate(await request.json())
+    except (ValueError,TypeError,ValidationError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as conn:
+        if not _mutation_ok(request,conn):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            data=request_estimate_clarification(
+                conn,request.cookies.get("rp_session",""),org,loc,order,
+                revision_id=body.revisionId,request_key=body.requestKey,
+                reason_code=body.reasonCode)
+        except (AutoEstimateDenied,AutoEstimateConflict) as exc:
+            return _error(request,exc)
+    return JSONResponse(status_code=200 if data["replayed"] else 201,
+                        content=data,headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/estimates/clarification/resolve")
+async def answer_clarification(org_id:str,loc_id:str,order_id:str,request:Request):
+    values=_scope(request,org_id,loc_id,order_id)
+    if isinstance(values,JSONResponse):
+        return values
+    dsn,org,loc,order=values
+    try:
+        body=ClarificationResolution.model_validate(await request.json())
+    except (ValueError,TypeError,ValidationError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as conn:
+        if not _mutation_ok(request,conn):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            data=resolve_estimate_clarification(
+                conn,request.cookies.get("rp_session",""),org,loc,order,
+                revision_id=body.revisionId,request_key=body.requestKey,
+                resolution_code=body.resolutionCode)
         except (AutoEstimateDenied,AutoEstimateConflict) as exc:
             return _error(request,exc)
     return JSONResponse(status_code=200 if data["replayed"] else 201,
