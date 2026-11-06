@@ -273,8 +273,10 @@ def test_previous_visit_does_not_leak_another_branch_to_branch_scoped_staff(monk
                    (other_loc,"LOC_"+other_loc.hex[:10].upper(),org))
         db.execute("""INSERT INTO auto_work_bay(id,organization_id,location_id,code)
                       VALUES(%s,%s,%s,'BAY_1')""",(other_bay,org,other_loc))
-        db.execute("""INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id)
-                      VALUES(%s,%s)""",(d["vehicle"],other_loc))
+        # This domain enforces one live location per vehicle: simulate transfer
+        # A → B → A, never two simultaneous bindings.
+        db.execute("""UPDATE auto_vehicle_location_binding SET location_id=%s
+                      WHERE vehicle_id=%s""",(other_loc,d["vehicle"]))
         grant(db,d["manager"],org,other_loc,"INTAKE")
         _,_,branch_b_order=create_appointment(
             db,d["tokens"][d["manager"]],org,other_loc,other_bay,d["link"],
@@ -286,6 +288,9 @@ def test_previous_visit_does_not_leak_another_branch_to_branch_scoped_staff(monk
     saved=publish(http,inspector,url(org,other_loc,branch_b_order),custody(image))
     assert saved.status_code==201,saved.text
     photo=saved.json()["items"][0]["photos"][0]["path"]
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_vehicle_location_binding SET location_id=%s
+                      WHERE vehicle_id=%s""",(loc,d["vehicle"]))
     staff_a=token_as(http,d,d["intake"])
     assert http.get(url(org,other_loc,branch_b_order)).status_code==403
     assert http.get(photo).status_code==403
