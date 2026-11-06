@@ -14,6 +14,31 @@ from .auto_workshop_qc import (
 router = APIRouter(include_in_schema=False)
 
 
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/inspection-qc/pending")
+def read_pending_qc(org_id: str, loc_id: str, request: Request, limit: int=20,
+                    afterOrderId: str | None=None):
+    from .auto_workshop_qc import pending_work_order_qc
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(loc_id)
+        cursor=UUID(afterOrderId) if afterOrderId is not None else None
+        if not 1<=limit<=50:
+            raise ValueError("invalid page size")
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as conn:
+        try:
+            items,next_id=pending_work_order_qc(
+                conn,request.cookies.get("rp_session",""),org,loc,limit,cursor)
+        except InspectionDenied as error:
+            return _denied_response(request,error)
+    return JSONResponse(content={"syntheticOnly":True,"items":items,
+            "nextOrderId":str(next_id) if next_id else None},
+            headers={"Cache-Control":"no-store"})
+
+
 class InspectionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     odometerKm: int
