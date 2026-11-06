@@ -88,6 +88,27 @@ def test_intake_qc_fail_rework_pass_audit_and_retries(monkeypatch):
                  "result":"FAIL","findingCode":"REWORK"}).status_code==200
     assert client.post(qc,headers=mechanic,json={"requestKey":key,
                  "result":"PASS","findingCode":"NONE"}).status_code==409
+    # A QC FAIL cannot be silently changed into PASS without corrective action.
+    assert client.post(qc,headers=mechanic,json={"requestKey":str(uuid4()),
+                "result":"PASS","findingCode":"NONE"}).status_code==409
+    rework=qc+"/rework"
+    assert client.post(rework,headers=mechanic,json={"requestKey":str(uuid4()),
+                "failEventId":str(uuid4()),"actionCode":"ADJUSTMENT"}).status_code==409
+    fail_id=failed.json()["qcEvents"][-1]["id"]
+    fix_key=str(uuid4())
+    worker=token_as(client,d,d["intake"])
+    action=client.post(rework,headers=worker,json={"requestKey":fix_key,
+                "failEventId":fail_id,"actionCode":"ADJUSTMENT"})
+    assert action.status_code==201,action.text
+    assert len(action.json()["reworks"])==1
+    repeated_action=client.post(rework,headers=worker,json={"requestKey":fix_key,
+                "failEventId":fail_id,"actionCode":"ADJUSTMENT"})
+    assert repeated_action.status_code==200 and repeated_action.json()["replayed"] is True
+    assert client.post(rework,headers=worker,json={"requestKey":fix_key,
+                "failEventId":fail_id,"actionCode":"COMPONENT_RECHECK"}).status_code==409
+    assert client.post(rework,headers=worker,json={"requestKey":str(uuid4()),
+                "failEventId":fail_id,"actionCode":"ADJUSTMENT"}).status_code==409
+    mechanic=token_as(client,d,d["manager"])
     passed=client.post(qc,headers=mechanic,json={"requestKey":str(uuid4()),
                         "result":"PASS","findingCode":"NONE"})
     assert passed.status_code==201,passed.text
@@ -99,6 +120,12 @@ def test_intake_qc_fail_rework_pass_audit_and_retries(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT count(*) FROM auto_work_order_qc_event WHERE work_order_id=%s",
                           (order,)).fetchone()[0]==2
+        assert db.execute("SELECT count(*) FROM auto_work_order_qc_rework WHERE work_order_id=%s",
+                          (order,)).fetchone()[0]==1
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("DELETE FROM auto_work_order_qc_rework WHERE work_order_id=%s",
+                           (order,))
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
                 db.execute("DELETE FROM auto_work_order_qc_event WHERE work_order_id=%s",(order,))
@@ -239,6 +266,14 @@ def test_qc_manager_queue_scoped_first_fail_pass_and_pagination(monkeypatch):
     assert {row["orderId"] for row in changed.json()["items"]}==ids
     assert next(row for row in changed.json()["items"]
                 if row["orderId"]==str(order))["status"]=="FAIL"
+    assert client.post(qc,headers=mechanic,json={"requestKey":str(uuid4()),
+                "result":"PASS","findingCode":"NONE"}).status_code==409
+    fail_id=failed.json()["qcEvents"][-1]["id"]
+    worker=token_as(client,d,d["intake"])
+    fixed=client.post(qc+"/rework",headers=worker,json={"requestKey":str(uuid4()),
+                "failEventId":fail_id,"actionCode":"DIAGNOSTIC_RECHECK"})
+    assert fixed.status_code==201,fixed.text
+    mechanic=token_as(client,d,d["manager"])
     passed=client.post(qc,headers=mechanic,json={"requestKey":str(uuid4()),
                 "result":"PASS","findingCode":"NONE"})
     assert passed.status_code==201,passed.text
