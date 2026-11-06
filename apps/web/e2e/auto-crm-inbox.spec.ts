@@ -160,3 +160,105 @@ test('CRM inbox: invalid nextCursor fails closed, previous tasks cleared on 403'
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить очередь');
   await expect(queue.getByRole('button',{name:'Открыть обращение'})).toHaveCount(0);
 });
+
+
+
+test('CRM overdue-only mode paginates server-filtered tasks and remains active after DONE',async({page})=>{
+  const ids=Array.from({length:26},(_,i)=>
+    'aaaaaaaa-aaaa-4aaa-8aaa-'+String(i+1).padStart(12,'0'));
+  const past=new Date(Date.now()-4*86400000).getTime();
+  const overdue=ids.map((taskId,i)=>({...row,taskId,
+    dueAt:new Date(past+i*60000).toISOString()}));
+  const upcoming={...row,taskId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    dueAt:new Date(Date.now()+86400000).toISOString()};
+  let completed=false;
+  const requests:string[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(leads,route=>{
+    if(route.request().url().endsWith('/'+lead))
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify(leadItem)});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[]})});
+  });
+  await page.route(inbox,route=>{
+    const url=new URL(route.request().url());
+    const mode=url.searchParams.get('mode')??'ALL';
+    const cursor=url.searchParams.get('cursor');
+    requests.push(mode+':'+(cursor??'FIRST'));
+    let tasks=mode==='OVERDUE'?overdue:[...overdue,upcoming];
+    if(completed)tasks=tasks.filter(t=>t.taskId!==ids[0]);
+    const items=cursor?tasks.slice(25):tasks.slice(0,25);
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items,
+        nextCursor:!cursor&&tasks.length>25?'page-two':null})});
+  });
+  await page.route(tasks,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:completed?[{
+        ...overdue[0],status:'DONE',event:{
+          id:'77777777-7777-4777-8777-777777777777',
+          actorId:owner,action:'DONE',createdAt:new Date().toISOString(),
+        }}]:[overdue[0]]})});
+    expect(route.request().headers()['x-csrf-token']).toBe('synthetic-csrf');
+    expect(route.request().postDataJSON().action).toBe('DONE');
+    completed=true;
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({...overdue[0],status:'DONE',event:{
+        id:'77777777-7777-4777-8777-777777777777',
+        actorId:owner,action:'DONE',createdAt:new Date().toISOString(),
+      }})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const queue=page.getByLabel('Очередь CRM');
+  await expect(queue.locator('ol > li')).toHaveCount(25);
+  await page.getByRole('combobox',{name:'Режим очереди CRM'}).selectOption('OVERDUE');
+  await expect(queue.locator('ol > li')).toHaveCount(25);
+  expect(requests).toContain('OVERDUE:FIRST');
+  await queue.getByRole('button',{name:'Следующая страница'}).click();
+  await expect(queue.locator('ol > li')).toHaveCount(1);
+  expect(requests).toContain('OVERDUE:page-two');
+  await queue.getByRole('button',{name:'Предыдущая страница'}).click();
+  await expect(queue.locator('ol > li')).toHaveCount(25);
+  await queue.getByRole('button',{name:'Открыть обращение'}).first().click();
+  await expect(page.getByRole('button',{name:'Выполнено'})).toBeVisible();
+  await page.getByRole('button',{name:'Выполнено'}).click();
+  await expect(queue.locator('ol > li')).toHaveCount(25);
+  await expect(page.getByRole('combobox',{name:'Режим очереди CRM'})).toHaveValue('OVERDUE');
+  expect(requests.at(-1)).toBe('OVERDUE:FIRST');
+  await page.getByRole('combobox',{name:'Режим очереди CRM'}).selectOption('ALL');
+  await expect(queue.locator('ol > li')).toHaveCount(25);
+  expect(requests.at(-1)).toBe('ALL:FIRST');
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(1280);
+});
+
+test('CRM overdue view clears selected tasks on denial and resets paging when filter changes',async({page})=>{
+  let denied=false;
+  await page.route(leads,route=>route.fulfill({status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,items:[]})}));
+  await page.route(inbox,route=>{
+    const u=new URL(route.request().url());
+    if(denied)return route.fulfill({status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[row],
+        nextCursor:u.searchParams.get('mode')==='OVERDUE'?'next-page':null})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const queue=page.getByLabel('Очередь CRM');
+  await page.getByRole('combobox',{name:'Режим очереди CRM'}).selectOption('OVERDUE');
+  await expect(queue.getByRole('button',{name:'Следующая страница'})).toBeVisible();
+  await page.getByRole('combobox',{name:'Режим очереди CRM'}).selectOption('ALL');
+  await expect(queue.getByRole('button',{name:'Следующая страница'})).toHaveCount(0);
+  denied=true;
+  await page.getByRole('combobox',{name:'Режим очереди CRM'}).selectOption('OVERDUE');
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(queue.getByRole('button',{name:'Открыть обращение'})).toHaveCount(0);
+});
