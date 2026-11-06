@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 type Inspection = { id:string; odometerKm:number; fuelPercent:number; tyresOk:boolean;
   lightsOk:boolean; fluidLeak:boolean; exteriorCode:string; createdAt:string };
@@ -249,6 +250,11 @@ export function AutoWorkshopQc() {
           <option value="DAMAGE">Есть повреждения</option></select></label>
         <button type="submit" disabled={!canMutate||!validInspection}>Зафиксировать осмотр</button>
       </form>}
+      {snapshot.inspection&&<p>После приёмочного осмотра механик может подготовить
+        {' '}<Link to={'/staff/auto-diagnostics?'+new URLSearchParams({
+          org:org.trim(),loc:loc.trim(),order:order.trim()}).toString()}>
+          диагностическое заключение (dev)</Link> для согласования сметы.
+      </p>}
       <h3>Журнал QC</h3>
       {snapshot.qcEvents.length===0?<p>Проверок качества пока нет.</p>:
         <ol>{snapshot.qcEvents.map(event=><li key={event.id}>
