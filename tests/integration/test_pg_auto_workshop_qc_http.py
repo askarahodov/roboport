@@ -344,7 +344,7 @@ def test_qc_rework_independent_pass_sql_guard_concurrency_and_proof_revoke(monke
             return "CONFLICT"
     with ThreadPoolExecutor(max_workers=2) as pool:
         results=list(pool.map(attempt,range(2)))
-    assert sorted(results,key=str)==[False,"CONFLICT"]
+    assert results.count(False)==1 and results.count("CONFLICT")==1
     # The actor that attested corrective action cannot approve their own PASS.
     checker=token_as(client,d,d["manager"])
     assert client.post(qc,headers=checker,json={"requestKey":str(uuid4()),
