@@ -5,16 +5,25 @@
 import hashlib
 import binascii
 from uuid import UUID
-from .keyset_cursor import encode_cursor, decode_cursor
+from .keyset_cursor import encode_cursor, decode_cursor, encode_triplet_cursor, decode_triplet_cursor
 import psycopg
 
 from .auto_customer_orders import _actor, CustomerOrderDenied
 from .auto_appointment_service import AppointmentDenied
 
 
-def bookable_resources(conn: psycopg.Connection, token: str) -> list[dict]:
+def bookable_resources(conn: psycopg.Connection, token: str,
+                       *, cursor: str | None = None) -> dict:
+    """All owned active vehicle/bay choices, 50 per signed cursor page."""
+    if cursor is not None and (type(cursor) is not str or not cursor or len(cursor) > 256):
+        raise ValueError("INVALID_CURSOR")
     with conn.transaction():
         actor = _actor(conn, token)
+        scope = hashlib.sha256(("customer-resources:v1:" + str(actor)).encode()).hexdigest()[:32]
+        try:
+            position = decode_triplet_cursor(cursor, scope, token) if cursor else None
+        except ValueError:
+            raise ValueError("INVALID_CURSOR") from None
         rows = conn.execute(
             """SELECT org.id,loc.id,proof.id,bay.id,v.make,v.model,loc.timezone_name
                FROM account_customer_link acl
@@ -30,13 +39,24 @@ def bookable_resources(conn: psycopg.Connection, token: str) -> list[dict]:
                JOIN auto_work_bay bay ON bay.location_id=loc.id
                  AND bay.organization_id=org.id AND bay.disabled_at IS NULL
                WHERE acl.user_id=%s AND acl.revoked_at IS NULL
-               ORDER BY loc.id,proof.id,bay.id LIMIT 50""",
-            (actor,),
+                 AND (%s::uuid IS NULL OR (loc.id,proof.id,bay.id) >
+                      (%s::uuid,%s::uuid,%s::uuid))
+               ORDER BY loc.id,proof.id,bay.id LIMIT 51""",
+            (actor,position[0] if position else None,
+             position[0] if position else None,
+             position[1] if position else None,
+             position[2] if position else None),
         ).fetchall()
-        return [{"organizationId":str(o),"locationId":str(l),
+        page = rows[:50]
+        next_cursor = (
+            encode_triplet_cursor((page[-1][1], page[-1][2], page[-1][3]), scope, token)
+            if len(rows) > 50 else None
+        )
+        return {"items":[{"organizationId":str(o),"locationId":str(l),
                  "customerLinkId":str(p),"bayId":str(b),
                  "vehicle":{"make":make,"model":model},"timeZone":tz}
-                for o,l,p,b,make,model,tz in rows]
+                for o,l,p,b,make,model,tz in page],
+                "nextCursor": next_cursor, "syntheticOnly": True}
 
 
 def my_appointments(conn: psycopg.Connection, token: str, *, cursor: str | None = None) -> dict:

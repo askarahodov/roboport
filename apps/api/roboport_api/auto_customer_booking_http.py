@@ -48,17 +48,19 @@ def _deny(request: Request, exc: Exception) -> JSONResponse:
 
 
 @router.get("/api/v1/dev/auto/customer/booking/resources")
-def get_resources(request: Request):
+def get_resources(request: Request, cursor: str | None = None):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
     with psycopg.connect(dsn) as db:
         try:
-            items = bookable_resources(db, request.cookies.get("rp_session", ""))
+            result = bookable_resources(db, request.cookies.get("rp_session", ""),
+                                        cursor=cursor)
         except CustomerOrderDenied as exc:
             return _deny(request, exc)
-    return JSONResponse(content={"items":items,"syntheticOnly":True},
-                        headers={"Cache-Control":"no-store"})
+        except ValueError:
+            return _response(request, 422, "INVALID_CURSOR")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
 
 
 @router.get("/api/v1/dev/auto/customer/booking/appointments")

@@ -196,3 +196,8 @@ phantom Appointment/Reschedule находятся в
 В закрытом кабинете клиента /account/auto-booking список «Мои записи» не обрывается молча на 50 строках. Сессионно подписанная keyset-пагинация GET /api/v1/dev/auto/customer/booking/appointments?cursor=... сортирует текущие брони по starts_at DESC и appointment.id DESC, возвращает максимум 50 строк и nextCursor (или null). Кнопка «Показать ещё записи» догружает историю; обновление сбрасывает курсор.
 
 На каждой странице ACL проверяется заново, включая отзыв verified link; чужой или повреждённый курсор даёт 422 INVALID_CURSOR. Утрата клиентской сессии или роли даёт 401/403 согласно текущей модели. VIN и чужая история не выдаются; Cache-Control: no-store. Покрытие: test_pg_auto_customer_booking_http.py (52 записи, cursor, отзыв), customer-auto-booking.spec.ts (пагинация, refresh, 403, 390/1280). Это только dev-функция: #113/#119 остаются открытыми.
+
+
+## Полная клиентская выдача доступных автомобилей и постов (#113, current-dev)
+
+Закрытый API /api/v1/dev/auto/customer/booking/resources больше не теряет варианты сверх первых 50. Постраничный keyset по (location.id, verified_proof.id, bay.id), подписанный сессионный cursor, ответ items/nextCursor/syntheticOnly; каждая страница заново проверяет роль CLIENT, привязку account_customer_link, verified unrevoked proof и активный филиал/пост. Повреждённый или чужой курсор: 422 INVALID_CURSOR; role/ACL denied — прежние 401/403, Cache-Control: no-store. React догружает выбор по кнопке «Показать ещё автомобили и посты», сохраняет выбранный ресурс и скрывает данные после 403. PG17: 52 варианта, 50+2, A/B, отзыв прав; Playwright: догрузка, сохранённый выбор, повторная загрузка, 403, 390/1280. Это current-dev, не production или завершение #113/#119.

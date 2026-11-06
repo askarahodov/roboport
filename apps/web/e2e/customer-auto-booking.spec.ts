@@ -260,3 +260,50 @@ test('customer can reach booking page two, refresh and fail closed on revoked se
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
 });
+
+
+test('client loads additional vehicle/bay choices and loses them on revoked access',async({page})=>{
+  await auth(page);
+  const extraBay='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const firstPage={...resources,nextCursor:'synthetic-resource-cursor'};
+  let requests=0, denied=false;
+  await page.route('**/api/v1/dev/auto/customer/booking/**',route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='GET'&&url.pathname.endsWith('/resources')){
+      if(url.searchParams.has('cursor')){
+        expect(url.searchParams.get('cursor')).toBe('synthetic-resource-cursor');
+        requests++;
+        if(denied)return route.fulfill({status:403,body:'{"code":"FORBIDDEN"}'});
+        return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+          syntheticOnly:true,nextCursor:null,items:[{
+            ...resources.items[0],bayId:extraBay,
+          }],
+        })});
+      }
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(firstPage)});
+    }
+    if(req.method()==='GET'&&url.pathname.endsWith('/appointments'))
+      return route.fulfill({status:200,contentType:'application/json',
+        body:'{"syntheticOnly":true,"nextCursor":null,"items":[]}'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:'{"syntheticOnly":true,"items":[]}'});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/auto-booking');
+  const region=page.getByRole('region',{name:'Самостоятельная запись автомобиля (dev)'});
+  await expect(region.getByRole('button',{name:'Показать ещё автомобили и посты'})).toBeVisible();
+  await region.getByRole('button',{name:'Показать ещё автомобили и посты'}).click();
+  await expect(region.getByRole('combobox',{name:'Автомобиль и пост'}).locator('option')).toHaveCount(2);
+  await region.getByRole('combobox',{name:'Автомобиль и пост'}).selectOption(link+':'+extraBay);
+  await expect(region.getByRole('combobox',{name:'Автомобиль и пост'})).toHaveValue(link+':'+extraBay);
+  await expect(region.getByRole('button',{name:'Показать ещё автомобили и посты'})).toHaveCount(0);
+  await region.getByRole('button',{name:'Обновить мои записи'}).click();
+  await expect(region.getByRole('combobox',{name:'Автомобиль и пост'}).locator('option')).toHaveCount(1);
+  denied=true;
+  await region.getByRole('button',{name:'Показать ещё автомобили и посты'}).click();
+  await expect(region.getByRole('alert')).toContainText('Доступ к записи запрещён');
+  await expect(region.getByRole('combobox',{name:'Автомобиль и пост'})).toHaveCount(0);
+  expect(requests).toBe(2);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});
