@@ -169,3 +169,76 @@ def record_work_order_qc(conn, token, org, loc, order, *,
           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,(uuid4(),order,inspection[0],org,loc,actor,request_key,result,finding_code))
         return {"ok":True,"replayed":False,**_snapshot(conn,order)}
+
+
+
+def pending_work_order_qc(conn, token, org, loc, limit=20, after_order_id=None):
+    """Bounded live MECHANIC queue: inspected, eligible, not yet QC-passed.
+
+    Selection is advisory. QC POST independently locks the work order and
+    revalidates maker-checker, work completion and current proof.
+    """
+    if (type(token) is not str or not token.strip()
+            or type(org) is not UUID or type(loc) is not UUID
+            or type(limit) is not int or not 1<=limit<=50
+            or (after_order_id is not None and type(after_order_id) is not UUID)):
+        raise InspectionDenied("INVALID_INPUT")
+    with conn.transaction():
+        if not organization_role_allows(conn,token,org,"MECHANIC",loc,
+                                        for_mutation=True):
+            raise InspectionDenied("FORBIDDEN")
+        actor=session_subject(conn,token,for_mutation=True)
+        if actor is None:
+            raise InspectionDenied("FORBIDDEN")
+        rows=conn.execute("""
+            SELECT w.id,COALESCE(latest.result,'PENDING_QC') AS current_state,
+                   COALESCE(latest.finding_code,'NONE') AS finding
+            FROM auto_work_order w
+            JOIN auto_appointment a ON a.id=w.appointment_id
+              AND a.organization_id=w.organization_id
+              AND a.location_id=w.location_id
+            JOIN LATERAL (
+              SELECT COALESCE((
+                SELECT r.new_booking_id FROM auto_appointment_reschedule r
+                WHERE r.appointment_id=a.id
+                ORDER BY r.created_at DESC,r.id DESC LIMIT 1
+              ),a.booking_id) AS current_id
+            ) booking ON TRUE
+            JOIN auto_bay_booking b ON b.id=booking.current_id
+              AND b.organization_id=w.organization_id
+              AND b.location_id=w.location_id AND b.canceled_at IS NULL
+            JOIN auto_vehicle_customer_link proof
+              ON proof.id=a.customer_link_id AND proof.vehicle_id=a.vehicle_id
+              AND proof.verified_at IS NOT NULL AND proof.revoked_at IS NULL
+            JOIN auto_vehicle_location_binding binding
+              ON binding.vehicle_id=a.vehicle_id AND binding.location_id=w.location_id
+            JOIN auto_organization o ON o.id=w.organization_id
+              AND o.disabled_at IS NULL
+            JOIN auto_service_location loc ON loc.id=w.location_id
+              AND loc.organization_id=o.id AND loc.disabled_at IS NULL
+            JOIN auto_work_order_inspection inspection
+              ON inspection.work_order_id=w.id AND inspection.actor_id<>%s
+            LEFT JOIN LATERAL (
+              SELECT q.result,q.finding_code
+              FROM auto_work_order_qc_event q WHERE q.work_order_id=w.id
+              ORDER BY q.created_at DESC,q.id DESC LIMIT 1
+            ) latest ON TRUE
+            LEFT JOIN auto_work_order_execution execution
+              ON execution.work_order_id=w.id
+            WHERE w.organization_id=%s AND w.location_id=%s
+              AND (latest.result IS NULL OR latest.result='FAIL')
+              AND (execution.id IS NULL OR EXISTS(
+                SELECT 1 FROM auto_work_order_execution_finish finish
+                WHERE finish.execution_id=execution.id
+              ))
+              AND (execution.id IS NULL OR NOT EXISTS(
+                SELECT 1 FROM auto_work_order_labor_entry labor
+                WHERE labor.execution_id=execution.id AND labor.actor_id=%s
+              ))
+              AND (%s::uuid IS NULL OR w.id>%s::uuid)
+            ORDER BY w.id LIMIT %s
+        """,(actor,org,loc,actor,after_order_id,after_order_id,limit+1)).fetchall()
+        next_id=rows[limit-1][0] if len(rows)>limit else None
+        return ([{"orderId":str(order_id),"status":state,
+                  "lastFindingCode":finding}
+                 for order_id,state,finding in rows[:limit]],next_id)
