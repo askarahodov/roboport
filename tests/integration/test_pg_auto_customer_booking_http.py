@@ -75,6 +75,20 @@ def test_customer_book_move_cancel_own_scope_and_replays(monkeypatch):
     url=ROOT+"/appointments"
     assert http.post(url,json=payload,headers=headers).status_code==422
     key={**headers,"Idempotency-Key":str(uuid4())}
+    for invalid in (
+        {**payload, "endsAt": at.isoformat()},
+        {**payload, "startsAt": at.replace(tzinfo=None).isoformat()},
+        {**payload, "endsAt": (at+timedelta(hours=25)).isoformat()},
+    ):
+        result=http.post(url,json=invalid,headers={
+            **headers,"Idempotency-Key":str(uuid4())})
+        assert result.status_code==422,result.text
+        assert result.json()["code"]=="INVALID_INPUT"
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment WHERE organization_id=%s",
+            (org,),
+        ).fetchone()==(0,)
     created=http.post(url,json=payload,headers=key)
     assert created.status_code==201,created.text
     assert http.post(url,json=payload,headers=key).json()==created.json()
