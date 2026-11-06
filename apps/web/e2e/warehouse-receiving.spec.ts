@@ -13,6 +13,11 @@ test('warehouse receipt draft and independent acceptance use exact scope and dis
     status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
   await page.route('**/api/v1/dev/auto/organizations/**/warehouse/receipts**',route=>{
     const req=route.request();
+    if(req.method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,stage:new URL(req.url()).searchParams.get('stage'),
+        items:[],nextDocumentId:null}),
+    });
     expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
     seen.push({url:new URL(req.url()).pathname,key:req.headers()['idempotency-key'],
       body:req.postDataJSON()});
@@ -90,4 +95,109 @@ test('warehouse receiving denies missing authority without false success',async(
   await page.getByRole('button',{name:'Создать документ'}).click();
   await expect(page.getByRole('status')).toContainText('Нет прав');
   await expect(page.getByRole('textbox',{name:'UUID приходного документа'})).toHaveValue('');
+});
+
+
+
+test('manager reviews receipt draft, accepts and values from live queues',async({page})=>{
+  let acceptedOnce=false;
+  let valuedOnce=false;
+  const queries:string[]=[];
+  const mutations:{path:string;body:any;key:string}[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route('**/warehouse/receipts/pending?*',route=>{
+    const u=new URL(route.request().url());
+    const stage=u.searchParams.get('stage');
+    queries.push(stage??'');
+    expect(u.searchParams.get('locationId')).toBe(loc);
+    const show=stage==='accept'?!acceptedOnce:acceptedOnce&&!valuedOnce;
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,stage,nextDocumentId:null,
+        items:show?[{documentId:receipt,lotId:lot,article:'SYN-120',
+          batchCode:'LOT-A',binCode:'BIN-1',quantity:4,
+          sourceReference:'SUP-QUEUE-4'}]:[]})});
+  });
+  await page.route('**/warehouse/receipts/accept',route=>{
+    const req=route.request();
+    mutations.push({path:new URL(req.url()).pathname,key:req.headers()['idempotency-key'],
+      body:req.postDataJSON()});
+    expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+    acceptedOnce=true;
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({acceptanceId:accepted})});
+  });
+  await page.route('**/warehouse/receipts/valuation',route=>{
+    const req=route.request();
+    mutations.push({path:new URL(req.url()).pathname,key:req.headers()['idempotency-key'],
+      body:req.postDataJSON()});
+    expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+    valuedOnce=true;
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({valuationId:valuation})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/warehouse-receiving');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const drafts=page.getByLabel('Документы на подтверждение прихода');
+  const values=page.getByLabel('Принятые документы без оценки');
+  await drafts.getByRole('button',{name:'Показать черновики'}).click();
+  await expect(drafts).toContainText('SUP-QUEUE-4');
+  await drafts.getByRole('button',{name:'Выбрать черновик '+receipt}).click();
+  await expect(page.getByRole('textbox',{name:'UUID приходного документа'})).toHaveValue(receipt);
+  await page.getByRole('button',{name:'Подтвердить приёмку'}).click();
+  await expect(page.getByText('Приёмка подтверждена другим сотрудником.',{
+    exact:false})).toBeVisible();
+  await expect(drafts).toContainText('Черновиков к приёмке нет.');
+  await expect(values).toContainText('SUP-QUEUE-4');
+  await values.getByRole('button',{name:'Выбрать для оценки '+receipt}).click();
+  await page.getByRole('spinbutton',{name:'Закупочная цена за единицу'}).fill('1250');
+  await page.getByRole('spinbutton',{name:'НДС по документу'}).fill('600');
+  await page.getByRole('textbox',{name:'Ревизия цены поставщика'}).fill('QUOTE-QUEUE-001');
+  await page.getByRole('textbox',{name:'Время цены поставщика ISO UTC'}).fill('2026-10-28T12:00:00Z');
+  await page.getByRole('button',{name:'Сохранить закупочную стоимость'}).click();
+  await expect(page.getByText('Закупочная стоимость и НДС зафиксированы',{
+    exact:false})).toBeVisible();
+  await expect(values).toContainText('Документов без оценки нет.');
+  expect(mutations).toHaveLength(2);
+  expect(mutations[0].body).toEqual({locationId:loc,documentId:receipt});
+  expect(mutations[1].body.documentId).toBe(receipt);
+  expect(mutations[0].key).not.toBe(mutations[1].key);
+  expect(queries).toContain('accept');expect(queries).toContain('value');
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(1280);
+});
+
+test('receipt manager queue fails closed on foreign branch, revoke and malformed JSON',async({page})=>{
+  const foreign='99999999-9999-4999-8999-999999999999';
+  let bad=false;
+  await page.route('**/warehouse/receipts/pending?*',route=>{
+    const u=new URL(route.request().url());
+    if(u.searchParams.get('locationId')!==loc)return route.fulfill({
+      status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,stage:u.searchParams.get('stage'),
+        nextDocumentId:null,items:[{documentId:receipt,lotId:lot,
+          article:'PRIVATE-SUPPLIER',batchCode:'LOT-A',binCode:'BIN-1',
+          quantity:4,sourceReference:'SUP-QUEUE-4',
+          ...(bad?{quantity:-4}:{})}]})});
+  });
+  await page.goto('/staff/warehouse-receiving');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const drafts=page.getByLabel('Документы на подтверждение прихода');
+  await drafts.getByRole('button',{name:'Показать черновики'}).click();
+  await expect(drafts).toContainText('PRIVATE-SUPPLIER');
+  bad=true;
+  await drafts.getByRole('button',{name:'Показать черновики'}).click();
+  await expect(drafts.getByRole('alert')).toContainText('Не удалось загрузить черновики');
+  await expect(drafts).not.toContainText('PRIVATE-SUPPLIER');
+  bad=false;
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(foreign);
+  await expect(drafts).not.toContainText('PRIVATE-SUPPLIER');
+  await drafts.getByRole('button',{name:'Показать черновики'}).click();
+  await expect(drafts.getByRole('alert')).toContainText('Нет доступа');
+  await expect(drafts.getByRole('button',{name:'Выбрать черновик '+receipt})).toHaveCount(0);
 });
