@@ -206,3 +206,57 @@ test('client cancellation retry preserves original key after lost response',asyn
   await expect(page.getByText('Изменение записи принято сервером.')).toBeVisible();
   expect(count).toBe(2);
 });
+
+
+test('customer can reach booking page two, refresh and fail closed on revoked session',async({page})=>{
+  await auth(page);
+  const later='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const laterWork='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const cursor='opaque-synthetic-cursor';
+  let nextDenied=false, pages=0;
+  await page.route('**/api/v1/dev/auto/customer/booking/**',route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='GET'&&url.pathname.endsWith('/resources'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(resources)});
+    if(req.method()==='GET'&&url.pathname.endsWith('/appointments')){
+      if(url.searchParams.has('cursor')){
+        expect(url.searchParams.get('cursor')).toBe(cursor);
+        pages++;
+        if(nextDenied)return route.fulfill({status:403,body:'{"code":"FORBIDDEN"}'});
+        return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+          syntheticOnly:true,nextCursor:null,items:[{
+            appointmentId:later,organizationId:org,locationId:loc,customerLinkId:link,
+            bookingId:booking,bayId:bay,...second,status:'SCHEDULED',workOrderId:laterWork,
+            timeZone:'Europe/Berlin',canManage:true,serviceIds:[],
+          }],
+        })});
+      }
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,nextCursor:cursor,items:[{
+          appointmentId:appointment,organizationId:org,locationId:loc,customerLinkId:link,
+          bookingId:booking,bayId:bay,...first,status:'SCHEDULED',workOrderId:work,
+          timeZone:'Europe/Berlin',canManage:true,serviceIds:[],
+        }],
+      })});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:'{"syntheticOnly":true,"items":[]}'});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/auto-booking');
+  const region=page.getByRole('region',{name:'Самостоятельная запись автомобиля (dev)'});
+  await expect(region.getByText('Заказ-наряд '+work,{exact:false})).toBeVisible();
+  await region.getByRole('button',{name:'Показать ещё записи'}).click();
+  await expect(region.getByText('Заказ-наряд '+laterWork,{exact:false})).toBeVisible();
+  await expect(region.getByRole('button',{name:'Показать ещё записи'})).toHaveCount(0);
+  expect(pages).toBe(1);
+  await region.getByRole('button',{name:'Обновить мои записи'}).click();
+  await expect(region.getByText('Заказ-наряд '+laterWork,{exact:false})).toHaveCount(0);
+  await expect(region.getByRole('button',{name:'Показать ещё записи'})).toBeVisible();
+  nextDenied=true;
+  await region.getByRole('button',{name:'Показать ещё записи'}).click();
+  await expect(region.getByRole('alert')).toContainText('Доступ к записи запрещён');
+  await expect(region.getByText('Заказ-наряд '+work,{exact:false})).toHaveCount(0);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});
