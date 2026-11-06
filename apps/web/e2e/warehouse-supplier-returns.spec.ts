@@ -39,7 +39,7 @@ test('supplier return prepares, approves and preserves provenance request bodies
   await expect(page.getByRole('status')).toContainText('остаток ещё не изменён');
   await expect(page.getByRole('textbox',{name:'UUID акта'})).toHaveValue(doc);
   await page.getByRole('button',{name:'Утвердить возврат'}).click();
-  await expect(page.getByRole('status')).toContainText('закупочная оценка связаны');
+  await expect(page.getByRole('status').filter({hasText:'закупочная оценка связаны'})).toContainText('закупочная оценка связаны');
   expect(sent).toHaveLength(2);
   expect(sent[0].body).toEqual({locationId:loc,sourceReceiptId:receipt,
     quantity:2,reason:'Возврат брака',supplierReference:'RMA-2026-001'});
