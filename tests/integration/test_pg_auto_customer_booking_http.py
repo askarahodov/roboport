@@ -308,3 +308,47 @@ def test_customer_appointments_cursor_more_than_fifty_and_revocation(monkeypatch
     assert revoked.status_code==200,revoked.text
     assert revoked.json()["items"]==[]
     assert revoked.json()["nextCursor"] is None
+
+
+def test_customer_resource_pages_cover_all_bays_and_recheck_access(monkeypatch):
+    """52 vehicle/bay choices, no omissions, cross-session reuse or post-revoke leak."""
+    d,org,loc,bay,_,_,http=_setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        for i in range(51):
+            db.execute("""INSERT INTO auto_work_bay
+                (id,organization_id,location_id,code)
+                VALUES(%s,%s,%s,%s)""",(uuid4(),org,loc,f"EXTRA-{i:03d}"))
+    _auth(http,d,d["client_a"])
+    root=ROOT+"/resources"
+    first_response=http.get(root)
+    assert first_response.status_code==200,first_response.text
+    assert first_response.headers["cache-control"]=="no-store"
+    first=first_response.json()
+    assert first["syntheticOnly"] is True
+    assert len(first["items"])==50 and first["nextCursor"]
+    assert "vin" not in first_response.text.lower()
+    second_response=http.get(root,params={"cursor":first["nextCursor"]})
+    assert second_response.status_code==200,second_response.text
+    second=second_response.json()
+    assert len(second["items"])==2 and second["nextCursor"] is None
+    ids=[r["bayId"] for r in first["items"]+second["items"]]
+    assert len(ids)==len(set(ids))==52
+    assert all(r["locationId"]==str(loc) and r["customerLinkId"]==str(d["link"])
+               for r in first["items"]+second["items"])
+    _auth(http,d,d["client_b"])
+    foreign=http.get(root,params={"cursor":first["nextCursor"]})
+    assert foreign.status_code==422,foreign.text
+    assert foreign.json()["code"]=="INVALID_CURSOR"
+    assert http.get(root).json()["items"]==[]
+    _auth(http,d,d["client_a"])
+    for invalid in ("invalid***","x"*257,first["nextCursor"]+"A"):
+        response=http.get(root,params={"cursor":invalid})
+        assert response.status_code==422,response.text
+        assert response.json()["code"]=="INVALID_CURSOR"
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+                   (d["link"],))
+    revoked=http.get(root,params={"cursor":first["nextCursor"]})
+    assert revoked.status_code==200,revoked.text
+    assert revoked.json()["items"]==[]
+    assert revoked.json()["nextCursor"] is None
