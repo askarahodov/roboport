@@ -56,14 +56,14 @@ def upgrade():
             AND chosen.service_id=NEW.service_id
             AND chosen.organization_id=w.organization_id
             AND chosen.location_id=w.location_id
-          JOIN auto_organization_role_grant grant ON grant.organization_id=w.organization_id
-            AND grant.user_id=NEW.actor_id AND grant.role_code='MECHANIC'
-            AND grant.revoked_at IS NULL
-            AND (grant.location_id=w.location_id OR grant.location_id IS NULL)
+          JOIN auto_organization_role_grant g ON g.organization_id=w.organization_id
+            AND g.user_id=NEW.actor_id AND g.role_code='MECHANIC'
+            AND g.revoked_at IS NULL
+            AND (g.location_id=w.location_id OR g.location_id IS NULL)
           WHERE w.id=NEW.work_order_id
             AND NOT EXISTS(SELECT 1 FROM auto_work_order_estimate_revision r
               WHERE r.work_order_id=w.id)
-          FOR SHARE OF w,a,b,proof,binding,org,loc,inspection,chosen,grant
+          FOR SHARE OF w,a,b,proof,binding,org,loc,inspection,chosen,g
         ) THEN RAISE EXCEPTION 'diagnostic requires inspection, selected service, live mechanic and no quote'; END IF;
         RETURN NEW;
       END $f$""")
