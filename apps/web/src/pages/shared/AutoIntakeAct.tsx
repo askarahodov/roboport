@@ -19,9 +19,11 @@ type PhotoMeta={areaCode:Area;sha256:string;mime:'image/png';
   width:number;height:number;index:number;path:string};
 type Act={id:string;version:number;vehicleKind:typeof kinds[number];damages:Damage[];
   inventory:Inventory[];photos:PhotoMeta[];sha256:string;createdAt:string;actorId:string};
+type Previous={orderId:string;version:number;damages:Damage[];inventory:Inventory[];
+  createdAt:string};
 type State={syntheticOnly:true;releaseAllowed:false;legalSignatureStatus:'NOT_IMPLEMENTED';
   inspection:null|{id:string;odometerKm:number;fuelPercent:number;exteriorCode:string};
-  locked:boolean;latestVersion:number;items:Act[]};
+  locked:boolean;latestVersion:number;items:Act[];previousVisit:Previous|null};
 type Pending={body:string;scope:string};
 type Status='idle'|'loading'|'ready'|'error'|'denied';
 
@@ -50,6 +52,13 @@ function validState(raw:unknown):State{
     v.legalSignatureStatus!=='NOT_IMPLEMENTED'||
     typeof v.locked!=='boolean'||!Array.isArray(v.items)||v.items.length>20||
     !Number.isInteger(v.latestVersion)||v.latestVersion!==v.items.length||
+    !(v.previousVisit===null||(v.previousVisit!==undefined&&
+      uuid.test(v.previousVisit.orderId)&&Number.isInteger(v.previousVisit.version)&&
+      Array.isArray(v.previousVisit.damages)&&
+      v.previousVisit.damages.every(d=>areas.includes(d.areaCode)&&
+        damageCodes.includes(d.damageCode)&&severities.includes(d.severity))&&
+      Array.isArray(v.previousVisit.inventory)&&
+      v.previousVisit.inventory.length===5))||
     !(v.inspection===null||(typeof v.inspection==='object'&&
       uuid.test(v.inspection.id)&&Number.isInteger(v.inspection.odometerKm)&&
       Number.isInteger(v.inspection.fuelPercent)))||
@@ -193,6 +202,15 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
         <p role="status">Для первой версии требуется приёмочный осмотр (INTAKE).</p>}
       {data.locked&&<p role="status">Смета или QC уже зафиксированы.
         Новая версия акта недоступна; история остаётся доступной.</p>}
+      {data.previousVisit&&<section aria-label="Сравнение с предыдущим визитом">
+        <h3>Предыдущий визит того же заказчика</h3>
+        <p>Акт №{data.previousVisit.version},
+          {' '}{new Date(data.previousVisit.createdAt).toLocaleString('ru-RU')}.
+          Данные другого владельца автомобиля не отображаются.</p>
+        <ul>{data.previousVisit.damages.map(d=><li key={d.areaCode+d.damageCode}>
+          {areaLabels[d.areaCode]}: {damageLabels[d.damageCode]} · {d.severity}
+        </li>)}</ul>
+      </section>}
       {data.items.length===0?<p>Версий акта ещё нет.</p>:
         <ol>{data.items.map(item=><li key={item.id}>
           <section aria-label={'Акт версия '+item.version}>
