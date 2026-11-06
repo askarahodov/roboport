@@ -3,8 +3,10 @@ import React from 'react';
 type Inspection = { id:string; odometerKm:number; fuelPercent:number; tyresOk:boolean;
   lightsOk:boolean; fluidLeak:boolean; exteriorCode:string; createdAt:string };
 type Event = { id:string; result:'PASS'|'FAIL'; findingCode:string; createdAt:string };
+type Rework={id:string;failEventId:string;actorId:string;
+  actionCode:'ADJUSTMENT'|'DIAGNOSTIC_RECHECK'|'COMPONENT_RECHECK';createdAt:string};
 type Snapshot = { status:'NOT_INSPECTED'|'PENDING_QC'|'QC_FAILED'|'QC_PASSED';
-  releaseAllowed:false; inspection:Inspection|null; qcEvents:Event[] };
+  releaseAllowed:false; inspection:Inspection|null; qcEvents:Event[]; reworks:Rework[] };
 type Pending = { path:string; body:string; key:string };
 type QueueItem={orderId:string;status:'PENDING_QC'|'FAIL';lastFindingCode:string};
 type QueueState={status:'idle'|'loading'|'ready'|'denied'|'error';
@@ -17,6 +19,13 @@ function validate(raw:unknown):Snapshot {
   const value=raw as Record<string,unknown>;
   if(!['NOT_INSPECTED','PENDING_QC','QC_FAILED','QC_PASSED'].includes(String(value.status))||
       value.releaseAllowed!==false || !Array.isArray(value.qcEvents)||value.qcEvents.length>50||
+      !Array.isArray(value.reworks)||value.reworks.length>50||
+      !value.reworks.every((x:unknown)=>x!==null&&typeof x==='object'&&
+        'id' in x&&typeof x.id==='string'&&uuid.test(x.id)&&
+        'failEventId' in x&&typeof x.failEventId==='string'&&uuid.test(x.failEventId)&&
+        'actorId' in x&&typeof x.actorId==='string'&&uuid.test(x.actorId)&&
+        'actionCode' in x&&['ADJUSTMENT','DIAGNOSTIC_RECHECK','COMPONENT_RECHECK'].includes(String(x.actionCode))&&
+        'createdAt' in x&&typeof x.createdAt==='string')||
       !value.qcEvents.every((x:unknown)=>x!==null&&typeof x==='object'
         && 'id' in x&&typeof x.id==='string'&&uuid.test(x.id)
         && 'result' in x&&(x.result==='PASS'||x.result==='FAIL')
@@ -52,6 +61,7 @@ export function AutoWorkshopQc() {
   const [exterior,setExterior]=React.useState('UNCHECKED');
   const [qcResult,setQcResult]=React.useState<'PASS'|'FAIL'>('FAIL');
   const [finding,setFinding]=React.useState('REWORK');
+  const [reworkAction,setReworkAction]=React.useState<Rework['actionCode']>('ADJUSTMENT');
   const scope=[org.trim(),loc.trim(),order.trim()].join(':');
   const valid=[org,loc,order].every(x=>uuid.test(x.trim()));
   const root='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())
@@ -114,6 +124,10 @@ export function AutoWorkshopQc() {
     odometerValue>=0&&odometerValue<=2000000&&fuel.trim()!==''&&
     Number.isInteger(fuelValue)&&fuelValue>=0&&fuelValue<=100;
   const canMutate=ready&&!busy&&!pending;
+  const latestFail=snapshot?.qcEvents.at(-1);
+  const requiresRework=snapshot?.status==='QC_FAILED'&&latestFail?.result==='FAIL';
+  const reworkRecorded=!!(requiresRework&&snapshot?.reworks.some(
+    item=>item.failEventId===latestFail?.id));
   React.useEffect(()=>{
     queueSequence.current+=1;
     setQueue(emptyQueue());
@@ -240,8 +254,33 @@ export function AutoWorkshopQc() {
         <ol>{snapshot.qcEvents.map(event=><li key={event.id}>
           {event.result} · {event.findingCode} · {event.createdAt}
         </li>)}</ol>}
+      {snapshot.reworks.length>0&&<section aria-label="Журнал доработок">
+        <h3>Неизменяемые подтверждения доработки</h3>
+        <ol>{snapshot.reworks.map(item=><li key={item.id}>
+          {item.actionCode} · FAIL {item.failEventId} · {item.createdAt}
+        </li>)}</ol>
+      </section>}
+      {requiresRework&&<section aria-label="Доработка после QC FAIL">
+        <h3>Доработка после отклонения QC (MECHANIC)</h3>
+        <p>Перед повторным PASS нужен новый неизменяемый факт работы по последнему FAIL.
+          Работавший над доработкой сотрудник не может утверждать её QC PASS.
+          Это синтетическая отметка без списания деталей, подписи или разрешения на выдачу.</p>
+        {reworkRecorded?<p role="status">Доработка зарегистрирована. Повторный QC возможен только независимым сотрудником.</p>:<>
+          <label>Тип доработки <select aria-label="Тип доработки" value={reworkAction}
+            onChange={e=>setReworkAction(e.target.value as Rework['actionCode'])}>
+            <option value="ADJUSTMENT">Корректировка</option>
+            <option value="DIAGNOSTIC_RECHECK">Повторная диагностика</option>
+            <option value="COMPONENT_RECHECK">Проверка узла</option>
+          </select></label>
+          <button type="button" disabled={!canMutate} onClick={()=>{
+            const body=JSON.stringify({requestKey:crypto.randomUUID(),
+              failEventId:latestFail?.id,actionCode:reworkAction});
+            void execute(root+'/qc/rework',body,'rework');
+          }}>Зафиксировать доработку</button>
+        </>}
+      </section>}
       {snapshot.inspection&&snapshot.status!=='QC_PASSED'&&<form onSubmit={e=>{
-        e.preventDefault();if(!canMutate)return;
+        e.preventDefault();if(!canMutate||(qcResult==='PASS'&&requiresRework&&!reworkRecorded))return;
         const body=JSON.stringify({requestKey:crypto.randomUUID(),result:qcResult,
           findingCode:qcResult==='PASS'?'NONE':finding});
         void execute(root+'/qc',body,'qc');
@@ -255,7 +294,9 @@ export function AutoWorkshopQc() {
           value={finding} onChange={e=>setFinding(e.target.value)}>
           <option value="REWORK">Требуется доработка</option>
           <option value="DEFECT">Выявлен дефект</option></select></label>}
-        <button type="submit" disabled={!canMutate}>Записать результат QC</button>
+        <button type="submit" disabled={!canMutate||
+          (qcResult==='PASS'&&requiresRework&&!reworkRecorded)}>
+          Записать результат QC</button>
       </form>}
       <button type="button" disabled={busy}
         onClick={()=>setRevision(n=>n+1)}>Обновить журнал</button>
