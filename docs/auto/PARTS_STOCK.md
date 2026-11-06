@@ -241,3 +241,18 @@ expected и целостность запаса. stale=true лишь подск�
 пагинацию, утверждение, устаревший count, no PII и revoke.
 Полный склад #168 и release gate #119 остаются OPEN.
 
+
+## Очереди на приёмку и оценку приходов (current-dev, #168)
+
+Новый закрытый read-only HTTP контракт:
+
+```text
+GET /api/v1/dev/auto/organizations/{org}/warehouse/receipts/pending?locationId={loc}&stage=accept&limit=20
+GET /api/v1/dev/auto/organizations/{org}/warehouse/receipts/pending?locationId={loc}&stage=value&limit=20&afterDocumentId={uuid}
+```
+
+`stage=accept`: ещё не подтверждённый документ без записи в `auto_stock_receipt_acceptance`. `stage=value`: подтверждённый, но ещё не оценённый документ (нет `auto_stock_receipt_valuation`). Доступ только действующему MANAGER данного филиала; SQL ограничен организацией, филиалом и их активностью. Ответ `Cache-Control:no-store`: `syntheticOnly`, `stage`, `items[]`, `nextDocumentId`. Каждая строка содержит `documentId`, `lotId`, `article`, `batchCode`, `binCode`, `quantity`, `sourceReference`, но не персональные ID сотрудников, клиента, VIN и ключи повторов.
+
+Сортировка по UUID документа, cursor-pagination до 20 по умолчанию (1–50), не по времени создания. Отозванные права и чужой scope → 403, неверный UUID/limit/stage → 422. Обе очереди перечитываются после успешных POST. Возможны гонки между чтением и мутацией; серверный POST независимо проверяет другого создателя, актуальную роль, физическую атомарность и отсутствие повтора. Выбор в очереди **не** является разрешением на запись. Фиксация оценки отдельно от физического остатка. Все транзакционные проверки и idempotency сохранены.
+
+Контрактные PG17 тесты: `tests/integration/test_pg_auto_receipt_http.py`; Playwright: `apps/web/e2e/warehouse-receiving.spec.ts`. Нет миграций или production OpenAPI; synthetic-only до #119.
