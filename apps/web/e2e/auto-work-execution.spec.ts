@@ -98,3 +98,53 @@ test('execution UI hides stale labor and stock after access revocation',async({p
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByText('PRIVATE-SYN',{exact:false})).toHaveCount(0);
 });
+
+
+test('lost labor response is replayed with original payload after execution advances',async({page})=>{
+  let phase='IN_PROGRESS';
+  let posts=0;
+  const sent:{body:string|null;key:string}[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}',
+  }));
+  await page.route(root,route=>{
+    const req=route.request();
+    if(req.method()==='POST'&&new URL(req.url()).pathname.endsWith('/labor')){
+      posts++;
+      const raw=req.postData()??'';
+      const payload=req.postDataJSON();
+      sent.push({body:raw,key:payload.requestKey});
+      expect(payload).toMatchObject({serviceId:service,actualMinutes:40});
+      if(posts===1){
+        // Another worker finished execution while the first HTTP response was lost.
+        phase='READY_FOR_QC';
+        return route.abort('failed');
+      }
+      return route.fulfill({status:200,contentType:'application/json',
+        body:'{"ok":true,"replayed":true}'});
+    }
+    if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({status:phase,approvedVersion:1,approvedTotalMinor:12500,
+        requiredServices:[{serviceId:service,code:'SVC-SYN',title:'Synthetic',
+          durationMinutes:30}],labor:[],materials:[],qcStatus:'PENDING_QC',
+        executionId:order,releaseAllowed:false,syntheticOnly:true})});
+    return route.fulfill({status:409,contentType:'application/json',
+      body:'{"code":"NOT_IN_PROGRESS"}'});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-execution');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByRole('textbox',{name:'UUID заказ-наряда'}).fill(order);
+  await expect(page.getByRole('heading',{name:'Этап: IN_PROGRESS'})).toBeVisible();
+  await page.getByRole('spinbutton',{name:'Фактические минуты SVC-SYN'}).fill('40');
+  await page.getByRole('button',{name:'Зафиксировать работу'}).click();
+  await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toBeVisible();
+  await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
+  await expect(page.getByRole('heading',{name:'Этап: READY_FOR_QC'})).toBeVisible();
+  expect(posts).toBe(2);
+  expect(sent[0]).toEqual(sent[1]);
+  await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toHaveCount(0);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});
