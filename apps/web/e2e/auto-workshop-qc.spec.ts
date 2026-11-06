@@ -114,6 +114,7 @@ test('mechanic QC queue moves from pending to failed to passed, no stale rows',a
   });
   await page.route(base,route=>{
     const req=route.request(),url=new URL(req.url());
+    if(url.pathname.endsWith('/inspection-qc/pending'))return route.fallback();
     const inspected={id:'44444444-4444-4444-8444-444444444444',
       odometerKm:10000,fuelPercent:60,tyresOk:true,lightsOk:true,
       fluidLeak:false,exteriorCode:'CLEAR',createdAt:'2030-01-01T10:00:00Z'};
