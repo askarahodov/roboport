@@ -89,16 +89,28 @@ def test_full_approved_execution_stock_handoff_and_independent_qc(monkeypatch):
     assert post(http,base+"/labor",mech,labor_key,
                 serviceId=str(service),actualMinutes=25).status_code==409
     warehouse=session(http,d,d["intake"])
-    issued=post(http,base+"/materials/issue",warehouse,lotId=str(lot),quantity=1)
+    issue_key=uuid4()
+    issued=post(http,base+"/materials/issue",warehouse,issue_key,
+                lotId=str(lot),quantity=1)
     assert issued.status_code==201,issued.text
     issue=issued.json()["issueId"]
+    issue_replay=post(http,base+"/materials/issue",warehouse,issue_key,
+                      lotId=str(lot),quantity=1)
+    assert issue_replay.status_code==200,issue_replay.text
+    assert issue_replay.json()["issueId"]==issue
+    assert issue_replay.json()["replayed"] is True
+    assert post(http,base+"/materials/issue",warehouse,issue_key,
+                lotId=str(lot),quantity=2).status_code==409
     assert any(not x["received"] for x in issued.json()["materials"])
     mech=session(http,d,d["manager"])
     assert post(http,base+"/finish",mech).status_code==409
     receipt_key=uuid4()
     accepted=post(http,base+"/materials/receive",mech,receipt_key,issueId=issue)
     assert accepted.status_code==201,accepted.text
-    assert post(http,base+"/materials/receive",mech,receipt_key,issueId=issue).status_code==201
+    receipt_replay=post(http,base+"/materials/receive",mech,receipt_key,issueId=issue)
+    assert receipt_replay.status_code==200,receipt_replay.text
+    assert receipt_replay.json()["handoffId"]==accepted.json()["handoffId"]
+    assert receipt_replay.json()["replayed"] is True
     assert all(x["received"] for x in accepted.json()["materials"])
     # No QC before execution completion, even with independent mechanic.
     other=session(http,d,d["other"])
@@ -112,9 +124,27 @@ def test_full_approved_execution_stock_handoff_and_independent_qc(monkeypatch):
     assert finish.json()["releaseAllowed"] is False
     assert post(http,base+"/finish",mech,finish_key).status_code==200
     assert post(http,base+"/finish",mech).status_code==409
+    # The same immutable receipts remain replayable after finish, even though
+    # all genuinely new mutations are now forbidden.
+    assert post(http,base+"/labor",mech,labor_key,
+                serviceId=str(service),actualMinutes=32).status_code==200
+    assert post(http,base+"/materials/receive",mech,receipt_key,
+                issueId=issue).status_code==200
+    assert post(http,base+"/labor",mech,labor_key,
+                serviceId=str(service),actualMinutes=31).status_code==409
+    assert post(http,base+"/labor",mech,uuid4(),
+                serviceId=str(service),actualMinutes=32).status_code==409
+    assert post(http,base+"/materials/receive",mech,uuid4(),
+                issueId=issue).status_code==409
     warehouse=session(http,d,d["intake"])
     assert post(http,base+"/materials/issue",warehouse,
                 lotId=str(lot),quantity=1).status_code==409
+    replay_after_finish=post(http,base+"/materials/issue",warehouse,issue_key,
+                             lotId=str(lot),quantity=1)
+    assert replay_after_finish.status_code==200,replay_after_finish.text
+    assert replay_after_finish.json()["issueId"]==issue
+    assert post(http,base+"/materials/issue",warehouse,issue_key,
+                lotId=str(lot),quantity=2).status_code==409
     # Mechanic that performed labor cannot independently QC own order.
     assert post(http,qc_path,mech,result="PASS",findingCode="NONE").status_code==403
     other=session(http,d,d["other"])
@@ -124,8 +154,34 @@ def test_full_approved_execution_stock_handoff_and_independent_qc(monkeypatch):
     assert completed.status_code==200
     assert completed.json()["status"]=="QC_ACCEPTED"
     assert completed.json()["releaseAllowed"] is False
+    # A delayed HTTP retry after QC must not be mistaken for a new mutation.
+    mech=session(http,d,d["manager"])
+    assert post(http,base+"/labor",mech,labor_key,
+                serviceId=str(service),actualMinutes=32).json()["replayed"] is True
+    assert post(http,base+"/materials/receive",mech,receipt_key,
+                issueId=issue).json()["replayed"] is True
+    warehouse=session(http,d,d["intake"])
+    after_qc=post(http,base+"/materials/issue",warehouse,issue_key,
+                  lotId=str(lot),quantity=1)
+    assert after_qc.status_code==200 and after_qc.json()["replayed"] is True
+    # A valid existing receipt does not grant cross-role, cross-actor access.
+    other=session(http,d,d["other"])
+    assert post(http,base+"/labor",other,labor_key,
+                serviceId=str(service),actualMinutes=32).status_code==409
+    assert post(http,base+"/materials/receive",other,receipt_key,
+                issueId=issue).status_code==409
     with psycopg.connect(DSN) as db:
         assert balance(db,item)==(1,1)
+        assert db.execute("""SELECT count(*) FROM auto_work_order_labor_entry l
+            JOIN auto_work_order_execution e ON e.id=l.execution_id
+            WHERE e.work_order_id=%s""",(order,)).fetchone()[0]==1
+        assert db.execute(
+            "SELECT count(*) FROM auto_stock_lot_work_order_issue WHERE work_order_id=%s",
+            (order,),
+        ).fetchone()[0]==1
+        assert db.execute("""SELECT count(*) FROM auto_stock_mechanic_handoff h
+            JOIN auto_stock_lot_work_order_issue i ON i.id=h.issue_id
+            WHERE i.work_order_id=%s""",(order,)).fetchone()[0]==1
         assert db.execute("""SELECT count(*) FROM auto_work_order_execution_finish f
             JOIN auto_work_order_execution e ON e.id=f.execution_id WHERE e.work_order_id=%s""",
             (order,)).fetchone()[0]==1
