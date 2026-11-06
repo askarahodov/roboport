@@ -82,8 +82,8 @@ export function WarehouseReceiving(){
     }catch{if(scope.org===context.current.org&&scope.location===context.current.location)
       setListState('error');}
   }
-  async function loadReview(stage:Stage,after:string|null=null){
-    if(!validScope||busy||reviews[stage].status==='loading')return;
+  async function loadReview(stage:Stage,after:string|null=null,force=false){
+    if(!validScope||(!force&&(busy||reviews[stage].status==='loading')))return;
     const seq=++readSequence.current[stage];
     const scope={...context.current};
     setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'loading'}}));
@@ -182,8 +182,10 @@ export function WarehouseReceiving(){
       if(snap.kind==='accept'||snap.kind==='valuation'){
         readSequence.current.accept+=1;readSequence.current.value+=1;
         setReviews({accept:emptyReview(),value:emptyReview()});
-        // Never keep a document listed after it has changed stage.
-        // Manager explicitly refreshes both queues from the live database.
+        // Never retain the old stage after a confirmed mutation.
+        // Both queues are reloaded under the same live MANAGER scope.
+        void loadReview('accept',null,true);
+        void loadReview('value',null,true);
       }
       setPending(null);
       setMessage(snap.kind==='draft'?'Документ создан. Остатки пока не изменены.':
