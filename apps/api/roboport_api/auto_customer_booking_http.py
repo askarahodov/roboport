@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError, Field
 
+from .auto_booking_interval import BookingInterval
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_customer_orders import CustomerOrderDenied
@@ -21,23 +22,19 @@ from .auto_slot_candidates import candidate_slots, SlotsDenied, parse_slot_servi
 router = APIRouter(include_in_schema=False)
 
 
-class CustomerCreate(BaseModel):
+class CustomerCreate(BookingInterval):
     model_config = ConfigDict(extra="forbid")
     organizationId: UUID
     locationId: UUID
     customerLinkId: UUID
     bayId: UUID
-    startsAt: datetime
-    endsAt: datetime
     serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
 
 
-class CustomerMove(BaseModel):
+class CustomerMove(BookingInterval):
     model_config = ConfigDict(extra="forbid")
     organizationId: UUID
     bayId: UUID
-    startsAt: datetime
-    endsAt: datetime
 
 
 class CustomerCancel(BaseModel):
