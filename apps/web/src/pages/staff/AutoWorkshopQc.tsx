@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link,useSearchParams } from 'react-router-dom';
 
 type Inspection = { id:string; odometerKm:number; fuelPercent:number; tyresOk:boolean;
   lightsOk:boolean; fluidLeak:boolean; exteriorCode:string; createdAt:string };
@@ -40,9 +40,10 @@ function validate(raw:unknown):Snapshot {
 }
 
 export function AutoWorkshopQc() {
-  const [org,setOrg]=React.useState('');
-  const [loc,setLoc]=React.useState('');
-  const [order,setOrder]=React.useState('');
+  const [query]=useSearchParams();
+  const [org,setOrg]=React.useState(query.get('org')??'');
+  const [loc,setLoc]=React.useState(query.get('loc')??'');
+  const [order,setOrder]=React.useState(query.get('order')??'');
   const [revision,setRevision]=React.useState(0);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [loadedScope,setLoadedScope]=React.useState('');
@@ -250,6 +251,11 @@ export function AutoWorkshopQc() {
           <option value="DAMAGE">Есть повреждения</option></select></label>
         <button type="submit" disabled={!canMutate||!validInspection}>Зафиксировать осмотр</button>
       </form>}
+      {snapshot.inspection&&<p>Приёмщик может оформить
+        {' '}<Link to={'/staff/auto-intake-act?'+new URLSearchParams({
+          org:org.trim(),loc:loc.trim(),order:order.trim()}).toString()}>
+          версионированный акт повреждений и комплектности (dev)</Link>.
+      </p>}
       {snapshot.inspection&&<p>После приёмочного осмотра механик может подготовить
         {' '}<Link to={'/staff/auto-diagnostics?'+new URLSearchParams({
           org:org.trim(),loc:loc.trim(),order:order.trim()}).toString()}>

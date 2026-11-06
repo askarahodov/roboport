@@ -16,6 +16,7 @@ import { AutoCrmFunnel } from './pages/staff/AutoCrmFunnel';
 import { AutoStockAbcXyz } from './pages/staff/AutoStockAbcXyz';
 import { AutoOrderServices } from './pages/staff/AutoOrderServices';
 import { AutoWorkshopQc } from './pages/staff/AutoWorkshopQc';
+import { AutoIntakeAct } from './pages/shared/AutoIntakeAct';
 import { AutoDiagnostics } from './pages/staff/AutoDiagnostics';
 import { AutoEstimateConsole } from './pages/shared/AutoEstimateConsole';
 import { AutoWorkExecution } from './pages/staff/AutoWorkExecution';
@@ -114,6 +115,7 @@ function App() {
         <NavLink to="/staff/auto-stock-abc-xyz" end>ABC/XYZ склада (dev)</NavLink>
         <NavLink to="/staff/auto-order-services" end>Услуги наряда (dev)</NavLink>
         <NavLink to="/staff/auto-workshop-qc" end>Осмотр и QC (dev)</NavLink>
+        <NavLink to="/staff/auto-intake-act" end>Акт приёмки (dev)</NavLink>
         <NavLink to="/staff/auto-diagnostics" end>Диагностика (dev)</NavLink>
         <NavLink to="/staff/auto-estimates" end>Сметы (dev)</NavLink>
         <NavLink to="/staff/auto-execution" end>Работы и материалы (dev)</NavLink>
@@ -180,12 +182,14 @@ function App() {
       <Route path="/staff/auto-stock-abc-xyz" element={<AutoStockAbcXyz />} />
       <Route path="/staff/auto-order-services" element={<AutoOrderServices />} />
       <Route path="/staff/auto-workshop-qc" element={<AutoWorkshopQc />} />
+      <Route path="/staff/auto-intake-act" element={<AutoIntakeAct role="staff" />} />
       <Route path="/staff/auto-diagnostics" element={<AutoDiagnostics />} />
       <Route path="/staff/auto-estimates" element={<AutoEstimateConsole role="manager" />} />
       <Route path="/staff/auto-execution" element={<AutoWorkExecution />} />
       <Route path="/staff/auto-demo-close" element={<AutoDemoClose role="staff" />} />
       <Route path="/account/auto-demo-close" element={<AutoDemoClose role="client" />} />
       <Route path="/account/auto-estimates" element={<AutoEstimateConsole role="client" />} />
+      <Route path="/account/auto-intake-act" element={<AutoIntakeAct role="client" />} />
       <Route path="/staff/warehouse-stocktake" element={<WarehouseStocktake />} />
       <Route path="/staff/warehouse-receiving" element={<WarehouseReceiving />} />
       <Route path="/staff/warehouse-work-orders" element={<WarehouseWorkOrders />} />

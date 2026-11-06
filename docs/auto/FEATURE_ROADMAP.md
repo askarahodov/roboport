@@ -219,3 +219,10 @@ phantom Appointment/Reschedule находятся в
 ## Второй постраничный проход AutoDealer Online — 06.11.2026 (#108)
 
 [Структурированный аудит 30 источников](AUTODEALER_PAGE_AUDIT.md) → [JSON inventory](AUTODEALER_ONLINE_PAGES.json) → [52 группы функций](FUNCTIONAL_MATRIX.md) → canonical full-vertical issues **#439–#448**. Повторные #450–#459 обнаружены пересекающимися и объединены с исходными владельцами: новый параллельный backlog по каждой кнопке не создаётся. M1: #439 приёмка с фото/версиями → #440 комплексы+назначения+нормы/коэффициенты → #441 настоящий документный FSM/QC/выдача. Далее #442 публичный виджет, #443 supplier PO/partial receipt, #444 CRM paid funnel, #445 cashflow, #446 granular ACL, #447 price+XLSX, #448 отчётность/payroll. Больше страниц справки, независимый BA-review и production gates #119 **не завершены**. Статус `D_PARTIAL` не означает соответствия Online.
+
+
+## #439: Версионированный осмотр с фото и комплектностью (current-dev, partial)
+
+Отдельный синтетический автомобильный акт с immutable версиями, структурированными зонами и типами повреждений, пятью состояниями комплектности, контролируемыми фото (PNG RGB(A), EXIF/metadata rejected/discarded, CRC+bounded pixels+SHA256), client original-link read, privacy-safe previous-visit comparison, 403 fail-closed, повтором requestKey и PostgreSQL-атомарностью фото/метаданных. Реализованы `/staff/auto-intake-act`, `/account/auto-intake-act`, `auto_intake_act.py`, `auto_intake_act_http.py` и Alembic `0106_auto_intake_photo_act`, PG17/E2E/Docsify тесты — [сценарий](WORKSHOP_OPERATIONS.md).
+
+**Ограничения:** фотографии физически хранятся в ограниченном синтетическом PG bytea[], не production object storage; нет AV/virus pipeline, юридически действующих подписей, retention policy, реального подписанного PDF, поэтому #439 и gate #119 остаются OPEN. Наличие клиентского предпросмотра **не** означает готовность промышленной фото-приёмки.

@@ -219,6 +219,9 @@ export function CustomerAutoOrders(){
           освещение: {detail.inspection.lightsOk?'норма':'замечание'},
           утечки: {detail.inspection.fluidLeak?'есть':'нет'}.
         </p>:<p>Осмотр пока не зафиксирован.</p>}
+        <p><a href={'/account/auto-intake-act?'+new URLSearchParams({
+          org:detail.organizationId,loc:detail.locationId,order:detail.id}).toString()}>
+          Посмотреть версии акта приёмки, повреждения и фотографии (dev)</a></p>
         <h4>Сметы и решения</h4>
         {detail.estimates.length===0?<p>Смета ещё не опубликована.</p>:
           <ol>{detail.estimates.map(e=><li key={e.id}>
