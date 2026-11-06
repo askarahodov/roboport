@@ -221,13 +221,36 @@ def _read(conn,order,org,loc):
        SELECT EXISTS(SELECT 1 FROM auto_work_order_qc_event WHERE work_order_id=%s),
               EXISTS(SELECT 1 FROM auto_work_order_estimate_revision WHERE work_order_id=%s)
     """,(order,order)).fetchone()
+    # Compare only visits under the EXACT SAME verified customer/vehicle link.
+    # Same VIN and same vehicle under a different owner do not match.
+    before=conn.execute("""
+       SELECT p.work_order_id,p.version,p.damages,p.inventory,p.created_at
+       FROM auto_work_order current_order
+       JOIN auto_appointment current_appointment
+         ON current_appointment.id=current_order.appointment_id
+       JOIN auto_work_order previous_order
+         ON previous_order.organization_id=current_order.organization_id
+         AND previous_order.id<>current_order.id
+         AND previous_order.created_at<current_order.created_at
+       JOIN auto_appointment previous_appointment
+         ON previous_appointment.id=previous_order.appointment_id
+         AND previous_appointment.customer_link_id=current_appointment.customer_link_id
+         AND previous_appointment.vehicle_id=current_appointment.vehicle_id
+       JOIN auto_work_order_intake_act p ON p.work_order_id=previous_order.id
+       WHERE current_order.id=%s
+       ORDER BY previous_order.created_at DESC,p.version DESC LIMIT 1
+    """,(order,)).fetchone()
+    previous=None if before is None else {
+       "orderId":str(before[0]),"version":before[1],
+       "damages":before[2],"inventory":before[3],
+       "createdAt":before[4].isoformat()}
     return {"syntheticOnly":True,"releaseAllowed":False,
             "legalSignatureStatus":"NOT_IMPLEMENTED",
             "inspection":None if not inspection else
               {"id":str(inspection[0]),"odometerKm":inspection[1],
                "fuelPercent":inspection[2],"exteriorCode":inspection[3]},
             "locked":bool(frozen[0] or frozen[1]),"latestVersion":len(versions),
-            "items":versions}
+            "previousVisit":previous,"items":versions}
 
 
 def read_intake_acts(conn,token,org,loc,order):
