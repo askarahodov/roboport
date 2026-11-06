@@ -116,6 +116,20 @@ def test_customer_book_move_cancel_own_scope_and_replays(monkeypatch):
     moved_payload={"organizationId":str(org),"bayId":str(bay),
       "startsAt":(at+timedelta(hours=2)).isoformat(),
       "endsAt":(at+timedelta(hours=3)).isoformat()}
+    for invalid_move in (
+        {**moved_payload, "endsAt": moved_payload["startsAt"]},
+        {**moved_payload, "endsAt": (at+timedelta(hours=28)).isoformat()},
+        {**moved_payload, "startsAt": (at+timedelta(hours=2)).replace(tzinfo=None).isoformat()},
+    ):
+        invalid_result=http.post(move_url,json=invalid_move,headers={
+            **headers,"Idempotency-Key":str(uuid4())})
+        assert invalid_result.status_code==422,invalid_result.text
+        assert invalid_result.json()["code"]=="INVALID_INPUT"
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment_reschedule WHERE appointment_id=%s",
+            (appointment,),
+        ).fetchone()==(0,)
     moved=http.post(move_url,json=moved_payload,headers=moving)
     assert moved.status_code==200,moved.text
     assert http.post(move_url,json=moved_payload,headers=moving).json()==moved.json()
