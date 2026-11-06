@@ -281,7 +281,13 @@ def test_customer_appointments_cursor_more_than_fifty_and_revocation(monkeypatch
     first=first_page.json()
     assert len(first["items"])==50 and first["nextCursor"]
     assert first_page.headers["cache-control"]=="no-store"
-    assert "vin" not in first_page.text.lower()
+    # A signed cursor is opaque base64; arbitrary bytes may contain "vin".
+    # Test the actual returned field names instead of substring-matching JSON.
+    assert all(set(item)=={
+        "appointmentId","organizationId","locationId","customerLinkId",
+        "bookingId","bayId","startsAt","endsAt","status","workOrderId",
+        "timeZone","canManage","serviceIds",
+    } for item in first["items"])
     ids=[row["appointmentId"] for row in first["items"]]
     assert len(set(ids))==50
     second_page=http.get(url,params={"cursor":first["nextCursor"]})
@@ -326,7 +332,12 @@ def test_customer_resource_pages_cover_all_bays_and_recheck_access(monkeypatch):
     first=first_response.json()
     assert first["syntheticOnly"] is True
     assert len(first["items"])==50 and first["nextCursor"]
-    assert "vin" not in first_response.text.lower()
+    # A cursor signature can coincidentally contain "vin"; assert the
+    # contract of the public fields, including nested vehicle identifiers.
+    assert all(set(item)=={
+        "organizationId","locationId","customerLinkId","bayId","vehicle","timeZone",
+    } and set(item["vehicle"])=={"make","model"}
+               for item in first["items"])
     second_response=http.get(root,params={"cursor":first["nextCursor"]})
     assert second_response.status_code==200,second_response.text
     second=second_response.json()
