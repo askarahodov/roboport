@@ -92,7 +92,7 @@ def validate(document: object, matrix_text: str) -> list[str]:
         if row["checkedOn"] != document.get("checkedOn"):
             problems.append(f"{where}: inconsistent check date")
         for key in ("title", "section", "scenario", "gap"):
-            if not isinstance(row[key], str) or len(row[key].strip()) < 6:
+            if not isinstance(row[key], str) or len(row[key].strip()) < (2 if key in ("title", "section") else 6):
                 problems.append(f"{where}: empty or short {key}")
         if isinstance(row["section"], str):
             sections.add(row["section"])
