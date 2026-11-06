@@ -3,7 +3,9 @@ import React from 'react';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Line={serviceId:string;code:string;title:string;durationMinutes:number;amountMinor:number};
 type Revision={id:string;version:number;totalMinor:number;currency:'RUB';digest:string;
-  lines:Line[];decision:'APPROVED'|'DECLINED'|null;createdAt:string;decidedAt:string|null};
+  lines:Line[];decision:'APPROVED'|'DECLINED'|null;createdAt:string;decidedAt:string|null;
+  clarificationId?:string|null;clarificationReason?:'PRICE'|'WORK_SCOPE'|'TIMING'|'OTHER'|null;
+  clarificationResolution?:'EXPLAINED'|'NEW_VERSION_REQUIRED'|null};
 type Estimates={items:Revision[];latestVersion:number;syntheticOnly:true;releaseAllowed:false};
 type Service={id:string;code:string;title:string;durationMinutes:number};
 type Pending={path:string;body:string};
@@ -21,6 +23,12 @@ function parseEstimate(raw:unknown):Estimates{
         typeof e.totalMinor==='number'&&Number.isSafeInteger(e.totalMinor)&&
         ['APPROVED','DECLINED',null].includes(e.decision as null)&&
         typeof e.digest==='string'&&e.digest.length===64&&
+        (e.clarificationId===undefined||e.clarificationId===null||
+          (typeof e.clarificationId==='string'&&uuid.test(e.clarificationId)))&&
+        (e.clarificationReason===undefined||e.clarificationReason===null||
+          ['PRICE','WORK_SCOPE','TIMING','OTHER'].includes(String(e.clarificationReason)))&&
+        (e.clarificationResolution===undefined||e.clarificationResolution===null||
+          ['EXPLAINED','NEW_VERSION_REQUIRED'].includes(String(e.clarificationResolution)))&&
         Array.isArray(e.lines)&&e.lines.length<=50&&
         e.lines.every((line:unknown)=>line!==null&&typeof line==='object'&&
           'code' in line&&typeof line.code==='string'&&
@@ -53,6 +61,7 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   const [busy,setBusy]=React.useState(false);
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [message,setMessage]=React.useState('');
+  const [reason,setReason]=React.useState<'PRICE'|'WORK_SCOPE'|'TIMING'|'OTHER'>('PRICE');
   const valid=[org,loc,order].every(v=>uuid.test(v.trim()));
   const scope=[org.trim(),loc.trim(),order.trim()].join(':');
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())
@@ -110,6 +119,7 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
 
   const latest=data?.items[data.items.length-1];
   const canPublish=role==='manager'&&ready&&!busy&&!pending&&services.length>0&&
+    !(latest?.clarificationId&&!latest.clarificationResolution)&&
     !data?.items.some(item=>item.decision!==null)&&services.every(s=>{
       const raw=prices[s.id]??'';
       const amount=Number(raw);
@@ -137,19 +147,51 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
           <h3>Версия {item.version}: {item.totalMinor} коп. (RUB)</h3>
           <p>Решение: {item.decision??(item.version===data.latestVersion?
             'ОЖИДАЕТ РЕШЕНИЯ':'ЗАМЕНЕНА НОВОЙ ВЕРСИЕЙ')}</p>
+          {item.clarificationId&&<p>Уточнение: {item.clarificationReason} ·
+            {' '}{item.clarificationResolution??'ОЖИДАЕТ ОТВЕТА МЕНЕДЖЕРА'}</p>}
           <p>SHA-256 снимка: <code>{item.digest}</code></p>
           <ul>{item.lines.map(line=><li key={line.serviceId}>
             {line.code} — {line.title}: {line.amountMinor} коп.
           </li>)}</ul>
           {role==='client'&&item.version===data.latestVersion&&!item.decision&&!pending&&
-            <div><button type="button" disabled={busy} onClick={()=>{
+            <div>
+            {!item.clarificationId&&<><label>Причина запроса уточнения
+              <select aria-label="Причина уточнения сметы" value={reason}
+                onChange={e=>setReason(e.target.value as typeof reason)}>
+                <option value="PRICE">Цена работ</option>
+                <option value="WORK_SCOPE">Состав работ</option>
+                <option value="TIMING">Сроки</option>
+                <option value="OTHER">Другое</option>
+              </select></label>
+              <button type="button" disabled={busy} onClick={()=>{
+                void send(base+'/estimates/clarification',JSON.stringify({
+                  revisionId:item.id,requestKey:crypto.randomUUID(),reasonCode:reason}));
+              }}>Запросить уточнение версии {item.version}</button></>}
+            {(!item.clarificationId||item.clarificationResolution==='EXPLAINED')&&
+            <><button type="button" disabled={busy} onClick={()=>{
               void send(base+'/estimates/decision',JSON.stringify({
                 revisionId:item.id,requestKey:crypto.randomUUID(),decision:'APPROVED'}));
             }}>Согласовать версию {item.version}</button>
             <button type="button" disabled={busy} onClick={()=>{
               void send(base+'/estimates/decision',JSON.stringify({
                 revisionId:item.id,requestKey:crypto.randomUUID(),decision:'DECLINED'}));
-            }}>Отклонить версию {item.version}</button></div>}
+            }}>Отклонить версию {item.version}</button></>}
+            {item.clarificationResolution==='NEW_VERSION_REQUIRED'&&
+              <p>Менеджер подготовит новую версию. Старую согласовать нельзя.</p>}
+            </div>}
+          {role==='manager'&&item.version===data.latestVersion&&item.clarificationId&&
+            !item.clarificationResolution&&!pending&&<div>
+              <button type="button" disabled={busy} onClick={()=>{
+                void send(base+'/estimates/clarification/resolve',JSON.stringify({
+                  revisionId:item.id,requestKey:crypto.randomUUID(),
+                  resolutionCode:'EXPLAINED'}));
+              }}>Ответить: пояснение предоставлено</button>
+              <button type="button" disabled={busy} onClick={()=>{
+                void send(base+'/estimates/clarification/resolve',JSON.stringify({
+                  revisionId:item.id,requestKey:crypto.randomUUID(),
+                  resolutionCode:'NEW_VERSION_REQUIRED'}));
+              }}>Ответить: подготовить новую версию</button>
+            </div>}
         </li>)}</ol>}
       {role==='manager'&&services.length>0&&!data.items.some(item=>item.decision!==null)&&
         <form onSubmit={event=>{
