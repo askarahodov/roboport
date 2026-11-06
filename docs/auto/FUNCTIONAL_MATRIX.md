@@ -2,6 +2,8 @@
 
 **Пересмотрено:** 28.10.2026 · Связанные [#107](https://github.com/askarahodov/roboport/issues/107), [#108](https://github.com/askarahodov/roboport/issues/108), [#174](https://github.com/askarahodov/roboport/issues/174). Цель — сравнимый **бизнес-функционал**, не копирование чужого кода, бренда, текстов или экранов.
 
+**Постраничное подтверждение:** [аудит 25 проверенных страниц AutoDealer Online](AUTODEALER_PAGE_AUDIT.md) и [структурированный JSON с URL, матричными ID и owner Issue](AUTODEALER_ONLINE_PAGES.json). Аудит от 06.11.2026 **частичный**: таблица ниже — историческая матрица бизнес-возможностей, а не доказательство полного покрытия всех страниц. Ссылки на новые M1/M2 задачи #439–#448 и конкретные непройденные сценарии — в постраничном реестре.
+
 ## Источники и трактовка статусов
 
 - [S1: AutoDealer «О программе»](https://autodealer.ru/online/help/o-programme.html) — обзор.
