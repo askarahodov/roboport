@@ -84,7 +84,7 @@ test('intake → damage + custody + photo → immutable version → client previ
     name:'synthetic.png',mimeType:'image/png',
     buffer:Buffer.from(pngBase64,'base64'),
   });
-  await expect(page.getByText('PNG без метаданных')).toBeVisible();
+  await expect(page.getByText('Перед — PNG без метаданных')).toBeVisible();
   await page.getByRole('button',{name:'Зафиксировать версию акта'}).click();
   await expect(page.getByRole('heading',{name:'Акт №1 · PASSENGER'})).toBeVisible();
   await expect(page.getByText('Царапина',{exact:false}).first()).toBeVisible();
