@@ -18,6 +18,10 @@ const locale=(time:string,zone:string)=>new Intl.DateTimeFormat('ru-RU',{
 export function CustomerAutoBooking(){
   const [resources,setResources]=React.useState<Resource[]>([]);
   const [bookings,setBookings]=React.useState<Booking[]>([]);
+  const [nextCursor,setNextCursor]=React.useState<string|null>(null);
+  const [pageLoading,setPageLoading]=React.useState(false);
+  const [pageError,setPageError]=React.useState('');
+  const pageRequest=React.useRef(0);
   const [state,setState]=React.useState<'loading'|'ready'|'denied'|'error'>('loading');
   const [selected,setSelected]=React.useState('');
   const [day,setDay]=React.useState(today);
@@ -38,6 +42,8 @@ export function CustomerAutoBooking(){
   const scoped=resource&&choices.some(r=>r===resource)?resource:null;
   React.useEffect(()=>{
     const controller=new AbortController();
+    pageRequest.current++;
+    setNextCursor(null);setPageLoading(false);setPageError('');
     setState('loading');setResources([]);setBookings([]);setSlots([]);setTarget(null);
     void (async()=>{
       try{
@@ -60,6 +66,8 @@ export function CustomerAutoBooking(){
              x.vehicle&&typeof x.vehicle.make==='string'&&typeof x.vehicle.model==='string')||
            !bb||typeof bb!=='object'||!('syntheticOnly' in bb)||bb.syntheticOnly!==true||
            !('items' in bb)||!Array.isArray(bb.items)||bb.items.length>50||
+           !('nextCursor' in bb)||!(bb.nextCursor===null||
+             (typeof bb.nextCursor==='string'&&bb.nextCursor.length>0&&bb.nextCursor.length<=256))||
            !bb.items.every((x:Booking)=>uuid.test(x.appointmentId)&&uuid.test(x.organizationId)&&
              uuid.test(x.locationId)&&uuid.test(x.customerLinkId)&&
              uuid.test(x.bayId)&&uuid.test(x.workOrderId)&&
@@ -71,6 +79,7 @@ export function CustomerAutoBooking(){
         if(controller.signal.aborted)return;
         const incoming=rr.items as Resource[];
         setResources(incoming);setBookings(bb.items as Booking[]);
+        setNextCursor(bb.nextCursor as string|null);
         setSelected(old=>incoming.some(x=>old===x.customerLinkId+':'+x.bayId)?
           old:incoming.length?incoming[0].customerLinkId+':'+incoming[0].bayId:'');
         setState('ready');
@@ -80,6 +89,46 @@ export function CustomerAutoBooking(){
     })();
     return ()=>controller.abort();
   },[revision]);
+
+  async function loadMore(){
+    if(!nextCursor||pageLoading||busy||pending||state!=='ready')return;
+    const requestId=pageRequest.current;
+    setPageLoading(true);setPageError('');
+    try{
+      const response=await fetch('/api/v1/dev/auto/customer/booking/appointments?'+
+        new URLSearchParams({cursor:nextCursor}),{
+          credentials:'include',cache:'no-store',
+        });
+      if(requestId!==pageRequest.current)return;
+      if([401,403,404].includes(response.status)){
+        setResources([]);setBookings([]);setNextCursor(null);setState('denied');return;
+      }
+      if(!response.ok)throw Error('pagination');
+      const raw:unknown=await response.json();
+      if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||raw.syntheticOnly!==true||
+        !('items' in raw)||!Array.isArray(raw.items)||raw.items.length>50||
+        !('nextCursor' in raw)||!(raw.nextCursor===null||
+          (typeof raw.nextCursor==='string'&&raw.nextCursor.length>0&&raw.nextCursor.length<=256))||
+        !raw.items.every((x:Booking)=>uuid.test(x.appointmentId)&&uuid.test(x.organizationId)&&
+          uuid.test(x.locationId)&&uuid.test(x.customerLinkId)&&uuid.test(x.bayId)&&
+          uuid.test(x.workOrderId)&&typeof x.startsAt==='string'&&typeof x.endsAt==='string'&&
+          (x.status==='CANCELED'||x.status==='SCHEDULED')&&
+          typeof x.timeZone==='string'&&typeof x.canManage==='boolean'&&
+          Array.isArray(x.serviceIds)&&x.serviceIds.length<=100&&
+          x.serviceIds.every((id:unknown)=>typeof id==='string'&&uuid.test(id))))throw Error('shape');
+      if(requestId!==pageRequest.current)return;
+      const incoming=raw.items as Booking[];
+      setBookings(old=>{
+        const seen=new Set(old.map(item=>item.appointmentId));
+        return [...old,...incoming.filter(item=>!seen.has(item.appointmentId))];
+      });
+      setNextCursor(raw.nextCursor as string|null);
+    }catch{
+      if(requestId===pageRequest.current)setPageError('Не удалось загрузить следующую страницу. Повторите.');
+    }finally{
+      if(requestId===pageRequest.current)setPageLoading(false);
+    }
+  }
 
   React.useEffect(()=>{slotRequest.current++;setSlots([]);setSlotState('');},[selected,day,target,selectedServices]);
 
@@ -213,6 +262,9 @@ export function CustomerAutoBooking(){
               onClick={()=>cancel(b)}>Отменить свою запись</button>
           </div>}
         </li>)}</ul>}
+      {nextCursor&&<button type="button" disabled={pageLoading||busy||!!pending}
+        onClick={()=>void loadMore()}>{pageLoading?'Загрузка…':'Показать ещё записи'}</button>}
+      {pageError&&<p role="alert">{pageError}</p>}
       <h4>{target?'Перенос записи':'Новая запись'}</h4>
       {target&&<button type="button" onClick={()=>{setTarget(null);setSelected('');}}>
         Отказаться от переноса</button>}

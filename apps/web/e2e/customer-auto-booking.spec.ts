@@ -9,7 +9,7 @@ const appointment='55555555-5555-4555-8555-555555555555';
 const booking='66666666-6666-4666-8666-666666666666';
 const service='88888888-8888-4888-8888-888888888888';
 const work='77777777-7777-4777-8777-777777777777';
-const resources={syntheticOnly:true,items:[{organizationId:org,locationId:loc,
+const resources={syntheticOnly:true,nextCursor:null,items:[{organizationId:org,locationId:loc,
   customerLinkId:link,bayId:bay,timeZone:'Europe/Berlin',
   vehicle:{make:'Synthetic',model:'Sedan'}}]};
 const first={startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:00:00Z'};
@@ -35,7 +35,7 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(resources)});
     if(req.method()==='GET'&&url.pathname.endsWith('/appointments'))
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
-        syntheticOnly:true,items:status==='EMPTY'?[]:[{
+        syntheticOnly:true,nextCursor:null,items:status==='EMPTY'?[]:[{
           appointmentId:appointment,organizationId:org,locationId:loc,
           customerLinkId:link,bookingId:booking,bayId:bay,
           ...interval,status:status==='CANCELED'?'CANCELED':'SCHEDULED',
@@ -44,7 +44,7 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
       })});
     if(req.method()==='GET'&&url.pathname.endsWith('/services'))
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
-        syntheticOnly:true,items:[{id:service,code:'SVC-001',title:'Тестовая работа',
+        syntheticOnly:true,nextCursor:null,items:[{id:service,code:'SVC-001',title:'Тестовая работа',
           durationMinutes:30}],
       })});
     if(req.method()==='GET'&&url.pathname.endsWith('/slots')){
@@ -117,7 +117,7 @@ test('customer booking hides own resources immediately after 403',async({page})=
     const suffix=new URL(route.request().url()).pathname;
     return route.fulfill({status:200,contentType:'application/json',
       body:JSON.stringify(suffix.endsWith('/resources')?resources:
-        {items:[],syntheticOnly:true})});
+        {items:[],syntheticOnly:true,nextCursor:null})});
   });
   await page.goto('/account/auto-booking');
   const region=page.getByRole('region',{name:'Самостоятельная запись автомобиля (dev)'});
@@ -138,11 +138,11 @@ test('selected workshop service is sent with the first booking in one payload',a
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(resources)});
     if(req.method()==='GET'&&url.pathname.endsWith('/appointments'))
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
-        syntheticOnly:true,items:[],
+        syntheticOnly:true,nextCursor:null,items:[],
       })});
     if(req.method()==='GET'&&url.pathname.endsWith('/services'))
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
-        syntheticOnly:true,items:[{id:service,code:'SVC-001',title:'Тестовая работа',
+        syntheticOnly:true,nextCursor:null,items:[{id:service,code:'SVC-001',title:'Тестовая работа',
           durationMinutes:30}],
       })});
     if(req.method()==='GET'&&url.pathname.endsWith('/slots')){
@@ -181,7 +181,7 @@ test('client cancellation retry preserves original key after lost response',asyn
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(resources)});
     if(req.method()==='GET'&&url.pathname.endsWith('/appointments'))
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
-        syntheticOnly:true,items:[{appointmentId:appointment,organizationId:org,locationId:loc,
+        syntheticOnly:true,nextCursor:null,items:[{appointmentId:appointment,organizationId:org,locationId:loc,
           customerLinkId:link,bookingId:booking,bayId:bay,...first,
           status:'SCHEDULED',workOrderId:work,timeZone:'Europe/Berlin',canManage:true,serviceIds:[]}],
       })});
@@ -205,4 +205,58 @@ test('client cancellation retry preserves original key after lost response',asyn
   await page.getByRole('button',{name:'Повторить прежний запрос'}).click();
   await expect(page.getByText('Изменение записи принято сервером.')).toBeVisible();
   expect(count).toBe(2);
+});
+
+
+test('customer can reach booking page two, refresh and fail closed on revoked session',async({page})=>{
+  await auth(page);
+  const later='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const laterWork='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const cursor='opaque-synthetic-cursor';
+  let nextDenied=false, pages=0;
+  await page.route('**/api/v1/dev/auto/customer/booking/**',route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='GET'&&url.pathname.endsWith('/resources'))
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(resources)});
+    if(req.method()==='GET'&&url.pathname.endsWith('/appointments')){
+      if(url.searchParams.has('cursor')){
+        expect(url.searchParams.get('cursor')).toBe(cursor);
+        pages++;
+        if(nextDenied)return route.fulfill({status:403,body:'{"code":"FORBIDDEN"}'});
+        return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+          syntheticOnly:true,nextCursor:null,items:[{
+            appointmentId:later,organizationId:org,locationId:loc,customerLinkId:link,
+            bookingId:booking,bayId:bay,...second,status:'SCHEDULED',workOrderId:laterWork,
+            timeZone:'Europe/Berlin',canManage:true,serviceIds:[],
+          }],
+        })});
+      }
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,nextCursor:cursor,items:[{
+          appointmentId:appointment,organizationId:org,locationId:loc,customerLinkId:link,
+          bookingId:booking,bayId:bay,...first,status:'SCHEDULED',workOrderId:work,
+          timeZone:'Europe/Berlin',canManage:true,serviceIds:[],
+        }],
+      })});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:'{"syntheticOnly":true,"items":[]}'});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/auto-booking');
+  const region=page.getByRole('region',{name:'Самостоятельная запись автомобиля (dev)'});
+  await expect(region.getByText('Заказ-наряд '+work,{exact:false})).toBeVisible();
+  await region.getByRole('button',{name:'Показать ещё записи'}).click();
+  await expect(region.getByText('Заказ-наряд '+laterWork,{exact:false})).toBeVisible();
+  await expect(region.getByRole('button',{name:'Показать ещё записи'})).toHaveCount(0);
+  expect(pages).toBe(1);
+  await region.getByRole('button',{name:'Обновить мои записи'}).click();
+  await expect(region.getByText('Заказ-наряд '+laterWork,{exact:false})).toHaveCount(0);
+  await expect(region.getByRole('button',{name:'Показать ещё записи'})).toBeVisible();
+  nextDenied=true;
+  await region.getByRole('button',{name:'Показать ещё записи'}).click();
+  await expect(region.getByRole('alert')).toContainText('Доступ к записи запрещён');
+  await expect(region.getByText('Заказ-наряд '+work,{exact:false})).toHaveCount(0);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
 });

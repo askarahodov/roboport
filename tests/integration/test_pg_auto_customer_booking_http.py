@@ -261,3 +261,50 @@ def test_two_verified_customers_cannot_double_book_same_bay(monkeypatch):
             "SELECT count(*) FROM auto_work_order WHERE organization_id=%s",
             (org,),
         ).fetchone()[0]==1
+
+
+def test_customer_appointments_cursor_more_than_fifty_and_revocation(monkeypatch):
+    """52 owned bookings are all reachable, without VIN or cross-account cursor reuse."""
+    from roboport_api.auto_appointment_service import create_appointment
+    d,org,loc,bay,_,_,http=_setup(monkeypatch)
+    at=datetime.now(timezone.utc)+timedelta(days=30)
+    with psycopg.connect(DSN) as db:
+        for i in range(52):
+            create_appointment(db,d["tokens"][d["client_a"]],org,loc,bay,d["link"],
+                               at+timedelta(hours=2*i),
+                               at+timedelta(hours=2*i+1),
+                               request_key=uuid4(),customer_mode=True)
+    _auth(http,d,d["client_a"])
+    url=ROOT+"/appointments"
+    first_page=http.get(url)
+    assert first_page.status_code==200,first_page.text
+    first=first_page.json()
+    assert len(first["items"])==50 and first["nextCursor"]
+    assert first_page.headers["cache-control"]=="no-store"
+    assert "vin" not in first_page.text.lower()
+    ids=[row["appointmentId"] for row in first["items"]]
+    assert len(set(ids))==50
+    second_page=http.get(url,params={"cursor":first["nextCursor"]})
+    assert second_page.status_code==200,second_page.text
+    second=second_page.json()
+    assert len(second["items"])==2 and second["nextCursor"] is None
+    ids.extend(row["appointmentId"] for row in second["items"])
+    assert len(set(ids))==52
+    # Cursor is an opaque session-bound token, never a reusable cross-user offset.
+    _auth(http,d,d["client_b"])
+    foreign=http.get(url,params={"cursor":first["nextCursor"]})
+    assert foreign.status_code==422 and foreign.json()["code"]=="INVALID_CURSOR"
+    assert http.get(url).json()["items"]==[]
+    _auth(http,d,d["client_a"])
+    for invalid in ("invalid***", "x"*257, first["nextCursor"]+"A"):
+        bad=http.get(url,params={"cursor":invalid})
+        assert bad.status_code==422,bad.text
+        assert bad.json()["code"]=="INVALID_CURSOR"
+    # Revocation after page one removes all subsequent rows immediately.
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+                   (d["link"],))
+    revoked=http.get(url,params={"cursor":first["nextCursor"]})
+    assert revoked.status_code==200,revoked.text
+    assert revoked.json()["items"]==[]
+    assert revoked.json()["nextCursor"] is None
