@@ -508,6 +508,33 @@ async def serial_transfer_http(org_id: str,request: Request):
     return await _serial_movement_http(org_id,request,"TRANSFER")
 
 
+@router.get("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns/pending")
+def pending_supplier_return_http(org_id:str,request:Request,locationId:str,
+                                 limit:int=20,afterDocumentId:str|None=None):
+    """Closed read-only manager worklist; no personal data or approval grant."""
+    from .auto_stock_supplier_return_document import pending_supplier_returns
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(locationId)
+        cursor=UUID(afterDocumentId) if afterDocumentId is not None else None
+        if not 1<=limit<=50:
+            raise ValueError("invalid page limit")
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            items,next_id=pending_supplier_returns(
+                db,request.cookies.get("rp_session",""),org,loc,limit,cursor)
+        except AutoStockDenied as exc:
+            return _response(request,422 if str(exc)=="INVALID_INPUT" else 403,
+                             "INVALID_INPUT" if str(exc)=="INVALID_INPUT" else "FORBIDDEN")
+    return JSONResponse(content={"syntheticOnly":True,"items":items,
+        "nextDocumentId":str(next_id) if next_id else None},
+        headers={"Cache-Control":"no-store"})
+
+
 class SupplierReturnDraftBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     locationId: UUID
