@@ -34,16 +34,16 @@ test('warehouse receipt draft and independent acceptance use exact scope and dis
   await page.getByRole('spinbutton',{name:'Количество к приёмке'}).fill('4');
   await page.getByRole('textbox',{name:'Номер документа поставки'}).fill('SUP-REF-4');
   await page.getByRole('button',{name:'Создать документ'}).click();
-  await expect(page.getByRole('status')).toContainText('Остатки пока не изменены');
+  await expect(page.getByRole('status').filter({hasText:'Остатки пока не изменены'})).toContainText('Остатки пока не изменены');
   await expect(page.getByRole('textbox',{name:'UUID приходного документа'})).toHaveValue(receipt);
   await page.getByRole('button',{name:'Подтвердить приёмку'}).click();
-  await expect(page.getByRole('status')).toContainText('Остатки обновлены');
+  await expect(page.getByRole('status').filter({hasText:'Остатки обновлены'})).toContainText('Остатки обновлены');
   await page.getByRole('spinbutton',{name:'Закупочная цена за единицу'}).fill('1250');
   await page.getByRole('spinbutton',{name:'НДС по документу'}).fill('600');
   await page.getByRole('textbox',{name:'Ревизия цены поставщика'}).fill('QUOTE-REV-1');
   await page.getByRole('textbox',{name:'Время цены поставщика ISO UTC'}).fill('2026-10-28T12:00:00Z');
   await page.getByRole('button',{name:'Сохранить закупочную стоимость'}).click();
-  await expect(page.getByRole('status')).toContainText('НДС зафиксированы отдельно');
+  await expect(page.getByRole('status').filter({hasText:'НДС зафиксированы отдельно'})).toContainText('НДС зафиксированы отдельно');
   expect(seen).toHaveLength(3);
   expect(seen[0].url).toBe('/api/v1/dev/auto/organizations/'+org+'/warehouse/receipts');
   expect(seen[1].url).toBe('/api/v1/dev/auto/organizations/'+org+'/warehouse/receipts/accept');
@@ -74,10 +74,10 @@ test('warehouse receiving retries uncertain response using original idempotency 
   await page.getByRole('textbox',{name:'UUID партии'}).fill(lot);
   await page.getByRole('textbox',{name:'Номер документа поставки'}).fill('SUP-REF-5');
   await page.getByRole('button',{name:'Создать документ'}).click();
-  await expect(page.getByRole('status')).toContainText('Неизвестный результат');
+  await expect(page.getByRole('status').filter({hasText:'Неизвестный результат'})).toContainText('Неизвестный результат');
   await expect(page.getByRole('button',{name:'Создать документ'})).toBeDisabled();
   await page.getByRole('button',{name:'Повторить с прежним ключом'}).click();
-  await expect(page.getByRole('status')).toContainText('Документ создан');
+  await expect(page.getByRole('status').filter({hasText:'Документ создан'})).toContainText('Документ создан');
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
@@ -93,7 +93,7 @@ test('warehouse receiving denies missing authority without false success',async(
   await page.getByRole('textbox',{name:'UUID партии'}).fill(lot);
   await page.getByRole('textbox',{name:'Номер документа поставки'}).fill('SUP-REF-6');
   await page.getByRole('button',{name:'Создать документ'}).click();
-  await expect(page.getByRole('status')).toContainText('Нет прав');
+  await expect(page.getByRole('status').filter({hasText:'Нет прав'})).toContainText('Нет прав');
   await expect(page.getByRole('textbox',{name:'UUID приходного документа'})).toHaveValue('');
 });
 
