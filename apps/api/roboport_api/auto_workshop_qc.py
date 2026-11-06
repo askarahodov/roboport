@@ -69,6 +69,16 @@ def _snapshot(conn, order):
         raise InspectionConflict("HISTORY_LIMIT")
     events = [{"id":str(i),"result":result,"findingCode":code,
                "createdAt":time.isoformat()} for i,result,code,time in history]
+    corrective = conn.execute("""
+        SELECT r.id,r.fail_event_id,r.actor_id,r.action_code,r.created_at
+        FROM auto_work_order_qc_rework r
+        WHERE r.work_order_id=%s ORDER BY r.created_at,r.id LIMIT 51
+    """,(order,)).fetchall()
+    if len(corrective)>50:
+        raise InspectionConflict("REWORK_HISTORY_LIMIT")
+    reworks=[{"id":str(ident),"failEventId":str(failed),"actorId":str(actor),
+              "actionCode":code,"createdAt":stamp.isoformat()}
+             for ident,failed,actor,code,stamp in corrective]
     status = ("NOT_INSPECTED" if not inspection else
               "PENDING_QC" if not events else
               "QC_PASSED" if events[-1]["result"]=="PASS" else "QC_FAILED")
@@ -80,7 +90,7 @@ def _snapshot(conn, order):
             "lightsOk":inspection[4],"fluidLeak":inspection[5],
             "exteriorCode":inspection[6],"createdAt":inspection[7].isoformat(),
         },
-        "qcEvents":events,
+        "qcEvents":events,"reworks":reworks,
     }
 
 
@@ -162,15 +172,69 @@ def record_work_order_qc(conn, token, org, loc, order, *,
         snapshot=_snapshot(conn,order)
         if snapshot["status"]=="QC_PASSED":
             raise InspectionConflict("QC_ALREADY_PASSED")
-        conn.execute("""
+        if result=="PASS" and snapshot["qcEvents"] and snapshot["qcEvents"][-1]["result"]=="FAIL":
+            failed=snapshot["qcEvents"][-1]["id"]
+            approved=next((item for item in snapshot["reworks"]
+                           if item["failEventId"]==failed and item["actorId"]!=str(actor)),None)
+            if approved is None:
+                raise InspectionConflict("REWORK_REQUIRED")
+        try:
+            with conn.transaction():
+                conn.execute("""
           INSERT INTO auto_work_order_qc_event
           (id,work_order_id,inspection_id,organization_id,location_id,
            actor_id,request_key,result,finding_code)
           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,(uuid4(),order,inspection[0],org,loc,actor,request_key,result,finding_code))
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
+                psycopg.errors.CheckViolation) as exc:
+            raise InspectionConflict("QC_CONFLICT") from exc
         return {"ok":True,"replayed":False,**_snapshot(conn,order)}
 
 
+
+
+def record_work_order_qc_rework(conn, token, org, loc, order, *,
+                               request_key, fail_event_id, action_code):
+    """One immutable mechanic action per latest QC FAIL; never claims repair release."""
+    if (type(request_key) is not UUID or type(fail_event_id) is not UUID
+            or action_code not in ("ADJUSTMENT","DIAGNOSTIC_RECHECK",
+                                   "COMPONENT_RECHECK")):
+        raise InspectionDenied("INVALID_INPUT")
+    with conn.transaction():
+        actor=_actor_and_order(conn,token,org,loc,order,("MECHANIC",))
+        # WorkOrder lock serializes FAIL, rework and PASS.
+        previous=conn.execute("""
+          SELECT id,work_order_id,fail_event_id,actor_id,action_code
+          FROM auto_work_order_qc_rework WHERE request_key=%s
+        """,(request_key,)).fetchone()
+        if previous:
+            if previous[1:]!=(order,fail_event_id,actor,action_code):
+                raise InspectionConflict("KEY_REUSED")
+            return {"ok":True,"replayed":True,**_snapshot(conn,order)}
+        latest=conn.execute("""
+          SELECT id,result FROM auto_work_order_qc_event
+          WHERE work_order_id=%s ORDER BY created_at DESC,id DESC LIMIT 1
+        """,(order,)).fetchone()
+        if latest is None or latest!=(fail_event_id,"FAIL"):
+            raise InspectionConflict("LATEST_QC_FAIL_REQUIRED")
+        if conn.execute("""
+          SELECT 1 FROM auto_work_order_qc_rework
+          WHERE fail_event_id=%s
+        """,(fail_event_id,)).fetchone():
+            raise InspectionConflict("ALREADY_REWORKED")
+        # Completed execution stays immutable; no extra labor or stock posting.
+        try:
+            with conn.transaction():
+                conn.execute("""
+                  INSERT INTO auto_work_order_qc_rework
+                  (id,work_order_id,fail_event_id,actor_id,action_code,request_key)
+                  VALUES(%s,%s,%s,%s,%s,%s)
+                """,(uuid4(),order,fail_event_id,actor,action_code,request_key))
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
+                psycopg.errors.CheckViolation) as exc:
+            raise InspectionConflict("REWORK_CONFLICT") from exc
+        return {"ok":True,"replayed":False,**_snapshot(conn,order)}
 
 def pending_work_order_qc(conn, token, org, loc, limit=20, after_order_id=None):
     """Bounded live MECHANIC queue: inspected, eligible, not yet QC-passed.

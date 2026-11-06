@@ -5,6 +5,7 @@ const loc='22222222-2222-4222-8222-222222222222';
 const order='33333333-3333-4333-8333-333333333333';
 const base='**/api/v1/dev/auto/organizations/**';
 type Event={id:string;result:string;findingCode:string;createdAt:string};
+type Rework={id:string;failEventId:string;actorId:string;actionCode:string;createdAt:string};
 
 test('intake -> mechanic QC FAIL -> PASS, auditable and responsive',async({page})=>{
   const inspection={id:'44444444-4444-4444-8444-444444444444',
@@ -12,6 +13,7 @@ test('intake -> mechanic QC FAIL -> PASS, auditable and responsive',async({page}
     exteriorCode:'DAMAGE',createdAt:'2030-01-01T10:00:00Z'};
   let registered=false;
   let events:Event[]=[];
+  let reworks:Rework[]=[];
   const writes:string[]=[];
   await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
     status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
@@ -22,7 +24,8 @@ test('intake -> mechanic QC FAIL -> PASS, auditable and responsive',async({page}
       const state=!registered?'NOT_INSPECTED':events.length===0?'PENDING_QC':
         events[events.length-1].result==='PASS'?'QC_PASSED':'QC_FAILED';
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
-        status:state,releaseAllowed:false,inspection:registered?inspection:null,qcEvents:events,
+        status:state,releaseAllowed:false,inspection:registered?inspection:null,
+        qcEvents:events,reworks,
       })});
     }
     expect(request.headers()['x-csrf-token']).toBe('synthetic-csrf');
@@ -31,6 +34,14 @@ test('intake -> mechanic QC FAIL -> PASS, auditable and responsive',async({page}
         odometerKm:75000,fuelPercent:42,tyresOk:true,lightsOk:false,
         fluidLeak:false,exteriorCode:'DAMAGE'});
       registered=true;writes.push('inspection');
+    }else if(url.pathname.endsWith('/qc/rework')){
+      const body=request.postDataJSON();
+      expect(body.requestKey).toMatch(/^[0-9a-f-]{36}$/);
+      expect(body).toMatchObject({failEventId:events[events.length-1].id,
+        actionCode:'ADJUSTMENT'});
+      reworks=[{id:'99999999-9999-4999-8999-999999999999',
+        failEventId:body.failEventId,actorId:org,actionCode:body.actionCode,
+        createdAt:'2030-01-01T10:00:30Z'}];writes.push('rework');
     }else{
       const body=request.postDataJSON();
       expect(body.requestKey).toMatch(/^[0-9a-f-]{36}$/);
@@ -59,6 +70,9 @@ test('intake -> mechanic QC FAIL -> PASS, auditable and responsive',async({page}
       await expect(page.getByRole('heading',{name:'Состояние: QC_FAILED'})).toBeVisible();
       await expect(page.getByText('FAIL · REWORK', {exact:false})).toBeVisible();
       await page.getByRole('combobox',{name:'Результат QC'}).selectOption('PASS');
+      await expect(page.getByRole('button',{name:'Записать результат QC'})).toBeDisabled();
+      await page.getByRole('button',{name:'Зафиксировать доработку'}).click();
+      await expect(page.getByText('Доработка зарегистрирована.',{exact:false})).toBeVisible();
       await page.getByRole('button',{name:'Записать результат QC'}).click();
       await expect(page.getByRole('heading',{name:'Состояние: QC_PASSED'})).toBeVisible();
     } else {
@@ -69,7 +83,7 @@ test('intake -> mechanic QC FAIL -> PASS, auditable and responsive',async({page}
     await expect(page.getByText('Выдача не разрешена этим dev-модулем.')).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }
-  expect(writes).toEqual(['inspection','FAIL','PASS']);
+  expect(writes).toEqual(['inspection','FAIL','rework','PASS']);
 });
 
 test('inspection and QC console removes old tenant data on 403',async({page})=>{
@@ -80,7 +94,7 @@ test('inspection and QC console removes old tenant data on 403',async({page})=>{
       status:'PENDING_QC',releaseAllowed:false,
       inspection:{id:'44444444-4444-4444-8444-444444444444',
         odometerKm:12500,fuelPercent:60,tyresOk:true,lightsOk:true,fluidLeak:false,
-        exteriorCode:'CLEAR',createdAt:'2030-01-01T10:00:00Z'},qcEvents:[],
+        exteriorCode:'CLEAR',createdAt:'2030-01-01T10:00:00Z'},qcEvents:[],reworks:[],
     })}
   ));
   await page.goto('/staff/auto-workshop-qc');
@@ -100,6 +114,7 @@ test('inspection and QC console removes old tenant data on 403',async({page})=>{
 
 test('mechanic QC queue moves from pending to failed to passed, no stale rows',async({page})=>{
   let state:'PENDING_QC'|'FAIL'|'PASS'='PENDING_QC';
+  let reworked=false;
   const fetched:string[]=[];
   const writes:{result:string;requestKey:string}[]=[];
   await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
@@ -126,7 +141,18 @@ test('mechanic QC queue moves from pending to failed to passed, no stale rows',a
           id:'55555555-5555-4555-8555-555555555555',
           result:state,findingCode:state==='FAIL'?'REWORK':'NONE',
           createdAt:'2030-01-01T12:00:00Z'}],
+        reworks:reworked?[{id:'66666666-6666-4666-8666-666666666666',
+          failEventId:'55555555-5555-4555-8555-555555555555',
+          actorId:org,actionCode:'ADJUSTMENT',createdAt:'2030-01-01T12:10:00Z'}]:[],
       })});
+    if(url.pathname.endsWith('/qc/rework')){
+      reworked=true;
+      expect(req.postDataJSON()).toMatchObject({
+        failEventId:'55555555-5555-4555-8555-555555555555',
+        actionCode:'ADJUSTMENT'});
+      return route.fulfill({status:201,contentType:'application/json',
+        body:'{"ok":true}'});
+    }
     expect(url.pathname.endsWith('/qc')).toBe(true);
     const data=req.postDataJSON();
     writes.push({result:data.result,requestKey:data.requestKey});
@@ -147,6 +173,9 @@ test('mechanic QC queue moves from pending to failed to passed, no stale rows',a
   await expect(page.getByRole('heading',{name:'Состояние: QC_FAILED'})).toBeVisible();
   await expect(queue).toContainText('Требуется повторный QC: REWORK');
   await page.getByRole('combobox',{name:'Результат QC'}).selectOption('PASS');
+  await expect(page.getByRole('button',{name:'Записать результат QC'})).toBeDisabled();
+  await page.getByRole('button',{name:'Зафиксировать доработку'}).click();
+  await expect(page.getByText('Доработка зарегистрирована.',{exact:false})).toBeVisible();
   await page.getByRole('button',{name:'Записать результат QC'}).click();
   await expect(page.getByRole('heading',{name:'Состояние: QC_PASSED'})).toBeVisible();
   await expect(queue).toContainText('Нарядов в очереди QC нет.');
