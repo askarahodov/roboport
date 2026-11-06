@@ -114,18 +114,19 @@ def read_auto_estimates(conn,token,org,loc,order):
 
 
 def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_version,
-                          prices=None,labor_rates=None):
+                          prices=None,labor_rates=None,work_rates=None):
     """Manual prices or server-calculated norm-hour prices; never both.
 
     Each rated line contains the exact rate, qualification category and source
     duration that the customer approves. A category is a proposed tariff, NOT
     evidence of a real mechanic's accredited qualification.
     """
-    rated=labor_rates is not None
-    selected=labor_rates if rated else prices
+    advanced=work_rates is not None
+    rated=labor_rates is not None or advanced
+    selected=work_rates if advanced else labor_rates if rated else prices
     if (type(request_key) is not UUID or type(expected_version) is not int or
         not 0<=expected_version<30 or
-        (prices is None)==(labor_rates is None) or
+        sum(x is not None for x in (prices,labor_rates,work_rates))!=1 or
         type(selected) is not list or not 1<=len(selected)<=50):
         raise AutoEstimateDenied("INVALID_INPUT")
     supplied={}
@@ -136,10 +137,21 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
         if service in supplied:
             raise AutoEstimateDenied("INVALID_INPUT")
         if rated:
-            if (set(item)!={"serviceId","qualificationCode","rateMinorPerHour"} or
+            required={"serviceId","qualificationCode","rateMinorPerHour"}
+            if advanced:
+                required|={"quantity","coefficientBps","discountBps"}
+            if (set(item)!=required or
                 item["qualificationCode"] not in ("GENERAL","DIAGNOSTIC","MASTER") or
                 type(item["rateMinorPerHour"]) is not int or
                 not 0<=item["rateMinorPerHour"]<=10**10):
+                raise AutoEstimateDenied("INVALID_INPUT")
+            if advanced and (
+                type(item["quantity"]) is not int or
+                not 1<=item["quantity"]<=20 or
+                type(item["coefficientBps"]) is not int or
+                not 10000<=item["coefficientBps"]<=30000 or
+                type(item["discountBps"]) is not int or
+                not 0<=item["discountBps"]<=2500):
                 raise AutoEstimateDenied("INVALID_INPUT")
         elif (set(item)!={"serviceId","amountMinor"} or
               type(item["amountMinor"]) is not int or
@@ -165,11 +177,25 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
                   "durationMinutes":duration}
             if rated:
                 rate=supplied[i]["rateMinorPerHour"]
-                # Half-up to the nearest kopeck, with only bounded integers.
-                line.update({"pricingMethod":"NORM_HOUR",
-                             "qualificationCode":supplied[i]["qualificationCode"],
-                             "rateMinorPerHour":rate,
-                             "amountMinor":(duration*rate+30)//60})
+                if advanced:
+                    quantity=supplied[i]["quantity"]
+                    coeff=supplied[i]["coefficientBps"]
+                    discount=supplied[i]["discountBps"]
+                    # One rounding, after all modifiers: no float/intermediate
+                    # kopeck rounding, and PostgreSQL independently recomputes.
+                    numerator=duration*rate*quantity*coeff*(10000-discount)
+                    amount=(numerator+3000000000)//6000000000
+                    line.update({"pricingMethod":"NORM_HOUR_FACTORED",
+                                 "qualificationCode":supplied[i]["qualificationCode"],
+                                 "rateMinorPerHour":rate,"quantity":quantity,
+                                 "coefficientBps":coeff,"discountBps":discount,
+                                 "amountMinor":amount})
+                else:
+                    # Original norm-hour contract is unchanged for old clients.
+                    line.update({"pricingMethod":"NORM_HOUR",
+                                 "qualificationCode":supplied[i]["qualificationCode"],
+                                 "rateMinorPerHour":rate,
+                                 "amountMinor":(duration*rate+30)//60})
             else:
                 line["amountMinor"]=supplied[i]["amountMinor"]
             lines.append(line)
