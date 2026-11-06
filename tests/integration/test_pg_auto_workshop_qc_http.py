@@ -299,3 +299,77 @@ def test_qc_queue_excludes_revoked_proof_and_cancelled_appointment(monkeypatch):
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
                    (d["link"],))
     assert client.get(queue).json()["items"]==[]
+
+
+def test_qc_rework_independent_pass_sql_guard_concurrency_and_proof_revoke(monkeypatch):
+    """FAIL cannot become PASS without a distinct worker; direct SQL cannot bypass it."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from uuid import UUID
+    from roboport_api.auto_workshop_qc import record_work_order_qc_rework, InspectionConflict
+    d,org,loc,_,order,*_=scenario()
+    with psycopg.connect(DSN) as db:
+        grant(db,d["other"],org,loc,"MECHANIC")
+    client=client_setup(monkeypatch)
+    read,inspect,qc=target(org,loc,order)
+    intake=token_as(client,d,d["intake"])
+    assert client.post(inspect,headers=intake,json=inspection()).status_code==201
+    checker=token_as(client,d,d["manager"])
+    failed=client.post(qc,headers=checker,json={"requestKey":str(uuid4()),
+                           "result":"FAIL","findingCode":"DEFECT"})
+    assert failed.status_code==201,failed.text
+    failed_id=UUID(failed.json()["qcEvents"][-1]["id"])
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO auto_work_order_qc_event
+                  (id,work_order_id,inspection_id,organization_id,location_id,
+                   actor_id,request_key,result,finding_code)
+                  SELECT %s,work_order_id,id,organization_id,location_id,
+                         %s,%s,'PASS','NONE'
+                  FROM auto_work_order_inspection WHERE work_order_id=%s""",
+                  (uuid4(),d["manager"],uuid4(),order))
+    assert client.post(qc,headers=checker,json={"requestKey":str(uuid4()),
+                 "result":"PASS","findingCode":"NONE"}).status_code==409
+    # Competing workers can create only one immutable record for this FAIL.
+    barrier=Barrier(2)
+    def attempt(_):
+        barrier.wait(timeout=10)
+        try:
+            with psycopg.connect(DSN) as db:
+                return record_work_order_qc_rework(db,d["tokens"][d["manager"]],
+                    org,loc,order,request_key=uuid4(),fail_event_id=failed_id,
+                    action_code="COMPONENT_RECHECK")["replayed"]
+        except InspectionConflict:
+            return "CONFLICT"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=list(pool.map(attempt,range(2)))
+    assert sorted(results,key=str)==[False,"CONFLICT"]
+    # The actor that attested corrective action cannot approve their own PASS.
+    checker=token_as(client,d,d["manager"])
+    assert client.post(qc,headers=checker,json={"requestKey":str(uuid4()),
+                 "result":"PASS","findingCode":"NONE"}).status_code==409
+    independent=token_as(client,d,d["other"])
+    passed=client.post(qc,headers=independent,json={"requestKey":str(uuid4()),
+                 "result":"PASS","findingCode":"NONE"})
+    assert passed.status_code==201,passed.text
+    assert passed.json()["status"]=="QC_PASSED"
+    assert len(passed.json()["reworks"])==1
+    assert client.post(qc+"/rework",headers=independent,json={
+        "requestKey":str(uuid4()),"failEventId":str(failed_id),
+        "actionCode":"ADJUSTMENT"}).status_code==409
+    # Do not permit a stale receipt to bypass later revocation.
+    rework_row=passed.json()["reworks"][0]
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+                   (d["link"],))
+    checker=token_as(client,d,d["manager"])
+    assert client.post(qc+"/rework",headers=checker,json={
+        "requestKey":str(uuid4()),"failEventId":str(failed_id),
+        "actionCode":"COMPONENT_RECHECK"}).status_code==403
+    assert client.get(read).status_code==403
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_work_order_qc_rework WHERE work_order_id=%s",
+                          (order,)).fetchone()==(1,)
+        assert db.execute("SELECT count(*) FROM auto_work_order_qc_event WHERE work_order_id=%s",
+                          (order,)).fetchone()==(2,)
