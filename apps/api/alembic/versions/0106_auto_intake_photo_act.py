@@ -52,6 +52,7 @@ def upgrade():
       DECLARE d jsonb;
       DECLARE i jsonb;
       DECLARE p jsonb;
+      DECLARE photo_idx integer;
       BEGIN
         IF NOT EXISTS(
           SELECT 1 FROM auto_work_order w
@@ -140,6 +141,17 @@ def upgrade():
             OR COALESCE(p->>'width','') !~ '^[1-9][0-9]{0,3}$'
             OR COALESCE(p->>'height','') !~ '^[1-9][0-9]{0,3}$'
           THEN RAISE EXCEPTION 'invalid photo manifest'; END IF;
+        END LOOP;
+        FOR photo_idx IN 1..jsonb_array_length(NEW.photo_meta)
+        LOOP
+          p:=NEW.photo_meta->(photo_idx-1);
+          IF NEW.photo_bytes[photo_idx] IS NULL
+            OR octet_length(NEW.photo_bytes[photo_idx])>196608
+            OR substring(NEW.photo_bytes[photo_idx] from 1 for 8)
+              <> decode('89504e470d0a1a0a','hex')
+            OR encode(sha256(NEW.photo_bytes[photo_idx]),'hex')
+              IS DISTINCT FROM p->>'sha256'
+          THEN RAISE EXCEPTION 'photo payload integrity mismatch'; END IF;
         END LOOP;
         RETURN NEW;
       END $f$
