@@ -46,14 +46,14 @@ def upgrade():
       FOR line IN SELECT value FROM jsonb_array_elements(NEW.service_lines)
       LOOP
         IF line->>'pricingMethod' IS DISTINCT FROM 'NORM_HOUR'
-          OR line->>'qualificationCode' NOT IN ('GENERAL','DIAGNOSTIC','MASTER')
+          OR COALESCE(line->>'qualificationCode','') NOT IN ('GENERAL','DIAGNOSTIC','MASTER')
           OR jsonb_typeof(line->'rateMinorPerHour') IS DISTINCT FROM 'number'
           OR COALESCE(line->>'rateMinorPerHour','') !~ '^[0-9]{1,11}$'
           OR jsonb_typeof(line->'amountMinor') IS DISTINCT FROM 'number'
           OR COALESCE(line->>'amountMinor','') !~ '^[0-9]{1,13}$'
           OR jsonb_typeof(line->'durationMinutes') IS DISTINCT FROM 'number'
           OR COALESCE(line->>'durationMinutes','') !~ '^[0-9]{1,4}$'
-          OR jsonb_object_length(line)<>8
+          OR (SELECT count(*) FROM jsonb_object_keys(line))<>8
         THEN RAISE EXCEPTION 'invalid norm-hour line'; END IF;
 
         rate:=(line->>'rateMinorPerHour')::bigint;
