@@ -41,6 +41,20 @@ def test_reschedule_then_cancel_current_booking_and_audit(monkeypatch):
     wrong=f"/api/v1/dev/auto/organizations/{other}/appointments/{appointment}/reschedule"
     assert client.post(wrong,json=payload,headers=headers).status_code==403
     retry_headers={**headers,"Idempotency-Key":str(uuid4())}
+    for wrong_time in (
+        {**payload, "startsAt": (start+timedelta(hours=3)).replace(tzinfo=None).isoformat()},
+        {**payload, "endsAt": (start+timedelta(hours=3)).isoformat()},
+        {**payload, "endsAt": (start+timedelta(hours=29)).isoformat()},
+    ):
+        rejected=client.post(res,json=wrong_time,headers={
+            **headers,"Idempotency-Key":str(uuid4())})
+        assert rejected.status_code==422,rejected.text
+        assert rejected.json()["code"]=="INVALID_INPUT"
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT count(*) FROM auto_appointment_reschedule WHERE appointment_id=%s",
+            (appointment,),
+        ).fetchone()==(0,)
     moved=client.post(res,json=payload,headers=retry_headers)
     assert moved.status_code==200,moved.text
     fresh=moved.json()["bookingId"]
