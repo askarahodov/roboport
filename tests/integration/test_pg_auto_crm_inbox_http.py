@@ -159,3 +159,68 @@ def test_inbox_keyset_excludes_completed_between_pages(monkeypatch):
     second=http.get(inbox(org,loc)+"?cursor="+first["nextCursor"])
     assert second.status_code==200,second.text
     assert [r["taskId"] for r in second.json()["items"]]==[tasks[26]]
+
+
+
+def test_overdue_mode_selects_only_due_open_tasks_and_live_scope(monkeypatch):
+    """Server clock decides overdue; resolved tasks and revoked scope never leak."""
+    import time
+    d,org,loc,bay,foreign,foreign_loc,http,lead=setup(monkeypatch)
+    headers=session(http,d,d["intake"])
+    path=scope(org,loc,lead)
+    near={"taskCode":"CALL_BACK",
+          "dueAt":(datetime.now(timezone.utc)+timedelta(seconds=3)).isoformat(),
+          "requestKey":str(uuid4())}
+    pending=http.post(path,headers=headers,json=near)
+    assert pending.status_code==201,pending.text
+    future=http.post(path,headers=headers,json=task_payload(8))
+    assert future.status_code==201,future.text
+    url=inbox(org,loc)
+    assert len(http.get(url+"?mode=ALL").json()["items"])==2
+    assert http.get(url+"?mode=OVERDUE").json()["items"]==[]
+    assert http.get(url+"?mode=invalid").status_code==422
+    assert http.get(url+"?mode=OVERDUE&cursor=bad").status_code==422
+
+    # The immutable task is allowed to become overdue naturally in PG17.
+    time.sleep(3.3)
+    due=http.get(url+"?mode=OVERDUE")
+    assert due.status_code==200,due.text
+    assert due.headers["cache-control"]=="no-store"
+    assert due.json()["syntheticOnly"] is True
+    assert due.json()["nextCursor"] is None
+    assert [row["taskId"] for row in due.json()["items"]]==[pending.json()["taskId"]]
+    assert str(d["vehicle"]) not in due.text
+    done=http.post(path+"/"+pending.json()["taskId"]+"/events",
+        headers=headers,json={"action":"DONE","requestKey":str(uuid4())})
+    assert done.status_code==201,done.text
+    assert http.get(url+"?mode=OVERDUE").json()["items"]==[]
+    assert [row["taskId"] for row in http.get(url+"?mode=ALL").json()["items"]]==[
+        future.json()["taskId"]]
+    assert http.get(inbox(foreign,foreign_loc)+"?mode=OVERDUE").status_code==403
+    session(http,d,d["manager"])
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant
+                      SET revoked_at=now() WHERE user_id=%s AND location_id=%s
+                      AND role_code='MANAGER'""",(d["manager"],loc))
+    assert http.get(url+"?mode=OVERDUE").status_code==403
+
+
+def test_overdue_filter_passes_through_sql_before_cursor_pagination(monkeypatch):
+    from contextlib import nullcontext
+    from roboport_api import auto_crm_inbox
+    observed=[]
+    class Cursor:
+        def fetchall(self):
+            return []
+    class Connection:
+        def transaction(self):
+            return nullcontext()
+        def execute(self,sql,params):
+            observed.append((sql,params))
+            return Cursor()
+    monkeypatch.setattr(auto_crm_inbox,"_authority",lambda *args:(uuid4(),False))
+    for mode in ("ALL","OVERDUE"):
+        result=auto_crm_inbox.list_inbox(Connection(),"test",uuid4(),uuid4(),mode=mode)
+        assert result=={"syntheticOnly":True,"items":[],"nextCursor":None}
+    assert all("t.due_at<now()" in sql for sql,_ in observed)
+    assert [params[4] for _,params in observed]==["ALL","OVERDUE"]

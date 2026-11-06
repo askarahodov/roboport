@@ -135,6 +135,7 @@ export function AutoCrmLeads(){
   const [inboxStatus,setInboxStatus]=React.useState<'idle'|'loading'|'ready'|'error'>('idle');
   const [inboxRevision,setInboxRevision]=React.useState(0);
   const [inboxCursor,setInboxCursor]=React.useState<string|null>(null);
+  const [inboxMode,setInboxMode]=React.useState<'ALL'|'OVERDUE'>('ALL');
   const [inboxHistory,setInboxHistory]=React.useState<(string|null)[]>([]);
   const [inboxNext,setInboxNext]=React.useState<string|null>(null);
   const [inboxOpening,setInboxOpening]=React.useState(false);
@@ -205,7 +206,9 @@ export function AutoCrmLeads(){
       try{
         const response=await fetch('/api/v1/dev/auto/organizations/'+
           encodeURIComponent(org)+'/locations/'+encodeURIComponent(loc)+'/crm/inbox'+
-          (inboxCursor?'?cursor='+encodeURIComponent(inboxCursor):''),{
+          (inboxMode==='OVERDUE'?'?'+new URLSearchParams({
+            mode:'OVERDUE',...(inboxCursor?{cursor:inboxCursor}:{})}):
+            inboxCursor?'?cursor='+encodeURIComponent(inboxCursor):''),{
             credentials:'include',cache:'no-store',signal:controller.signal,
           });
         if(controller.signal.aborted)return;
@@ -218,7 +221,7 @@ export function AutoCrmLeads(){
       }catch{if(!controller.signal.aborted)setInboxStatus('error');}
     })();
     return ()=>controller.abort();
-  },[org,loc,valid,loadedScope,status,inboxRevision,inboxCursor,taskRevision,revision]);
+  },[org,loc,valid,loadedScope,status,inboxRevision,inboxCursor,inboxMode,taskRevision,revision]);
 
   async function openInboxLead(leadId:string){
     if(inboxOpening||busy||taskBusy||pendingLead!==null||pendingTask!==null||
@@ -372,12 +375,28 @@ export function AutoCrmLeads(){
         <h2>Очередь открытых задач филиала</h2>
         <p>Только внутренние задачи. Сначала просроченные, затем ближайшие по сроку.
           Видимость зависит от действующей роли и подтверждённой связи с автомобилем.</p>
+        <label>Режим очереди CRM
+          <select aria-label="Режим очереди CRM" value={inboxMode}
+            disabled={busy||taskBusy||inboxOpening}
+            onChange={event=>{
+              setInbox([]);setInboxStatus('idle');
+              setInboxNext(null);setInboxCursor(null);setInboxHistory([]);
+              setInboxMode(event.target.value as 'ALL'|'OVERDUE');
+            }}>
+            <option value="ALL">Все открытые задачи</option>
+            <option value="OVERDUE">Только просроченные</option>
+          </select>
+        </label>
+        <p>{inboxMode==='OVERDUE'?
+          'Просроченность определяется сервером на момент каждого чтения. Будущие задачи не отображаются.':
+          'Весь список открытых задач без ограничения по сроку.'}</p>
         <button type="button" disabled={busy||taskBusy||inboxOpening}
           onClick={()=>{setInboxCursor(null);setInboxHistory([]);setInboxRevision(n=>n+1);}}>Обновить очередь</button>
         {inboxStatus==='loading'&&<p role="status">Чтение очереди…</p>}
         {inboxStatus==='error'&&<p role="alert">Не удалось загрузить очередь.
           Проверьте права и обновите очередь.</p>}
-        {inboxStatus==='ready'&&inbox.length===0&&<p>Открытых задач нет.</p>}
+        {inboxStatus==='ready'&&inbox.length===0&&
+          <p>{inboxMode==='OVERDUE'?'Просроченных задач нет.':'Открытых задач нет.'}</p>}
         {inboxStatus==='ready'&&<ol>{inbox.map(task=><li key={task.taskId}>
           {taskCodeLabels[task.taskCode]} ·
           {new Date(task.dueAt).toLocaleString('ru-RU')} ·
