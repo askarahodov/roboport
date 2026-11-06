@@ -23,6 +23,10 @@ test('supplier return prepares, approves and preserves provenance request bodies
   const sent:{url:string;key:string;body:unknown}[]=[];
   await page.route('**/api/v1/dev/auto/organizations/**/warehouse/supplier-returns**',route=>{
     const req=route.request();
+    if(req.method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[],nextDocumentId:null}),
+    });
     expect(req.headers()['x-csrf-token']).toBe('csrf');
     sent.push({url:new URL(req.url()).pathname,
       key:req.headers()['idempotency-key'],body:req.postDataJSON()});
@@ -69,4 +73,84 @@ test('supplier return holds key and request after in-flight scope edit',async({p
   await expect(page.getByRole('status')).toContainText('Акт возврата поставщику создан');
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
+});
+
+
+
+test('manager sees return draft, approves, and receives refreshed empty queue',async({page})=>{
+  let approved=false;
+  const posts:unknown[]=[];
+  await page.route('**/api/v1/dev/auto/organizations/**/warehouse/supplier-returns**',
+    route=>{
+      const req=route.request();
+      if(req.method()==='GET'){
+        const url=new URL(req.url());
+        expect(url.searchParams.get('locationId')).toBe(loc);
+        return route.fulfill({status:200,contentType:'application/json',
+          body:JSON.stringify({syntheticOnly:true,nextDocumentId:null,
+            items:approved?[]:[{documentId:doc,sourceReceiptId:receipt,
+              lotId:'66666666-6666-4666-8666-666666666666',
+              article:'SYN-SKU',batchCode:'LOT-A',binCode:'BIN-1',
+              quantity:2,reason:'Возврат брака',supplierReference:'RMA-2026-001'}]})});
+      }
+      posts.push(req.postDataJSON());
+      expect(req.headers()['x-csrf-token']).toBe('csrf');
+      expect(req.headers()['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/i);
+      if(req.url().endsWith('/approvals'))approved=true;
+      return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify(approved?{approvalId:approval}:{documentId:doc})});
+    });
+  await page.setViewportSize({width:390,height:844});
+  await setup(page);
+  const queue=page.getByLabel('Очередь актов поставщику');
+  await queue.getByRole('button',{name:'Обновить акты к утверждению'}).click();
+  await expect(queue).toContainText('SYN-SKU');
+  await expect(queue).toContainText('RMA-2026-001');
+  await queue.getByRole('button',{name:'Выбрать акт '+doc}).click();
+  await expect(page.getByRole('textbox',{name:'UUID акта'})).toHaveValue(doc);
+  await page.getByRole('button',{name:'Утвердить возврат'}).click();
+  await expect(page.getByRole('status').filter({hasText:'Возврат поставщику утверждён'}))
+    .toBeVisible();
+  await expect(queue).toContainText('Актов к утверждению нет.');
+  await expect(page.getByRole('textbox',{name:'UUID акта'})).toHaveValue('');
+  expect(posts).toEqual([{locationId:loc,documentId:doc}]);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(1280);
+});
+
+test('supplier return review refuses stale/foreign location or malformed queue body',async({page})=>{
+  let malformed=false;
+  let deny=false;
+  const foreign='77777777-7777-4777-8777-777777777777';
+  await page.route('**/warehouse/supplier-returns/pending?*',route=>{
+    const u=new URL(route.request().url());
+    if(deny||u.searchParams.get('locationId')!==loc)
+      return route.fulfill({status:403,contentType:'application/json',
+        body:'{"code":"FORBIDDEN"}'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,nextDocumentId:null,
+        items:[{documentId:doc,sourceReceiptId:receipt,
+          lotId:'66666666-6666-4666-8666-666666666666',
+          article:'SECRET-SKU',batchCode:'LOT-A',binCode:'BIN-1',
+          quantity:malformed?-1:2,reason:'Возврат брака',
+          supplierReference:'RMA-2026-001'}]})});
+  });
+  await setup(page);
+  const queue=page.getByLabel('Очередь актов поставщику');
+  await queue.getByRole('button',{name:'Обновить акты к утверждению'}).click();
+  await expect(queue.getByRole('button',{name:'Выбрать акт '+doc})).toBeVisible();
+  malformed=true;
+  await queue.getByRole('button',{name:'Обновить акты к утверждению'}).click();
+  await expect(queue.getByRole('alert')).toContainText('Не удалось загрузить');
+  await expect(queue).not.toContainText('SECRET-SKU');
+  malformed=false;deny=true;
+  await queue.getByRole('button',{name:'Обновить акты к утверждению'}).click();
+  await expect(queue.getByRole('alert')).toContainText('Нет доступа');
+  await expect(queue.getByRole('button',{name:'Выбрать акт '+doc})).toHaveCount(0);
+  deny=false;
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(foreign);
+  await expect(queue).not.toContainText('SECRET-SKU');
+  await queue.getByRole('button',{name:'Обновить акты к утверждению'}).click();
+  await expect(queue.getByRole('alert')).toContainText('Нет доступа');
 });
