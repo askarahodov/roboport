@@ -4,6 +4,7 @@ Restart or switching workers invalidates outstanding cursors by design.
 This is only used for the opt-in synthetic API, not production.
 """
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -84,5 +85,5 @@ def decode_triplet_cursor(cursor: str, state: str, token: str) -> tuple[UUID, UU
             raise ValueError("noncanonical cursor payload")
         return position
     except (ValueError, UnicodeError, TypeError, OverflowError,
-            json.JSONDecodeError, __import__("binascii").Error) as exc:
+            json.JSONDecodeError, binascii.Error) as exc:
         raise ValueError("invalid cursor") from exc
