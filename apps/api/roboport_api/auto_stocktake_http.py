@@ -141,6 +141,34 @@ def get_pending_counts(org_id: str, request: Request, locationId: str,
     },headers={"Cache-Control":"no-store"})
 
 
+@router.get("/api/v1/dev/auto/organizations/{org_id}/warehouse/receipts/pending")
+def get_pending_receipt_reviews(org_id: str,request: Request,locationId: str,
+                                stage: str,limit: int=20,
+                                afterDocumentId: str | None=None):
+    """Read-only manager queues for not-yet-accepted and not-yet-valued docs."""
+    from .auto_stock_receipt_document import pending_receipt_reviews
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(locationId)
+        cursor=UUID(afterDocumentId) if afterDocumentId is not None else None
+        if stage not in ("accept","value") or not 1<=limit<=50:
+            raise ValueError("invalid stage or page size")
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            items,next_id=pending_receipt_reviews(
+                db,request.cookies.get("rp_session",""),
+                org,loc,stage,limit,cursor)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(content={"syntheticOnly":True,"stage":stage,
+            "items":items,"nextDocumentId":str(next_id) if next_id else None},
+            headers={"Cache-Control":"no-store"})
+
+
 class ReceiptDraftBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     locationId: UUID
