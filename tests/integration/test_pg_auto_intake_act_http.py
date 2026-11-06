@@ -259,3 +259,47 @@ def test_png_sanitizer_rejects_exif_text_crc_bombs_and_unknown_chunks():
     ):
         with pytest.raises(IntakeActInvalid):
             sanitize_png(bad)
+
+
+def test_previous_visit_does_not_leak_another_branch_to_branch_scoped_staff(monkeypatch):
+    """A staff grant for branch A is never an indirect grant for branch B's act."""
+    from test_pg_auto_stock_service import grant
+    d,org,loc,bay,first_order,_,start,*_=scenario()
+    http=client_setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        other_loc,other_bay=uuid4(),uuid4()
+        db.execute("""INSERT INTO auto_service_location(id,code,organization_id)
+                      VALUES(%s,%s,%s)""",
+                   (other_loc,"LOC_"+other_loc.hex[:10].upper(),org))
+        db.execute("""INSERT INTO auto_work_bay(id,organization_id,location_id,code)
+                      VALUES(%s,%s,%s,'BAY_1')""",(other_bay,org,other_loc))
+        db.execute("""INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id)
+                      VALUES(%s,%s)""",(d["vehicle"],other_loc))
+        grant(db,d["manager"],org,other_loc,"INTAKE")
+        _,_,branch_b_order=create_appointment(
+            db,d["tokens"][d["manager"]],org,other_loc,other_bay,d["link"],
+            start+timedelta(hours=2),start+timedelta(hours=3))
+    inspector=token_as(http,d,d["manager"])
+    _,inspector_path,_=target(org,other_loc,branch_b_order)
+    assert http.post(inspector_path,headers=inspector,json=inspection()).status_code==201
+    image=synthetic_png()
+    saved=publish(http,inspector,url(org,other_loc,branch_b_order),custody(image))
+    assert saved.status_code==201,saved.text
+    photo=saved.json()["items"][0]["photos"][0]["path"]
+    staff_a=token_as(http,d,d["intake"])
+    assert http.get(url(org,other_loc,branch_b_order)).status_code==403
+    assert http.get(photo).status_code==403
+
+    with psycopg.connect(DSN) as db:
+        _,_,current_a_order=create_appointment(
+            db,d["tokens"][d["intake"]],org,loc,bay,d["link"],
+            start+timedelta(hours=4),start+timedelta(hours=5))
+    # The only earlier versioned act belongs to B; the employee is scoped A.
+    current=url(org,loc,current_a_order)
+    own=http.get(current)
+    assert own.status_code==200,own.text
+    assert own.json()["previousVisit"] is None
+    assert own.json()["items"]==[]
+    # Client is also shown only same-branch history in this conservative version.
+    token_as(http,d,d["client_a"])
+    assert http.get(current).json()["previousVisit"] is None
