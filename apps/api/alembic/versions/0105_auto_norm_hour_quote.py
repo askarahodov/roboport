@@ -28,9 +28,9 @@ def upgrade():
     BEGIN
       -- All legacy flat-price revisions retain their original contract.
       IF NOT EXISTS (
-        SELECT 1 FROM jsonb_array_elements(NEW.service_lines) e
-        WHERE e ? 'pricingMethod' OR e ? 'rateMinorPerHour'
-          OR e ? 'qualificationCode'
+        SELECT 1 FROM jsonb_array_elements(NEW.service_lines) AS elements(value)
+        WHERE elements.value ? 'pricingMethod' OR elements.value ? 'rateMinorPerHour'
+          OR elements.value ? 'qualificationCode'
       ) THEN RETURN NEW; END IF;
 
       line_count:=jsonb_array_length(NEW.service_lines);
@@ -39,8 +39,8 @@ def upgrade():
         AND organization_id=NEW.organization_id
         AND location_id=NEW.location_id;
       IF line_count<>selected_count OR
-        (SELECT count(DISTINCT e->>'serviceId')
-         FROM jsonb_array_elements(NEW.service_lines) e)<>line_count
+        (SELECT count(DISTINCT elements.value->>'serviceId')
+         FROM jsonb_array_elements(NEW.service_lines) AS elements(value))<>line_count
       THEN RAISE EXCEPTION 'norm-hour quote must include every selected service once'; END IF;
 
       FOR line IN SELECT value FROM jsonb_array_elements(NEW.service_lines)
