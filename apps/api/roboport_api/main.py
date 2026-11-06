@@ -52,6 +52,8 @@ from .auto_order_financial_read_http import router as auto_order_financial_read_
 app.include_router(auto_order_financial_read_router)
 from .auto_order_service_http import router as auto_order_service_router
 app.include_router(auto_order_service_router)
+from .auto_intake_act_http import router as auto_intake_act_router
+app.include_router(auto_intake_act_router)
 from .auto_workshop_qc_http import router as auto_workshop_qc_router
 app.include_router(auto_workshop_qc_router)
 from .auto_work_order_diagnostics_http import router as auto_work_order_diagnostics_router
