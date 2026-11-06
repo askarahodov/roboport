@@ -78,20 +78,26 @@ def _staff_and_scope(conn,token,org,loc,order):
 def _estimate_state(conn,order):
     revisions=conn.execute("""
        SELECT r.id,r.version,r.total_minor,r.fingerprint,r.service_lines,
-              r.created_at,d.decision,d.created_at
+              r.created_at,d.decision,d.created_at,
+              q.id,q.reason_code,answer.resolution_code
        FROM auto_work_order_estimate_revision r
        LEFT JOIN auto_work_order_estimate_decision d ON d.revision_id=r.id
+       LEFT JOIN auto_estimate_clarification_request q ON q.revision_id=r.id
+       LEFT JOIN auto_estimate_clarification_reply answer ON answer.request_id=q.id
        WHERE r.work_order_id=%s ORDER BY r.version LIMIT 31
     """,(order,)).fetchall()
     if len(revisions)>30:
         raise AutoEstimateConflict("LIMIT")
     results=[]
-    for ident,version,total,digest,lines,created,decision,decided_at in revisions:
+    for ident,version,total,digest,lines,created,decision,decided_at,question,reason,resolution in revisions:
         results.append({"id":str(ident),"version":version,"totalMinor":total,
                         "currency":"RUB","digest":digest.strip(),
                         "lines":lines,"decision":decision,
                         "createdAt":created.isoformat(),
-                        "decidedAt":decided_at.isoformat() if decided_at else None})
+                        "decidedAt":decided_at.isoformat() if decided_at else None,
+                        "clarificationId":str(question) if question else None,
+                        "clarificationReason":reason,
+                        "clarificationResolution":resolution})
     return {"items":results,"latestVersion":results[-1]["version"] if results else 0,
             "syntheticOnly":True,"releaseAllowed":False}
 
@@ -149,6 +155,9 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
                 raise AutoEstimateConflict("KEY_REUSED")
             return {"ok":True,"replayed":True,**_estimate_state(conn,order)}
         state=_estimate_state(conn,order)
+        if state["items"] and state["items"][-1]["clarificationId"] and (
+            state["items"][-1]["clarificationResolution"] is None):
+            raise AutoEstimateConflict("CLARIFICATION_PENDING")
         if (state["latestVersion"]!=expected_version or
             any(item["decision"] is not None for item in state["items"])):
             raise AutoEstimateConflict("VERSION_CONFLICT")
@@ -177,6 +186,11 @@ def decide_auto_estimate(conn,token,org,loc,order,*,revision_id,request_key,deci
         current=state["items"][-1] if state["items"] else None
         if current is None or current["id"]!=str(revision_id):
             raise AutoEstimateConflict("STALE_REVISION")
+        if (current["clarificationId"] and
+            current["clarificationResolution"]!="EXPLAINED"):
+            raise AutoEstimateConflict(
+                "CLARIFICATION_PENDING" if current["clarificationResolution"] is None
+                else "CLARIFICATION_NEW_VERSION_REQUIRED")
         digest=_fingerprint({"revision":str(revision_id),"actor":str(actor),
                              "decision":decision,"estimateDigest":current["digest"]})
         previous=conn.execute("""
@@ -197,4 +211,75 @@ def decide_auto_estimate(conn,token,org,loc,order,*,revision_id,request_key,deci
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoEstimateConflict("ALREADY_DECIDED") from None
+        return {"ok":True,"replayed":False,**_estimate_state(conn,order)}
+
+
+def request_estimate_clarification(conn,token,org,loc,order,*,
+                                   revision_id,request_key,reason_code):
+    """One structured immutable client question per current undecided version."""
+    if (type(revision_id) is not UUID or type(request_key) is not UUID or
+        reason_code not in ("PRICE","WORK_SCOPE","TIMING","OTHER")):
+        raise AutoEstimateDenied("INVALID_INPUT")
+    with conn.transaction():
+        actor=_client_and_scope(conn,token,org,loc,order)
+        state=_estimate_state(conn,order)
+        current=state["items"][-1] if state["items"] else None
+        if current is None or current["id"]!=str(revision_id) or current["decision"] is not None:
+            raise AutoEstimateConflict("STALE_REVISION")
+        previous=conn.execute("""
+          SELECT revision_id,actor_id,request_key,reason_code
+          FROM auto_estimate_clarification_request WHERE work_order_id=%s AND revision_id=%s
+        """,(order,revision_id)).fetchone()
+        if previous:
+            if previous!=(revision_id,actor,request_key,reason_code):
+                raise AutoEstimateConflict("CLARIFICATION_ALREADY_REQUESTED")
+            return {"ok":True,"replayed":True,**_estimate_state(conn,order)}
+        try:
+            with conn.transaction():
+                conn.execute("""
+                  INSERT INTO auto_estimate_clarification_request
+                  (id,revision_id,work_order_id,actor_id,request_key,reason_code)
+                  VALUES(%s,%s,%s,%s,%s,%s)
+                """,(uuid4(),revision_id,order,actor,request_key,reason_code))
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
+                psycopg.errors.CheckViolation):
+            raise AutoEstimateConflict("CLARIFICATION_ALREADY_REQUESTED") from None
+        return {"ok":True,"replayed":False,**_estimate_state(conn,order)}
+
+
+def resolve_estimate_clarification(conn,token,org,loc,order,*,
+                                   revision_id,request_key,resolution_code):
+    """Manager resolves current client question, without silently editing estimate."""
+    if (type(revision_id) is not UUID or type(request_key) is not UUID or
+        resolution_code not in ("EXPLAINED","NEW_VERSION_REQUIRED")):
+        raise AutoEstimateDenied("INVALID_INPUT")
+    with conn.transaction():
+        actor=_staff_and_scope(conn,token,org,loc,order)
+        state=_estimate_state(conn,order)
+        current=state["items"][-1] if state["items"] else None
+        if current is None or current["id"]!=str(revision_id) or current["decision"] is not None:
+            raise AutoEstimateConflict("STALE_REVISION")
+        if not current["clarificationId"]:
+            raise AutoEstimateConflict("CLARIFICATION_REQUIRED")
+        prior=conn.execute("""
+          SELECT answer.actor_id,answer.request_key,answer.resolution_code
+          FROM auto_estimate_clarification_reply answer
+          JOIN auto_estimate_clarification_request q ON q.id=answer.request_id
+          WHERE q.revision_id=%s
+        """,(revision_id,)).fetchone()
+        if prior:
+            if prior!=(actor,request_key,resolution_code):
+                raise AutoEstimateConflict("CLARIFICATION_ALREADY_RESOLVED")
+            return {"ok":True,"replayed":True,**_estimate_state(conn,order)}
+        try:
+            with conn.transaction():
+                conn.execute("""
+                  INSERT INTO auto_estimate_clarification_reply
+                  (id,request_id,actor_id,request_key,resolution_code)
+                  VALUES(%s,%s,%s,%s,%s)
+                """,(uuid4(),UUID(current["clarificationId"]),actor,
+                      request_key,resolution_code))
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
+                psycopg.errors.CheckViolation):
+            raise AutoEstimateConflict("CLARIFICATION_ALREADY_RESOLVED") from None
         return {"ok":True,"replayed":False,**_estimate_state(conn,order)}
