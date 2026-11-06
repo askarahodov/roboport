@@ -17,6 +17,10 @@ const locale=(time:string,zone:string)=>new Intl.DateTimeFormat('ru-RU',{
 
 export function CustomerAutoBooking(){
   const [resources,setResources]=React.useState<Resource[]>([]);
+  const [nextResourceCursor,setNextResourceCursor]=React.useState<string|null>(null);
+  const [resourceLoading,setResourceLoading]=React.useState(false);
+  const [resourceError,setResourceError]=React.useState('');
+  const resourceRequest=React.useRef(0);
   const [bookings,setBookings]=React.useState<Booking[]>([]);
   const [nextCursor,setNextCursor]=React.useState<string|null>(null);
   const [pageLoading,setPageLoading]=React.useState(false);
@@ -43,6 +47,8 @@ export function CustomerAutoBooking(){
   React.useEffect(()=>{
     const controller=new AbortController();
     pageRequest.current++;
+    resourceRequest.current++;
+    setNextResourceCursor(null);setResourceLoading(false);setResourceError('');
     setNextCursor(null);setPageLoading(false);setPageError('');
     setState('loading');setResources([]);setBookings([]);setSlots([]);setTarget(null);
     void (async()=>{
@@ -61,6 +67,8 @@ export function CustomerAutoBooking(){
         const rr:unknown=await r.json(),bb:unknown=await b.json();
         if(!rr||typeof rr!=='object'||!('syntheticOnly' in rr)||rr.syntheticOnly!==true||
            !('items' in rr)||!Array.isArray(rr.items)||rr.items.length>50||
+           !('nextCursor' in rr)||!(rr.nextCursor===null||
+             (typeof rr.nextCursor==='string'&&rr.nextCursor.length>0&&rr.nextCursor.length<=256))||
            !rr.items.every((x:Resource)=>uuid.test(x.organizationId)&&uuid.test(x.locationId)&&
              uuid.test(x.customerLinkId)&&uuid.test(x.bayId)&&typeof x.timeZone==='string'&&
              x.vehicle&&typeof x.vehicle.make==='string'&&typeof x.vehicle.model==='string')||
@@ -78,7 +86,8 @@ export function CustomerAutoBooking(){
               x.serviceIds.every((id:unknown)=>typeof id==='string'&&uuid.test(id))))throw Error('shape');
         if(controller.signal.aborted)return;
         const incoming=rr.items as Resource[];
-        setResources(incoming);setBookings(bb.items as Booking[]);
+        setResources(incoming);setNextResourceCursor(rr.nextCursor as string|null);
+        setBookings(bb.items as Booking[]);
         setNextCursor(bb.nextCursor as string|null);
         setSelected(old=>incoming.some(x=>old===x.customerLinkId+':'+x.bayId)?
           old:incoming.length?incoming[0].customerLinkId+':'+incoming[0].bayId:'');
@@ -89,6 +98,46 @@ export function CustomerAutoBooking(){
     })();
     return ()=>controller.abort();
   },[revision]);
+
+  async function loadMoreResources(){
+    if(!nextResourceCursor||resourceLoading||busy||pending||state!=='ready')return;
+    const requestId=resourceRequest.current;
+    setResourceLoading(true);setResourceError('');
+    try{
+      const response=await fetch('/api/v1/dev/auto/customer/booking/resources?'+
+        new URLSearchParams({cursor:nextResourceCursor}),{
+          credentials:'include',cache:'no-store',
+        });
+      if(requestId!==resourceRequest.current)return;
+      if([401,403,404].includes(response.status)){
+        setResources([]);setBookings([]);setNextResourceCursor(null);
+        setNextCursor(null);setState('denied');return;
+      }
+      if(!response.ok)throw Error('resource pagination');
+      const raw:unknown=await response.json();
+      if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||raw.syntheticOnly!==true||
+        !('items' in raw)||!Array.isArray(raw.items)||raw.items.length>50||
+        !('nextCursor' in raw)||!(raw.nextCursor===null||
+          (typeof raw.nextCursor==='string'&&raw.nextCursor.length>0&&raw.nextCursor.length<=256))||
+        !raw.items.every((x:Resource)=>uuid.test(x.organizationId)&&uuid.test(x.locationId)&&
+          uuid.test(x.customerLinkId)&&uuid.test(x.bayId)&&typeof x.timeZone==='string'&&
+          x.vehicle&&typeof x.vehicle.make==='string'&&typeof x.vehicle.model==='string'))
+        throw Error('resource shape');
+      if(requestId!==resourceRequest.current)return;
+      const incoming=raw.items as Resource[];
+      setResources(old=>{
+        const seen=new Set(old.map(x=>x.organizationId+':'+x.locationId+':'+x.customerLinkId+':'+x.bayId));
+        return [...old,...incoming.filter(x=>!seen.has(
+          x.organizationId+':'+x.locationId+':'+x.customerLinkId+':'+x.bayId))];
+      });
+      setNextResourceCursor(raw.nextCursor as string|null);
+    }catch{
+      if(requestId===resourceRequest.current)
+        setResourceError('Не удалось получить следующую страницу автомобилей и постов.');
+    }finally{
+      if(requestId===resourceRequest.current)setResourceLoading(false);
+    }
+  }
 
   async function loadMore(){
     if(!nextCursor||pageLoading||busy||pending||state!=='ready')return;
@@ -276,6 +325,11 @@ export function CustomerAutoBooking(){
             {r.vehicle.make} {r.vehicle.model} · {r.timeZone} · пост {r.bayId}
           </option>)}
         </select></label>
+        {nextResourceCursor&&<button type="button" disabled={resourceLoading||busy||!!pending}
+          onClick={()=>void loadMoreResources()}>
+          {resourceLoading?'Загрузка постов…':'Показать ещё автомобили и посты'}
+        </button>}
+        {resourceError&&<p role="alert">{resourceError}</p>}
         {!target&&<fieldset aria-label="Услуги при записи (dev)"><legend>Работы по записи (необязательно)</legend>
           <p>Выберите не более 8 услуг и не более 24 часов суммарно. Поиск учитывает полную длительность. Первоначальный выбор работ не мешает переносу и отмене до начала оформления приёмщиком, осмотра, сметы или складских операций.</p>
           {serviceState&&<p role="status">{serviceState}</p>}
