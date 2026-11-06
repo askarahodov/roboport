@@ -6,6 +6,7 @@ import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, ValidationError, Field
+from .auto_booking_interval import BookingInterval
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_appointment_service import (
@@ -20,14 +21,12 @@ class BookingMaterialItem(BaseModel):
     quantity: int = Field(gt=0, le=1000000000, strict=True)
 
 
-class CreateAppointment(BaseModel):
+class CreateAppointment(BookingInterval):
     model_config=ConfigDict(extra="forbid")
     locationId: UUID
     bayId: UUID
     customerLinkId: UUID
     employeeId: UUID | None = None
-    startsAt: datetime
-    endsAt: datetime
     serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
     materialItems: list[BookingMaterialItem] = Field(default_factory=list, max_length=8)
 
@@ -169,12 +168,10 @@ def cancel(org_id: str, appointment_id: str, request: Request):
     return JSONResponse(content={"status":outcome},headers={"Cache-Control":"no-store"})
 
 
-class ReschedulePayload(BaseModel):
+class ReschedulePayload(BookingInterval):
     model_config=ConfigDict(extra="forbid")
     bayId: UUID
     employeeId: UUID | None = None
-    startsAt: datetime
-    endsAt: datetime
 
 @router.post("/api/v1/dev/auto/organizations/{org_id}/appointments/{appointment_id}/reschedule")
 async def reschedule(org_id: str, appointment_id: str, request: Request):
