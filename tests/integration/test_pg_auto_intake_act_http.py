@@ -259,3 +259,77 @@ def test_png_sanitizer_rejects_exif_text_crc_bombs_and_unknown_chunks():
     ):
         with pytest.raises(IntakeActInvalid):
             sanitize_png(bad)
+
+
+
+def test_previous_visit_is_branch_scoped_and_branch_b_direct_reads_need_grant(monkeypatch):
+    """Runtime SQL must scope historic rows to the current branch.
+
+    A vehicle has ONE immutable location binding. Build legitimate separate
+    branch-B custody for a different synthetic vehicle/customer instead of
+    trying to UPDATE the append-only binding to fabricate history.
+    """
+    from test_pg_auto_vehicle_claim_http import _scenario as vehicle_scenario
+    from test_pg_auto_stock_service import grant
+    from roboport_api.auto_intake_act import _read
+
+    d,org,loc,bay,first_order,_,start,*_=scenario()
+    other=vehicle_scenario()
+    http=client_setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        other_loc,other_bay=uuid4(),uuid4()
+        db.execute("""INSERT INTO auto_service_location(id,code,organization_id)
+                      VALUES(%s,%s,%s)""",
+                   (other_loc,"LOC_"+other_loc.hex[:10].upper(),org))
+        db.execute("""INSERT INTO auto_work_bay(id,organization_id,location_id,code)
+                      VALUES(%s,%s,%s,'BAY_1')""",(other_bay,org,other_loc))
+        db.execute("""INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id)
+                      VALUES(%s,%s)""",(other["vehicle"],other_loc))
+        db.execute("""UPDATE auto_vehicle_customer_link
+                      SET verified_at=now(),verified_by=%s WHERE id=%s""",
+                   (other["manager"],other["link"]))
+        grant(db,other["intake"],org,other_loc,"INTAKE")
+        _,_,branch_b_order=create_appointment(
+            db,other["tokens"][other["intake"]],org,other_loc,
+            other_bay,other["link"],start+timedelta(hours=2),
+            start+timedelta(hours=3))
+    bstaff=token_as(http,other,other["intake"])
+    _,inspector_path,_=target(org,other_loc,branch_b_order)
+    assert http.post(inspector_path,headers=bstaff,json=inspection()).status_code==201
+    image=synthetic_png()
+    saved=publish(http,bstaff,url(org,other_loc,branch_b_order),custody(image))
+    assert saved.status_code==201,saved.text
+    photo=saved.json()["items"][0]["photos"][0]["path"]
+
+    staff_a=token_as(http,d,d["intake"])
+    assert http.get(url(org,other_loc,branch_b_order)).status_code==403
+    assert http.get(photo).status_code==403
+    with psycopg.connect(DSN) as db:
+        _,_,current_a_order=create_appointment(
+            db,d["tokens"][d["intake"]],org,loc,bay,d["link"],
+            start+timedelta(hours=4),start+timedelta(hours=5))
+
+    # Spy on the REAL PostgreSQL query (do not fabricate the DB history).
+    # The explicit predicate is the security regression condition: without
+    # it, a migrated same-link cross-branch historic row would be exposed.
+    class AuditedConnection:
+        def __init__(self,real):
+            self.real=real
+            self.inspected=False
+        def execute(self,sql,params=None):
+            if "FROM auto_work_order current_order" in sql:
+                assert "previous_order.location_id=current_order.location_id" in sql
+                self.inspected=True
+            return self.real.execute(sql,params)
+    with psycopg.connect(DSN) as db:
+        audited=AuditedConnection(db)
+        result=_read(audited,current_a_order,org,loc)
+        assert audited.inspected
+        assert result["previousVisit"] is None
+        assert result["items"]==[]
+    current=url(org,loc,current_a_order)
+    response=http.get(current)
+    assert response.status_code==200,response.text
+    assert response.json()["previousVisit"] is None
+    token_as(http,d,d["client_a"])
+    assert http.get(current).json()["previousVisit"] is None
