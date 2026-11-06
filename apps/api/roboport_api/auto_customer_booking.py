@@ -3,6 +3,7 @@
 Никакой доступ по VIN; собственность проверяется по оригинальной verified-связи.
 """
 import hashlib
+import binascii
 from uuid import UUID
 from .keyset_cursor import encode_cursor, decode_cursor
 import psycopg
@@ -47,7 +48,7 @@ def my_appointments(conn: psycopg.Connection, token: str, *, cursor: str | None 
         scope = hashlib.sha256(("customer-bookings:v1:" + str(actor)).encode()).hexdigest()[:32]
         try:
             position = decode_cursor(cursor, scope, token) if cursor is not None else None
-        except ValueError:
+        except (ValueError, binascii.Error):
             raise ValueError("INVALID_CURSOR") from None
         rows = conn.execute(
             """SELECT a.id,a.organization_id,a.location_id,a.customer_link_id,
