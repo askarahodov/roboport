@@ -230,6 +230,10 @@ def _read(conn,order,org,loc):
          ON current_appointment.id=current_order.appointment_id
        JOIN auto_work_order previous_order
          ON previous_order.organization_id=current_order.organization_id
+         -- A staff grant for the current order never authorizes a visit
+         -- to another branch. Until separate cross-branch ACL exists,
+         -- comparison history is deliberately limited to this branch.
+         AND previous_order.location_id=current_order.location_id
          AND previous_order.id<>current_order.id
          AND previous_order.created_at<current_order.created_at
        JOIN auto_appointment previous_appointment
