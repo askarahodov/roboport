@@ -142,3 +142,42 @@ scope, ошибке и недействительном JSON.
 Playwright `weekly calendar` в `apps/web/e2e/auto-calendar.spec.ts`.
 Миграции и production OpenAPI не меняются; полный #113 и
 release gate #119 остаются открытыми.
+
+## Очередь независимого контроля качества (current-dev, #167)
+
+Новый read-only private synthetic endpoint:
+
+```text
+GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/inspection-qc/pending?limit=20&afterOrderId={uuid}
+```
+
+В ответе `syntheticOnly=true`, `items[]`, `nextOrderId`,
+`Cache-Control:no-store`. Строка содержит только `orderId`,
+`status` (`PENDING_QC` или `FAIL`) и
+`lastFindingCode` (`NONE`, `REWORK`, `DEFECT`).
+Отсутствуют личные данные, VIN, customer и actor IDs.
+Действующий `MECHANIC` grant проверяется до чтения; SQL
+ограничен org/location, активными организацией и филиалом,
+действующим подтверждением связи и текущим неотменённым
+бронированием. Нужен осмотр **другого** сотрудника.
+Исполнитель незавершённого этапа работ или собственных
+labor entries не может использовать очередь для обхода
+независимого контроля. Последний QC `PASS` исключает наряд
+из очереди, `FAIL` оставляет для повторного QC.
+
+По умолчанию 20 строк, до 50 по параметру `limit`;
+keyset-курсор `afterOrderId`, порядок UUID (не дата).
+Отзыв роли или чужой филиал → 403, некорректные
+UUID/лимит → 422. Переход из очереди на UI
+подставляет UUID и загружает текущую карточку.
+После успешной записи `QC` очередь загружается заново.
+Это advisory reader: сам `POST /qc` независимо блокирует
+WorkOrder и проверяет роль, разграничение исполнителей,
+завершение работ, статус и идемпотентность. При гонках
+возможны 403/409, никакая строка списка не даёт
+разрешения на выдачу.
+
+PG17: `tests/integration/test_pg_auto_workshop_qc_http.py`;
+Playwright: `apps/web/e2e/auto-workshop-qc.spec.ts`.
+DDL и production OpenAPI не меняются. Production gate #119
+и полный scope #167 остаются открытыми.
