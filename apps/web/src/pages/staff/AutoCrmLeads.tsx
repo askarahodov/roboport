@@ -205,8 +205,10 @@ export function AutoCrmLeads(){
     void (async()=>{
       try{
         const response=await fetch('/api/v1/dev/auto/organizations/'+
-          encodeURIComponent(org)+'/locations/'+encodeURIComponent(loc)+'/crm/inbox?'+
-          new URLSearchParams({mode:inboxMode,...(inboxCursor?{cursor:inboxCursor}:{})}),{
+          encodeURIComponent(org)+'/locations/'+encodeURIComponent(loc)+'/crm/inbox'+
+          (inboxMode==='OVERDUE'?'?'+new URLSearchParams({
+            mode:'OVERDUE',...(inboxCursor?{cursor:inboxCursor}:{})}):
+            inboxCursor?'?cursor='+encodeURIComponent(inboxCursor):''),{
             credentials:'include',cache:'no-store',signal:controller.signal,
           });
         if(controller.signal.aborted)return;
