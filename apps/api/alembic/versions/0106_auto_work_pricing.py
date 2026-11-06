@@ -53,8 +53,8 @@ def upgrade():
 
       FOR line IN SELECT value FROM jsonb_array_elements(NEW.service_lines)
       LOOP
-        factor_mode:=line->>'pricingMethod'='NORM_HOUR_FACTORED';
-        IF line->>'pricingMethod' NOT IN ('NORM_HOUR','NORM_HOUR_FACTORED')
+        factor_mode:=COALESCE(line->>'pricingMethod'='NORM_HOUR_FACTORED',FALSE);
+        IF COALESCE(line->>'pricingMethod','') NOT IN ('NORM_HOUR','NORM_HOUR_FACTORED')
           OR COALESCE(line->>'qualificationCode','')
              NOT IN ('GENERAL','DIAGNOSTIC','MASTER')
           OR jsonb_typeof(line->'rateMinorPerHour') IS DISTINCT FROM 'number'
