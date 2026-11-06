@@ -189,3 +189,10 @@ phantom Appointment/Reschedule находятся в
 
 Это нормализация **только dev/synthetic API**, не release approval
 и не завершение всего #113. Production gate #119 остаётся закрытым.
+
+
+## Постраничная клиентская история записей (#113, current-dev)
+
+В закрытом кабинете клиента /account/auto-booking список «Мои записи» не обрывается молча на 50 строках. Сессионно подписанная keyset-пагинация GET /api/v1/dev/auto/customer/booking/appointments?cursor=... сортирует текущие брони по starts_at DESC и appointment.id DESC, возвращает максимум 50 строк и nextCursor (или null). Кнопка «Показать ещё записи» догружает историю; обновление сбрасывает курсор.
+
+На каждой странице ACL проверяется заново, включая отзыв verified link; чужой или повреждённый курсор даёт 422 INVALID_CURSOR. Утрата клиентской сессии или роли даёт 401/403 согласно текущей модели. VIN и чужая история не выдаются; Cache-Control: no-store. Покрытие: test_pg_auto_customer_booking_http.py (52 записи, cursor, отзыв), customer-auto-booking.spec.ts (пагинация, refresh, 403, 390/1280). Это только dev-функция: #113/#119 остаются открытыми.
