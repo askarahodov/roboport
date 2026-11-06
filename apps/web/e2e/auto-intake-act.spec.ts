@@ -147,7 +147,8 @@ test('lost POST reply preserves exact requestKey and photo bytes for one safe re
   await page.getByRole('button',{name:'Зафиксировать версию акта'}).click();
   await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toBeVisible();
   await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
-  expect(attempts).toBe(2);
+  // A click resolves before the asynchronous POST reaches the network route.
+  await expect.poll(()=>attempts).toBe(2);
   expect(bodies[1]).toBe(bodies[0]);
   expect(JSON.parse(bodies[0])).toMatchObject({
     expectedVersion:0,act:{vehicleKind:'PASSENGER',damages:[],photos:[]},
