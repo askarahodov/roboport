@@ -1,11 +1,13 @@
 import React from 'react';
+import { Link,useSearchParams } from 'react-router-dom';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Line={serviceId:string;code:string;title:string;durationMinutes:number;amountMinor:number};
 type Revision={id:string;version:number;totalMinor:number;currency:'RUB';digest:string;
   lines:Line[];decision:'APPROVED'|'DECLINED'|null;createdAt:string;decidedAt:string|null;
   clarificationId?:string|null;clarificationReason?:'PRICE'|'WORK_SCOPE'|'TIMING'|'OTHER'|null;
-  clarificationResolution?:'EXPLAINED'|'NEW_VERSION_REQUIRED'|null};
+  clarificationResolution?:'EXPLAINED'|'NEW_VERSION_REQUIRED'|null;
+  diagnostics?:{serviceId:string;findingCode:string;severityCode:string}[]};
 type Estimates={items:Revision[];latestVersion:number;syntheticOnly:true;releaseAllowed:false};
 type Service={id:string;code:string;title:string;durationMinutes:number};
 type Pending={path:string;body:string};
@@ -29,6 +31,11 @@ function parseEstimate(raw:unknown):Estimates{
           ['PRICE','WORK_SCOPE','TIMING','OTHER'].includes(String(e.clarificationReason)))&&
         (e.clarificationResolution===undefined||e.clarificationResolution===null||
           ['EXPLAINED','NEW_VERSION_REQUIRED'].includes(String(e.clarificationResolution)))&&
+        (e.diagnostics===undefined||(Array.isArray(e.diagnostics)&&e.diagnostics.length<=50&&
+          e.diagnostics.every((f:unknown)=>f!==null&&typeof f==='object'&&
+            'serviceId' in f&&typeof f.serviceId==='string'&&uuid.test(f.serviceId)&&
+            'findingCode' in f&&['NO_FAULT','MAINTENANCE_DUE','FAULT_CONFIRMED','FURTHER_CHECK'].includes(String(f.findingCode))&&
+            'severityCode' in f&&['ROUTINE','SOON','URGENT'].includes(String(f.severityCode)))))&&
         Array.isArray(e.lines)&&e.lines.length<=50&&
         e.lines.every((line:unknown)=>line!==null&&typeof line==='object'&&
           'code' in line&&typeof line.code==='string'&&
@@ -49,9 +56,10 @@ function parseServices(raw:unknown):Service[]{
 }
 
 export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
-  const [org,setOrg]=React.useState('');
-  const [loc,setLoc]=React.useState('');
-  const [order,setOrder]=React.useState('');
+  const [query]=useSearchParams();
+  const [org,setOrg]=React.useState(query.get('org')??'');
+  const [loc,setLoc]=React.useState(query.get('loc')??'');
+  const [order,setOrder]=React.useState(query.get('order')??'');
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [scopeLoaded,setScopeLoaded]=React.useState('');
   const [data,setData]=React.useState<Estimates|null>(null);
@@ -150,6 +158,13 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
           {item.clarificationId&&<p>Уточнение: {item.clarificationReason} ·
             {' '}{item.clarificationResolution??'ОЖИДАЕТ ОТВЕТА МЕНЕДЖЕРА'}</p>}
           <p>SHA-256 снимка: <code>{item.digest}</code></p>
+          {item.diagnostics&&item.diagnostics.length>0&&<section aria-label={'Диагностика версии '+item.version}>
+            <h4>Диагностическое заключение, включённое в эту версию</h4>
+            <ul>{item.diagnostics.map(f=><li key={f.serviceId}>
+              {item.lines.find(line=>line.serviceId===f.serviceId)?.code??f.serviceId}:
+              {' '}{f.findingCode} · {f.severityCode}
+            </li>)}</ul>
+          </section>}
           <ul>{item.lines.map(line=><li key={line.serviceId}>
             {line.code} — {line.title}: {line.amountMinor} коп.
           </li>)}</ul>
@@ -211,6 +226,11 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
               }))}/></label>)}
           <button type="submit" disabled={!canPublish}>Опубликовать версию</button>
         </form>}
+      {role==='manager'&&<p>Перед публикацией:
+        {' '}<Link to={'/staff/auto-diagnostics?'+new URLSearchParams({
+          org:org.trim(),loc:loc.trim(),order:order.trim()}).toString()}>
+          Проверить диагностическое заключение</Link>.
+      </p>}
       <button type="button" disabled={busy}
         onClick={()=>setRevision(n=>n+1)}>Обновить версии</button>
     </>}
