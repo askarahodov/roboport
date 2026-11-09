@@ -55,7 +55,7 @@ def test_runtime_route_registration_contains_zero_retired_robot_paths():
         capture_output=True, text=True, check=True, timeout=30,
     )
     fresh_paths = json.loads(check.stdout)
-    assert any(path.startswith("/api/v1/dev/auto/") for path in fresh_paths), fresh_paths
+    assert any(path.startswith("/api/v1/dev/auto/") for path in fresh_paths), "\\n".join(fresh_paths)
     assert not [path for path in fresh_paths if _retired(path)]
 
 
