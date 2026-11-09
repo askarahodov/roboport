@@ -43,7 +43,7 @@ def test_runtime_route_registration_contains_zero_retired_robot_paths():
     assert not [path for path in paths if _retired(path)]
     assert "/health/live" in paths
     assert "/api/v1/meta" in paths
-    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), paths
+    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), "ACTUAL ROUTES:\n" + "\n".join(paths)
 
 
 def test_live_openapi_contains_no_legacy_routes():
