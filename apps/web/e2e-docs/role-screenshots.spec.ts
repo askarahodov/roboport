@@ -64,3 +64,28 @@ test('скриншоты мобильной навигации и статусо
     animations:'disabled',
   });
 });
+
+
+test('скриншоты навигатора задач: 390/1280 × light/dark', async ({ page }, info) => {
+  test.setTimeout(120_000);
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme });
+      await page.goto('/docs/#/guides/ROLE_NAVIGATOR');
+      await expect(page.locator('.markdown-section h1')).toContainText(
+        'Навигатор операций автосервиса', { timeout: 25_000 });
+      await expect(page.locator('.markdown-section')).toContainText('Самостоятельно записаться');
+      const report = await page.evaluate(() => ({
+        width: document.documentElement.scrollWidth,
+        max: document.documentElement.clientWidth,
+      }));
+      expect(report.width, 'role navigator root overflow').toBeLessThanOrEqual(
+        Math.max(width, report.max) + 2);
+      await page.screenshot({
+        path: info.outputPath('role-navigator-' + width + '-' + colorScheme + '.png'),
+        animations: 'disabled',
+      });
+    }
+  }
+});
