@@ -3,6 +3,7 @@ from uuid import UUID,uuid4
 import psycopg
 from .auto_workshop_qc import _actor_and_order, _snapshot, InspectionDenied
 from .auto_work_order_estimate import _estimate_state
+from .auto_work_order_additional import _state as _extra_state
 from .auto_stock_lot_work_order_issue import issue_work_order_from_lot
 from .auto_stock_mechanic_handoff import acknowledge_mechanic_handoff
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
@@ -27,6 +28,10 @@ def _state(conn,order):
     estimate=_estimate_state(conn,order)
     revisions=estimate["items"]
     approved=revisions[-1] if revisions and revisions[-1]["decision"]=="APPROVED" else None
+    extra=_extra_state(conn,order)
+    current_extra=extra["items"][-1] if extra["items"] else None
+    approved_extra=current_extra if current_extra and current_extra["decision"]=="APPROVED" else None
+    additional_pending=bool(current_extra and current_extra["decision"] is None)
     row=conn.execute("""
       SELECT id,revision_id,created_at FROM auto_work_order_execution
       WHERE work_order_id=%s
@@ -69,9 +74,12 @@ def _state(conn,order):
         state="QC_ACCEPTED"
     return {"status":state,"approvedVersion":approved["version"] if approved else None,
             "approvedTotalMinor":approved["totalMinor"] if approved else None,
+            "approvedExtraVersion":approved_extra["version"] if approved_extra else None,
+            "approvedExtraTotalMinor":approved_extra["totalMinor"] if approved_extra else None,
+            "additionalConsentPending":additional_pending,
             "requiredServices":[{"serviceId":line["serviceId"],"code":line["code"],
                    "title":line["title"],"durationMinutes":line["durationMinutes"]}
-                  for line in approved["lines"]] if approved else [],
+                  for line in (approved["lines"]+(approved_extra["lines"] if approved_extra else []))] if approved else [],
             "labor":labor,"materials":materials,"qcStatus":qc["status"],
             "executionId":str(row[0]) if row else None,
             "releaseAllowed":False,"syntheticOnly":True}
@@ -248,6 +256,8 @@ def finish_execution(conn,token,org,loc,order,request_key):
             return {"ok":True,"replayed":True,**state}
         if state["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
+        if state["additionalConsentPending"]:
+            raise ExecutionConflict("ADDITIONAL_CONSENT_PENDING")
         if {v["serviceId"] for v in state["labor"]}!={v["serviceId"] for v in state["requiredServices"]}:
             raise ExecutionConflict("LABOR_INCOMPLETE")
         if any(not v["received"] for v in state["materials"]):
