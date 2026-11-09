@@ -205,10 +205,17 @@ def upgrade():
           END IF;
           RETURN NEW;
         END IF;
+        -- Only the latest offer governs execution; older DECLINED offers
+        -- remain immutable audit history, not a permanent execution veto.
+        -- Match the HTTP guard even when no active assignment remains.
         IF EXISTS (
-          SELECT 1 FROM auto_work_order_assignment a
-          WHERE a.work_order_id=target_order
-            AND (a.status<>'ACCEPTED' OR a.mechanic_id<>performer)
+          SELECT 1 FROM (
+            SELECT a.status,a.mechanic_id
+            FROM auto_work_order_assignment a
+            WHERE a.work_order_id=target_order
+            ORDER BY a.created_at DESC,a.id DESC LIMIT 1
+          ) latest
+          WHERE latest.status<>'ACCEPTED' OR latest.mechanic_id<>performer
         ) THEN
           RAISE EXCEPTION 'accepted mechanic assignment required';
         END IF;
