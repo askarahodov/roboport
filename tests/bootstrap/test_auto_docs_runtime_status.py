@@ -58,3 +58,24 @@ def test_navigator_covers_all_roles_and_keeps_nonproduction_gates():
     assert "releaseAllowed: false" in navigator
     assert "#119" in navigator and "#165" in navigator
     assert "production" in navigator.lower()
+
+def test_additional_documented_staff_routes_match_live_react_router():
+    """An implemented UI route must stay documented, not silently become planned."""
+    react = (ROOT / "apps/web/src/main.tsx").read_text(encoding="utf-8")
+    navigator = (ROOT / "docs/guides/ROLE_NAVIGATOR.md").read_text(encoding="utf-8")
+    for route in (
+        "/staff/auto-diagnostics",
+        "/staff/auto-intake-act",
+        "/staff/auto-bay-occupancy",
+        "/staff/auto-demo-finance-report",
+        "/staff/auto-crm-leads",
+        "/staff/auto-crm-funnel",
+        "/staff/auto-stock-abc-xyz",
+        "/staff/warehouse-serial-movements",
+        "/account/auto-intake-act",
+        "/account/auto-estimates",
+    ):
+        assert f'<Route path="{route}"' in react, route
+        assert f'`{route}`' in navigator, route
+    assert "только" in navigator.lower()
+    assert "releaseAllowed: false" in navigator
