@@ -108,7 +108,7 @@ test('revoke clears financial and document details and tenant change remains hid
 });
 
 
-test('additional CLIENT consent increases synthetic balance and never authorizes release',async({page})=>{
+test('additional CLIENT consent increases synthetic balance and never authorizes release',async({page},testInfo)=>{
   let paid=0,sealed=false;
   const events:number[]=[];
   const revision='77777777-7777-4777-8777-777777777777';
@@ -155,6 +155,11 @@ test('additional CLIENT consent increases synthetic balance and never authorizes
   await expect(page.getByText('Согласованные допработы: 11251',{exact:false})).toBeVisible();
   await expect(page.getByText('Итого по согласованным работам: 13751',{exact:false})).toBeVisible();
   await expect(page.getByText('Остаток: 13751',{exact:false})).toBeVisible();
+  for(const mode of ['light','dark'] as const){
+    await page.emulateMedia({colorScheme:mode});
+    await page.screenshot({path:testInfo.outputPath(
+      `settlement-390-${mode}.png`),fullPage:true});
+  }
   await page.getByRole('spinbutton',{name:'Сумма, коп.'}).fill('13751');
   await page.getByRole('button',{name:'Записать условное движение'}).click();
   await expect(page.getByText('Остаток: 0',{exact:false})).toBeVisible();
@@ -167,5 +172,10 @@ test('additional CLIENT consent increases synthetic balance and never authorizes
   await expect(page.getByText('Согласованные допработы: 11251',{exact:false})).toBeVisible();
   await expect(page.getByRole('button',{name:'Записать условное движение'})).toHaveCount(0);
   await expect(page.getByText('НЕ ПРОЙДЕН.',{exact:false})).toBeVisible();
+  for(const mode of ['light','dark'] as const){
+    await page.emulateMedia({colorScheme:mode});
+    await page.screenshot({path:testInfo.outputPath(
+      `settlement-1280-${mode}.png`),fullPage:true});
+  }
   expect(events).toEqual([13751]);
 });
