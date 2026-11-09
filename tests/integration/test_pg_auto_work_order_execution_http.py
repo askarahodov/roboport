@@ -1,4 +1,5 @@
 """End-to-end PG17/HTTP: consent -> execution -> lot issue -> handoff -> QC."""
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from uuid import uuid4
@@ -217,6 +218,61 @@ def test_declined_stale_and_revoked_proof_block_execution(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT count(*) FROM auto_work_order_execution WHERE work_order_id=%s",
                           (order,)).fetchone()[0]==0
+
+
+
+
+def test_assignment_enforces_labor_handoff_finish_and_independent_qc(monkeypatch):
+    """A granted but unassigned MECHANIC may QC, never execute the order."""
+    d,org,loc,order,service,item,lot=fixture(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    root=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+    base=url(org,loc,order)
+    manager=session(http,d,d["intake"])
+    assert post(http,base+"/start",manager).status_code==201
+    starts=datetime.now(timezone.utc)+timedelta(hours=2)
+    ends=starts+timedelta(hours=2)
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO auto_staff_shift
+          (id,organization_id,location_id,user_id,starts_at,ends_at)
+          VALUES(%s,%s,%s,%s,%s,%s)""",
+          (uuid4(),org,loc,d["manager"],starts-timedelta(minutes=5),
+           ends+timedelta(minutes=5)))
+    offered=http.post(root+f"/orders/{order}/assignments",headers=manager,json={
+        "mechanicId":str(d["manager"]),"startsAt":starts.isoformat(),
+        "endsAt":ends.isoformat(),"requestKey":str(uuid4())})
+    assert offered.status_code==201,offered.text
+    mechanic=session(http,d,d["manager"])
+    assigned=http.post(root+f"/assignments/{offered.json()['assignmentId']}/accept",
+                       headers=mechanic,json={"requestKey":str(uuid4())})
+    assert assigned.status_code==201,assigned.text
+
+    other=session(http,d,d["other"])
+    assert post(http,base+"/labor",other,serviceId=str(service),
+                actualMinutes=25).status_code==403
+    assert post(http,base+"/finish",other).status_code==403
+    mechanic=session(http,d,d["manager"])
+    assert post(http,base+"/labor",mechanic,serviceId=str(service),
+                actualMinutes=25).status_code==201
+    warehouse=session(http,d,d["intake"])
+    issued=post(http,base+"/materials/issue",warehouse,
+                lotId=str(lot),quantity=1)
+    assert issued.status_code==201,issued.text
+    issue=issued.json()["issueId"]
+    other=session(http,d,d["other"])
+    denied=post(http,base+"/materials/receive",other,issueId=issue)
+    assert denied.status_code==403,denied.text
+    assert post(http,base+"/finish",other).status_code==403
+    mechanic=session(http,d,d["manager"])
+    received=post(http,base+"/materials/receive",mechanic,issueId=issue)
+    assert received.status_code==201,received.text
+    assert post(http,base+"/finish",mechanic).status_code==201
+    # Independent QC remains possible for a different mechanic.
+    other=session(http,d,d["other"])
+    qc=post(http,root+f"/orders/{order}/qc",other,
+            result="PASS",findingCode="NONE")
+    assert qc.status_code==201,qc.text
+    assert qc.json()["releaseAllowed"] is False
 
 
 def test_concurrent_start_serializes_and_only_one_execution(monkeypatch):
