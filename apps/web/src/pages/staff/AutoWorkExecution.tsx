@@ -17,8 +17,8 @@ function parse(raw:unknown):Snapshot{
   const v=raw as Record<string,unknown>;
   if(!['NOT_APPROVED','APPROVED','IN_PROGRESS','READY_FOR_QC','QC_ACCEPTED'].includes(String(v.status))
     ||v.syntheticOnly!==true||v.releaseAllowed!==false
-    ||!Array.isArray(v.requiredServices)||v.requiredServices.length>50
-    ||!Array.isArray(v.labor)||v.labor.length>50
+    ||!Array.isArray(v.requiredServices)||v.requiredServices.length>70
+    ||!Array.isArray(v.labor)||v.labor.length>70
     ||!Array.isArray(v.materials)||v.materials.length>100)throw Error('invalid');
   return raw as Snapshot;
 }
