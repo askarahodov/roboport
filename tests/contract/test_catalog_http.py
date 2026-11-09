@@ -1,6 +1,6 @@
-"""Проверки HTTP-поведения трёх публичных маршрутов каталога.
+"""Исторический draft robot catalog и отрицательная runtime HTTP-проверка (#165).
 
-Тесты не объявляют проектные 42 операции реализованными.
+Наличие каталога в архивном контракте НЕ означает регистрацию endpoint.
 """
 from pathlib import Path
 
@@ -26,12 +26,18 @@ def test_public_catalog_routes_are_described_in_versioned_contract():
         assert CONTRACT["paths"][path]["get"].get("operationId")
 
 
-def test_synthetic_catalog_read_only():
+def test_retired_catalog_rejects_all_http_methods():
     for path in ("/api/v1/catalog/brands", "/api/v1/catalog/models"):
-        response = client.get(path)
-        assert response.status_code == 200
-        assert response.json() == {'items': []}
-        assert client.post(path, json={}).status_code == 405
+        for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+            response = client.request(method, path)
+            assert response.status_code == 404, (method, path)
+            assert response.json()["code"] == "NOT_FOUND"
+            assert response.headers["cache-control"] == "no-store"
+
+
+def test_retired_catalog_not_in_live_openapi():
+    paths = client.get("/openapi.json").json()["paths"]
+    assert not any(path.startswith("/api/v1/catalog/") for path in paths)
 
 
 def test_unknown_model_does_not_disclose_private_data():
