@@ -15,18 +15,18 @@ test('автомобильная главная и маршруты — без �
 });
 
 test('старые публичные URL не раскрывают каталоги и заявки', async ({ page }) => {
-  for (const path of ['/robots', '/catalog/brands', '/catalog/models', '/catalog/models/example', '/request-demo', '/account/claim']) {
+  for (const path of ['/robots', '/catalog/brands', '/catalog/models', '/catalog/models/example', '/request-demo']) {
     await page.goto(path);
     await expect(page.getByRole('heading', { name: 'Страница не найдена' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Сервисное обслуживание автомобилей' })).toHaveCount(0);
   }
 });
 
-test('закрытые приватные разделы не возвращаются через wildcard route', async ({ page }) => {
+test('закрытые приватные разделы и старый claim не возвращаются через wildcard route', async ({ page }) => {
   await page.route('**/api/v1/auth/me', route => route.fulfill({
     status: 200, contentType: 'application/json', body: '{"subjectId":"synthetic-customer"}',
   }));
-  for (const path of ['/account/robots', '/account/tickets', '/account/estimates', '/account/documents']) {
+  for (const path of ['/account/robots', '/account/tickets', '/account/estimates', '/account/documents', '/account/claim']) {
     await page.goto(path);
     await expect(page.getByRole('heading', { name: 'Раздел не найден' })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Разделы личного кабинета' })).toHaveCount(0);
