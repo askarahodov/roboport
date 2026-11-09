@@ -52,7 +52,7 @@ function App() {
   const dark = theme === 'dark' || (theme === 'auto' && systemDark);
   return <main className={dark ? 'app dark' : 'app'}>
     <header>
-      <Link to="/" aria-label="Airmatik — главная"><strong>Airmatik</strong></Link>
+      <Link to="/" aria-label="Airmatik — главная"><picture><source media="(prefers-color-scheme: dark)" srcSet="/logo-dark.svg" /><img src="/logo-light.svg" alt="" width="64" height="64" /></picture><strong>Airmatik</strong></Link>
       <nav aria-label="Разделы сервиса">
         <NavLink to="/" end>Главная</NavLink>
         <NavLink to="/account" end>Личный кабинет</NavLink>
