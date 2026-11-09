@@ -10,8 +10,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from roboport_api.main import app, _ROUTE_BOOT_COUNTS, _ROUTE_BOOT_IDS
-ROUTES_AT_IMPORT = [route.path for route in app.routes if hasattr(route, 'path')]
+from roboport_api.main import app
 
 ROOT = Path(__file__).resolve().parents[2]
 RETIRED = (
@@ -44,10 +43,7 @@ def test_runtime_route_registration_contains_zero_retired_robot_paths():
     assert not [path for path in paths if _retired(path)]
     assert "/health/live" in paths
     assert "/api/v1/meta" in paths
-    from roboport_api.auto_vehicle_http import router as vehicle_router
-    from roboport_api.auto_appointment_http import router as appointment_router
-    from roboport_api.auth_http import router as auth_router
-    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), ("AT BOOT " + str(_ROUTE_BOOT_COUNTS) + " OBJECT IDS: " + str(_ROUTE_BOOT_IDS) + " CURRENT IDS: " + str((id(app), id(app.router), id(app.routes))) + " SOURCE COUNTS " + str([len(vehicle_router.routes), len(appointment_router.routes), len(auth_router.routes)]) + " IMPORT ROUTES:\n" + "\n".join(ROUTES_AT_IMPORT) + " ACTUAL ROUTES:\n" + "\n".join(paths))
+    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), paths
 
 
 def test_live_openapi_contains_no_legacy_routes():
