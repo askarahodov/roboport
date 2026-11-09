@@ -3,7 +3,6 @@
 This is not a financial posting, payment, legal delivery or fiscal document.
 Every operation is bound to live WorkOrder, role, vehicle proof and session.
 """
-import hashlib
 import json
 from uuid import UUID,uuid4
 import psycopg
@@ -240,7 +239,11 @@ def seal_handover_preview(conn,token,org,loc,order,*,request_key):
         }
         encoded=json.dumps(snapshot,sort_keys=True,separators=(",",":"),
                            ensure_ascii=True)
-        fingerprint=hashlib.sha256(encoded.encode()).hexdigest()
+        # PostgreSQL хранит JSONB в нормализованной форме; отпечаток
+        # считается именно от неё и повторно сверяется SQL-триггером.
+        fingerprint=conn.execute("""
+          SELECT encode(sha256(convert_to(%s::jsonb::text,'UTF8')),'hex')
+        """,(encoded,)).fetchone()[0]
         try:
             with conn.transaction():
                 conn.execute("""
