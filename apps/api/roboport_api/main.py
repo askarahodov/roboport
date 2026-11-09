@@ -204,8 +204,18 @@ async def dev_customer_preferences(request: Request):
 async def dev_update_customer_preferences(request: Request):
     return await _customer_notification_preferences(request,True)
 
-# Register all routers last, after direct route decorators and imports.
-app.include_router(synthetic_auth_router)
+# Exclude two historical staff ticket views before mounting shared auth.
+# Never mutate the entire live route table as a cleanup operation.
+from fastapi import APIRouter
+_current_auth_router = APIRouter(include_in_schema=False)
+_RETIRED_STAFF_PATHS = {"/api/v1/dev/staff/queue", "/api/v1/dev/staff/audit"}
+_current_auth_router.routes.extend(
+    route for route in synthetic_auth_router.routes
+    if route.path not in _RETIRED_STAFF_PATHS
+)
+
+# Register all routers after imports and direct route decorators.
+app.include_router(_current_auth_router)
 app.include_router(oidc_router)
 app.include_router(auto_vehicle_router)
 app.include_router(auto_vehicle_claim_router)
@@ -240,10 +250,3 @@ app.include_router(auto_demo_close_router)
 app.include_router(auto_customer_orders_router)
 app.include_router(auto_customer_booking_router)
 
-# These two pre-automotive staff endpoints are not part of the Airmatik API.
-# Retain their implementation solely for historical tests outside this app.
-_RETIRED_STAFF_PATHS = {"/api/v1/dev/staff/queue", "/api/v1/dev/staff/audit"}
-app.router.routes[:] = [
-    route for route in app.router.routes
-    if getattr(route, "path", None) not in _RETIRED_STAFF_PATHS
-]
