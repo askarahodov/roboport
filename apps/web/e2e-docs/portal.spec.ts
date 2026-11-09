@@ -214,3 +214,31 @@ test('руководство СТО, FAQ и legacy-архив не смешив�
   await expect(page.locator('.markdown-section h1')).toContainText('Отдельный архив');
   await expect(page.locator('.markdown-section')).toContainText('не рабочая инструкция');
 });
+
+
+test('ролевой навигатор открывается с клавиатуры, ищется и различает planned/current-dev на 390/1280', async ({ page }) => {
+  test.setTimeout(120_000);
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/docs/');
+    await expect(page.locator('.markdown-section h1')).toContainText('База знаний');
+    if (width === 390) await page.locator('.sidebar-toggle').click();
+    const navigator = page.locator('.sidebar-nav a[href*="guides/ROLE_NAVIGATOR"]');
+    await expect(navigator).toBeVisible();
+    await navigator.focus();
+    await expect(navigator).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.markdown-section h1')).toContainText('Навигатор операций автосервиса');
+    const content = page.locator('.markdown-section');
+    await expect(content).toContainText('Самостоятельно записаться');
+    await expect(content).toContainText('отзыв');
+    await expect(content).toContainText('releaseAllowed: false');
+    await expect(content).toContainText('planned для production');
+    await expect(content).not.toContainText('404 - Not found');
+    const pageWidth = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, viewport: innerWidth }));
+    expect(pageWidth.scroll, 'navigator must not overflow viewport').toBeLessThanOrEqual(pageWidth.viewport + 2);
+    await page.goto('/docs/#/guides/ROLE_NAVIGATOR');
+    await page.locator('.markdown-section a', { hasText: 'Матрица доступов и E2E' }).click();
+    await expect(page.locator('.markdown-section h1')).toContainText('Матрица ролей');
+  }
+});
