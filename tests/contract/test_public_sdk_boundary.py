@@ -13,11 +13,11 @@ def test_archived_robot_contract_operations_are_preserved_for_migration_audit():
     assert paths['/api/v1/catalog/models']['get']['operationId']=='listModels'
     assert paths['/api/v1/catalog/models/{modelId}']['get']['operationId']=='getModel'
     assert len(LOCK['operation_ids'])==46
-    # The draft contract is retained as migration evidence, not used by Airmatik UI.
+    # The draft contract is retained as migration evidence, not used by БоксРитм UI.
     assert not (ROOT/"apps/web/src/shared/api/catalogClient.ts").exists()
     main=(ROOT/"apps/web/src/main.tsx").read_text(encoding="utf-8")
     assert "/api/v1/catalog/" not in main
-    assert "Airmatik" in main
+    assert "БоксРитм" in main and "Airmatik" not in main
 
 def test_error_statuses_use_canonical_schema():
     expected={'401','403','404','409','422','429','500'}
