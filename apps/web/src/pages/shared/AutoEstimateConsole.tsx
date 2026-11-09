@@ -2,6 +2,7 @@ import React from 'react';
 import { Link,useSearchParams } from 'react-router-dom';
 import { AutoAdditionalWork } from './AutoAdditionalWork';
 import { AutoTariffPolicies } from './AutoTariffPolicies';
+import { AutoWorkComplexes } from './AutoWorkComplexes';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Qualification='GENERAL'|'DIAGNOSTIC'|'MASTER';
@@ -13,6 +14,9 @@ type Revision={id:string;version:number;totalMinor:number;currency:'RUB';digest:
   lines:Line[];decision:'APPROVED'|'DECLINED'|null;createdAt:string;decidedAt:string|null;
   clarificationId?:string|null;clarificationReason?:'PRICE'|'WORK_SCOPE'|'TIMING'|'OTHER'|null;
   clarificationResolution?:'EXPLAINED'|'NEW_VERSION_REQUIRED'|null;
+  materialLines?:{selectionId:string;skuId:string;article:string;
+    itemKind:'PART'|'CONSUMABLE';quantity:number;unitPriceMinor:number;
+    amountMinor:number}[];
   diagnostics?:{serviceId:string;findingCode:string;severityCode:string}[];
   tariffs?:{serviceId:string;policyId:string;version:number;qualificationCode:string;
     rateMinorPerHour:number;maxDiscountBps:number}[]};
@@ -71,6 +75,14 @@ function parseEstimate(raw:unknown):Estimates{
             'serviceId' in f&&typeof f.serviceId==='string'&&uuid.test(f.serviceId)&&
             'findingCode' in f&&['NO_FAULT','MAINTENANCE_DUE','FAULT_CONFIRMED','FURTHER_CHECK'].includes(String(f.findingCode))&&
             'severityCode' in f&&['ROUTINE','SOON','URGENT'].includes(String(f.severityCode)))))&&
+        (e.materialLines===undefined||(Array.isArray(e.materialLines)&&
+          e.materialLines.length<=100&&e.materialLines.every((m:unknown)=>
+            m!==null&&typeof m==='object'&&
+            'selectionId' in m&&typeof m.selectionId==='string'&&uuid.test(m.selectionId)&&
+            'skuId' in m&&typeof m.skuId==='string'&&uuid.test(m.skuId)&&
+            'itemKind' in m&&['PART','CONSUMABLE'].includes(String(m.itemKind))&&
+            'amountMinor' in m&&typeof m.amountMinor==='number'&&
+            Number.isSafeInteger(m.amountMinor))))&&
         (e.tariffs===undefined||(Array.isArray(e.tariffs)&&e.tariffs.length<=50&&
           e.tariffs.every((t:unknown)=>t!==null&&typeof t==='object'&&
             'policyId' in t&&typeof t.policyId==='string'&&uuid.test(t.policyId)&&
@@ -99,6 +111,7 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   const [query]=useSearchParams();
   const [extraOpen,setExtraOpen]=React.useState(false);
   const [tariffsOpen,setTariffsOpen]=React.useState(false);
+  const [complexesOpen,setComplexesOpen]=React.useState(false);
   const [org,setOrg]=React.useState(query.get('org')??'');
   const [loc,setLoc]=React.useState(query.get('loc')??'');
   const [order,setOrder]=React.useState(query.get('order')??'');
@@ -127,7 +140,7 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   React.useEffect(()=>{
     setStatus(valid?'loading':'idle');setData(null);setServices([]);
     setScopeLoaded('');setMessage('');setPending(null);setPrices({});
-    setExtraOpen(false);setTariffsOpen(false);
+    setExtraOpen(false);setTariffsOpen(false);setComplexesOpen(false);
     setRates({});setQualifications({});
     setQuantities({});setCoefficients({});setDiscounts({});
     if(!valid)return;
@@ -248,6 +261,16 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
               {' '}{f.findingCode} · {f.severityCode}
             </li>)}</ul>
           </section>}
+          {item.materialLines&&item.materialLines.length>0&&<section
+            aria-label={'Материалы сметы версии '+item.version}>
+            <h4>Детали и расходные материалы в версии</h4>
+            <ul>{item.materialLines.map((m,i)=><li key={m.selectionId+':'+m.skuId+':'+i}>
+              {m.article} — {m.itemKind==='PART'?'Продаваемая деталь':'Расходный материал'}:
+              {' '}{m.quantity} шт. × {m.unitPriceMinor} коп. = {m.amountMinor} коп.
+            </li>)}</ul>
+            <p>Расходные материалы не продаются отдельной позицией,
+              но резервируются со склада. Их цена в версии — 0 коп.</p>
+          </section>}
           <ul>{item.lines.map(line=><li key={line.serviceId}>
             {line.code} — {line.title}: {line.amountMinor} коп.
             {line.pricingMethod==='NORM_HOUR'&&<p>
@@ -303,6 +326,15 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
               }}>Ответить: подготовить новую версию</button>
             </div>}
         </li>)}</ol>}
+      {role==='manager'&&data.items.length===0&&
+        <section aria-label="Выбор комплекса услуг до сметы">
+          <button type="button" aria-expanded={complexesOpen}
+            onClick={()=>setComplexesOpen(open=>!open)}>
+            {complexesOpen?'Скрыть комплексы работ':'Открыть комплексы работ'}
+          </button>
+          {complexesOpen&&<AutoWorkComplexes org={org.trim()} loc={loc.trim()}
+            order={order.trim()} onChanged={()=>setRevision(n=>n+1)}/>}
+        </section>}
       {role==='manager'&&<section aria-label="Управление тарифами филиала">
         <button type="button" aria-expanded={tariffsOpen}
           onClick={()=>setTariffsOpen(open=>!open)}>
