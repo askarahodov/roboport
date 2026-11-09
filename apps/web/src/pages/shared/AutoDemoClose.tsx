@@ -6,7 +6,10 @@ type Stock={skuId:string;quantity:number};
 type Preview={id:string;revisionId:string;digest:string;createdAt:string;
   snapshot:Record<string,unknown>};
 type Snapshot={syntheticOnly:true;releaseAllowed:false;legalGatePassed:false;
-  currency:'RUB';approvedVersion:number|null;approvedTotalMinor:number|null;
+  currency:'RUB';approvedVersion:number|null;
+  approvedBaseMinor:number|null;approvedExtraMinor:number;
+  approvedExtraVersion:number|null;approvedExtraRevisionId:string|null;
+  approvedTotalMinor:number|null;
   simulatedPaidMinor:number;simulatedRefundedMinor:number;simulatedDueMinor:number|null;
   events:Event[];outstandingReserves:Stock[];unreceivedMaterialCount:number;
   executionStatus:string;blockers:string[];canSealPreview:boolean;preview:Preview|null};
@@ -23,6 +26,25 @@ function parse(raw:unknown):Snapshot{
     typeof v.simulatedPaidMinor!=='number'||typeof v.simulatedRefundedMinor!=='number'){
     throw new Error('invalid demo state');
   }
+  // Не показываем неполный или арифметически противоречивый финансовый итог.
+  const minor=(value:unknown):value is number=>
+    typeof value==='number'&&Number.isSafeInteger(value)&&value>=0;
+  const base=v.approvedBaseMinor,extra=v.approvedExtraMinor,total=v.approvedTotalMinor;
+  const paid=v.simulatedPaidMinor,refunded=v.simulatedRefundedMinor;
+  if((base!==null&&!minor(base))||!minor(extra)||
+    (total!==null&&!minor(total))||
+    (base===null?total!==null:total!==Number(base)+Number(extra))||
+    !minor(paid)||!minor(refunded)||refunded>paid||
+    (total!==null&&v.simulatedDueMinor!==Number(total)-paid+refunded)||
+    (total===null&&v.simulatedDueMinor!==null)||
+    (v.approvedExtraRevisionId===null?
+      v.approvedExtraVersion!==null||extra!==0:
+      typeof v.approvedExtraRevisionId!=='string'||
+      !uuid.test(v.approvedExtraRevisionId)||
+      !Number.isInteger(v.approvedExtraVersion)||
+      Number(v.approvedExtraVersion)<1)){
+    throw new Error('invalid reconciliation state');
+  }
   return v as Snapshot;
 }
 
@@ -32,6 +54,8 @@ const reasons:Record<string,string>={
   MATERIAL_HANDOFF_OPEN:'Есть выдачи материалов без подтверждения получения',
   STOCK_RESERVATION_OPEN:'Есть неосвобождённый резерв склада',
   SIMULATED_BALANCE_OPEN:'Остаток условной сверки не равен нулю',
+  ADDITIONAL_CONSENT_PENDING:'Дополнительная работа ожидает отдельного решения клиента',
+  EXTRA_BASE_REVISION_MISMATCH:'Допработа относится не к действующей смете',
 };
 
 export function AutoDemoClose({role}:{role:'staff'|'client'}){
@@ -118,7 +142,11 @@ export function AutoDemoClose({role}:{role:'staff'|'client'}){
       <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить загрузку</button></>}
     {ready&&data&&<>
       <h2>Сверка сметы (RUB, копейки)</h2>
-      <p>Версия: {data.approvedVersion??'нет'} · Смета: {data.approvedTotalMinor??'нет'}
+      <p>Версия базовой сметы: {data.approvedVersion??'нет'}
+        {' '}· Основные работы: {data.approvedBaseMinor??'нет'}
+        {' '}· Согласованные допработы: {data.approvedExtraMinor}
+        {' '}({data.approvedExtraVersion===null?'нет':'версия '+data.approvedExtraVersion})
+        {' '}· Итого по согласованным работам: {data.approvedTotalMinor??'нет'}
         {' '}· Условно внесено: {data.simulatedPaidMinor}
         {' '}· Условно возвращено: {data.simulatedRefundedMinor}
         {' '}· Остаток: {data.simulatedDueMinor??'нет'}</p>

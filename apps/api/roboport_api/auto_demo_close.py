@@ -9,6 +9,7 @@ from uuid import UUID,uuid4
 import psycopg
 from .auto_work_order_execution import _scope, _state, ExecutionDenied
 from .auto_work_order_estimate import _client_and_scope, _estimate_state, AutoEstimateDenied
+from .auto_work_order_additional import _state as _extra_state
 from .auto_org_authority import organization_role_allows
 from .auto_work_order_stock import mutate_work_order_stock
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
@@ -58,6 +59,15 @@ def _state_snapshot(conn,order):
     estimates=_estimate_state(conn,order)["items"]
     latest=estimates[-1] if estimates else None
     approved=latest if latest and latest["decision"]=="APPROVED" else None
+    # Допработы попадают в итог только после отдельного решения клиента
+    # по последней версии, привязанной к принятой базовой смете.
+    extras=_extra_state(conn,order)["items"]
+    newest_extra=extras[-1] if extras else None
+    accepted_extra=(newest_extra if newest_extra and approved and
+                    newest_extra["decision"]=="APPROVED" and
+                    newest_extra["baseRevisionId"]==approved["id"] else None)
+    base_total=approved["totalMinor"] if approved else None
+    extra_total=accepted_extra["totalMinor"] if accepted_extra else 0
     rows=conn.execute("""
        SELECT id,kind,amount_minor,created_at
        FROM auto_order_demo_cash_event WHERE work_order_id=%s
@@ -69,7 +79,7 @@ def _state_snapshot(conn,order):
             for i,k,a,t in rows]
     simulated_paid=sum(x["amountMinor"] for x in events if x["kind"]=="SIM_PAYMENT")
     simulated_refunded=sum(x["amountMinor"] for x in events if x["kind"]=="SIM_REFUND")
-    total=approved["totalMinor"] if approved else None
+    total=base_total+extra_total if base_total is not None else None
     due=total-simulated_paid+simulated_refunded if total is not None else None
     balances=conn.execute("""
       SELECT sku_id,
@@ -87,6 +97,10 @@ def _state_snapshot(conn,order):
     blockers=[]
     if not approved:
         blockers.append("LATEST_ESTIMATE_NOT_APPROVED")
+    if newest_extra and newest_extra["decision"] is None:
+        blockers.append("ADDITIONAL_CONSENT_PENDING")
+    if newest_extra and newest_extra["decision"]=="APPROVED" and not accepted_extra:
+        blockers.append("EXTRA_BASE_REVISION_MISMATCH")
     if execution["status"] not in ("QC_ACCEPTED",):
         blockers.append("EXECUTION_OR_INDEPENDENT_QC_INCOMPLETE")
     if unreceived:
@@ -109,6 +123,10 @@ def _state_snapshot(conn,order):
     return {"syntheticOnly":True,"releaseAllowed":False,"legalGatePassed":False,
             "currency":"RUB","approvedRevisionId":approved["id"] if approved else None,
             "approvedVersion":approved["version"] if approved else None,
+            "approvedBaseMinor":base_total,"approvedExtraMinor":extra_total,
+            "approvedExtraRevisionId":accepted_extra["id"] if accepted_extra else None,
+            "approvedExtraVersion":accepted_extra["version"] if accepted_extra else None,
+            "approvedExtraDigest":accepted_extra["digest"] if accepted_extra else None,
             "approvedTotalMinor":total,"simulatedPaidMinor":simulated_paid,
             "simulatedRefundedMinor":simulated_refunded,"simulatedDueMinor":due,
             "events":events,"outstandingReserves":reserved,
@@ -206,6 +224,13 @@ def seal_handover_preview(conn,token,org,loc,order,*,request_key):
           "workOrderId":str(order),"estimateRevisionId":estimate["id"],
           "estimateVersion":estimate["version"],"estimateDigest":estimate["digest"],
           "currency":"RUB","lines":estimate["lines"],
+          "approvedBaseMinor":current["approvedBaseMinor"],
+          "approvedExtraMinor":current["approvedExtraMinor"],
+          "extraRevisionId":current["approvedExtraRevisionId"],
+          "extraVersion":current["approvedExtraVersion"],
+          "extraDigest":current["approvedExtraDigest"],
+          "extraLines":(next((item["lines"] for item in _extra_state(conn,order)["items"]
+                             if item["id"]==current["approvedExtraRevisionId"]),[])),
           "approvedTotalMinor":current["approvedTotalMinor"],
           "simulatedPaidMinor":current["simulatedPaidMinor"],
           "simulatedRefundedMinor":current["simulatedRefundedMinor"],
