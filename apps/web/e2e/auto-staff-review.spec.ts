@@ -37,7 +37,7 @@ test('INTAKE создаёт pending, выдаёт одноразовый код,
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await staff(page, ['INTAKE']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await expect(region.getByRole('button', { name: 'Подтвердить связь' })).toHaveCount(0);
   await region.getByLabel('UUID автомобиля').fill(vehicle);
@@ -69,7 +69,7 @@ test('MANAGER может принять независимое решение и
     throw Error('unexpected mutation');
   });
   await staff(page, ['MANAGER']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await expect(region.getByRole('button', { name: 'Выдать код для клиента' })).toHaveCount(0);
   await region.getByLabel('UUID подтверждения').fill(claim);
@@ -91,7 +91,7 @@ test('403 от backend не раскрывает секрет и права ро
     status: 403, contentType: 'application/json', body: '{"code":"FORBIDDEN"}',
   }));
   await staff(page, ['INTAKE']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await region.getByLabel('UUID автомобиля').fill(vehicle);
   await region.getByLabel('UUID клиента').fill(customer);
@@ -192,7 +192,7 @@ test('две роли: изменение UUID менеджерской заяв
       body: JSON.stringify({ claimId: claim, proof }) });
   });
   await staff(page, ['INTAKE', 'MANAGER']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await region.getByLabel('UUID связи', { exact: true }).fill(link);
   await region.getByRole('button', { name: 'Выдать код для клиента' }).click();
@@ -236,7 +236,7 @@ test('MANAGER делегирует только INTAKE с живым scope и о
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await staff(page, ['MANAGER']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Назначения приёмщиков (dev)' });
   await expect(region).toBeVisible();
   await region.getByLabel('UUID автомобиля для назначения').fill(vehicle);
@@ -267,7 +267,7 @@ test('manager потерял scope: активные назначения скр
     });
   });
   await staff(page, ['MANAGER']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Назначения приёмщиков (dev)' });
   await region.getByLabel('UUID автомобиля для назначения').fill(vehicle);
   await region.getByRole('button', { name: 'Обновить назначения' }).click();
@@ -280,7 +280,7 @@ test('manager потерял scope: активные назначения скр
 
 test('INTAKE без MANAGER не видит делегирование даже при известном UUID', async ({ page }) => {
   await staff(page, ['INTAKE']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Назначения приёмщиков (dev)' })).toHaveCount(0);
 });
 
@@ -297,7 +297,7 @@ test('INTAKE повторяет создание после сбоя сети с
         body: JSON.stringify({ linkId: link, status: 'PENDING' }) });
   });
   await staff(page, ['INTAKE']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const panel = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await panel.getByLabel('UUID автомобиля').fill(vehicle);
   await panel.getByLabel('UUID клиента').fill(customer);
@@ -324,7 +324,7 @@ test('MANAGER повторяет grant после сбоя с тем же клю
         body: JSON.stringify({ assignmentId: assignment, status: 'ACTIVE' }) });
   });
   await staff(page, ['MANAGER']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Назначения приёмщиков (dev)' });
   await region.getByLabel('UUID автомобиля для назначения').fill(vehicle);
   await region.getByLabel('UUID сотрудника с ролью INTAKE').fill(target);
@@ -384,7 +384,7 @@ test('MANAGER retry проверки сохраняет ключ после HTTP
       : { status: 200, contentType: 'application/json', body: '{"status":"VERIFIED"}' });
   });
   await staff(page, ['MANAGER']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const panel = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await panel.getByLabel('UUID подтверждения').fill(claim);
   await panel.getByRole('button', { name: 'Подтвердить связь' }).click();
@@ -403,7 +403,7 @@ test('INTAKE при 429 видит лимит выдачи и не видит н
     body: '{"code":"RATE_LIMITED"}',
   }));
   await staff(page, ['INTAKE']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const panel = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await panel.getByLabel('UUID связи', { exact: true }).fill(link);
   await panel.getByRole('button', { name: 'Выдать код для клиента' }).click();
@@ -455,7 +455,7 @@ test('потерянный ISSUE response: исходный INTAKE перевы�
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await staff(page, ['INTAKE']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await region.getByLabel('UUID связи', { exact: true }).fill(link);
   await region.getByRole('button', { name: 'Выдать код для клиента' }).click();
@@ -483,7 +483,7 @@ test('повторный перевыпуск отклоняется и удал
     status: 403, contentType: 'application/json', body: '{"code":"FORBIDDEN"}',
   }));
   await staff(page, ['INTAKE']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   const region = page.getByRole('region', { name: 'Автомобильные привязки (dev)' });
   await region.getByLabel('UUID связи', { exact: true }).fill(link);
   await region.getByRole('checkbox', {
@@ -496,6 +496,6 @@ test('повторный перевыпуск отклоняется и удал
 
 test('MANAGER и STOCK не видят перевыпуск INTAKE', async ({ page }) => {
   await staff(page, ['MANAGER']);
-  await page.getByRole('button', { name: 'Автомобили (dev)' }).click();
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Перевыпустить код однократно' })).toHaveCount(0);
 });

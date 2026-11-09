@@ -20,25 +20,24 @@ for(const width of [390,1280]){
       expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
       const nav=page.getByRole('navigation',{name:'Разделы сервиса'});
       await expect(nav).toBeVisible();
-      await nav.getByRole('link',{name:'Бренды'}).focus();
-      await expect(nav.getByRole('link',{name:'Бренды'})).toBeFocused();
-      const focus=await nav.getByRole('link',{name:'Бренды'}).evaluate(el=>getComputedStyle(el).outlineStyle);
+      await nav.getByRole('link',{name:'Личный кабинет'}).focus();
+      await expect(nav.getByRole('link',{name:'Личный кабинет'})).toBeFocused();
+      const focus=await nav.getByRole('link',{name:'Личный кабинет'}).evaluate(el=>getComputedStyle(el).outlineStyle);
       expect(focus).not.toBe('none');
-      const logo=page.getByRole('link',{name:'ROBOport — главная'}).locator('img');
-      await expect(logo).toHaveAttribute('src',/logo-light\.svg/);
-      await expect(page.getByText('Приём реальных заявок пока закрыт.')).toBeVisible();
+      await expect(page.getByRole('link',{name:'Airmatik — главная'})).toBeVisible();
+      await expect(page.getByText('Реальные заказы, оплаты и выдача автомобилей до release-gate #119 недоступны.')).toBeVisible();
       await page.screenshot({path:`test-results/brand-${theme}-${width}.png`,fullPage:true});
     });
   }
 }
-test('alert contrast tokens remain active in dark mode and error is keyboard accessible',async({page})=>{
- await page.route('**/api/v1/catalog/brands?*',r=>r.fulfill({status:503,body:'{}'}));
- await page.goto('/catalog/brands');
+test('тёмная тема и клавиатура доступны на закрытом автомобильном маршруте', async ({page})=>{
+ await page.goto('/');
  await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
- const alert=page.getByRole('alert');
- await expect(alert).toBeVisible();
- const styles=await alert.evaluate(el=>{const s=getComputedStyle(el);return {color:s.color,background:s.backgroundColor};});
- expect(styles.color).not.toBe(styles.background);
- await page.getByRole('button',{name:'Повторить запрос'}).focus();
- await expect(page.getByRole('button',{name:'Повторить запрос'})).toBeFocused();
+ const link=page.getByRole('navigation',{name:'Разделы сервиса'}).getByRole('link',{name:'Личный кабинет'});
+ await link.focus();
+ await expect(link).toBeFocused();
+ const outline=await link.evaluate(el=>getComputedStyle(el).outlineStyle);
+ expect(outline).not.toBe('none');
+ await link.click();
+ await expect(page.getByRole('alert')).toContainText('403');
 });

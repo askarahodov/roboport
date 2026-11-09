@@ -17,8 +17,8 @@
 | QA старых клиентских и складских функций | [ACCEPTANCE_TESTS.md](../quality/ACCEPTANCE_TESTS.md), [INVENTORY_DEV_GATES.md](../quality/INVENTORY_DEV_GATES.md) | Отрицательные регрессионные проверки до cutover |
 | Старая авторизация/вложения | [SECURITY_MODEL.md](../security/SECURITY_MODEL.md), [LOCAL_AUTH_AND_MINIO.md](../security/LOCAL_AUTH_AND_MINIO.md) | Сохранить до независимого security review |
 
-Публичные старые страницы и REST-маршруты могут всё ещё существовать
-в коде ROBOport. Это **не** означает, что они являются частью
+Публичные robot-страницы `/robots`, `/catalog/*`, `/request-demo`, `/account/claim` исключены из React маршрутизации в автомобильном UI cutover; `/account/robots`, `/account/tickets`, `/account/estimates`, `/account/documents` больше не являются страницами клиентского кабинета; `/staff` открывает автомобильные рабочие разделы. Старые React компоненты сохранены лишь как неиспользуемый код до финальной очистки. Legacy REST, OpenAPI и SQL ещё существуют
+в коде. Это **не** означает, что они являются частью
 новой автомобильной информационной системы. Не переименовывать сущность
 `service_ticket` в автомобильный `WorkOrder` без новой модели прав и
 согласий; не переносить историю по совпадению VIN. Робототехнические
@@ -31,6 +31,10 @@
 ## Воспроизводимый снимок маршрутов (без удаления)
 
 Запустите из корня репозитория `python scripts/inventory_legacy_routes.py --legacy-only > /tmp/roboport-legacy-routes.json`. Анализатор статически читает декораторы FastAPI и буквальные React Route/NavLink, выводит пути, исходные файлы, строки, признак скрытия из OpenAPI и кандидатов в legacy. Он **не** импортирует backend, не подключается к БД и не открывает клиентов. Все записи имеют `manual-required`: это список проверки, а не доказательство достижимости или разрешение на удаление. Динамические маршруты, нестандартные JSX выражения, mounts/prefixes при include_router и авторизацию требуется проверять отдельно в runtime. Регрессия: `python -m pytest -q tests/bootstrap/test_legacy_route_inventory.py`.
+
+## Граница UI cutover (09.11.2026)
+
+Автомобильный homepage, customer overview и staff workspace не вызывают старые robot API/queue; в E2E проверяются закрытые URL, роль, запрет старых вызовов и адаптивность 390/1280. **Это не физический backend decommission:** публичный draft `contracts/openapi.yaml` и legacy методы `apps/api/roboport_api/main.py` всё ещё требуют удаления/замены с миграцией тестов/контрактов. До независимой проверки не утверждаем, что все frontend source-файлы очищены от слова «робот».
 
 ## Что ещё нужно для настоящего вывода из эксплуатации
 
