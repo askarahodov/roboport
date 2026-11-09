@@ -89,6 +89,44 @@ def test_complete_demo_reconcile_reserve_seal_client_view_and_immutability(monke
     assert document["snapshot"]["releaseAllowed"] is False
     assert sealed.json()["blockers"]==[]
     assert sealed.json()["canSealPreview"] is False
+    # Технический digest проверяется по каноническому JSONB не только API,
+    # но и SQL-триггером; произвольный INSERT не может изменить атрибуты.
+    with psycopg.connect(DSN) as db:
+        canonical=db.execute("""
+          SELECT encode(sha256(convert_to(snapshot::text,'UTF8')),'hex')
+          FROM auto_order_demo_handover_preview WHERE work_order_id=%s
+        """,(order,)).fetchone()[0]
+        assert document["digest"]==canonical
+        for changed_sql, actor_id, expected_error in (
+            ("jsonb_set(snapshot,'{kind}','\"RELEASED\"'::jsonb)",d["intake"],
+             "invalid synthetic preview metadata"),
+            ("snapshot || '{\"documentPosted\":true}'::jsonb",d["intake"],
+             "invalid synthetic preview metadata"),
+            ("snapshot",d["client_b"],
+             "preview actor lacks live MANAGER grant"),
+        ):
+            with pytest.raises(psycopg.errors.RaiseException,
+                               match=expected_error):
+                with db.transaction():
+                    db.execute(f"""
+                      INSERT INTO auto_order_demo_handover_preview
+                        (id,work_order_id,revision_id,actor_id,request_key,
+                         fingerprint,snapshot)
+                      SELECT gen_random_uuid(),work_order_id,revision_id,%s,
+                             gen_random_uuid(),fingerprint,{changed_sql}
+                      FROM auto_order_demo_handover_preview WHERE work_order_id=%s
+                    """,(actor_id,order))
+        with pytest.raises(psycopg.errors.RaiseException,
+                           match="preview fingerprint mismatch"):
+            with db.transaction():
+                db.execute("""
+                  INSERT INTO auto_order_demo_handover_preview
+                    (id,work_order_id,revision_id,actor_id,request_key,
+                     fingerprint,snapshot)
+                  SELECT gen_random_uuid(),work_order_id,revision_id,
+                         actor_id,gen_random_uuid(),repeat('f',64),snapshot
+                  FROM auto_order_demo_handover_preview WHERE work_order_id=%s
+                """,(order,))
     same=post(http,base+"/seal-preview",manager,seal_key)
     assert same.status_code==200 and same.json()["replayed"] is True
     assert post(http,base+"/seal-preview",manager).status_code==409
