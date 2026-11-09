@@ -7,7 +7,7 @@
     "dev": "npm run generate:api:auto-dev && vite",
     "typecheck": "npm run generate:api:auto-dev && tsc --noEmit",
     "build": "npm run generate:api:auto-dev && tsc --noEmit && vite build",
-    "generate:api": "openapi-typescript ../../contracts/openapi.yaml -o src/shared/api/schema.d.ts",
+    "generate:api": "openapi-typescript ../../contracts/openapi.yaml -o ../../tests/legacy_assets/schema.d.ts",
     "test:e2e": "playwright test",
     "test:docs:e2e": "playwright test --config playwright.docs.config.ts",
     "generate:api:auto-dev": "openapi-typescript ../../contracts/auto-dev-openapi.yaml -o src/shared/api/autoDevSchema.d.ts"
