@@ -41,3 +41,20 @@ def test_guides_map_actual_synthetic_automotive_navigation():
     assert "готового публичного автомобильного кабинета пока нет" in guides
     assert "не пройдены" in guides
     assert "`planned`" in guides
+
+def test_navigator_covers_all_roles_and_keeps_nonproduction_gates():
+    navigator = (ROOT / "docs/guides/ROLE_NAVIGATOR.md").read_text(encoding="utf-8")
+    sidebar = (ROOT / "docs/_sidebar.md").read_text(encoding="utf-8")
+    start = (ROOT / "docs/guides/QUICK_START.md").read_text(encoding="utf-8")
+    for role in ("Администратор", "Приёмщик", "Механик", "Склад",
+                 "Руководитель", "Бухгалтер", "Клиент", "Мобильное"):
+        assert role.lower() in navigator.lower(), role
+    for code in ("401", "403", "404", "409", "422", "429"):
+        assert code in navigator, code
+    for route in ("/account/auto-booking", "/staff/auto-calendar",
+                  "/staff/auto-workshop-qc", "/staff/warehouse-work-orders"):
+        assert route in navigator and route in start, route
+    assert "ROLE_NAVIGATOR.md" in sidebar
+    assert "releaseAllowed: false" in navigator
+    assert "#119" in navigator and "#165" in navigator
+    assert "production" in navigator.lower()
