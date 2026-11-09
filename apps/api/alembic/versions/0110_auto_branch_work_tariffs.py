@@ -44,14 +44,14 @@ def upgrade():
         IF NOT EXISTS(
           SELECT 1 FROM auto_service_location loc
           JOIN auto_organization o ON o.id=loc.organization_id AND o.disabled_at IS NULL
-          JOIN auto_organization_role_grant grant
-            ON grant.organization_id=o.id AND grant.user_id=NEW.actor_id
-            AND grant.role_code='MANAGER' AND grant.revoked_at IS NULL
-            AND (grant.location_id IS NULL OR grant.location_id=loc.id)
+          JOIN auto_organization_role_grant role_grant
+            ON role_grant.organization_id=o.id AND role_grant.user_id=NEW.actor_id
+            AND role_grant.role_code='MANAGER' AND role_grant.revoked_at IS NULL
+            AND (role_grant.location_id IS NULL OR role_grant.location_id=loc.id)
           JOIN app_user actor ON actor.id=NEW.actor_id AND actor.status='ACTIVE'
           WHERE loc.id=NEW.location_id AND loc.organization_id=NEW.organization_id
             AND loc.disabled_at IS NULL
-          FOR SHARE OF loc,o,grant,actor
+          FOR SHARE OF loc,o,role_grant,actor
         ) THEN RAISE EXCEPTION 'tariff proposer has no branch authority'; END IF;
         IF NEW.version<>1+COALESCE((
           SELECT max(version) FROM auto_work_tariff_revision
@@ -87,15 +87,15 @@ def upgrade():
           OR NOT EXISTS (
             SELECT 1 FROM auto_service_location loc
             JOIN auto_organization o ON o.id=loc.organization_id AND o.disabled_at IS NULL
-            JOIN auto_organization_role_grant grant
-              ON grant.organization_id=o.id AND grant.user_id=NEW.approved_by
-              AND grant.role_code='MANAGER' AND grant.revoked_at IS NULL
-              AND (grant.location_id IS NULL OR grant.location_id=loc.id)
+            JOIN auto_organization_role_grant role_grant
+              ON role_grant.organization_id=o.id AND role_grant.user_id=NEW.approved_by
+              AND role_grant.role_code='MANAGER' AND role_grant.revoked_at IS NULL
+              AND (role_grant.location_id IS NULL OR role_grant.location_id=loc.id)
             JOIN app_user actor ON actor.id=NEW.approved_by AND actor.status='ACTIVE'
             WHERE loc.id=proposal.location_id
               AND loc.organization_id=proposal.organization_id
               AND loc.disabled_at IS NULL
-            FOR SHARE OF loc,o,grant,actor
+            FOR SHARE OF loc,o,role_grant,actor
           )
         THEN RAISE EXCEPTION 'tariff approval requires distinct authorized manager'; END IF;
         RETURN NEW;
