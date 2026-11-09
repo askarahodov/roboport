@@ -250,6 +250,15 @@ def test_assignment_enforces_labor_handoff_finish_and_independent_qc(monkeypatch
     other=session(http,d,d["other"])
     assert post(http,base+"/labor",other,serviceId=str(service),
                 actualMinutes=25).status_code==403
+    with psycopg.connect(DSN) as db:
+        execution=db.execute("""SELECT id FROM auto_work_order_execution
+          WHERE work_order_id=%s""",(order,)).fetchone()[0]
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO auto_work_order_labor_entry
+                  (id,execution_id,service_id,actor_id,actual_minutes,request_key)
+                  VALUES(%s,%s,%s,%s,%s,%s)""",
+                  (uuid4(),execution,service,d["other"],25,uuid4()))
     assert post(http,base+"/finish",other).status_code==403
     mechanic=session(http,d,d["manager"])
     assert post(http,base+"/labor",mechanic,serviceId=str(service),
@@ -259,6 +268,16 @@ def test_assignment_enforces_labor_handoff_finish_and_independent_qc(monkeypatch
                 lotId=str(lot),quantity=1)
     assert issued.status_code==201,issued.text
     issue=issued.json()["issueId"]
+    # The legacy handoff trigger overwrites received_by from its trusted GUC.
+    # Assignment trigger must execute after that actor binding, not before.
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("SELECT set_config('roboport.mechanic_handoff_actor',%s,true)",
+                           (str(d["other"]),))
+                db.execute("""INSERT INTO auto_stock_mechanic_handoff
+                  (id,request_id,issue_id,received_by) VALUES(%s,%s,%s,%s)""",
+                  (uuid4(),uuid4(),issue,d["manager"]))
     other=session(http,d,d["other"])
     denied=post(http,base+"/materials/receive",other,issueId=issue)
     assert denied.status_code==403,denied.text
@@ -266,6 +285,14 @@ def test_assignment_enforces_labor_handoff_finish_and_independent_qc(monkeypatch
     mechanic=session(http,d,d["manager"])
     received=post(http,base+"/materials/receive",mechanic,issueId=issue)
     assert received.status_code==201,received.text
+    with psycopg.connect(DSN) as db:
+        execution=db.execute("""SELECT id FROM auto_work_order_execution
+          WHERE work_order_id=%s""",(order,)).fetchone()[0]
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO auto_work_order_execution_finish
+                  (id,execution_id,actor_id,request_key) VALUES(%s,%s,%s,%s)""",
+                  (uuid4(),execution,d["other"],uuid4()))
     assert post(http,base+"/finish",mechanic).status_code==201
     # Independent QC remains possible for a different mechanic.
     other=session(http,d,d["other"])
