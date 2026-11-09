@@ -2,7 +2,7 @@
 from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
-from roboport_api.main import app
+from tests.legacy_runtime import app
 
 PATHS = (
     "/api/v1/dev/tickets",
