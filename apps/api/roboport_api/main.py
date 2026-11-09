@@ -259,3 +259,14 @@ class _TraceRouteList(list):
         self._fail("setitem")
 
 app.router.routes = _TraceRouteList(app.router.routes)
+
+# Temporary diagnostic for assignments that replace the route list outright.
+class _TraceRouter(type(app.router)):
+    def __setattr__(self, name, value):
+        if name == "routes":
+            import traceback
+            raise RuntimeError("ASGI ROUTE TABLE REPLACED\n" + "".join(traceback.format_stack(limit=12)))
+        return super().__setattr__(name, value)
+
+app.router.__class__ = _TraceRouter
+_ROUTE_AFTER_GUARD_ID = id(app.router.routes)
