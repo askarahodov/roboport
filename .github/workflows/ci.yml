@@ -225,7 +225,7 @@ jobs:
             if curl --fail --silent http://127.0.0.1:5173/api/v1/meta | grep -q '"Airmatik"'; then break; fi
             sleep 1
           done
-          curl --fail --silent http://127.0.0.1:5173/health/live | grep -q '"alive"'
+          curl --fail --silent http://127.0.0.1:8000/health/live | grep -q '"alive"'
           curl --fail --silent http://127.0.0.1:5173/account/login | grep -q 'root'
           for path in brands models models/unknown; do
             test "$(curl -s -o /tmp/roboport-error.json -w '%{http_code}' "http://127.0.0.1:5173/api/v1/catalog/$path")" = 404
