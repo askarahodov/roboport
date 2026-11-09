@@ -1,28 +1,39 @@
-/* ROBOport canonical semantic colors; generated to match theme.json. */
-/* Use --rp-accent only decoratively; text/button contrast uses --rp-action. */
+/* БоксРитм / Auto Digital. Semantic tokens match theme.json; neutral source for Light/Dark/Auto. */
 .app {
-  --rp-background:#f4fafb;
-  --rp-foreground:#12343b;
-  --rp-surface:#ffffff;
-  --rp-accent:#19bbb5;
-  --rp-action:#006d67;
-  --rp-action-text:#ffffff;
-  --rp-error-text:#9f1b23;
-  --rp-error-surface:#fff3f2;
-  --rp-safety-text:#994900;
-  --rp-safety-surface:#fff4e3;
-  --rp-focus:#006d67;
+  --rp-background:#F6F8FC;
+  --rp-foreground:#0B0E14;
+  --rp-surface:#FFFFFF;
+  --rp-accent:#0066FF;
+  --rp-action:#0066FF;
+  --rp-action-text:#FFFFFF;
+  --rp-error-text:#B4233A;
+  --rp-error-surface:#FFF1F3;
+  --rp-safety-text:#8B4500;
+  --rp-safety-surface:#FFF3E7;
+  --rp-focus:#0054D9;
+  --rp-muted:#4C576A;
+  --rp-border:#A6B4C9;
+  --rp-success-text:#13683C;
+  --rp-success-surface:#EAF7F0;
+  --rp-disabled-text:#525D6F;
+  --rp-disabled-surface:#E2E7F0;
 }
 .app.dark {
-  --rp-background:#101e22;
-  --rp-foreground:#ecf9fa;
-  --rp-surface:#1b3136;
-  --rp-accent:#19bbb5;
-  --rp-action:#19bbb5;
-  --rp-action-text:#071820;
-  --rp-error-text:#ffb4ad;
-  --rp-error-surface:#441b1b;
-  --rp-safety-text:#ffd3a1;
-  --rp-safety-surface:#422900;
-  --rp-focus:#42dacf;
+  --rp-background:#0B0E14;
+  --rp-foreground:#F5F8FF;
+  --rp-surface:#161D2B;
+  --rp-accent:#5CA9FF;
+  --rp-action:#5CA9FF;
+  --rp-action-text:#0B0E14;
+  --rp-error-text:#FFD2D9;
+  --rp-error-surface:#451C29;
+  --rp-safety-text:#FFE0AA;
+  --rp-safety-surface:#38260F;
+  --rp-focus:#8EC5FF;
+  --rp-muted:#C2CAD9;
+  --rp-border:#536278;
+  --rp-success-text:#BBF3D4;
+  --rp-success-surface:#163629;
+  --rp-disabled-text:#B6C1D1;
+  --rp-disabled-surface:#303747;
 }

@@ -63,7 +63,7 @@ export function StaffPortal() {
 
   const allowed = sections.filter(section => section.roles.some(role => roles.includes(role)));
   return <section className="ui-page crm-workspace">
-    <div className="crm-heading"><div><span className="ui-eyebrow">AIRMATIK / АВТОМОБИЛЬНЫЙ СЕРВИС</span>
+    <div className="crm-heading"><div><span className="ui-eyebrow">БОКСРИТМ / АВТОМОБИЛЬНЫЙ СЕРВИС</span>
       <h1>Рабочее место СТО</h1>
       <p>Автомобили, заказ-наряды, диагностика, склад и CRM. Только синтетический стенд.</p>
     </div><Badge tone="warning">DEV / TEST</Badge></div>
@@ -74,7 +74,7 @@ export function StaffPortal() {
       <Button onClick={() => setAttempt(a => a + 1)}>Повторить</Button></div>}
     {state === 'ready' && <div className="crm-layout">
       <aside className="crm-rail" aria-label="Разделы СТО">
-        <div className="crm-rail-brand">Airmatik<small>КАБИНЕТ СОТРУДНИКА</small></div>
+        <div className="crm-rail-brand">БоксРитм<small>КАБИНЕТ СОТРУДНИКА</small></div>
         <h2>Доступные разделы</h2>
         <nav aria-label="Навигация СТО" className="crm-menu">
           {allowed.map(section => <Link key={section.to} to={section.to}>{section.label}</Link>)}

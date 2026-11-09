@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="Airmatik automotive development API", version="0.1.0")
+app = FastAPI(title="БоксРитм — автомобильный dev API", version="0.1.0")
 
 from .auth_http import router as synthetic_auth_router
 from .oidc_http import router as oidc_router
@@ -181,11 +181,11 @@ def ready():
 
 @app.get("/api/v1/meta")
 def meta():
-    return {"service": "Airmatik", "environment": "development"}
+    return {"service": "БоксРитм", "environment": "development"}
 
 
 # Retired robot, ticket, catalog, attachment, estimate and inventory HTTP
-# endpoints are intentionally not imported or mounted by the Airmatik app.
+# endpoints are intentionally not imported or mounted by the БоксРитм app.
 # Their historical acceptance harness lives under tests/legacy_app.py only.
 
 
