@@ -138,6 +138,9 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
         serviceId=str(extra_service),actualMinutes=20).status_code==403
 
     # Actual allocated lot issues and handoffs consume the package reservations.
+    # Labor alone never fulfills the reserved stock of a selected complex.
+    mechanic=token(http,d,d["manager"])
+    assert post(http,execution+"/finish",mechanic).status_code==409
     warehouse=token(http,d,d["intake"])
     issue_ids=[]
     for lot,quantity in ((part_lot,2),(consumable_lot,1)):
