@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from uuid import UUID,uuid4
+import json
 
 import psycopg
 import pytest
@@ -79,6 +80,33 @@ def test_approved_extra_is_billable_and_immutable_preview_matches_real_consent(m
     second=post(http,cash,manager,kind="SIM_PAYMENT",amountMinor=11251)
     assert second.status_code==201,second.text
     assert second.json()["simulatedDueMinor"]==0
+    # Попытка подделать перечень услуг при совпадающих итогах и UUID
+    # отклоняется PostgreSQL до фиксации immutable-пакета.
+    with psycopg.connect(DSN) as db:
+        estimate=db.execute("""
+          SELECT version,fingerprint,service_lines
+          FROM auto_work_order_estimate_revision WHERE id=%s
+        """,(base_id,)).fetchone()
+        fake={
+          "kind":"SYNTHETIC_PRE_HANDOVER_PREVIEW",
+          "workOrderId":str(order),"estimateRevisionId":str(base_id),
+          "estimateVersion":estimate[0],"estimateDigest":estimate[1].strip(),
+          "currency":"RUB","lines":[],  # Подмена базовых услуг.
+          "approvedBaseMinor":2500,"approvedExtraMinor":11251,
+          "extraRevisionId":extra["id"],"extraVersion":extra["version"],
+          "extraDigest":extra["digest"],"extraLines":extra["lines"],
+          "approvedTotalMinor":13751,"simulatedPaidMinor":13751,
+          "simulatedRefundedMinor":0,"simulatedDueMinor":0,
+          "independentQc":"PASS","stockReservations":0,"unreceivedMaterials":0,
+          "legalGatePassed":False,"releaseAllowed":False,
+        }
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""
+                  INSERT INTO auto_order_demo_handover_preview
+                  (id,work_order_id,revision_id,actor_id,request_key,fingerprint,snapshot)
+                  VALUES(gen_random_uuid(),%s,%s,%s,gen_random_uuid(),%s,%s::jsonb)
+                """,(order,base_id,d["intake"],"0"*64,json.dumps(fake)))
     sealed=post(http,base+"/seal-preview",manager)
     assert sealed.status_code==201,sealed.text
     snapshot=sealed.json()["preview"]["snapshot"]
