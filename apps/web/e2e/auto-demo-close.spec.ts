@@ -40,7 +40,8 @@ test('manager simulated reconciliation -> warehouse reserve -> sealed customer p
     }
     const state={
       syntheticOnly:true,releaseAllowed:false,legalGatePassed:false,
-      currency:'RUB',approvedVersion:1,approvedTotalMinor:2500,
+      currency:'RUB',approvedVersion:1,approvedBaseMinor:2500,approvedExtraMinor:0,
+      approvedExtraVersion:null,approvedExtraRevisionId:null,approvedTotalMinor:2500,
       simulatedPaidMinor:paid,simulatedRefundedMinor:0,simulatedDueMinor:2500-paid,
       events:paid?[{id:'55555555-5555-4555-8555-555555555555',kind:'SIM_PAYMENT',
         amountMinor:paid,createdAt:'2030-01-01T10:00:00Z'}]:[],
@@ -87,7 +88,8 @@ test('revoke clears financial and document details and tenant change remains hid
     {status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'}:
     {status:200,contentType:'application/json',body:JSON.stringify({
       syntheticOnly:true,releaseAllowed:false,legalGatePassed:false,currency:'RUB',
-      approvedVersion:1,approvedTotalMinor:37890,simulatedPaidMinor:0,
+      approvedVersion:1,approvedBaseMinor:37890,approvedExtraMinor:0,
+      approvedExtraVersion:null,approvedExtraRevisionId:null,approvedTotalMinor:37890,simulatedPaidMinor:0,
       simulatedRefundedMinor:0,simulatedDueMinor:37890,events:[],
       outstandingReserves:[],unreceivedMaterialCount:0,executionStatus:'QC_ACCEPTED',
       blockers:['SIMULATED_BALANCE_OPEN'],canSealPreview:false,preview:null,
@@ -95,7 +97,7 @@ test('revoke clears financial and document details and tenant change remains hid
   ));
   await page.goto('/staff/auto-demo-close');
   await fillScope(page);
-  await expect(page.getByText('Смета: 37890',{exact:false})).toBeVisible();
+  await expect(page.getByText('Основные работы: 37890',{exact:false})).toBeVisible();
   revoked=true;
   await page.getByRole('button',{name:'Обновить сверку'}).click();
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
@@ -103,4 +105,67 @@ test('revoke clears financial and document details and tenant change remains hid
   await page.getByRole('textbox',{name:'UUID филиала'})
     .fill('99999999-9999-4999-8999-999999999999');
   await expect(page.getByRole('button',{name:'Зафиксировать технический пакет (MANAGER)'})).toHaveCount(0);
+});
+
+
+test('additional CLIENT consent increases synthetic balance and never authorizes release',async({page})=>{
+  let paid=0,sealed=false;
+  const events:number[]=[];
+  const revision='77777777-7777-4777-8777-777777777777';
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}',
+  }));
+  await page.route(root,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='POST'){
+      expect(req.headers()['x-csrf-token']).toBe('synthetic');
+      const body=req.postDataJSON();
+      if(url.pathname.endsWith('/simulated-cash')){
+        expect(body.kind).toBe('SIM_PAYMENT');
+        expect(body.amountMinor).toBe(13751);
+        paid+=body.amountMinor;events.push(paid);
+      }else if(url.pathname.endsWith('/seal-preview')){
+        expect(paid).toBe(13751);
+        sealed=true;
+      }else throw Error('Unexpected operation '+url.pathname);
+      return route.fulfill({status:201,contentType:'application/json',
+        body:'{"ok":true,"replayed":false}'});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({
+        syntheticOnly:true,releaseAllowed:false,legalGatePassed:false,
+        currency:'RUB',approvedVersion:1,
+        approvedBaseMinor:2500,approvedExtraMinor:11251,
+        approvedExtraRevisionId:revision,approvedExtraVersion:1,
+        approvedTotalMinor:13751,simulatedPaidMinor:paid,simulatedRefundedMinor:0,
+        simulatedDueMinor:13751-paid,events:[],outstandingReserves:[],
+        unreceivedMaterialCount:0,executionStatus:'QC_ACCEPTED',
+        blockers:paid===13751?[]:['SIMULATED_BALANCE_OPEN'],
+        canSealPreview:paid===13751&&!sealed,
+        preview:sealed?{id:sku,revisionId:revision,digest:'a'.repeat(64),
+          createdAt:'2030-01-01T09:00:00Z',
+          snapshot:{approvedBaseMinor:2500,approvedExtraMinor:11251,
+            approvedTotalMinor:13751,releaseAllowed:false}}:null,
+      })});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-demo-close');
+  await fillScope(page);
+  await expect(page.getByText('Основные работы: 2500',{exact:false})).toBeVisible();
+  await expect(page.getByText('Согласованные допработы: 11251',{exact:false})).toBeVisible();
+  await expect(page.getByText('Итого по согласованным работам: 13751',{exact:false})).toBeVisible();
+  await expect(page.getByText('Остаток: 13751',{exact:false})).toBeVisible();
+  await page.getByRole('spinbutton',{name:'Сумма, коп.'}).fill('13751');
+  await page.getByRole('button',{name:'Записать условное движение'}).click();
+  await expect(page.getByText('Остаток: 0',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Зафиксировать технический пакет (MANAGER)'}).click();
+  await expect(page.getByRole('heading',{name:'Технический пакет зафиксирован'})).toBeVisible();
+  await expect(page.getByText('Разрешение на выдачу: НЕТ.',{exact:false})).toBeVisible();
+  await page.setViewportSize({width:1280,height:800});
+  await page.goto('/account/auto-demo-close');
+  await fillScope(page);
+  await expect(page.getByText('Согласованные допработы: 11251',{exact:false})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Записать условное движение'})).toHaveCount(0);
+  await expect(page.getByText('НЕ ПРОЙДЕН.',{exact:false})).toBeVisible();
+  expect(events).toEqual([13751]);
 });
