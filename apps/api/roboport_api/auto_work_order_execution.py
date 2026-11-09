@@ -145,10 +145,14 @@ def labor_execution(conn,token,org,loc,order,service_id,minutes,request_key):
             raise ExecutionConflict("NOT_IN_PROGRESS")
         if str(service_id) not in [v["serviceId"] for v in state["requiredServices"]]:
             raise ExecutionConflict("SERVICE_NOT_APPROVED")
-        assigned=conn.execute("""SELECT mechanic_id FROM auto_work_order_assignment
-          WHERE work_order_id=%s AND status='ACCEPTED'""",(order,)).fetchone()
-        if assigned is not None and assigned[0]!=actor:
-            raise ExecutionDenied("FORBIDDEN")
+        assignment=conn.execute("""SELECT mechanic_id,status FROM auto_work_order_assignment
+          WHERE work_order_id=%s ORDER BY created_at DESC,id DESC LIMIT 1""",
+          (order,)).fetchone()
+        if assignment is not None:
+            if assignment[1]!="ACCEPTED":
+                raise ExecutionConflict("ASSIGNMENT_NOT_ACCEPTED")
+            if assignment[0]!=actor:
+                raise ExecutionDenied("FORBIDDEN")
         execution=execution_row[0]
         existing=conn.execute("""
            SELECT 1 FROM auto_work_order_labor_entry
