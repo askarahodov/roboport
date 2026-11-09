@@ -28,12 +28,23 @@ class LaborRate(BaseModel):
     rateMinorPerHour: int=Field(ge=0,le=10**10,strict=True)
 
 
+class WorkRate(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    serviceId: UUID
+    qualificationCode: str=Field(pattern="^(GENERAL|DIAGNOSTIC|MASTER)$")
+    rateMinorPerHour: int=Field(ge=0,le=10**10,strict=True)
+    quantity: int=Field(ge=1,le=20,strict=True)
+    coefficientBps: int=Field(ge=10000,le=30000,strict=True)
+    discountBps: int=Field(ge=0,le=2500,strict=True)
+
+
 class Publish(BaseModel):
     model_config=ConfigDict(extra="forbid")
     requestKey: UUID
     expectedVersion: int=Field(ge=0,le=29)
     prices: list[Price] | None=Field(default=None,min_length=1,max_length=50)
     laborRates: list[LaborRate] | None=Field(default=None,min_length=1,max_length=50)
+    workRates: list[WorkRate] | None=Field(default=None,min_length=1,max_length=50)
 
 
 class Decision(BaseModel):
@@ -99,7 +110,7 @@ async def publish(org_id:str,loc_id:str,order_id:str,request:Request):
         body=Publish.model_validate(await request.json())
     except (ValueError,TypeError,ValidationError,UnicodeDecodeError):
         return _response(request,422,"INVALID_INPUT")
-    if (body.prices is None)==(body.laborRates is None):
+    if sum(x is not None for x in (body.prices,body.laborRates,body.workRates))!=1:
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as conn:
         if not _mutation_ok(request,conn):
@@ -113,7 +124,14 @@ async def publish(org_id:str,loc_id:str,order_id:str,request:Request):
                 labor_rates=[{"serviceId":p.serviceId,
                               "qualificationCode":p.qualificationCode,
                               "rateMinorPerHour":p.rateMinorPerHour}
-                             for p in body.laborRates] if body.laborRates is not None else None)
+                             for p in body.laborRates] if body.laborRates is not None else None,
+                work_rates=[{"serviceId":p.serviceId,
+                             "qualificationCode":p.qualificationCode,
+                             "rateMinorPerHour":p.rateMinorPerHour,
+                             "quantity":p.quantity,
+                             "coefficientBps":p.coefficientBps,
+                             "discountBps":p.discountBps}
+                            for p in body.workRates] if body.workRates is not None else None)
         except (AutoEstimateDenied,AutoEstimateConflict) as exc:
             return _error(request,exc)
     return JSONResponse(status_code=200 if data["replayed"] else 201,

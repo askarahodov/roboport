@@ -1,18 +1,55 @@
 import React from 'react';
 import { Link,useSearchParams } from 'react-router-dom';
+import { AutoAdditionalWork } from './AutoAdditionalWork';
+import { AutoTariffPolicies } from './AutoTariffPolicies';
+import { AutoWorkComplexes } from './AutoWorkComplexes';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Qualification='GENERAL'|'DIAGNOSTIC'|'MASTER';
+type PricingMode='MANUAL'|'NORM_HOUR'|'WORK_FACTORED';
 type Line={serviceId:string;code:string;title:string;durationMinutes:number;amountMinor:number;
-  pricingMethod?:'NORM_HOUR';qualificationCode?:Qualification;rateMinorPerHour?:number};
+  pricingMethod?:'NORM_HOUR'|'NORM_HOUR_FACTORED';qualificationCode?:Qualification;
+  rateMinorPerHour?:number;quantity?:number;coefficientBps?:number;discountBps?:number};
 type Revision={id:string;version:number;totalMinor:number;currency:'RUB';digest:string;
   lines:Line[];decision:'APPROVED'|'DECLINED'|null;createdAt:string;decidedAt:string|null;
   clarificationId?:string|null;clarificationReason?:'PRICE'|'WORK_SCOPE'|'TIMING'|'OTHER'|null;
   clarificationResolution?:'EXPLAINED'|'NEW_VERSION_REQUIRED'|null;
-  diagnostics?:{serviceId:string;findingCode:string;severityCode:string}[]};
+  materialLines?:{selectionId:string;skuId:string;article:string;
+    itemKind:'PART'|'CONSUMABLE';quantity:number;unitPriceMinor:number;
+    amountMinor:number}[];
+  diagnostics?:{serviceId:string;findingCode:string;severityCode:string}[];
+  tariffs?:{serviceId:string;policyId:string;version:number;qualificationCode:string;
+    rateMinorPerHour:number;maxDiscountBps:number}[]};
 type Estimates={items:Revision[];latestVersion:number;syntheticOnly:true;releaseAllowed:false};
 type Service={id:string;code:string;title:string;durationMinutes:number};
 type Pending={path:string;body:string};
+
+function validPricedLine(line:Record<string,unknown>):boolean{
+  if(!('pricingMethod' in line))return true; // Pre-existing manual price.
+  if(!['NORM_HOUR','NORM_HOUR_FACTORED'].includes(String(line.pricingMethod))||
+    !['GENERAL','DIAGNOSTIC','MASTER'].includes(String(line.qualificationCode))||
+    typeof line.rateMinorPerHour!=='number'||!Number.isSafeInteger(line.rateMinorPerHour)||
+    line.rateMinorPerHour<0||line.rateMinorPerHour>1e10||
+    typeof line.durationMinutes!=='number'||!Number.isInteger(line.durationMinutes)||
+    line.durationMinutes<5||line.durationMinutes>1440||
+    typeof line.amountMinor!=='number'||!Number.isSafeInteger(line.amountMinor)||
+    line.amountMinor<0||line.amountMinor>1e12)return false;
+  if(line.pricingMethod==='NORM_HOUR'){
+    return !('quantity' in line)&&!('coefficientBps' in line)&&
+      !('discountBps' in line)&&line.amountMinor===
+      Math.floor((line.durationMinutes*line.rateMinorPerHour+30)/60);
+  }
+  const {quantity,coefficientBps,discountBps}=line;
+  if(typeof quantity!=='number'||!Number.isInteger(quantity)||quantity<1||quantity>20||
+     typeof coefficientBps!=='number'||!Number.isInteger(coefficientBps)||
+     coefficientBps<10000||coefficientBps>30000||
+     typeof discountBps!=='number'||!Number.isInteger(discountBps)||
+     discountBps<0||discountBps>2500)return false;
+  const numerator=BigInt(line.durationMinutes)*BigInt(line.rateMinorPerHour)*
+    BigInt(quantity)*BigInt(coefficientBps)*BigInt(10000-discountBps);
+  const expected=(numerator+3000000000n)/6000000000n;
+  return expected<=1000000000000n&&BigInt(line.amountMinor)===expected;
+}
 
 function parseEstimate(raw:unknown):Estimates{
   if(!raw||typeof raw!=='object')throw Error('invalid estimate');
@@ -38,19 +75,24 @@ function parseEstimate(raw:unknown):Estimates{
             'serviceId' in f&&typeof f.serviceId==='string'&&uuid.test(f.serviceId)&&
             'findingCode' in f&&['NO_FAULT','MAINTENANCE_DUE','FAULT_CONFIRMED','FURTHER_CHECK'].includes(String(f.findingCode))&&
             'severityCode' in f&&['ROUTINE','SOON','URGENT'].includes(String(f.severityCode)))))&&
+        (e.materialLines===undefined||(Array.isArray(e.materialLines)&&
+          e.materialLines.length<=100&&e.materialLines.every((m:unknown)=>
+            m!==null&&typeof m==='object'&&
+            'selectionId' in m&&typeof m.selectionId==='string'&&uuid.test(m.selectionId)&&
+            'skuId' in m&&typeof m.skuId==='string'&&uuid.test(m.skuId)&&
+            'itemKind' in m&&['PART','CONSUMABLE'].includes(String(m.itemKind))&&
+            'amountMinor' in m&&typeof m.amountMinor==='number'&&
+            Number.isSafeInteger(m.amountMinor))))&&
+        (e.tariffs===undefined||(Array.isArray(e.tariffs)&&e.tariffs.length<=50&&
+          e.tariffs.every((t:unknown)=>t!==null&&typeof t==='object'&&
+            'policyId' in t&&typeof t.policyId==='string'&&uuid.test(t.policyId)&&
+            'serviceId' in t&&typeof t.serviceId==='string'&&uuid.test(t.serviceId))))&&
         Array.isArray(e.lines)&&e.lines.length<=50&&
         e.lines.every((line:unknown)=>line!==null&&typeof line==='object'&&
           'code' in line&&typeof line.code==='string'&&
           'title' in line&&typeof line.title==='string'&&
           'amountMinor' in line&&typeof line.amountMinor==='number'&&
-          (!('pricingMethod' in line)||(
-            line.pricingMethod==='NORM_HOUR'&&
-            'qualificationCode' in line&&['GENERAL','DIAGNOSTIC','MASTER'].includes(String(line.qualificationCode))&&
-            'rateMinorPerHour' in line&&typeof line.rateMinorPerHour==='number'&&
-            Number.isSafeInteger(line.rateMinorPerHour)&&line.rateMinorPerHour>=0&&line.rateMinorPerHour<=1e10&&
-            'durationMinutes' in line&&typeof line.durationMinutes==='number'&&
-            Number.isInteger(line.durationMinutes)&&line.durationMinutes>=5&&line.durationMinutes<=1440&&
-            line.amountMinor===Math.floor((line.durationMinutes*line.rateMinorPerHour+30)/60))));
+          validPricedLine(line as Record<string,unknown>));
     }))throw Error('invalid estimate');
   return value as Estimates;
 }
@@ -67,6 +109,9 @@ function parseServices(raw:unknown):Service[]{
 
 export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   const [query]=useSearchParams();
+  const [extraOpen,setExtraOpen]=React.useState(false);
+  const [tariffsOpen,setTariffsOpen]=React.useState(false);
+  const [complexesOpen,setComplexesOpen]=React.useState(false);
   const [org,setOrg]=React.useState(query.get('org')??'');
   const [loc,setLoc]=React.useState(query.get('loc')??'');
   const [order,setOrder]=React.useState(query.get('order')??'');
@@ -75,9 +120,12 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   const [data,setData]=React.useState<Estimates|null>(null);
   const [services,setServices]=React.useState<Service[]>([]);
   const [prices,setPrices]=React.useState<Record<string,string>>({});
-  const [pricingMode,setPricingMode]=React.useState<'MANUAL'|'NORM_HOUR'>('MANUAL');
+  const [pricingMode,setPricingMode]=React.useState<PricingMode>('MANUAL');
   const [rates,setRates]=React.useState<Record<string,string>>({});
   const [qualifications,setQualifications]=React.useState<Record<string,Qualification>>({});
+  const [quantities,setQuantities]=React.useState<Record<string,string>>({});
+  const [coefficients,setCoefficients]=React.useState<Record<string,string>>({});
+  const [discounts,setDiscounts]=React.useState<Record<string,string>>({});
   const [revision,setRevision]=React.useState(0);
   const [busy,setBusy]=React.useState(false);
   const [pending,setPending]=React.useState<Pending|null>(null);
@@ -92,7 +140,9 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   React.useEffect(()=>{
     setStatus(valid?'loading':'idle');setData(null);setServices([]);
     setScopeLoaded('');setMessage('');setPending(null);setPrices({});
+    setExtraOpen(false);setTariffsOpen(false);setComplexesOpen(false);
     setRates({});setQualifications({});
+    setQuantities({});setCoefficients({});setDiscounts({});
     if(!valid)return;
     const controller=new AbortController();
     const routes=[base+'/estimates'];
@@ -148,7 +198,21 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
     if(pricingMode==='MANUAL')return value<=1e12?value:NaN;
     if(value>1e10||!Number.isInteger(s.durationMinutes)||
       s.durationMinutes<5||s.durationMinutes>1440)return NaN;
-    return Math.floor((s.durationMinutes*value+30)/60);
+    if(pricingMode==='NORM_HOUR')
+      return Math.floor((s.durationMinutes*value+30)/60);
+    const quantityRaw=quantities[s.id]??'1';
+    const coeffRaw=coefficients[s.id]??'10000';
+    const discountRaw=discounts[s.id]??'0';
+    if([quantityRaw,coeffRaw,discountRaw].some(x=>!/^(0|[1-9][0-9]*)$/.test(x)))
+      return NaN;
+    const quantity=Number(quantityRaw),coeff=Number(coeffRaw),
+      discount=Number(discountRaw);
+    if(!Number.isInteger(quantity)||quantity<1||quantity>20||
+      !Number.isInteger(coeff)||coeff<10000||coeff>30000||
+      !Number.isInteger(discount)||discount<0||discount>2500)return NaN;
+    const amount=(BigInt(s.durationMinutes)*BigInt(value)*BigInt(quantity)*
+      BigInt(coeff)*BigInt(10000-discount)+3000000000n)/6000000000n;
+    return amount<=1000000000000n?Number(amount):NaN;
   }
   const amounts=services.map(computedAmount);
   const canPublish=role==='manager'&&ready&&!busy&&!pending&&services.length>0&&
@@ -181,6 +245,15 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
           {item.clarificationId&&<p>Уточнение: {item.clarificationReason} ·
             {' '}{item.clarificationResolution??'ОЖИДАЕТ ОТВЕТА МЕНЕДЖЕРА'}</p>}
           <p>SHA-256 снимка: <code>{item.digest}</code></p>
+          {item.tariffs&&item.tariffs.length>0&&<section
+            aria-label={'Утверждённые тарифы версии '+item.version}>
+            <h4>Утверждённые тарифы филиала в версии</h4>
+            <ul>{item.tariffs.map(p=><li key={p.serviceId}>
+              Услуга {item.lines.find(line=>line.serviceId===p.serviceId)?.code??p.serviceId}:
+              {' '}категория {p.qualificationCode}, ставка {p.rateMinorPerHour} коп./час,
+              {' '}лимит скидки {p.maxDiscountBps}/100 %, версия политики {p.version}
+            </li>)}</ul>
+          </section>}
           {item.diagnostics&&item.diagnostics.length>0&&<section aria-label={'Диагностика версии '+item.version}>
             <h4>Диагностическое заключение, включённое в эту версию</h4>
             <ul>{item.diagnostics.map(f=><li key={f.serviceId}>
@@ -188,12 +261,29 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
               {' '}{f.findingCode} · {f.severityCode}
             </li>)}</ul>
           </section>}
+          {item.materialLines&&item.materialLines.length>0&&<section
+            aria-label={'Материалы сметы версии '+item.version}>
+            <h4>Детали и расходные материалы в версии</h4>
+            <ul>{item.materialLines.map((m,i)=><li key={m.selectionId+':'+m.skuId+':'+i}>
+              {m.article} — {m.itemKind==='PART'?'Продаваемая деталь':'Расходный материал'}:
+              {' '}{m.quantity} шт. × {m.unitPriceMinor} коп. = {m.amountMinor} коп.
+            </li>)}</ul>
+            <p>Расходные материалы не продаются отдельной позицией,
+              но резервируются со склада. Их цена в версии — 0 коп.</p>
+          </section>}
           <ul>{item.lines.map(line=><li key={line.serviceId}>
             {line.code} — {line.title}: {line.amountMinor} коп.
             {line.pricingMethod==='NORM_HOUR'&&<p>
               Расчёт по нормо-часу: {line.durationMinutes} мин. ×
               {' '}{line.rateMinorPerHour} коп./час · категория {line.qualificationCode}.
               Округление до копейки (0,5 вверх).
+            </p>}
+            {line.pricingMethod==='NORM_HOUR_FACTORED'&&<p>
+              Расчёт работ с коэффициентом: {line.durationMinutes} мин. ×
+              {' '}{line.rateMinorPerHour} коп./час · категория {line.qualificationCode};
+              {' '}кратность {line.quantity} · коэффициент {line.coefficientBps}/10000
+              {' '}· скидка {line.discountBps}/100 %.
+              Все модификаторы входят в согласованную неизменяемую версию.
             </p>}
           </li>)}</ul>
           {role==='client'&&item.version===data.latestVersion&&!item.decision&&!pending&&
@@ -236,6 +326,31 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
               }}>Ответить: подготовить новую версию</button>
             </div>}
         </li>)}</ol>}
+      {role==='manager'&&data.items.length===0&&
+        <section aria-label="Выбор комплекса услуг до сметы">
+          <button type="button" aria-expanded={complexesOpen}
+            onClick={()=>setComplexesOpen(open=>!open)}>
+            {complexesOpen?'Скрыть комплексы работ':'Открыть комплексы работ'}
+          </button>
+          {complexesOpen&&<AutoWorkComplexes org={org.trim()} loc={loc.trim()}
+            order={order.trim()} onChanged={()=>setRevision(n=>n+1)}/>}
+        </section>}
+      {role==='manager'&&<section aria-label="Управление тарифами филиала">
+        <button type="button" aria-expanded={tariffsOpen}
+          onClick={()=>setTariffsOpen(open=>!open)}>
+          {tariffsOpen?'Скрыть тарифы филиала':'Открыть тарифы филиала'}
+        </button>
+        {tariffsOpen&&<AutoTariffPolicies org={org.trim()} loc={loc.trim()}/>}
+      </section>}
+      {latest?.decision==='APPROVED'&&<section aria-label="Новые работы после сметы">
+        <button type="button" aria-expanded={extraOpen}
+          onClick={()=>setExtraOpen(open=>!open)}>
+          {extraOpen?'Скрыть дополнительные работы':'Открыть дополнительные работы'}
+        </button>
+        {extraOpen&&<AutoAdditionalWork role={role} baseRevisionId={latest.id}
+          baseServiceIds={latest.lines.map(line=>line.serviceId)}
+          org={org.trim()} loc={loc.trim()} order={order.trim()}/>}
+      </section>}
       {role==='manager'&&services.length>0&&!data.items.some(item=>item.decision!==null)&&
         <form onSubmit={event=>{
           event.preventDefault();if(!canPublish)return;
@@ -244,24 +359,34 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
             ...(pricingMode==='MANUAL'?{
               prices:services.map(service=>({serviceId:service.id,
                 amountMinor:Number(prices[service.id])})),
-            }:{
+            }:pricingMode==='NORM_HOUR'?{
               laborRates:services.map(service=>({serviceId:service.id,
                 qualificationCode:qualifications[service.id]??'GENERAL',
                 rateMinorPerHour:Number(rates[service.id])})),
+            }:{
+              workRates:services.map(service=>({serviceId:service.id,
+                qualificationCode:qualifications[service.id]??'GENERAL',
+                rateMinorPerHour:Number(rates[service.id]),
+                quantity:Number(quantities[service.id]??'1'),
+                coefficientBps:Number(coefficients[service.id]??'10000'),
+                discountBps:Number(discounts[service.id]??'0')})),
             }),
           }));
         }}>
           <h2>Новая неизменяемая версия</h2>
           <label>Способ расчёта стоимости
             <select aria-label="Способ расчёта стоимости" value={pricingMode}
-              onChange={e=>setPricingMode(e.target.value as 'MANUAL'|'NORM_HOUR')}>
+              onChange={e=>setPricingMode(e.target.value as PricingMode)}>
               <option value="MANUAL">Ручная стоимость услуги</option>
               <option value="NORM_HOUR">По нормо-часу и тарифной категории</option>
+              <option value="WORK_FACTORED">Нормо-час × кратность × коэффициент − скидка</option>
             </select>
           </label>
-          {pricingMode==='NORM_HOUR'&&<p>Основа расчёта — плановые минуты выбранной
+          {pricingMode!=='MANUAL'&&<p>Основа расчёта — плановые минуты выбранной
             услуги. Категория — тарифная предпосылка, не подтверждение квалификации
-            сотрудника. Сервер пересчитывает каждую сумму и сохраняет ставку в версии.</p>}
+            сотрудника. Сервер пересчитывает каждую сумму и сохраняет ставку в версии.
+            {pricingMode==='WORK_FACTORED'&&' Кратность 1–20, коэффициент 1,00–3,00 и скидка до 25% — ограничения синтетического контура.'}
+          </p>}
           {services.map(s=><div key={s.id}>
             {pricingMode==='MANUAL'?<label>{s.code} — {s.title}, стоимость (коп.)
               <input type="number" min="0" max="1000000000000" step="1"
@@ -286,6 +411,25 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
                   min="0" max="10000000000" step="1" value={rates[s.id]??''}
                   onChange={e=>setRates(prev=>({...prev,[s.id]:e.target.value}))}/>
               </label>
+              {pricingMode==='WORK_FACTORED'&&<>
+                <label>Кратность работы {s.code}
+                  <input type="number" min="1" max="20" step="1"
+                    aria-label={'Кратность работы '+s.code} value={quantities[s.id]??'1'}
+                    onChange={e=>setQuantities(prev=>({...prev,[s.id]:e.target.value}))}/>
+                </label>
+                <label>Коэффициент работы {s.code} (10000 = 1,00)
+                  <input type="number" min="10000" max="30000" step="1"
+                    aria-label={'Коэффициент работы '+s.code}
+                    value={coefficients[s.id]??'10000'}
+                    onChange={e=>setCoefficients(prev=>({...prev,[s.id]:e.target.value}))}/>
+                </label>
+                <label>Скидка работы {s.code} (100 = 1%)
+                  <input type="number" min="0" max="2500" step="1"
+                    aria-label={'Скидка работы '+s.code}
+                    value={discounts[s.id]??'0'}
+                    onChange={e=>setDiscounts(prev=>({...prev,[s.id]:e.target.value}))}/>
+                </label>
+              </>}
               <p>Расчёт {s.code}: {Number.isSafeInteger(computedAmount(s))?
                 computedAmount(s)+' коп.':'укажите целую ставку'}</p>
             </>}

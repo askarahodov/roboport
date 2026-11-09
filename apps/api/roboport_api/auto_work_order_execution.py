@@ -3,6 +3,7 @@ from uuid import UUID,uuid4
 import psycopg
 from .auto_workshop_qc import _actor_and_order, _snapshot, InspectionDenied
 from .auto_work_order_estimate import _estimate_state
+from .auto_work_order_additional import _state as _extra_state
 from .auto_stock_lot_work_order_issue import issue_work_order_from_lot
 from .auto_stock_mechanic_handoff import acknowledge_mechanic_handoff
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
@@ -27,6 +28,10 @@ def _state(conn,order):
     estimate=_estimate_state(conn,order)
     revisions=estimate["items"]
     approved=revisions[-1] if revisions and revisions[-1]["decision"]=="APPROVED" else None
+    extra=_extra_state(conn,order)
+    current_extra=extra["items"][-1] if extra["items"] else None
+    approved_extra=current_extra if current_extra and current_extra["decision"]=="APPROVED" else None
+    additional_pending=bool(current_extra and current_extra["decision"] is None)
     row=conn.execute("""
       SELECT id,revision_id,created_at FROM auto_work_order_execution
       WHERE work_order_id=%s
@@ -35,9 +40,9 @@ def _state(conn,order):
     if row:
         lines=conn.execute("""
            SELECT service_id,actual_minutes,created_at FROM auto_work_order_labor_entry
-           WHERE execution_id=%s ORDER BY created_at,id LIMIT 51
+           WHERE execution_id=%s ORDER BY created_at,id LIMIT 71
         """,(row[0],)).fetchall()
-        if len(lines)>50:
+        if len(lines)>70:
             raise ExecutionConflict("LIMIT")
         labor=[{"serviceId":str(s),"actualMinutes":m,"createdAt":at.isoformat()}
                for s,m,at in lines]
@@ -69,9 +74,12 @@ def _state(conn,order):
         state="QC_ACCEPTED"
     return {"status":state,"approvedVersion":approved["version"] if approved else None,
             "approvedTotalMinor":approved["totalMinor"] if approved else None,
+            "approvedExtraVersion":approved_extra["version"] if approved_extra else None,
+            "approvedExtraTotalMinor":approved_extra["totalMinor"] if approved_extra else None,
+            "additionalConsentPending":additional_pending,
             "requiredServices":[{"serviceId":line["serviceId"],"code":line["code"],
                    "title":line["title"],"durationMinutes":line["durationMinutes"]}
-                  for line in approved["lines"]] if approved else [],
+                  for line in (approved["lines"]+(approved_extra["lines"] if approved_extra else []))] if approved else [],
             "labor":labor,"materials":materials,"qcStatus":qc["status"],
             "executionId":str(row[0]) if row else None,
             "releaseAllowed":False,"syntheticOnly":True}
@@ -145,6 +153,7 @@ def labor_execution(conn,token,org,loc,order,service_id,minutes,request_key):
             raise ExecutionConflict("NOT_IN_PROGRESS")
         if str(service_id) not in [v["serviceId"] for v in state["requiredServices"]]:
             raise ExecutionConflict("SERVICE_NOT_APPROVED")
+        _require_assigned_mechanic(conn,order,actor)
         execution=execution_row[0]
         existing=conn.execute("""
            SELECT 1 FROM auto_work_order_labor_entry
@@ -187,6 +196,19 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
                 **_state(conn,order)}
 
 
+def _require_assigned_mechanic(conn,order,actor):
+    """An accepted offer owns execution handoff/finish, not just labor."""
+    row=conn.execute("""
+      SELECT mechanic_id,status FROM auto_work_order_assignment
+      WHERE work_order_id=%s ORDER BY created_at DESC,id DESC LIMIT 1
+    """,(order,)).fetchone()
+    if row is not None:
+        if row[1]!="ACCEPTED":
+            raise ExecutionConflict("ASSIGNMENT_NOT_ACCEPTED")
+        if row[0]!=actor:
+            raise ExecutionDenied("FORBIDDEN")
+
+
 def receive_material(conn,token,org,loc,order,issue_id,request_key):
     if type(issue_id) is not UUID or type(request_key) is not UUID:
         raise ExecutionDenied("INVALID_INPUT")
@@ -209,6 +231,7 @@ def receive_material(conn,token,org,loc,order,issue_id,request_key):
                     **_state(conn,order)}
         if _state(conn,order)["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
+        _require_assigned_mechanic(conn,order,actor)
         try:
             receipt=acknowledge_mechanic_handoff(conn,token,org,loc,issue_id,request_key)
         except AutoStockDenied:
@@ -240,12 +263,40 @@ def finish_execution(conn,token,org,loc,order,request_key):
             return {"ok":True,"replayed":True,**state}
         if state["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
+        _require_assigned_mechanic(conn,order,actor)
+        if state["additionalConsentPending"]:
+            raise ExecutionConflict("ADDITIONAL_CONSENT_PENDING")
         if {v["serviceId"] for v in state["labor"]}!={v["serviceId"] for v in state["requiredServices"]}:
             raise ExecutionConflict("LABOR_INCOMPLETE")
         if any(not v["received"] for v in state["materials"]):
             raise ExecutionConflict("MATERIAL_HANDOFF_INCOMPLETE")
-        conn.execute("""
-          INSERT INTO auto_work_order_execution_finish(id,execution_id,actor_id,request_key)
-          VALUES(%s,%s,%s,%s)
-        """,(uuid4(),execution[0],actor,request_key))
+        required=conn.execute("""
+          SELECT component.sku_id,sum(component.quantity) AS required_qty
+          FROM auto_work_order_complex_selection chosen
+          JOIN auto_work_complex_material component
+            ON component.complex_id=chosen.complex_id
+          WHERE chosen.work_order_id=%s
+          GROUP BY component.sku_id
+        """,(order,)).fetchall()
+        issued={}
+        for item in state["materials"]:
+            issued[item["skuId"]]=issued.get(item["skuId"],0)+item["quantity"]
+        # A confirmed handoff is immutable audit evidence, not proof that
+        # material was retained: warehouse returns credit the original lot.
+        for sku,quantity in conn.execute("""
+          SELECT sku_id,SUM(quantity) FROM auto_stock_lot_work_order_return
+          WHERE work_order_id=%s GROUP BY sku_id
+        """,(order,)).fetchall():
+            issued[str(sku)]=issued.get(str(sku),0)-quantity
+        if any(issued.get(str(sku),0)<need for sku,need in required):
+            raise ExecutionConflict("COMPLEX_MATERIAL_ISSUE_INCOMPLETE")
+        try:
+            with conn.transaction():
+                conn.execute("""
+                  INSERT INTO auto_work_order_execution_finish
+                    (id,execution_id,actor_id,request_key)
+                  VALUES(%s,%s,%s,%s)
+                """,(uuid4(),execution[0],actor,request_key))
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
+            raise ExecutionConflict("EXECUTION_INTEGRITY_CONFLICT") from None
         return {"ok":True,"replayed":False,**_state(conn,order)}

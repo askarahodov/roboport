@@ -102,3 +102,79 @@ test('client norm-hour price and approved tariff vanish after scope revocation',
   await expect(page.getByRole('heading',{name:'Версия 1: 7501 коп. (RUB)'}))
     .toHaveCount(0);
 });
+
+
+test('manager publishes factorized work price; client approves the exact breakdown',async({page})=>{
+  let quote=false,approved=false;
+  const actions:string[]=[];
+  const factoredLine={serviceId:service,code:'SYN-LABOR',title:'Синтетическая работа',
+    durationMinutes:45,pricingMethod:'NORM_HOUR_FACTORED',
+    qualificationCode:'MASTER',rateMinorPerHour:10001,quantity:2,
+    coefficientBps:12500,discountBps:1000,amountMinor:16877};
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}',
+  }));
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const req=route.request(),pathname=new URL(req.url()).pathname;
+    if(req.method()==='POST'){
+      expect(req.headers()['x-csrf-token']).toBe('synthetic');
+      const payload=req.postDataJSON();
+      expect(payload.requestKey).toMatch(/^[0-9a-f-]{36}$/);
+      if(pathname.endsWith('/estimates/decision')){
+        expect(payload).toMatchObject({revisionId,decision:'APPROVED'});
+        approved=true;actions.push('APPROVED');
+      }else if(pathname.endsWith('/estimates')){
+        expect(payload).toEqual({
+          requestKey:expect.any(String),expectedVersion:0,
+          workRates:[{serviceId:service,qualificationCode:'MASTER',
+            rateMinorPerHour:10001,quantity:2,coefficientBps:12500,discountBps:1000}],
+        });
+        expect(payload.prices).toBeUndefined();
+        quote=true;actions.push('PUBLISHED');
+      }else throw Error('Unexpected route '+pathname);
+      return route.fulfill({status:201,contentType:'application/json',
+        body:'{"ok":true,"replayed":false}'});
+    }
+    if(pathname.endsWith('/services'))return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({items:[{id:service,code:'SYN-LABOR',
+        title:'Синтетическая работа',durationMinutes:45}]})});
+    if(pathname.endsWith('/estimates'))return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,releaseAllowed:false,
+        latestVersion:quote?1:0,
+        items:quote?[{id:revisionId,version:1,totalMinor:16877,
+          currency:'RUB',digest:'c'.repeat(64),lines:[factoredLine],diagnostics:[],
+          decision:approved?'APPROVED':null,createdAt:'2030-03-01T10:00:00Z',
+          decidedAt:null}]:[]})});
+    throw Error('Unexpected request '+pathname);
+  });
+
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-estimates?'+query);
+  await page.getByRole('combobox',{name:'Способ расчёта стоимости'})
+    .selectOption('WORK_FACTORED');
+  await page.getByRole('combobox',{name:'Категория тарифа SYN-LABOR'})
+    .selectOption('MASTER');
+  await page.getByRole('spinbutton',{name:'Ставка нормо-часа SYN-LABOR'}).fill('10001');
+  await page.getByRole('spinbutton',{name:'Кратность работы SYN-LABOR'}).fill('2');
+  await page.getByRole('spinbutton',{name:'Коэффициент работы SYN-LABOR'}).fill('12500');
+  await page.getByRole('spinbutton',{name:'Скидка работы SYN-LABOR'}).fill('1000');
+  await expect(page.getByText('Расчёт SYN-LABOR: 16877 коп.')).toBeVisible();
+  await page.getByRole('button',{name:'Опубликовать версию'}).click();
+  await expect(page.getByRole('heading',{name:'Версия 1: 16877 коп. (RUB)'}))
+    .toBeVisible();
+  await expect(page.getByText('Расчёт работ с коэффициентом:',{exact:false}))
+    .toContainText('кратность 2');
+  await page.goto('/account/auto-estimates?'+query);
+  await expect(page.getByRole('heading',{name:'Версия 1: 16877 коп. (RUB)'}))
+    .toBeVisible();
+  await expect(page.getByText('Расчёт работ с коэффициентом:',{exact:false}))
+    .toContainText('коэффициент 12500/10000');
+  await page.getByRole('button',{name:'Согласовать версию 1'}).click();
+  await expect(page.getByText('Решение: APPROVED')).toBeVisible();
+  expect(actions).toEqual(['PUBLISHED','APPROVED']);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(1280);
+});

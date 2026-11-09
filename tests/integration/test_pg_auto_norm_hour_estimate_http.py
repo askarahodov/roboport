@@ -176,3 +176,121 @@ def test_competing_norm_hour_publications_and_new_version_are_exact(monkeypatch)
     assert second.json()["items"][-1]["lines"][0]["amountMinor"]==22501
     assert second.json()["items"][0]["lines"]==quoted[0]["lines"]
     assert second.json()["items"][0]["digest"]==quoted[0]["digest"]
+
+
+def factored(service,rate=10001,quantity=2,coefficient=12500,discount=1000,
+             category="MASTER",key=None,version=0):
+    return {"requestKey":str(key or uuid4()),"expectedVersion":version,
+            "workRates":[{"serviceId":str(service),"qualificationCode":category,
+                "rateMinorPerHour":rate,"quantity":quantity,
+                "coefficientBps":coefficient,"discountBps":discount}]}
+
+
+def test_factored_work_price_customer_consent_and_exact_integer_rounding(monkeypatch):
+    d,org,loc,order,service,foreign,_=scenario()
+    client=api(monkeypatch)
+    quote=estimate_path(org,loc,order)
+    manager=token(client,d,d["intake"])
+    body=factored(service)
+    assert client.post(quote,json=body).status_code==403
+    assert client.post(quote,headers=manager,json={
+        **body,"laborRates":[{"serviceId":str(service),
+            "qualificationCode":"MASTER","rateMinorPerHour":10001}]
+    }).status_code==422
+    for field,bad in (("quantity",0),("quantity",21),("coefficientBps",9999),
+                      ("coefficientBps",30001),("discountBps",-1),
+                      ("discountBps",2501),("rateMinorPerHour",True),
+                      ("quantity",1.5)):
+        invalid=factored(service)
+        invalid["workRates"][0][field]=bad
+        assert client.post(quote,headers=manager,json=invalid).status_code==422
+    assert client.post(quote,headers=manager,json=factored(foreign)).status_code==409
+    duplicate=factored(service)
+    duplicate["workRates"].append(duplicate["workRates"][0])
+    assert client.post(quote,headers=manager,json=duplicate).status_code==422
+    # 45m × 10001 × 2 × 1.25 × (1 - 0.10), rounded once: 16877 kopecks.
+    response=client.post(quote,headers=manager,json=body)
+    assert response.status_code==201,response.text
+    current=response.json()["items"][0]
+    assert current["totalMinor"]==16877
+    assert current["lines"]==[{
+        "serviceId":str(service),"code":"TEST-ORDER-SVC",
+        "title":"SYNTHETIC INSPECTION","durationMinutes":45,
+        "pricingMethod":"NORM_HOUR_FACTORED","qualificationCode":"MASTER",
+        "rateMinorPerHour":10001,"quantity":2,"coefficientBps":12500,
+        "discountBps":1000,"amountMinor":16877,
+    }]
+    assert response.json()["releaseAllowed"] is False
+    replay=client.post(quote,headers=manager,json=body)
+    assert replay.status_code==200 and replay.json()["replayed"] is True
+    changed=factored(service,rate=10002,key=uuid4())
+    changed["requestKey"]=body["requestKey"]
+    assert client.post(quote,headers=manager,json=changed).status_code==409
+    customer=token(client,d,d["client_a"])
+    visible=client.get(quote)
+    assert visible.status_code==200
+    assert visible.json()["items"][0]["lines"]==current["lines"]
+    approval={"revisionId":current["id"],"requestKey":str(uuid4()),
+              "decision":"APPROVED"}
+    accepted=client.post(quote+"/decision",headers=customer,json=approval)
+    assert accepted.status_code==201,accepted.text
+    assert accepted.json()["items"][0]["digest"]==current["digest"]
+    manager=token(client,d,d["intake"])
+    assert client.post(quote,headers=manager,json=factored(
+        service,rate=20001,key=uuid4(),version=1)).status_code==409
+
+
+def test_postgres_rejects_forged_factor_fields_and_amount(monkeypatch):
+    d,org,loc,order,service,_,_=scenario()
+    api(monkeypatch)
+    correct={"serviceId":str(service),"code":"TEST-ORDER-SVC",
+        "title":"SYNTHETIC INSPECTION","durationMinutes":45,
+        "pricingMethod":"NORM_HOUR_FACTORED","qualificationCode":"MASTER",
+        "rateMinorPerHour":10001,"quantity":2,"coefficientBps":12500,
+        "discountBps":1000,"amountMinor":16877}
+    with psycopg.connect(DSN) as db:
+        for forged in [
+            {**correct,"amountMinor":16876},
+            {**correct,"quantity":21},
+            {**correct,"coefficientBps":30001},
+            {**correct,"discountBps":2501},
+            {**correct,"durationMinutes":46},
+            {**correct,"serviceId":str(uuid4())},
+            {**correct,"qualificationCode":"UNVERIFIED"},
+        ]:
+            with pytest.raises(psycopg.errors.RaiseException):
+                with db.transaction():
+                    db.execute("""INSERT INTO auto_work_order_estimate_revision
+                    (id,work_order_id,organization_id,location_id,version,actor_id,
+                     request_key,fingerprint,total_minor,service_lines,
+                     diagnostics_snapshot)
+                    VALUES(%s,%s,%s,%s,1,%s,%s,%s,%s,%s::jsonb,'[]'::jsonb)
+                    """,(uuid4(),order,org,loc,d["intake"],uuid4(),"c"*64,
+                          16877,json.dumps([forged])))
+        assert db.execute(
+            "SELECT count(*) FROM auto_work_order_estimate_revision WHERE work_order_id=%s",
+            (order,),
+        ).fetchone()==(0,)
+
+
+def test_competing_factored_publications_are_serialized(monkeypatch):
+    d,org,loc,order,service,_,_=scenario()
+    api(monkeypatch)
+    barrier=Barrier(2)
+    def publish(rate):
+        barrier.wait(timeout=15)
+        try:
+            with psycopg.connect(DSN) as db:
+                state=publish_auto_estimate(
+                    db,d["tokens"][d["intake"]],org,loc,order,
+                    request_key=uuid4(),expected_version=0,
+                    work_rates=[{"serviceId":service,"qualificationCode":"GENERAL",
+                        "rateMinorPerHour":rate,"quantity":2,
+                        "coefficientBps":12500,"discountBps":1000}])
+            return state["items"][0]["totalMinor"]
+        except AutoEstimateConflict:
+            return "CONFLICT"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=list(pool.map(publish,[10001,20001]))
+    assert results.count("CONFLICT")==1
+    assert [x for x in results if isinstance(x,int)][0] in (16877,33752)

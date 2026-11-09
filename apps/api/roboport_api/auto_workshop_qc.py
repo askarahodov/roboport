@@ -169,6 +169,11 @@ def record_work_order_qc(conn, token, org, loc, order, *,
             if tuple(existing)!=(result,finding_code,actor):
                 raise InspectionConflict("KEY_REUSED")
             return {"ok":True,"replayed":True,**_snapshot(conn,order)}
+        if conn.execute("""
+          SELECT 1 FROM auto_work_order_assignment
+          WHERE work_order_id=%s AND mechanic_id=%s AND status='ACCEPTED'
+        """,(order,actor)).fetchone():
+            raise InspectionDenied("SEPARATION_REQUIRED")
         snapshot=_snapshot(conn,order)
         if snapshot["status"]=="QC_PASSED":
             raise InspectionConflict("QC_ALREADY_PASSED")
@@ -300,9 +305,15 @@ def pending_work_order_qc(conn, token, org, loc, limit=20, after_order_id=None):
                 SELECT 1 FROM auto_work_order_labor_entry labor
                 WHERE labor.execution_id=execution.id AND labor.actor_id=%s
               ))
+              AND NOT EXISTS(
+                SELECT 1 FROM auto_work_order_assignment assignment
+                WHERE assignment.work_order_id=w.id
+                  AND assignment.mechanic_id=%s
+                  AND assignment.status='ACCEPTED'
+              )
               AND (%s::uuid IS NULL OR w.id>%s::uuid)
             ORDER BY w.id LIMIT %s
-        """,(actor,org,loc,actor,after_order_id,after_order_id,limit+1)).fetchall()
+        """,(actor,org,loc,actor,actor,after_order_id,after_order_id,limit+1)).fetchall()
         next_id=rows[limit-1][0] if len(rows)>limit else None
         return ([{"orderId":str(order_id),"status":state,
                   "lastFindingCode":finding}
