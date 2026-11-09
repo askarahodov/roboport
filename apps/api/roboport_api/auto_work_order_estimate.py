@@ -11,6 +11,7 @@ from .auto_workshop_qc import _actor_and_order, InspectionDenied
 from .session_lookup import session_subject
 from .auto_org_authority import organization_role_allows
 from .auto_work_order_diagnostics import diagnostic_snapshot
+from .auto_work_tariffs import quote_tariff_snapshot,TariffConflict
 
 
 class AutoEstimateDenied(ValueError):
@@ -80,7 +81,8 @@ def _estimate_state(conn,order):
     revisions=conn.execute("""
        SELECT r.id,r.version,r.total_minor,r.fingerprint,r.service_lines,
               r.created_at,d.decision,d.created_at,
-              q.id,q.reason_code,answer.resolution_code,r.diagnostics_snapshot
+              q.id,q.reason_code,answer.resolution_code,r.diagnostics_snapshot,
+              r.tariff_snapshot
        FROM auto_work_order_estimate_revision r
        LEFT JOIN auto_work_order_estimate_decision d ON d.revision_id=r.id
        LEFT JOIN auto_estimate_clarification_request q ON q.revision_id=r.id
@@ -90,10 +92,10 @@ def _estimate_state(conn,order):
     if len(revisions)>30:
         raise AutoEstimateConflict("LIMIT")
     results=[]
-    for ident,version,total,digest,lines,created,decision,decided_at,question,reason,resolution,diagnostics in revisions:
+    for ident,version,total,digest,lines,created,decision,decided_at,question,reason,resolution,diagnostics,tariffs in revisions:
         results.append({"id":str(ident),"version":version,"totalMinor":total,
                         "currency":"RUB","digest":digest.strip(),
-                        "lines":lines,"diagnostics":diagnostics,
+                        "lines":lines,"diagnostics":diagnostics,"tariffs":tariffs,
                         "decision":decision,
                         "createdAt":created.isoformat(),
                         "decidedAt":decided_at.isoformat() if decided_at else None,
@@ -202,9 +204,13 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
         total=sum(item["amountMinor"] for item in lines)
         if total>10**12:
             raise AutoEstimateDenied("INVALID_INPUT")
+        try:
+            tariffs=quote_tariff_snapshot(conn,org,loc,lines)
+        except TariffConflict:
+            raise AutoEstimateConflict("TARIFF_MISMATCH") from None
         diagnostics=diagnostic_snapshot(conn,order)
         digest=_fingerprint({"order":str(order),"lines":lines,
-                             "diagnostics":diagnostics,"totalMinor":total,
+                             "diagnostics":diagnostics,"tariffs":tariffs,"totalMinor":total,
                              "currency":"RUB"})
         existing=conn.execute("""
           SELECT fingerprint FROM auto_work_order_estimate_revision
@@ -227,11 +233,11 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
                   INSERT INTO auto_work_order_estimate_revision
                   (id,work_order_id,organization_id,location_id,version,actor_id,
                    request_key,fingerprint,total_minor,service_lines,
-                   diagnostics_snapshot)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb)
+                   diagnostics_snapshot,tariff_snapshot)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
                 """,(uuid4(),order,org,loc,expected_version+1,actor,
                       request_key,digest,total,json.dumps(lines),
-                      json.dumps(diagnostics)))
+                      json.dumps(diagnostics),json.dumps(tariffs)))
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoEstimateConflict("VERSION_CONFLICT") from None
