@@ -200,6 +200,83 @@ def test_superseded_pending_extra_does_not_block_finish(monkeypatch,last_decisio
         """,(order,)).fetchone()[0]==1
 
 
+
+def test_fifty_base_plus_twenty_approved_extra_services_can_finish(monkeypatch):
+    """No 50-labor truncation when an approved 20-line supplement brings 70."""
+    from test_pg_auto_work_order_estimate_http import scenario as base_scenario
+    from test_pg_auto_stock_service import grant
+    from roboport_api.auto_order_service_link import add_synthetic_order_service
+    from roboport_api.auto_workshop_qc import submit_work_order_inspection
+    from roboport_api.auto_work_order_estimate import (
+        publish_auto_estimate,decide_auto_estimate,
+    )
+    from roboport_api.auto_work_order_execution import (
+        start_execution,labor_execution,
+    )
+    d,org,loc,order,initial,_,_=base_scenario()
+    http=TestClient(app,base_url="https://127.0.0.1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    base_services=[initial]
+    extras=[]
+    with psycopg.connect(DSN) as db:
+        grant(db,d["manager"],org,loc,"MECHANIC")
+        for number in range(49):
+            svc=uuid4()
+            db.execute("""INSERT INTO auto_service_catalog
+              (id,organization_id,location_id,code,title,duration_minutes)
+              VALUES(%s,%s,%s,%s,%s,15)""",
+              (svc,org,loc,f"BASE-50-{number:02d}",f"BASE SERVICE {number:02d}"))
+            add_synthetic_order_service(db,d["tokens"][d["intake"]],
+                organization_id=org,location_id=loc,work_order_id=order,
+                service_id=svc,synthetic_only=True)
+            base_services.append(svc)
+        for number in range(20):
+            svc=uuid4()
+            db.execute("""INSERT INTO auto_service_catalog
+              (id,organization_id,location_id,code,title,duration_minutes)
+              VALUES(%s,%s,%s,%s,%s,15)""",
+              (svc,org,loc,f"EXTRA-20-{number:02d}",f"EXTRA SERVICE {number:02d}"))
+            extras.append(svc)
+        submit_work_order_inspection(db,d["tokens"][d["intake"]],org,loc,order,
+            odometer_km=9000,fuel_percent=50,tyres_ok=True,lights_ok=True,
+            fluid_leak=False,exterior_code="CLEAR")
+        estimate=publish_auto_estimate(db,d["tokens"][d["intake"]],org,loc,order,
+            request_key=uuid4(),expected_version=0,
+            prices=[{"serviceId":svc,"amountMinor":200} for svc in base_services])
+        revision=UUID(estimate["items"][0]["id"])
+        decide_auto_estimate(db,d["tokens"][d["client_a"]],org,loc,order,
+            revision_id=revision,request_key=uuid4(),decision="APPROVED")
+        extra=publish_extra(db,d["tokens"][d["intake"]],org,loc,order,
+            base_revision_id=revision,request_key=uuid4(),expected_version=0,
+            work_rates=[{"serviceId":svc,"qualificationCode":"MASTER",
+              "rateMinorPerHour":10001,"quantity":1,
+              "coefficientBps":10000,"discountBps":0} for svc in extras])
+        decide_extra(db,d["tokens"][d["client_a"]],org,loc,order,
+            revision_id=UUID(extra["items"][0]["id"]),
+            request_key=uuid4(),decision="APPROVED")
+        started=start_execution(db,d["tokens"][d["intake"]],org,loc,order,uuid4())
+        assert len(started["requiredServices"])==70
+        for svc in base_services+extras[:-1]:
+            labor_execution(db,d["tokens"][d["manager"]],org,loc,order,
+                svc,20,uuid4())
+    # The 70th POST must commit and respond with all 70 labor lines.
+    mechanic=session(http,d,d["manager"])
+    executed=post(http,url(org,loc,order)+"/labor",mechanic,
+                  serviceId=str(extras[-1]),actualMinutes=20)
+    assert executed.status_code==201,executed.text
+    assert len(executed.json()["labor"])==70
+    assert len(executed.json()["requiredServices"])==70
+    finished=post(http,url(org,loc,order)+"/finish",mechanic)
+    assert finished.status_code==201,finished.text
+    assert finished.json()["status"]=="READY_FOR_QC"
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT count(*) FROM auto_work_order_labor_entry labor
+          JOIN auto_work_order_execution e ON e.id=labor.execution_id
+          WHERE e.work_order_id=%s""",(order,)).fetchone()[0]==70
+
+
 def test_postgres_refuses_forged_additional_price_and_missing_consent(monkeypatch):
     d,org,loc,order,base_service,additional,base=setup(monkeypatch)
     good={"serviceId":str(additional),"code":"SYN-ADDITIONAL",
