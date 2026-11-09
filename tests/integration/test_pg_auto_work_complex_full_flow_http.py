@@ -4,6 +4,10 @@ additional consent, authorized labor, material handoff and independent QC.
 from datetime import datetime,timedelta,timezone
 from uuid import uuid4
 import psycopg
+import pytest
+from roboport_api.auto_stock_lot_work_order_return import return_work_order_to_lot
+from roboport_api.auto_stock_service import AutoStockConflict
+from test_pg_auto_work_order_stock import act as work_stock
 
 from test_pg_baseline import DSN
 from test_pg_auto_work_complexes_http import setup,paths,complex_body
@@ -152,8 +156,39 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     for issue_id in issue_ids:
         receipt=post(http,execution+"/materials/receive",mechanic,issueId=issue_id)
         assert receipt.status_code==201,receipt.text
+    # Warehouse return after a mechanic handoff reverses actual stock usage;
+    # the old immutable handoff must not count as retained complex material.
+    with psycopg.connect(DSN) as db:
+        returned=return_work_order_to_lot(
+            db,d["tokens"][d["intake"]],org,loc,order,part_lot,uuid4(),1)
+        assert returned
+        execution_id=db.execute("""
+          SELECT id FROM auto_work_order_execution WHERE work_order_id=%s
+        """,(order,)).fetchone()[0]
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO auto_work_order_execution_finish
+                  (id,execution_id,actor_id,request_key) VALUES(%s,%s,%s,%s)
+                """,(uuid4(),execution_id,d["manager"],uuid4()))
+    assert post(http,execution+"/finish",mechanic).status_code==409
+    # Re-reserve and re-issue the returned unit, then acknowledge again.
+    with psycopg.connect(DSN) as db:
+        work_stock(db,d,org,loc,order,part,"RESERVE",1)
+    warehouse=token(http,d,d["intake"])
+    replacement=post(http,execution+"/materials/issue",warehouse,
+                     lotId=str(part_lot),quantity=1)
+    assert replacement.status_code==201,replacement.text
+    mechanic=token(http,d,d["manager"])
+    accepted_replacement=post(http,execution+"/materials/receive",mechanic,
+                     issueId=replacement.json()["issueId"])
+    assert accepted_replacement.status_code==201,accepted_replacement.text
     finished=post(http,execution+"/finish",mechanic)
     assert finished.status_code==201,finished.text
+    # Completed execution cannot lose a mandatory complex component later.
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(AutoStockConflict):
+            return_work_order_to_lot(
+                db,d["tokens"][d["intake"]],org,loc,order,part_lot,uuid4(),1)
     assert finished.json()["status"]=="READY_FOR_QC"
     assert finished.json()["approvedExtraVersion"]==1
     self_qc=post(http,root+f"/orders/{order}/qc",mechanic,
