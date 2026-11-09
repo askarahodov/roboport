@@ -91,7 +91,7 @@ def test_permission_matrix_defaults():
 def test_audited_http_permission_and_revoke_bundle(monkeypatch):
     """Пакет HTTP проверки RBAC, отзыва grant и аудита решений."""
     from fastapi.testclient import TestClient
-    from roboport_api.main import app
+    from tests.legacy_app import app
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API", "1")
     monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
     user, customer, ticket, session, grant = (uuid4() for _ in range(5))

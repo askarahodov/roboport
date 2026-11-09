@@ -9,7 +9,7 @@ from test_pg_baseline import DSN
 
 def test_estimate_acl_status_latest_and_revoke_bundle(monkeypatch):
     from fastapi.testclient import TestClient
-    from roboport_api.main import app
+    from tests.legacy_app import app
     monkeypatch.setenv('ROBOport_SYNTHETIC_ACCESS_API','1')
     monkeypatch.setenv('ROBOport_DATABASE_URL',DSN)
     client,finance,customer,ticket,estimate1,estimate2=(uuid4() for _ in range(6))

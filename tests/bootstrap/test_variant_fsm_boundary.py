@@ -1,7 +1,7 @@
 """Regression gate for ticket/capability public boundary (synthetic data only)."""
 from uuid import uuid4
 from fastapi.testclient import TestClient
-from roboport_api.main import app
+from tests.legacy_app import app
 
 client=TestClient(app)
 

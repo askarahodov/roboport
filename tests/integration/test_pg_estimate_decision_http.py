@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from roboport_api.main import app
+from tests.legacy_app import app
 from roboport_api.session_tokens import new_token, token_digest
 from test_pg_baseline import DSN
 

@@ -2,8 +2,8 @@
 
 > **Статус:** `legacy`, **не** рабочая инструкция автомобильной СТО.
 > Документы сохранены для аудита, технического обслуживания старой системы
-> и будущей миграции. Никакого физического удаления URL/API/таблиц не
-> выполнено: это отдельный decommission-gate #165.
+> и будущей миграции. Публичные и внутренние robot HTTP пути выведены из рабочего ASGI, но
+> legacy SQL/вложения и production cutover остаются gate #165.
 
 ## Что относится к старому продукту
 
@@ -17,8 +17,8 @@
 | QA старых клиентских и складских функций | [ACCEPTANCE_TESTS.md](../quality/ACCEPTANCE_TESTS.md), [INVENTORY_DEV_GATES.md](../quality/INVENTORY_DEV_GATES.md) | Отрицательные регрессионные проверки до cutover |
 | Старая авторизация/вложения | [SECURITY_MODEL.md](../security/SECURITY_MODEL.md), [LOCAL_AUTH_AND_MINIO.md](../security/LOCAL_AUTH_AND_MINIO.md) | Сохранить до независимого security review |
 
-Публичные robot-страницы `/robots`, `/catalog/*`, `/request-demo`, `/account/claim` исключены из React маршрутизации в автомобильном UI cutover; `/account/robots`, `/account/tickets`, `/account/estimates`, `/account/documents` больше не являются страницами клиентского кабинета; `/staff` открывает автомобильные рабочие разделы. Неиспользуемые React-компоненты и клиентский SDK старой robot-системы удалены из исходников в рамках frontend source cleanup (#165): `PublicCatalog`, `GuestIntake`, `CustomerTickets`, `CustomerSummary`, `EstimateActions`, `StaffGuestClaims`, `TicketWorkflow`, `StaffOperations`, `StaffAudit`, `catalogClient`. Старые UI-маршруты остаются отключены. Регрессионный guard — `tests/bootstrap/test_retired_robot_web_sources.py`: запрещает возвращение удалённых компонентов и вызов retired robot API из браузерного исходного кода. Исторические версии доступны в Git, но их нельзя включать в сборку. Legacy REST, OpenAPI и SQL ещё существуют
-в коде. Это **не** означает, что они являются частью
+Публичные robot-страницы `/robots`, `/catalog/*`, `/request-demo`, `/account/claim` исключены из React маршрутизации в автомобильном UI cutover; `/account/robots`, `/account/tickets`, `/account/estimates`, `/account/documents` больше не являются страницами клиентского кабинета; `/staff` открывает автомобильные рабочие разделы. Неиспользуемые React-компоненты и клиентский SDK старой robot-системы удалены из исходников в рамках frontend source cleanup (#165): `PublicCatalog`, `GuestIntake`, `CustomerTickets`, `CustomerSummary`, `EstimateActions`, `StaffGuestClaims`, `TicketWorkflow`, `StaffOperations`, `StaffAudit`, `catalogClient`. Старые UI-маршруты остаются отключены. Регрессионный guard — `tests/bootstrap/test_retired_robot_web_sources.py`: запрещает возвращение удалённых компонентов и вызов retired robot API из браузерного исходного кода. Исторические версии доступны в Git, но их нельзя включать в сборку. Legacy HTTP существует лишь в изолированном тестовом `tests/legacy_app.py`,
+а исторические OpenAPI и SQL ещё остаются до decommission-gate. Это **не** означает, что они являются частью
 новой автомобильной информационной системы. Не переименовывать сущность
 `service_ticket` в автомобильный `WorkOrder` без новой модели прав и
 согласий; не переносить историю по совпадению VIN. Робототехнические
@@ -34,11 +34,11 @@
 
 ## Граница UI cutover (09.11.2026)
 
-Автомобильный homepage, customer overview и staff workspace не вызывают старые robot API/queue; в E2E проверяются закрытые URL, роль, запрет старых вызовов и адаптивность 390/1280. **Это не физический backend decommission:** публичный draft `contracts/openapi.yaml` и legacy методы `apps/api/roboport_api/main.py` всё ещё требуют удаления/замены с миграцией тестов/контрактов. До независимой проверки не утверждаем, что все frontend source-файлы очищены от слова «робот».
+Автомобильный homepage, customer overview и staff workspace не вызывают старые robot API/queue; в E2E проверяются закрытые URL, роль, запрет старых вызовов и адаптивность 390/1280. **Это не физический backend decommission:** исторический draft `contracts/openapi.yaml` и legacy SQL ещё требуют миграции/архивирования; устаревшие HTTP методы уже вынесены из `main.py` в test-only harness. До независимой проверки не утверждаем, что все frontend source-файлы очищены от слова «робот».
 
 ## Выключение публичного robot API (после UI cutover)
 
-На текущем runtime FastAPI намеренно **не регистрируются** `GET /api/v1/catalog/brands`, `GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/{modelId}`. Запросы любых методов к этим адресам отвечают 404, а `/openapi.json` не включает robot catalog; соответствующая негативная bootstrap-проверка — `tests/bootstrap/test_public_catalog.py`. Текущий `/api/v1/meta` возвращает `Airmatik`. Это не означает удаления исторического `contracts/openapi.yaml`: draft контракт ещё содержит старый домен и должен быть либо заменён новой версией после contract review, либо окончательно архивирован, до того он **не** публичный контракт работающего автомобильного API. Внутренние opt-in legacy `/api/v1/dev/tickets`, `/api/v1/dev/catalog`, архив и robot SQL ещё существуют только для контролируемого вывода.
+На текущем runtime FastAPI намеренно **не регистрируются** `GET /api/v1/catalog/brands`, `GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/{modelId}`. Запросы любых методов к этим адресам отвечают 404, а `/openapi.json` не включает robot catalog; соответствующая негативная bootstrap-проверка — `tests/bootstrap/test_public_catalog.py`. Текущий `/api/v1/meta` возвращает `Airmatik`. Это не означает удаления исторического `contracts/openapi.yaml`: draft контракт ещё содержит старый домен и должен быть либо заменён новой версией после contract review, либо окончательно архивирован, до того он **не** публичный контракт работающего автомобильного API. Внутренние legacy `/api/v1/dev/tickets`, `/api/v1/dev/catalog`, `/api/v1/dev/guest-claims`, старые staff queue/audit больше не регистрируются в рабочем ASGI. Для контрольной регрессии сохранён только тестовый архив.
 
 ## Что ещё нужно для настоящего вывода из эксплуатации
 
@@ -60,3 +60,7 @@
 [автомобильную дорожную карту](FEATURE_ROADMAP.md).
 Актуальный приоритет деактивации/архивирования — [#165](https://github.com/askarahodov/roboport/issues/165),
 документы и QA — [#173](https://github.com/askarahodov/roboport/issues/173).
+
+## Финальный план вывода
+
+См. [план полного вывода robot-domain](LEGACY_EXIT_PLAN.md): runtime и contract gates, проверка архивов, restore, безопасность, approvals #119 и отдельный SQL decommission. Текущий cutover **не** разрешает удаление исторических данных.

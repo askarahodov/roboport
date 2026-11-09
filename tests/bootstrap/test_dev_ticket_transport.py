@@ -1,7 +1,7 @@
 """Every opt-in ticket route requires HTTPS on loopback, ignoring forwarded headers."""
 import pytest
 from fastapi.testclient import TestClient
-from roboport_api.main import app
+from tests.legacy_app import app
 
 ROUTES=(
     "/api/v1/dev/tickets",
