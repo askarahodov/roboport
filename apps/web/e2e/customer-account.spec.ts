@@ -90,7 +90,7 @@ test('автомобильный обзор не загружает робото
   });
   await page.goto('/account');
   await expect(page.getByRole('link', {name:/Мои автомобили/})).toBeVisible();
-  await expect(page.getByRole('link', {name:/Мои заказ-наряды/})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Обзор автомобильного кабинета'}).getByRole('link', {name:'Мои заказ-наряды',exact:true})).toBeVisible();
   expect(legacyCalls).toBe(0);
 });
 
