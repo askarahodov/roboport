@@ -43,23 +43,34 @@ def test_runtime_route_registration_contains_zero_retired_robot_paths():
     assert not [path for path in paths if _retired(path)]
     assert "/health/live" in paths
     assert "/api/v1/meta" in paths
-    # A clean ASGI boot is distinct from the historical test application's
-    # module collection; check positive registration in an isolated interpreter.
+    # This FastAPI/ASGI stack can retain lazy _IncludedRouter objects in
+    # app.routes, so direct .path inspection cannot prove an imported router
+    # is actually reachable. Exercise HTTP in an independent Python process.
     import json
     import subprocess
     import sys
     check = subprocess.run(
         [sys.executable, "-c",
-         "import json; import roboport_api.main as m; "
-         "print(json.dumps({'mounted':[r.path for r in m.app.routes if hasattr(r, 'path')], "
-         "'vehicle':[r.path for r in m.auto_vehicle_router.routes], "
-         "'module_file':m.__file__}))"],
+         "import json, os; "
+         "os.environ['ROBOport_SYNTHETIC_AUTO_API']='1'; "
+         "os.environ.pop('ROBOport_DATABASE_URL',None); "
+         "from fastapi.testclient import TestClient; "
+         "import roboport_api.main as m; "
+         "client=TestClient(m.app,base_url='https://127.0.0.1'); "
+         "car=client.get('/api/v1/dev/auto/vehicles'); "
+         "old=client.get('/api/v1/dev/tickets'); "
+         "print(json.dumps({'auto_status':car.status_code, "
+         "'auto_code':car.json().get('code'), "
+         "'legacy_status':old.status_code, "
+         "'vehicle_defined':any(r.path=='/api/v1/dev/auto/vehicles' "
+         "for r in m.auto_vehicle_router.routes)}))"],
         capture_output=True, text=True, check=True, timeout=30,
     )
     report = json.loads(check.stdout)
-    fresh_paths = report["mounted"]
-    assert any(path.startswith("/api/v1/dev/auto/") for path in fresh_paths), report
-    assert not [path for path in fresh_paths if _retired(path)]
+    assert report["vehicle_defined"], report
+    assert report["auto_status"] == 403, report  # Real automotive route, no DSN.
+    assert report["auto_code"] == "FORBIDDEN", report
+    assert report["legacy_status"] == 404, report
 
 
 def test_live_openapi_contains_no_legacy_routes():
