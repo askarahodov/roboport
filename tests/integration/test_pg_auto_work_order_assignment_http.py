@@ -49,6 +49,7 @@ def test_shift_aware_assignment_accept_replay_and_authority(monkeypatch):
     # A second active assignment to the same order is never allowed.
     other_offer={**body,"requestKey":str(uuid4())}
     assert client.post(path,headers=manager,json=other_offer).status_code==409
+    auth(client,d,d["client_a"])
     queue=client.get(root+"/assignments")
     assert queue.status_code==403
     mechanic=auth(client,d,d["manager"])
