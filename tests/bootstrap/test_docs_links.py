@@ -78,9 +78,9 @@ def test_docsify_sidebar_absolute_routes_use_docs_root(tmp_path):
 def test_docsify_sidebar_rejects_duplicate_destination(tmp_path):
     docs = tmp_path / "docs"
     docs.mkdir()
-    (docs / "README.md").write_text("# Главная\\n", encoding="utf-8")
+    (docs / "README.md").write_text("# Главная\n", encoding="utf-8")
     (docs / "_sidebar.md").write_text(
-        "- [Первый](/)\\n- [Повтор](/)\\n", encoding="utf-8"
+        "- [Первый](/)\n- [Повтор](/)\n", encoding="utf-8"
     )
     problems = checker.check_links(tmp_path)
     assert len(problems) == 1
@@ -91,8 +91,8 @@ def test_docsify_sidebar_rejects_duplicate_destination(tmp_path):
 def test_docsify_sidebar_allows_different_anchors(tmp_path):
     docs = tmp_path / "docs"
     docs.mkdir()
-    (docs / "README.md").write_text("# Один\\n# Два\\n", encoding="utf-8")
+    (docs / "README.md").write_text("# Один\n# Два\n", encoding="utf-8")
     (docs / "_sidebar.md").write_text(
-        "- [Первый](/#один)\\n- [Второй](/#два)\\n", encoding="utf-8"
+        "- [Первый](/#один)\n- [Второй](/#два)\n", encoding="utf-8"
     )
     assert checker.check_links(tmp_path) == []
