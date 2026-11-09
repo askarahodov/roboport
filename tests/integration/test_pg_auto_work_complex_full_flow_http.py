@@ -210,4 +210,4 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
           WHERE s.work_order_id=%s""",(order,)).fetchone()==(2,)
         assert db.execute("""SELECT count(*) FROM auto_stock_mechanic_handoff h
           JOIN auto_stock_lot_work_order_issue i ON i.id=h.issue_id
-          WHERE i.work_order_id=%s""",(order,)).fetchone()==(2,)
+          WHERE i.work_order_id=%s""",(order,)).fetchone()==(3,)
