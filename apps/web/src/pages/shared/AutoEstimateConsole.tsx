@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link,useSearchParams } from 'react-router-dom';
+import { AutoAdditionalWork } from './AutoAdditionalWork';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Qualification='GENERAL'|'DIAGNOSTIC'|'MASTER';
@@ -89,6 +90,7 @@ function parseServices(raw:unknown):Service[]{
 
 export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   const [query]=useSearchParams();
+  const [extraOpen,setExtraOpen]=React.useState(false);
   const [org,setOrg]=React.useState(query.get('org')??'');
   const [loc,setLoc]=React.useState(query.get('loc')??'');
   const [order,setOrder]=React.useState(query.get('order')??'');
@@ -117,6 +119,7 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   React.useEffect(()=>{
     setStatus(valid?'loading':'idle');setData(null);setServices([]);
     setScopeLoaded('');setMessage('');setPending(null);setPrices({});
+    setExtraOpen(false);
     setRates({});setQualifications({});
     setQuantities({});setCoefficients({});setDiscounts({});
     if(!valid)return;
@@ -283,6 +286,15 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
               }}>Ответить: подготовить новую версию</button>
             </div>}
         </li>)}</ol>}
+      {latest?.decision==='APPROVED'&&<section aria-label="Новые работы после сметы">
+        <button type="button" aria-expanded={extraOpen}
+          onClick={()=>setExtraOpen(open=>!open)}>
+          {extraOpen?'Скрыть дополнительные работы':'Открыть дополнительные работы'}
+        </button>
+        {extraOpen&&<AutoAdditionalWork role={role} baseRevisionId={latest.id}
+          baseServiceIds={latest.lines.map(line=>line.serviceId)}
+          org={org.trim()} loc={loc.trim()} order={order.trim()}/>}
+      </section>}
       {role==='manager'&&services.length>0&&!data.items.some(item=>item.decision!==null)&&
         <form onSubmit={event=>{
           event.preventDefault();if(!canPublish)return;
