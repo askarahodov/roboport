@@ -5,7 +5,7 @@ test('главная, навигация, кодовые блоки и поис�
   test.setTimeout(90_000);
   await page.goto('/docs/');
   await expect(page.locator('.markdown-section h1')).toContainText(
-    'База знаний Airmatik Pro Service',
+    'База знаний БоксРитм',
     { timeout: 25_000 },
   );
   await expect(page.locator('.sidebar')).toBeVisible();
