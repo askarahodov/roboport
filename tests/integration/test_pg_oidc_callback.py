@@ -66,7 +66,7 @@ def test_oidc_callback_issues_only_prelinked_session(monkeypatch):
     assert http.get("/api/v1/auth/me").json()["subjectId"]==str(user)
     # No implicit customer ownership from a valid OIDC subject.
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
-    assert http.get("/api/v1/dev/account/tickets").json()["items"]==[]
+    assert http.get("/api/v1/dev/account/tickets").status_code == 404
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE user_session SET revoked_at=now() WHERE user_id=%s",(user,))
     assert http.get("/api/v1/auth/me").status_code==401
