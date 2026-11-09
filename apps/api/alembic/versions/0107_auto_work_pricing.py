@@ -64,7 +64,7 @@ def upgrade():
           OR jsonb_typeof(line->'durationMinutes') IS DISTINCT FROM 'number'
           OR COALESCE(line->>'durationMinutes','') !~ '^[0-9]{1,4}$'
           OR (SELECT count(*) FROM jsonb_object_keys(line))<>
-               CASE WHEN factor_mode THEN 11 ELSE 8 END
+               (CASE WHEN factor_mode THEN 11 ELSE 8 END)
         THEN RAISE EXCEPTION 'invalid priced line'; END IF;
 
         rate:=(line->>'rateMinorPerHour')::bigint;
