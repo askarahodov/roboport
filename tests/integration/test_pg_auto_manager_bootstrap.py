@@ -124,7 +124,7 @@ def test_two_admins_issue_no_rights_before_approval_and_exact_scopes(monkeypatch
     monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
     http = TestClient(app, base_url="https://127.0.0.1")
     http.cookies.set("rp_session", tokens[target])
-    assert http.get("/api/v1/dev/guest-claims/review-queue").status_code == 403
+    assert http.get("/api/v1/dev/guest-claims/review-queue").status_code == 404
     assert http.post(
         "/api/v1/dev/guest-claims/" + str(uuid4()) + "/assign-review",
         headers={"Origin": "https://127.0.0.1"},
