@@ -43,7 +43,20 @@ def test_runtime_route_registration_contains_zero_retired_robot_paths():
     assert not [path for path in paths if _retired(path)]
     assert "/health/live" in paths
     assert "/api/v1/meta" in paths
-    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), paths
+    # A clean ASGI boot is distinct from the historical test application's
+    # module collection; check positive registration in an isolated interpreter.
+    import json
+    import subprocess
+    import sys
+    check = subprocess.run(
+        [sys.executable, "-c",
+         "import json; from roboport_api.main import app; "
+         "print(json.dumps([r.path for r in app.routes if hasattr(r, 'path')]))"],
+        capture_output=True, text=True, check=True, timeout=30,
+    )
+    fresh_paths = json.loads(check.stdout)
+    assert any(path.startswith("/api/v1/dev/auto/") for path in fresh_paths), fresh_paths
+    assert not [path for path in fresh_paths if _retired(path)]
 
 
 def test_live_openapi_contains_no_legacy_routes():
