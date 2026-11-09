@@ -107,3 +107,23 @@ def test_docs_disclose_approved_brand_transition_without_claiming_ui_cutover():
         assert "#110" in doc
         assert "#121" in doc
         assert "ребрендинг" in doc.lower()
+
+
+def test_navigator_has_clickable_and_existing_e2e_pg17_source_links():
+    """Issue #173 requires source/test links, not bare filenames in code spans."""
+    import re
+
+    navigator = (ROOT / "docs/guides/ROLE_NAVIGATOR.md").read_text(encoding="utf-8")
+    links = re.findall(
+        r"\\[([^\\]\\n]+\\.(?:spec\\.ts|py))\\]\\("
+        r"https://github\\.com/askarahodov/roboport/blob/main/"
+        r"(apps/web/e2e/[^)]+|tests/integration/[^)]+)\\)",
+        navigator,
+    )
+    assert len(links) >= 22, "Every referenced browser/PG17 test needs a clickable source link"
+    for name, relative in links:
+        assert relative.endswith("/" + name), (name, relative)
+        assert (ROOT / relative).is_file(), f"Broken test reference: {relative}"
+    assert not re.search(r"`[^\\n`]+\\.(?:spec\\.ts|py)`", navigator), (
+        "Unlinked test filename in role navigator"
+    )
