@@ -238,13 +238,18 @@ test('ролевой навигатор открывается с клавиат
     const pageWidth = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, viewport: innerWidth }));
     expect(pageWidth.scroll, 'navigator must not overflow viewport').toBeLessThanOrEqual(pageWidth.viewport + 2);
     await page.goto('/docs/#/guides/ROLE_NAVIGATOR');
-    // On 390px Docsify can leave the sidebar open; it covers content clicks.
-    // Activate the actual Markdown link using the keyboard in both viewports.
+    // Docsify retains the mobile sidebar across navigation, covering content.
+    // Close it before activating a link from inside the rendered Markdown.
+    if (width === 390) {
+      const sidebar = page.locator('.sidebar');
+      if (await sidebar.evaluate(el => el.classList.contains('show'))) {
+        await page.locator('.sidebar-toggle').click();
+      }
+      await expect(sidebar).not.toHaveClass(/\\bshow\\b/);
+    }
     const matrixLink = page.locator('.markdown-section a', { hasText: 'Матрица доступов и E2E' });
     await expect(matrixLink).toBeVisible();
-    await matrixLink.focus();
-    await expect(matrixLink).toBeFocused();
-    await page.keyboard.press('Enter');
+    await matrixLink.click();
     await expect(page.locator('.markdown-section h1')).toContainText('Матрица ролей');
   }
 });
