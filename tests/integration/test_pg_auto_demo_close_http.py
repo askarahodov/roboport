@@ -149,6 +149,26 @@ def test_complete_demo_reconcile_reserve_seal_client_view_and_immutability(monke
                   ) forged
                   WHERE doc.work_order_id=%s
                 """,(order,))
+    # Неизвестный ключ с новым честным SHA также не принимается.
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(psycopg.errors.RaiseException,
+                           match="invalid synthetic preview metadata"):
+            with db.transaction():
+                db.execute("""
+                  INSERT INTO auto_order_demo_handover_preview
+                    (id,work_order_id,revision_id,actor_id,request_key,
+                     fingerprint,snapshot)
+                  SELECT gen_random_uuid(),work_order_id,revision_id,
+                         actor_id,gen_random_uuid(),
+                         encode(sha256(convert_to(forged.payload::text,'UTF8')),'hex'),
+                         forged.payload
+                  FROM auto_order_demo_handover_preview doc
+                  CROSS JOIN LATERAL (
+                    SELECT (doc.snapshot ||
+                         '{"handoverCompleted":true}'::jsonb) AS payload
+                  ) forged
+                  WHERE doc.work_order_id=%s
+                """,(order,))
     same=post(http,base+"/seal-preview",manager,seal_key)
     assert same.status_code==200 and same.json()["replayed"] is True
     assert post(http,base+"/seal-preview",manager).status_code==409
