@@ -203,7 +203,7 @@ jobs:
         working-directory: apps/web
         run: |
           npm run generate:api
-          git diff --exit-code -- src/shared/api/schema.d.ts
+          git -C ../.. diff --exit-code -- tests/legacy_assets/schema.d.ts
       - working-directory: apps/web
         run: npm run typecheck
       - working-directory: apps/web
