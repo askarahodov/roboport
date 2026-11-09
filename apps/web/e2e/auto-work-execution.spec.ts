@@ -148,3 +148,38 @@ test('lost labor response is replayed with original payload after execution adva
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
 });
+
+
+test('execution renders all 70 approved base plus additional labor entries at 390 and 1280',async({page})=>{
+  const ids=Array.from({length:70},(_,i)=>
+    `44444444-4444-4444-8444-${String(i+1).padStart(12,'0')}`);
+  const requiredServices=ids.map((serviceId,i)=>({
+    serviceId,code:`WORK-${String(i+1).padStart(3,'0')}`,
+    title:`SYNTHETIC LABOR ${i+1}`,durationMinutes:15,
+  }));
+  const labor=ids.map(serviceId=>({
+    serviceId,actualMinutes:20,createdAt:'2030-01-01T10:00:00Z',
+  }));
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}',
+  }));
+  await page.route(root,route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify({
+      status:'IN_PROGRESS',approvedVersion:1,approvedTotalMinor:14000,
+      approvedExtraVersion:1,approvedExtraTotalMinor:4000,additionalConsentPending:false,
+      requiredServices,labor,materials:[],qcStatus:'PENDING_QC',
+      executionId:order,syntheticOnly:true,releaseAllowed:false,
+    }),
+  }));
+  for(const width of [390,1280]){
+    await page.setViewportSize({width,height:844});
+    await page.goto('/staff/auto-execution');
+    await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+    await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+    await page.getByRole('textbox',{name:'UUID заказ-наряда'}).fill(order);
+    await expect(page.getByRole('heading',{name:'Этап: IN_PROGRESS'})).toBeVisible();
+    await expect(page.getByText('WORK-070',{exact:false})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Завершить выполнение (MECHANIC)'})).toBeEnabled();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+});
