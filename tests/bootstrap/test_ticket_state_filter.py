@@ -1,6 +1,6 @@
 """Reject unsupported ticket status filters before opening a database connection."""
 from fastapi.testclient import TestClient
-from roboport_api.main import app
+from tests.legacy_runtime import app
 from roboport_api.ticket_read import TICKET_STATES
 from pathlib import Path
 import ast
