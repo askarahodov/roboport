@@ -311,7 +311,8 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
         </li>)}</ol>}
       {last&&role==='staff'&&<p>Для следующей версии можно зафиксировать изменения.
         Старый акт №{last.version} останется неизменным.</p>}
-      {printAct&&<section aria-label="Контрольный предпросмотр одной версии">
+      {printAct&&<section className="intake-act-print-preview"
+        aria-label="Контрольный предпросмотр одной версии">
         <h2>Контрольный предпросмотр</h2>
         <label>Версия для печати <select aria-label="Версия для печати"
           value={printAct.id} onChange={e=>setPrintActId(e.target.value)}>
