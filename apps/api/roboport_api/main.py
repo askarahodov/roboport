@@ -85,6 +85,10 @@ async def request_id_middleware(request: Request, call_next):
     # All synthetic dev endpoints must fail before DB/storage access on unsafe transports.
     # Apply to the exact /dev root and slash-delimited descendants, not lookalike paths.
     path = request.url.path
+    # Old robot catalog is retired even for direct HTTP callers and methods.
+    # Canonical 404 does not reveal the old entity identity or route table.
+    if path == "/api/v1/catalog" or path.startswith("/api/v1/catalog/"):
+        return not_found(request)
     # Never infer a trusted socket/TLS peer from caller-controlled proxy headers.
     # There is no approved reverse-proxy ingress for synthetic auto yet.
     # Reject these before API/database activity, even when ASGI scope already
