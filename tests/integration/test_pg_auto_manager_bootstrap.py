@@ -128,7 +128,7 @@ def test_two_admins_issue_no_rights_before_approval_and_exact_scopes(monkeypatch
     assert http.post(
         "/api/v1/dev/guest-claims/" + str(uuid4()) + "/assign-review",
         headers={"Origin": "https://127.0.0.1"},
-    ).status_code == 403
+    ).status_code == 404  # Retired guest-claims endpoint: no legacy fallback at all.
     with pytest.raises(ManagerBootstrapRejected):
         _approve(b,tokens,req)
     with pytest.raises(ManagerBootstrapRejected):
