@@ -43,7 +43,10 @@ def test_runtime_route_registration_contains_zero_retired_robot_paths():
     assert not [path for path in paths if _retired(path)]
     assert "/health/live" in paths
     assert "/api/v1/meta" in paths
-    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), "ACTUAL ROUTES:\n" + "\n".join(paths)
+    from roboport_api.auto_vehicle_http import router as vehicle_router
+    from roboport_api.auto_appointment_http import router as appointment_router
+    from roboport_api.auth_http import router as auth_router
+    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), ("SOURCE COUNTS " + str([len(vehicle_router.routes), len(appointment_router.routes), len(auth_router.routes)]) + " ACTUAL ROUTES:\n" + "\n".join(paths))
 
 
 def test_live_openapi_contains_no_legacy_routes():
