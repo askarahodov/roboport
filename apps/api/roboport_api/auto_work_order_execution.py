@@ -203,6 +203,19 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
                 **_state(conn,order)}
 
 
+def _require_assigned_mechanic(conn,order,actor):
+    """An accepted offer owns execution handoff/finish, not just labor."""
+    row=conn.execute("""
+      SELECT mechanic_id,status FROM auto_work_order_assignment
+      WHERE work_order_id=%s ORDER BY created_at DESC,id DESC LIMIT 1
+    """,(order,)).fetchone()
+    if row is not None:
+        if row[1]!="ACCEPTED":
+            raise ExecutionConflict("ASSIGNMENT_NOT_ACCEPTED")
+        if row[0]!=actor:
+            raise ExecutionDenied("FORBIDDEN")
+
+
 def receive_material(conn,token,org,loc,order,issue_id,request_key):
     if type(issue_id) is not UUID or type(request_key) is not UUID:
         raise ExecutionDenied("INVALID_INPUT")
@@ -225,6 +238,7 @@ def receive_material(conn,token,org,loc,order,issue_id,request_key):
                     **_state(conn,order)}
         if _state(conn,order)["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
+        _require_assigned_mechanic(conn,order,actor)
         try:
             receipt=acknowledge_mechanic_handoff(conn,token,org,loc,issue_id,request_key)
         except AutoStockDenied:
@@ -256,6 +270,7 @@ def finish_execution(conn,token,org,loc,order,request_key):
             return {"ok":True,"replayed":True,**state}
         if state["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
+        _require_assigned_mechanic(conn,order,actor)
         if state["additionalConsentPending"]:
             raise ExecutionConflict("ADDITIONAL_CONSENT_PENDING")
         if {v["serviceId"] for v in state["labor"]}!={v["serviceId"] for v in state["requiredServices"]}:
