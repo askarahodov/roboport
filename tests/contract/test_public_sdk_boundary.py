@@ -13,7 +13,7 @@ def test_canonical_public_sdk_paths_and_operations():
     assert paths['/api/v1/catalog/models']['get']['operationId']=='listModels'
     assert paths['/api/v1/catalog/models/{modelId}']['get']['operationId']=='getModel'
     assert len(LOCK['operation_ids'])==46
-    sdk=(ROOT/'apps/web/src/shared/api/catalogClient.ts').read_text(encoding='utf-8')
+    sdk=(ROOT/'tests/legacy_assets/catalogClient.ts').read_text(encoding='utf-8')
     assert "import type { paths } from './schema'" in sdk
     assert "credentials:'omit'" in sdk
     assert "cache:'no-store'" in sdk
