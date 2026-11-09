@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="ROBOport development API", version="0.1.0")
+app = FastAPI(title="Airmatik automotive development API", version="0.1.0")
 
 from .auth_http import router as synthetic_auth_router
 app.include_router(synthetic_auth_router)
@@ -164,22 +164,13 @@ def ready():
 
 @app.get("/api/v1/meta")
 def meta():
-    return {"service": "ROBOport", "environment": "development"}
+    return {"service": "Airmatik", "environment": "development"}
 
 
-@app.get("/api/v1/catalog/brands")
-def brands():
-    return {"items": []}
-
-
-@app.get("/api/v1/catalog/models")
-def models():
-    return {"items": []}
-
-
-@app.get("/api/v1/catalog/models/{modelId}")
-def model(modelId: str, request: Request):
-    return not_found(request)
+# Legacy robot brand/model catalog was deliberately retired from the live app
+# after automotive UI cutover #165. The archived draft contract still exists
+# for migration review; it is NOT a registered or published runtime route.
+# Avoid a compatibility redirect: robot model identifiers are not vehicle IDs.
 
 
 @app.get("/api/v1/dev/tickets/keyset", include_in_schema=False)
