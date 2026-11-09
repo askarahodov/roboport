@@ -174,11 +174,65 @@ def upgrade():
       BEFORE UPDATE OR DELETE ON auto_work_order_assignment_event
       FOR EACH ROW EXECUTE FUNCTION immutable_auto_stock_event()
     """)
+    # Enforce ownership in PG17 even when a caller bypasses the HTTP layer.
+    op.execute("""
+      CREATE FUNCTION guard_auto_assignment_execution()
+      RETURNS trigger LANGUAGE plpgsql AS $f$
+      DECLARE target_order uuid;
+      DECLARE performer uuid;
+      BEGIN
+        IF TG_TABLE_NAME='auto_work_order_labor_entry' THEN
+          SELECT work_order_id INTO target_order FROM auto_work_order_execution
+            WHERE id=NEW.execution_id;
+          performer:=NEW.actor_id;
+        ELSIF TG_TABLE_NAME='auto_work_order_execution_finish' THEN
+          SELECT work_order_id INTO target_order FROM auto_work_order_execution
+            WHERE id=NEW.execution_id;
+          performer:=NEW.actor_id;
+        ELSIF TG_TABLE_NAME='auto_stock_mechanic_handoff' THEN
+          SELECT work_order_id INTO target_order FROM auto_stock_lot_work_order_issue
+            WHERE id=NEW.issue_id;
+          performer:=NEW.received_by;
+        ELSIF TG_TABLE_NAME='auto_work_order_qc_event' THEN
+          target_order:=NEW.work_order_id;
+          performer:=NEW.actor_id;
+          IF EXISTS (
+            SELECT 1 FROM auto_work_order_assignment a
+            WHERE a.work_order_id=target_order AND a.mechanic_id=performer
+              AND a.status='ACCEPTED'
+          ) THEN
+            RAISE EXCEPTION 'assigned executor cannot perform independent QC';
+          END IF;
+          RETURN NEW;
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM auto_work_order_assignment a
+          WHERE a.work_order_id=target_order
+            AND (a.status<>'ACCEPTED' OR a.mechanic_id<>performer)
+        ) THEN
+          RAISE EXCEPTION 'accepted mechanic assignment required';
+        END IF;
+        RETURN NEW;
+      END $f$
+    """)
+    for table in ("auto_work_order_labor_entry",
+                  "auto_stock_mechanic_handoff",
+                  "auto_work_order_execution_finish",
+                  "auto_work_order_qc_event"):
+        op.execute(f"""CREATE TRIGGER {table}_assignment_guard
+          BEFORE INSERT ON {table} FOR EACH ROW
+          EXECUTE FUNCTION guard_auto_assignment_execution()""")
     op.execute("REVOKE ALL ON auto_work_order_assignment FROM PUBLIC")
     op.execute("REVOKE ALL ON auto_work_order_assignment_event FROM PUBLIC")
 
 
 def downgrade():
+    for table in ("auto_work_order_qc_event",
+                  "auto_work_order_execution_finish",
+                  "auto_stock_mechanic_handoff",
+                  "auto_work_order_labor_entry"):
+        op.execute(f"DROP TRIGGER {table}_assignment_guard ON {table}")
+    op.execute("DROP FUNCTION guard_auto_assignment_execution()")
     op.execute("DROP TABLE auto_work_order_assignment_event")
     op.execute("DROP TABLE auto_work_order_assignment")
     op.execute("DROP FUNCTION guard_auto_work_order_assignment_event()")
