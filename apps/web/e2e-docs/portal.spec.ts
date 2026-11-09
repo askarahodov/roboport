@@ -245,7 +245,7 @@ test('ролевой навигатор открывается с клавиат
       if (await sidebar.evaluate(el => el.classList.contains('show'))) {
         await page.locator('.sidebar-toggle').click();
       }
-      await expect(sidebar).not.toHaveClass(/\\bshow\\b/);
+      await expect(sidebar).not.toHaveClass(/show/);
     }
     const matrixLink = page.locator('.markdown-section a', { hasText: 'Матрица доступов и E2E' });
     await expect(matrixLink).toBeVisible();
