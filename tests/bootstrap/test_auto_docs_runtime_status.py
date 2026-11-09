@@ -79,3 +79,19 @@ def test_additional_documented_staff_routes_match_live_react_router():
         assert f'`{route}`' in navigator, route
     assert "только" in navigator.lower()
     assert "releaseAllowed: false" in navigator
+
+
+def test_all_concrete_automotive_react_routes_have_navigator_entries():
+    """Avoid a hand-maintained allowlist silently missing future live screens."""
+    import re
+
+    router = (ROOT / "apps/web/src/main.tsx").read_text(encoding="utf-8")
+    account = (ROOT / "apps/web/src/pages/customer/CustomerAccount.tsx").read_text(encoding="utf-8")
+    navigator = (ROOT / "docs/guides/ROLE_NAVIGATOR.md").read_text(encoding="utf-8")
+    explicit = set(re.findall(r'<Route path="([^"]+)"', router))
+    nested = set(re.findall(r"path: '(/account[^']*)'", account))
+    concrete = (explicit | nested) - {"*", "/account/*", "/staff/*"}
+    assert len(concrete) >= 25, "Route inventory unexpectedly shrank: inspect router"
+    for route in sorted(concrete):
+        assert f"`{route}`" in navigator, f"Undocumented React route: {route}"
+    assert "current-dev" in navigator and "planned" in navigator
