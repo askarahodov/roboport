@@ -118,12 +118,12 @@ def upgrade():
       CREATE OR REPLACE FUNCTION guard_auto_demo_preview()
       RETURNS trigger LANGUAGE plpgsql AS $f$
       DECLARE base_total bigint; full_total bigint; paid bigint; refunded bigint;
-      DECLARE base_digest text; base_version integer; extra record;
+      DECLARE base_digest text; base_version integer; base_lines jsonb; extra record;
       DECLARE extra_id uuid; extra_version integer; extra_digest text;
-      DECLARE extra_amount bigint:=0;
+      DECLARE extra_amount bigint:=0; extra_lines jsonb:='[]'::jsonb;
       BEGIN
-        SELECT r.total_minor,r.fingerprint,r.version
-        INTO base_total,base_digest,base_version
+        SELECT r.total_minor,r.fingerprint,r.version,r.service_lines
+        INTO base_total,base_digest,base_version,base_lines
         FROM auto_work_order_estimate_revision r
         JOIN auto_work_order_estimate_decision d
           ON d.revision_id=r.id AND d.decision='APPROVED'
@@ -165,7 +165,7 @@ def upgrade():
         IF NOT FOUND THEN RAISE EXCEPTION 'QC and live scope required'; END IF;
         full_total:=auto_demo_billable_total(NEW.work_order_id,NEW.revision_id);
         IF full_total IS NULL THEN RAISE EXCEPTION 'extra consent pending'; END IF;
-        SELECT x.id,x.version,x.fingerprint,x.total_minor,d.decision
+        SELECT x.id,x.version,x.fingerprint,x.total_minor,x.service_lines,d.decision
           INTO extra
         FROM auto_work_order_extra_revision x
         LEFT JOIN auto_work_order_extra_decision d ON d.revision_id=x.id
@@ -176,11 +176,14 @@ def upgrade():
           extra_version:=extra.version;
           extra_digest:=btrim(extra.fingerprint);
           extra_amount:=extra.total_minor;
+          extra_lines:=extra.service_lines;
         END IF;
         -- Прямой SQL не может подменить сумму, версии и согласие в пакете.
         IF NEW.snapshot->>'estimateRevisionId' IS DISTINCT FROM NEW.revision_id::text
           OR NEW.snapshot->>'estimateVersion' IS DISTINCT FROM base_version::text
           OR NEW.snapshot->>'estimateDigest' IS DISTINCT FROM btrim(base_digest)
+          OR NEW.snapshot->'lines' IS DISTINCT FROM base_lines
+          OR NEW.snapshot->'extraLines' IS DISTINCT FROM extra_lines
           OR NEW.snapshot->>'approvedBaseMinor' IS DISTINCT FROM base_total::text
           OR NEW.snapshot->>'approvedExtraMinor' IS DISTINCT FROM extra_amount::text
           OR NEW.snapshot->>'approvedTotalMinor' IS DISTINCT FROM full_total::text
