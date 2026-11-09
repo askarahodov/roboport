@@ -43,6 +43,53 @@ from .auto_customer_booking_http import router as auto_customer_booking_router
 
 
 
+# Exclude two historical staff ticket views before mounting shared auth.
+# Never mutate the entire live route table as a cleanup operation.
+from fastapi import APIRouter
+_current_auth_router = APIRouter(include_in_schema=False)
+_RETIRED_STAFF_PATHS = {"/api/v1/dev/staff/queue", "/api/v1/dev/staff/audit"}
+_current_auth_router.routes.extend(
+    route for route in synthetic_auth_router.routes
+    if route.path not in _RETIRED_STAFF_PATHS
+)
+
+# Register all routers after imports and direct route decorators.
+app.include_router(_current_auth_router)
+app.include_router(oidc_router)
+app.include_router(auto_vehicle_router)
+app.include_router(auto_vehicle_claim_router)
+app.include_router(auto_intake_delegation_router)
+app.include_router(auto_org_staff_router)
+app.include_router(auto_appointment_router)
+app.include_router(auto_bay_occupancy_router)
+app.include_router(auto_demo_finance_report_router)
+app.include_router(auto_crm_leads_router)
+app.include_router(auto_crm_followups_router)
+app.include_router(auto_crm_inbox_router)
+app.include_router(auto_crm_contact_choices_router)
+app.include_router(auto_crm_funnel_router)
+app.include_router(auto_stock_abc_xyz_router)
+app.include_router(auto_opening_hours_router)
+app.include_router(auto_stocktake_router)
+app.include_router(auto_order_stock_read_router)
+app.include_router(auto_order_customer_read_router)
+app.include_router(auto_order_overview_router)
+app.include_router(auto_order_financial_read_router)
+app.include_router(auto_order_service_router)
+app.include_router(auto_intake_act_router)
+app.include_router(auto_workshop_qc_router)
+app.include_router(auto_work_order_diagnostics_router)
+app.include_router(auto_work_order_estimate_router)
+app.include_router(auto_work_order_execution_router)
+app.include_router(auto_work_order_assignment_router)
+app.include_router(auto_work_order_additional_router)
+app.include_router(auto_work_tariffs_router)
+app.include_router(auto_work_complexes_router)
+app.include_router(auto_demo_close_router)
+app.include_router(auto_customer_orders_router)
+app.include_router(auto_customer_booking_router)
+
+
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
     # Идентификатор создаётся сервером; клиентский X-Request-ID не доверенный.
@@ -203,50 +250,3 @@ async def dev_customer_preferences(request: Request):
 @app.post("/api/v1/dev/account/preferences",include_in_schema=False)
 async def dev_update_customer_preferences(request: Request):
     return await _customer_notification_preferences(request,True)
-
-# Exclude two historical staff ticket views before mounting shared auth.
-# Never mutate the entire live route table as a cleanup operation.
-from fastapi import APIRouter
-_current_auth_router = APIRouter(include_in_schema=False)
-_RETIRED_STAFF_PATHS = {"/api/v1/dev/staff/queue", "/api/v1/dev/staff/audit"}
-_current_auth_router.routes.extend(
-    route for route in synthetic_auth_router.routes
-    if route.path not in _RETIRED_STAFF_PATHS
-)
-
-# Register all routers after imports and direct route decorators.
-app.include_router(_current_auth_router)
-app.include_router(oidc_router)
-app.include_router(auto_vehicle_router)
-app.include_router(auto_vehicle_claim_router)
-app.include_router(auto_intake_delegation_router)
-app.include_router(auto_org_staff_router)
-app.include_router(auto_appointment_router)
-app.include_router(auto_bay_occupancy_router)
-app.include_router(auto_demo_finance_report_router)
-app.include_router(auto_crm_leads_router)
-app.include_router(auto_crm_followups_router)
-app.include_router(auto_crm_inbox_router)
-app.include_router(auto_crm_contact_choices_router)
-app.include_router(auto_crm_funnel_router)
-app.include_router(auto_stock_abc_xyz_router)
-app.include_router(auto_opening_hours_router)
-app.include_router(auto_stocktake_router)
-app.include_router(auto_order_stock_read_router)
-app.include_router(auto_order_customer_read_router)
-app.include_router(auto_order_overview_router)
-app.include_router(auto_order_financial_read_router)
-app.include_router(auto_order_service_router)
-app.include_router(auto_intake_act_router)
-app.include_router(auto_workshop_qc_router)
-app.include_router(auto_work_order_diagnostics_router)
-app.include_router(auto_work_order_estimate_router)
-app.include_router(auto_work_order_execution_router)
-app.include_router(auto_work_order_assignment_router)
-app.include_router(auto_work_order_additional_router)
-app.include_router(auto_work_tariffs_router)
-app.include_router(auto_work_complexes_router)
-app.include_router(auto_demo_close_router)
-app.include_router(auto_customer_orders_router)
-app.include_router(auto_customer_booking_router)
-
