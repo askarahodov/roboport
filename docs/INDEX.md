@@ -1,4 +1,4 @@
-# Карта документации автомобильной платформы Airmatik Pro Service
+# Карта документации автомобильной платформы БоксРитм
 
 > **Браузерная версия (dev):** [стартовая страница](README.md) · [навигация](PORTAL_SETUP.md) · [руководства по ролям](guides/INDEX.md). Для просмотра запустить локальный сервер как описано в PORTAL_SETUP.md. Не является публичным порталом.
 
@@ -6,7 +6,7 @@
 
 Статусы: **current-dev** — проверенный только в изолированном синтетическом окружении сценарий; **legacy** — архивные robot-данные, SQL, draft-контракты и тестовая регрессия, не часть текущего автомобильного runtime; **planned** — ещё не реализованные возможности автосервиса. Ни один статус не означает разрешение production: обязательный gate #119. Не смешивать.
 
-## Для новой разработки Airmatik
+## Для новой разработки БоксРитм
 
 | Документ | Статус | Назначение |
 |---|---|---|
@@ -53,7 +53,7 @@
 - [ADR существующего проекта](architecture/ADR.md) и [границы модулей](architecture/BOUNDARIES.md).
 - [Модель данных](data/DATA_MODEL.md), [FSM](domain/TICKET_FSM.md) и [сверка схем](data/SCHEMA_RECONCILIATION.md).
 - [Матрица тестов](quality/ACCEPTANCE_TESTS.md) и [модель безопасности](security/SECURITY_MODEL.md).
-- [Исторический roadmap](implementation/DEVELOPMENT_ROADMAP.md) и [WBS](implementation/WORK_BREAKDOWN.md) — прежняя нумерация, НЕ активный backlog Airmatik.
+- [Исторический roadmap](implementation/DEVELOPMENT_ROADMAP.md) и [WBS](implementation/WORK_BREAKDOWN.md) — прежняя нумерация, НЕ активный backlog БоксРитм.
 
 **Актуальный backlog:** [автосервис #107](https://github.com/askarahodov/roboport/issues/107), [документация #121](https://github.com/askarahodov/roboport/issues/121).
 

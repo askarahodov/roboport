@@ -32,9 +32,9 @@ header nav .header-login:hover{filter:brightness(.9)}
 .auth-help{max-width:65ch;color:var(--rp-foreground);opacity:.8}
 @media(max-width:500px){header nav .header-login{width:100%}.auth-recovery>*{width:100%;justify-content:center}}
 
-/* ROBOport visual foundation. Semantic tokens remain defined in theme.css. */
+/* БоксРитм Auto Digital visual foundation. Semantic tokens remain defined in theme.css. */
 :root{font-synthesis:none}
-body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-.01em}
+body{font-family:Manrope,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-.01em}
 .app{padding:0;min-height:100vh}
 .app>header{min-height:92px;padding:1rem max(1.5rem,calc((100% - 1320px)/2));border-bottom:1px solid color-mix(in srgb,var(--rp-foreground) 10%,transparent);gap:2.5rem}
 .app>header>a{display:flex;gap:.55rem;align-items:center;text-decoration:none;color:inherit;min-width:150px}
@@ -61,13 +61,13 @@ body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,
 .btn-primary{background:var(--rp-action);color:var(--rp-action-text)}
 .btn-secondary{border:1px solid color-mix(in srgb,var(--rp-foreground) 24%,transparent);color:var(--rp-foreground);background:color-mix(in srgb,var(--rp-background) 94%,var(--rp-foreground))}
 .hero-note{margin-top:2.2rem;font-size:.82rem;opacity:.65;max-width:500px}
-.hero-visual{background:radial-gradient(circle at 50% 45%,#245e62 0%,#11383c 43%,#0a2327 100%);position:relative;display:grid;place-items:center;overflow:hidden;isolation:isolate;min-height:470px}
+.hero-visual{background:radial-gradient(circle at 50% 45%,#1D488B 0%,#102C59 43%,#0B0E14 100%);position:relative;display:grid;place-items:center;overflow:hidden;isolation:isolate;min-height:470px}
 .hero-visual:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent 49.8%,#ffffff15 50%,transparent 50.2%),linear-gradient(transparent 49.8%,#ffffff15 50%,transparent 50.2%);background-size:72px 72px;opacity:.25}
 .orbital{border:1px solid #ffffff32;border-radius:50%;position:absolute;width:70%;aspect-ratio:1;transform:rotate(-22deg) skew(12deg)}
 .orbital-two{width:95%;transform:rotate(35deg) skew(-15deg);border-color:#ffffff17}
-.hero-mark{font-size:clamp(13rem,23vw,23rem);font-weight:850;letter-spacing:-.18em;line-height:1;color:#e1faf6;text-shadow:0 16px 90px #25b7a880;z-index:1;transform:translateX(-.13em)}
-.hero-mark span{color:#2fd2c3;font-size:.5em;vertical-align:top;position:relative;top:.45em;left:.07em}
-.hero-visual-label{position:absolute;bottom:3rem;right:3rem;color:#defcf3a8;font-size:.7rem;letter-spacing:.22em;font-weight:650}
+.hero-mark{font-size:clamp(13rem,23vw,23rem);font-weight:850;letter-spacing:-.18em;line-height:1;color:#FFFFFF;text-shadow:0 16px 90px #0066FF80;z-index:1;transform:translateX(-.13em)}
+.hero-mark span{color:#5CA9FF;font-size:.5em;vertical-align:top;position:relative;top:.45em;left:.07em}
+.hero-visual-label{position:absolute;bottom:3rem;right:3rem;color:#EFF5FFBB;font-size:.7rem;letter-spacing:.22em;font-weight:650}
 .landing-section{padding:6rem max(1.5rem,calc((100% - 1250px)/2))!important}
 .section-intro{max-width:630px;margin-bottom:2.5rem}
 .section-intro h2,.landing-cta h2{font-size:clamp(2rem,3vw,3.2rem);line-height:1.16;letter-spacing:-.05em;margin:.9rem 0}
@@ -125,3 +125,11 @@ body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,
 .auto-customer-claim h3,.auto-customer-claim p{margin:.2rem 0}
 .auto-customer-claim input{width:100%;min-width:0;min-height:44px;background:var(--rp-surface);color:var(--rp-foreground);border:1px solid color-mix(in srgb,var(--rp-foreground) 30%,transparent);border-radius:.55rem;padding:.65rem}
 .auto-customer-claim button{min-height:44px}
+
+/* Auto Digital: focus and disabled states never rely solely on color. */
+.app :is(button,a,input,select,textarea):focus-visible{outline:3px solid var(--rp-focus);outline-offset:3px}
+.app :is(input,select,textarea){border-color:var(--rp-border)}
+.app button:disabled{color:var(--rp-disabled-text);background:var(--rp-disabled-surface);opacity:1}
+.app .hero h1 span{color:var(--rp-accent)}
+.app .hero-mark{letter-spacing:-.09em;transform:none;font-size:clamp(10rem,18vw,18rem)}
+@media(max-width:720px){.app .hero-mark{font-size:10rem}}

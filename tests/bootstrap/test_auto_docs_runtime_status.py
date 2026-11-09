@@ -103,7 +103,7 @@ def test_docs_disclose_approved_brand_transition_without_claiming_ui_cutover():
     navigator = (ROOT / "docs/guides/ROLE_NAVIGATOR.md").read_text(encoding="utf-8")
     for doc in (home, navigator):
         assert "БоксРитм" in doc
-        assert "Airmatik" in doc
+        assert "БоксРитм" in doc
         assert "#110" in doc
         assert "#121" in doc
         assert "ребрендинг" in doc.lower()

@@ -4,7 +4,7 @@ test('автомобильная главная и маршруты — без �
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Сервисное обслуживание автомобилей' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Управляйте автосервисом/ })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Путь автомобиля через СТО' })).toBeVisible();
     await expect(page.getByRole('link', { name: /Запись на сервис/ }).first()).toHaveAttribute('href', '/account/auto-booking');
     await expect(page.getByText('Только синтетический стенд разработки', { exact: false })).toBeVisible();
@@ -18,7 +18,7 @@ test('старые публичные URL не раскрывают катало
   for (const path of ['/robots', '/catalog/brands', '/catalog/models', '/catalog/models/example', '/request-demo']) {
     await page.goto(path);
     await expect(page.getByRole('heading', { name: 'Страница не найдена' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Сервисное обслуживание автомобилей' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: /Управляйте автосервисом/ })).toHaveCount(0);
   }
 });
 
@@ -40,7 +40,7 @@ test('навигация, тема и история SPA работают пос
   await navigation.getByRole('link', { name: 'Личный кабинет' }).click();
   await expect(page).toHaveURL(/\/account$/);
   await page.goBack();
-  await expect(page.getByRole('heading', { name: 'Сервисное обслуживание автомобилей' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Управляйте автосервисом/ })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Тема оформления' })).toHaveValue('dark');
   await expect(page.locator('main')).toHaveClass(/dark/);
   const stored = await page.evaluate(() => Object.keys(localStorage));

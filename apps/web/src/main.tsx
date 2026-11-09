@@ -52,7 +52,7 @@ function App() {
   const dark = theme === 'dark' || (theme === 'auto' && systemDark);
   return <main className={dark ? 'app dark' : 'app'}>
     <header>
-      <Link to="/" aria-label="Airmatik — главная"><picture><source media="(prefers-color-scheme: dark)" srcSet="/logo-dark.svg" /><img src="/logo-light.svg" alt="" width="64" height="64" /></picture><strong>Airmatik</strong></Link>
+      <Link to="/" aria-label="БоксРитм — главная"><picture><source media="(prefers-color-scheme: dark)" srcSet="/logo-dark.svg" /><img src="/logo-light.svg" alt="" width="64" height="64" /></picture><strong>БоксРитм</strong></Link>
       <nav aria-label="Разделы сервиса">
         <NavLink to="/" end>Главная</NavLink>
         <NavLink to="/account" end>Личный кабинет</NavLink>
@@ -86,8 +86,8 @@ function App() {
       <Route path="/" element={<div className="landing">
         <section className="hero" aria-labelledby="hero-title">
           <div className="hero-content">
-            <span className="eyebrow"><span className="status-dot" /> Airmatik · платформа автосервиса</span>
-            <h1 id="hero-title">Сервисное обслуживание <span>автомобилей</span></h1>
+            <span className="eyebrow"><span className="status-dot" /> БоксРитм · платформа автосервиса</span>
+            <h1 id="hero-title">Управляйте автосервисом <span>в едином ритме</span></h1>
             <p className="hero-lead">Запись на СТО, заказ-наряды, согласование работ и обслуживание автомобиля — в единой системе.</p>
             <div className="hero-actions">
               <Link className="btn btn-primary" to="/account/auto-booking">Запись на сервис (dev) <span aria-hidden="true">↗</span></Link>
@@ -97,8 +97,8 @@ function App() {
           </div>
           <div className="hero-visual" aria-hidden="true">
             <div className="orbital orbital-one" /><div className="orbital orbital-two" />
-            <div className="hero-mark">A<span>·</span></div>
-            <div className="hero-visual-label">AUTO / SERVICE / DEVELOPMENT</div>
+            <div className="hero-mark">Б<span>·</span></div>
+            <div className="hero-visual-label">БОКСРИТМ / AUTO DIGITAL / DEV</div>
           </div>
         </section>
         <section className="landing-section" aria-labelledby="services-title">
@@ -116,7 +116,7 @@ function App() {
             <p>Просмотр доступен только авторизованному клиенту. Сведения чужих владельцев не раскрываются.</p></div>
           <div className="hero-actions"><Link className="btn btn-secondary" to="/account/vehicles">Мои автомобили</Link><Link className="btn btn-primary" to="/account/auto-orders">Заказ-наряды</Link></div>
         </section>
-        <footer className="site-footer"><strong>Airmatik</strong><span>Автомобильная платформа · Синтетический контур разработки</span></footer>
+        <footer className="site-footer"><strong>БоксРитм</strong><span>Автомобильная платформа · Синтетический контур разработки</span></footer>
       </div>} />
       <Route path="/account/login" element={<CustomerLogin />} />
       <Route path="/account/*" element={<CustomerAccount />} />

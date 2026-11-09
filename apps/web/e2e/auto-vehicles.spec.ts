@@ -37,7 +37,7 @@ test('автомобили dev: безопасная маска VIN, светл�
     await expect(page.getByRole('heading', { name: 'Автомобили (dev)' })).toBeVisible();
     await expect(page.getByText('SyntheticMake TestCar')).toBeVisible();
     await expect(page.getByText('VIN ••••1234')).toBeVisible();
-    await expect(page.getByText('Тестовый режим Airmatik', { exact: false })).toBeVisible();
+    await expect(page.getByText('Тестовый режим БоксРитм', { exact: false })).toBeVisible();
     for (const theme of ['light', 'dark', 'auto']) {
       await page.getByRole('combobox', { name: 'Тема оформления' }).selectOption(theme);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);

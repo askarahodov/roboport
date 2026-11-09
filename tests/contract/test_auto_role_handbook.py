@@ -84,14 +84,14 @@ def test_robot_legacy_in_separate_archived_nav_not_user_role_instructions():
     assert "legacy" in _text(DOCS / "README.md")
 
 
-def test_32_real_viewport_screenshots_and_safe_evidence_procedure():
+def test_81_real_viewport_screenshots_and_safe_evidence_procedure():
     test_source = _text(WEB / "e2e-docs" / "role-screenshots.spec.ts")
     evidence = _text(DOCS / "guides" / "SCREENSHOT_EVIDENCE.md")
     for role in ROLE_IDS:
         assert f"id:'{role}'" in test_source, role
-    for token in ("390", "1280", "light", "dark", "page.screenshot", "outputPath"):
+    for token in ("390", "1280", "1440", "light", "dark", "auto", "page.screenshot", "outputPath"):
         assert token in test_source
     for phrase in ("14 дней", "roboport-browser-evidence", "SHA",
                    "независим", "ручн"):
         assert phrase in evidence
-    assert "32 снимка" in evidence
+    assert "72 снимка" in evidence and "81 проверяемый PNG" in evidence

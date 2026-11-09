@@ -30,7 +30,7 @@ def test_automotive_matrix_has_complete_unique_feature_catalog():
 
 def test_full_product_end_state_and_migration_not_robot_plus_auto_tab():
     readme = _read("README.md")
-    assert "Airmatik Pro Service — система управления автосервисом" in readme.splitlines()[0]
+    assert "БоксРитм — система управления автосервисом" in readme.splitlines()[0]
     assert "Единая система независимого мультибрендового сервиса домашних роботов" not in readme
     product = _read("docs/auto/PRODUCT.md")
     architecture = _read("docs/auto/ADR-001.md")

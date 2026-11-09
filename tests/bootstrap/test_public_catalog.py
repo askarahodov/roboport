@@ -19,7 +19,7 @@ def test_robot_catalog_urls_are_unregistered_for_all_http_methods():
 
 def test_robot_catalog_is_not_in_live_fastapi_openapi():
     schema = TestClient(app).get("/openapi.json").json()
-    assert schema["info"]["title"] == "Airmatik automotive development API"
+    assert schema["info"]["title"] == "БоксРитм — автомобильный dev API"
     assert not any(path.startswith("/api/v1/catalog/")
                    for path in schema["paths"])
     assert not any("/robots" in path or "/devices" in path
@@ -29,4 +29,4 @@ def test_robot_catalog_is_not_in_live_fastapi_openapi():
 def test_runtime_service_identity_is_automotive():
     result = TestClient(app).get("/api/v1/meta")
     assert result.status_code == 200
-    assert result.json() == {"service": "Airmatik", "environment": "development"}
+    assert result.json() == {"service": "БоксРитм", "environment": "development"}

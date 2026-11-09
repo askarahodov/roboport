@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 128" role="img" aria-label="БоксРитм — система управления автосервисом">
+<rect width="570" height="128" rx="14" fill="#0B0E14"/>
+<g transform="translate(6 8) scale(.84)"><path d="M20 60V47L64 22L108 47V103" fill="none" stroke="#F5F8FF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><path d="M33 81L40 66Q43 61 49 61H79Q85 61 88 66L95 81V94H33Z" fill="none" stroke="#F5F8FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M38 82H48L54 74L62 92L70 77L75 82H91" fill="none" stroke="#5CA9FF" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="124" y="71" font-family="Manrope, Arial, sans-serif" font-size="47" font-weight="800" letter-spacing="-2"><tspan fill="#F5F8FF">Бокс</tspan><tspan fill="#5CA9FF">Ритм</tspan></text>
+<text x="127" y="101" font-family="Manrope, Arial, sans-serif" font-size="18" font-weight="600" fill="#F5F8FF">система управления автосервисом</text>
+</svg>

@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {mkdir} from 'node:fs/promises';
 
-const sizes=[{name:'desktop',width:1440,height:900},{name:'mobile',width:390,height:844}];
+const sizes=[{name:'desktop',width:1440,height:900},{name:'tablet',width:1280,height:900},{name:'mobile',width:390,height:844}];
 const themes=['light','dark','auto'] as const;
 const screens=[
  {name:'landing',url:'/'},
