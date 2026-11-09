@@ -95,3 +95,15 @@ def test_all_concrete_automotive_react_routes_have_navigator_entries():
     for route in sorted(concrete):
         assert f"`{route}`" in navigator, f"Undocumented React route: {route}"
     assert "current-dev" in navigator and "planned" in navigator
+
+
+def test_docs_disclose_approved_brand_transition_without_claiming_ui_cutover():
+    """The approved brand must not be confused with the as-yet unchanged UI."""
+    home = (ROOT / "docs/README.md").read_text(encoding="utf-8")
+    navigator = (ROOT / "docs/guides/ROLE_NAVIGATOR.md").read_text(encoding="utf-8")
+    for doc in (home, navigator):
+        assert "БоксРитм" in doc
+        assert "Airmatik" in doc
+        assert "#110" in doc
+        assert "#121" in doc
+        assert "ребрендинг" in doc.lower()
