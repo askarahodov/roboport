@@ -78,6 +78,8 @@ app.include_router(auto_work_complexes_router)
 app.include_router(auto_demo_close_router)
 app.include_router(auto_customer_orders_router)
 app.include_router(auto_customer_booking_router)
+# Diagnostics kept until CI verifies the ASGI route table is stable.
+_ROUTE_BOOT_COUNTS = (len(auto_vehicle_router.routes), len(synthetic_auth_router.routes), len(app.routes))
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
