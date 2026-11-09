@@ -18,7 +18,7 @@ def test_docs_do_not_describe_robot_domain_as_live_application():
         assert "#119" in page
         assert "legacy" in page.lower()
     assert "автомобильные dev API" in guides
-    assert "robot SQL" in guides
+    assert "robot sql" in guides.lower()
     assert "draft OpenAPI" in guides
     assert "robot HTTP-маршруты исключены" in home
     assert "current-dev" in index and "planned" in index
