@@ -1,11 +1,9 @@
 import React from 'react';
 import { PageShell, Tabs, Card } from '../../ui';
 import { Link, useLocation } from 'react-router-dom';
-import { CustomerTickets } from './CustomerTickets';
 import { CustomerVehicles } from './CustomerVehicles';
 import { CustomerAutoOrders } from './CustomerAutoOrders';
 import { CustomerAutoBooking } from './CustomerAutoBooking';
-import { CustomerSummary } from './CustomerSummary';
 import { CustomerOverview } from './CustomerOverview';
 import { CustomerSettings } from './CustomerSettings';
 
@@ -13,13 +11,9 @@ type Session = { subjectId: string };
 type State = 'loading' | 'authorized' | 'unauthorized' | 'forbidden' | 'error';
 const sections = [
   { path: '/account', title: 'Обзор', end: true },
-  { path: '/account/robots', title: 'Роботы' },
   { path: '/account/vehicles', title: 'Автомобили (dev)' },
   { path: '/account/auto-booking', title: 'Запись на сервис (dev)' },
   { path: '/account/auto-orders', title: 'Мои заказ-наряды (dev)' },
-  { path: '/account/tickets', title: 'Заявки' },
-  { path: '/account/estimates', title: 'Сметы' },
-  { path: '/account/documents', title: 'Документы' },
   { path: '/account/settings', title: 'Настройки и уведомления' },
 ] as const;
 
@@ -107,14 +101,10 @@ export function CustomerAccount() {
     <h1>Личный кабинет</h1>
     <div className="account-layout"><aside className="account-sidebar"><p className="ui-eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><Tabs label="Разделы личного кабинета" items={sections.map(section => ({to:section.path,label:section.title,end:'end' in section && section.end}))} /></aside><div className="account-content">
     <h2>{selected.title}</h2>
-    <p className="account-subtitle">Сервисные обращения и документы. Автомобили доступны только в синтетическом dev-контуре.</p>
-    <Card>{pathname === '/account/tickets' ? <CustomerTickets /> :
-      pathname === '/account/robots' ? <CustomerSummary section="robots" /> :
-      pathname === '/account/vehicles' ? <CustomerVehicles /> :
+    <p className="account-subtitle">Ваши автомобили, запись на СТО и заказ-наряды. Только синтетический dev-контур.</p>
+    <Card>{pathname === '/account/vehicles' ? <CustomerVehicles /> :
       pathname === '/account/auto-booking' ? <CustomerAutoBooking /> :
       pathname === '/account/auto-orders' ? <CustomerAutoOrders /> :
-      pathname === '/account/estimates' ? <CustomerSummary section="estimates" /> :
-      pathname === '/account/documents' ? <CustomerSummary section="documents" /> :
       pathname === '/account/settings' ? <CustomerSettings /> :
       <CustomerOverview />}</Card>
     <p className="account-hint">Настоящие документы доступны только через защищённый backend. Прямого подключения браузера к хранилищу нет.</p>
