@@ -167,9 +167,8 @@ def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[byte
             raise IntakeActInvalid("INVALID_PHOTO")
         clean,width,height=sanitize_png(data)
         digest=hashlib.sha256(clean).hexdigest()
-        # Identical binary evidence under multiple area labels misrepresents
-        # provenance. Reuse across immutable revisions is allowed, but not
-        # duplicate attachment slots within the same act version.
+        # Один снимок под разными зонами искажает происхождение фотодоказательств.
+        # Между версиями повтор допустим, но внутри версии каждый снимок уникален.
         if any(m["sha256"]==digest for m in manifest):
             raise IntakeActInvalid("DUPLICATE_PHOTO")
         blobs.append(clean)
