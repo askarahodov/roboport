@@ -4,7 +4,7 @@ from uuid import uuid4
 import hashlib
 import psycopg
 from fastapi.testclient import TestClient
-from roboport_api.main import app
+from tests.legacy_runtime import app
 from roboport_api.session_tokens import new_token,token_digest
 from test_pg_baseline import DSN
 
