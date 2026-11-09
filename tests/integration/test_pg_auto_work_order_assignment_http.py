@@ -8,6 +8,7 @@ from roboport_api.main import app
 from test_pg_baseline import DSN
 from test_pg_auto_work_order_estimate_http import scenario
 from test_pg_auto_stock_service import grant
+from roboport_api.auto_workshop_qc import submit_work_order_inspection
 
 
 def auth(client,d,user):
@@ -61,6 +62,22 @@ def test_shift_aware_assignment_accept_replay_and_authority(monkeypatch):
     assert accepted.json()["status"]=="ACCEPTED"
     assert client.post(accept_path,headers=mechanic,json={"requestKey":accept_key}).status_code==200
     assert client.post(accept_path,headers=mechanic,json={"requestKey":str(uuid4())}).status_code==409
+    with psycopg.connect(DSN) as db:
+        submit_work_order_inspection(db,d["tokens"][d["intake"]],org,loc,order,
+            odometer_km=1200,fuel_percent=70,tyres_ok=True,lights_ok=True,
+            fluid_leak=False,exterior_code="CLEAR")
+    # Accepted executor is never an independent QC checker, even before
+    # recording a labor entry; neither the queue nor direct POST bypasses it.
+    queue=client.get(root+"/inspection-qc/pending")
+    assert queue.status_code==200
+    assert str(order) not in [x["orderId"] for x in queue.json()["items"]]
+    self_qc=client.post(root+f"/orders/{order}/qc",headers=mechanic,json={
+        "requestKey":str(uuid4()),"result":"PASS","findingCode":"NONE"})
+    assert self_qc.status_code==403,self_qc.text
+    other=auth(client,d,d["other"])
+    queue=client.get(root+"/inspection-qc/pending")
+    assert queue.status_code==200
+    assert str(order) in [x["orderId"] for x in queue.json()["items"]]
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT status FROM auto_work_order_assignment
           WHERE id=%s""",(assignment,)).fetchone()==("ACCEPTED",)
