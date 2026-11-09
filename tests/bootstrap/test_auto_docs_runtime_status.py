@@ -115,9 +115,9 @@ def test_navigator_has_clickable_and_existing_e2e_pg17_source_links():
 
     navigator = (ROOT / "docs/guides/ROLE_NAVIGATOR.md").read_text(encoding="utf-8")
     links = re.findall(
-        r"\\[([^\\]\\n]+\\.(?:spec\\.ts|py))\\]\\("
-        r"https://github\\.com/askarahodov/roboport/blob/main/"
-        r"(apps/web/e2e/[^)]+|tests/integration/[^)]+)\\)",
+        r"\[([^]\n]+\.(?:spec\.ts|py))\]\("
+        r"https://github\.com/askarahodov/roboport/blob/main/"
+        r"(apps/web/e2e/[^)]+|tests/integration/[^)]+)\)",
         navigator,
     )
     assert len(links) >= 22, "Every referenced browser/PG17 test needs a clickable source link"
