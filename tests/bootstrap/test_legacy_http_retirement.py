@@ -70,4 +70,4 @@ def test_legacy_http_regression_harness_is_separate_object():
     live = {getattr(route, "path", "") for route in app.routes}
     historic = {getattr(route, "path", "") for route in archived.routes}
     assert "/api/v1/dev/tickets" in historic - live
-    assert "/api/v1/dev/staff/queue" in historic - live
+    assert "/api/v1/dev/staff/queue" in historic - live, {"historic": sorted(historic), "live": sorted(live)}
