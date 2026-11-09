@@ -39,7 +39,7 @@ def test_namespace_guard_exact_segment_not_prefix(monkeypatch):
     client=TestClient(app,base_url="http://127.0.0.1")
     assert client.get("/api/v1/dev").status_code==404
     assert client.get("/api/v1/devil").status_code==404
-    assert client.get("/api/v1/catalog/brands").status_code==200
+    assert client.get("/api/v1/catalog/brands").status_code==404
 
 def test_all_private_dev_routes_hidden_from_openapi():
     paths=TestClient(app).get("/openapi.json").json()["paths"]
