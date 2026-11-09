@@ -302,6 +302,67 @@ def test_assignment_enforces_labor_handoff_finish_and_independent_qc(monkeypatch
     assert qc.json()["releaseAllowed"] is False
 
 
+def test_declined_offer_then_new_accepted_mechanic_can_complete_execution(monkeypatch):
+    """Historical DECLINED offers must not veto the replacement in PG17."""
+    d,org,loc,order,service,item,lot=fixture(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    root=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+    execution=url(org,loc,order)
+    starts=datetime.now(timezone.utc)+timedelta(hours=2)
+    ends=starts+timedelta(hours=1)
+    with psycopg.connect(DSN) as db:
+        for mechanic_id in (d["other"],d["manager"]):
+            db.execute("""INSERT INTO auto_staff_shift
+              (id,organization_id,location_id,user_id,starts_at,ends_at)
+              VALUES(%s,%s,%s,%s,%s,%s)""",(
+                uuid4(),org,loc,mechanic_id,
+                starts-timedelta(minutes=5),ends+timedelta(minutes=5)
+            ))
+    manager=session(http,d,d["intake"])
+    assert post(http,execution+"/start",manager).status_code==201
+    path=root+f"/orders/{order}/assignments"
+    first=http.post(path,headers=manager,json={
+        "mechanicId":str(d["other"]),"startsAt":starts.isoformat(),
+        "endsAt":ends.isoformat(),"requestKey":str(uuid4())})
+    assert first.status_code==201,first.text
+    other=session(http,d,d["other"])
+    declined=post(http,root+f"/assignments/{first.json()['assignmentId']}/decline",other)
+    assert declined.status_code==201,declined.text
+    assert declined.json()["status"]=="DECLINED"
+    manager=session(http,d,d["intake"])
+    second=http.post(path,headers=manager,json={
+        "mechanicId":str(d["manager"]),"startsAt":starts.isoformat(),
+        "endsAt":ends.isoformat(),"requestKey":str(uuid4())})
+    assert second.status_code==201,second.text
+    mechanic=session(http,d,d["manager"])
+    accepted=post(http,root+f"/assignments/{second.json()['assignmentId']}/accept",mechanic)
+    assert accepted.status_code==201,accepted.text
+
+    # Each mutation hits an independent PG17 assignment trigger.
+    performed=post(http,execution+"/labor",mechanic,
+                   serviceId=str(service),actualMinutes=36)
+    assert performed.status_code==201,performed.text
+    warehouse=session(http,d,d["intake"])
+    issued=post(http,execution+"/materials/issue",warehouse,
+                lotId=str(lot),quantity=1)
+    assert issued.status_code==201,issued.text
+    mechanic=session(http,d,d["manager"])
+    received=post(http,execution+"/materials/receive",mechanic,
+                  issueId=issued.json()["issueId"])
+    assert received.status_code==201,received.text
+    finished=post(http,execution+"/finish",mechanic)
+    assert finished.status_code==201,finished.text
+    assert finished.json()["status"]=="READY_FOR_QC"
+    other=session(http,d,d["other"])
+    qc=post(http,root+f"/orders/{order}/qc",other,
+            result="PASS",findingCode="NONE")
+    assert qc.status_code==201,qc.text
+    with psycopg.connect(DSN) as db:
+        statuses=db.execute("""SELECT status FROM auto_work_order_assignment
+          WHERE work_order_id=%s ORDER BY created_at,id""",(order,)).fetchall()
+        assert [r[0] for r in statuses]==["DECLINED","ACCEPTED"]
+
+
 def test_concurrent_start_serializes_and_only_one_execution(monkeypatch):
     d,org,loc,order,service,_,_=fixture(monkeypatch,with_material=False)
     barrier=Barrier(2)
