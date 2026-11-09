@@ -88,9 +88,9 @@ test('intake → damage + custody + photo → immutable version → client previ
   await page.getByRole('button',{name:'Зафиксировать версию акта'}).click();
   await expect(page.getByRole('heading',{name:'Акт №1 · PASSENGER'})).toBeVisible();
   await expect(page.getByText('Царапина',{exact:false}).first()).toBeVisible();
-  await expect(page.getByText('Ключи: Есть')).toBeVisible();
+  await expect(page.getByText('Ключи: Есть').first()).toBeVisible();
   await expect(page.getByRole('img',{name:'Фото акта 1: Перед'})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Печатать предпросмотр акта'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Печатать выбранную версию'})).toBeVisible();
   expect(events).toEqual(['act']);
   expect(reads).toBeGreaterThanOrEqual(2);
   await page.setViewportSize({width:1280,height:800});
@@ -123,7 +123,8 @@ test('customer hides all act and photo evidence after revoked order scope',async
   await page.getByRole('button',{name:'Обновить журнал актов'}).click();
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByRole('heading',{name:'Акт №1 · PASSENGER'})).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Печатать предпросмотр акта'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Печатать выбранную версию'})).toHaveCount(0);
+  await expect(page.locator('body > .intake-act-print-portal')).toHaveCount(0);
 });
 
 test('lost POST reply preserves exact requestKey and photo bytes for one safe replay',async({page})=>{
@@ -154,4 +155,67 @@ test('lost POST reply preserves exact requestKey and photo bytes for one safe re
     expectedVersion:0,act:{vehicleKind:'PASSENGER',damages:[],photos:[]},
   });
   expect(picture.areaCode).toBe('FRONT');
+});
+
+
+test('print keeps one page with 20 historic acts at 390 and 1280',async({page},testInfo)=>{
+  // Длинный экранный журнал не должен создавать пустые страницы в PDF.
+  const versions=Array.from({length:20},(_,index)=>{
+    const n=index+1;
+    return {
+      id:n===1?actId:`77777777-7777-4777-8777-${String(n).padStart(12,'0')}`,
+      version:n,vehicleKind:'PASSENGER',sha256:(n===1?'a':'c').repeat(64),
+      createdAt:'2030-01-01T10:00:00Z',actorId:org,
+      damages:[{areaCode:'FRONT',damageCode:'SCRATCH',severity:'MINOR'}],
+      inventory:['KEYS','SPARE_WHEEL','TOOLS','DOCS','CHARGER'].map(itemCode=>
+        ({itemCode,condition:n===1?'PRESENT':'MISSING'})),
+      photos:[],
+    };
+  });
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>
+    route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({...initial,locked:true,latestVersion:20,items:versions})}));
+  for(const width of [390,1280]){
+    await page.setViewportSize({width,height:844});
+    await page.goto('/account/auto-intake-act?'+query);
+    const preview=page.locator('.intake-act-print-preview .intake-act-print-document');
+    const printable=page.locator('body > .intake-act-print-portal .intake-act-print-document');
+    await expect(preview).toContainText('версия 20');
+    await expect(printable).toHaveCount(1);
+    await expect(printable).toHaveCSS('display','block');
+    await expect(page.locator('body > .intake-act-print-portal')).toHaveCSS('display','none');
+    await page.getByRole('combobox',{name:'Версия для печати'}).selectOption(actId);
+    await expect(preview).toContainText('версия 1');
+    await expect(printable).toContainText('версия 1');
+    await expect(printable).toContainText('Царапина');
+    await expect(printable).not.toContainText('версия 20');
+    // Воспроизводимые снимки компонента в двух темах для review, без ПДн.
+    for(const mode of ['light','dark'] as const){
+      await page.emulateMedia({media:'screen',colorScheme:mode});
+      await preview.screenshot({
+        path:testInfo.outputPath(`intake-preview-${width}-${mode}.png`),
+      });
+    }
+
+    await page.emulateMedia({media:'print'});
+    const printRoot=page.locator('body > .intake-act-print-portal');
+    await expect(printRoot).toHaveCSS('display','block');
+    await expect(page.locator('body > :not(.intake-act-print-portal)').first())
+      .toHaveCSS('display','none');
+    const dimensions=await printRoot.evaluate(node=>({
+      height:node.getBoundingClientRect().height,
+      bodyHeight:document.body.scrollHeight,
+    }));
+    expect(dimensions.height).toBeGreaterThan(100);
+    // A4 ~1122 CSS px at 96 dpi: never include the 20-version screen history.
+    expect(dimensions.bodyHeight).toBeLessThan(1122);
+    const pdf=await page.pdf({format:'A4',printBackground:true,
+      path:testInfo.outputPath(`intake-selected-${width}.pdf`)});
+    // Chromium emits one uncompressed /Type /Page object per printed page.
+    const pages=pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)??[];
+    expect(pages).toHaveLength(1);
+    await page.emulateMedia({media:'screen'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(width);
+  }
 });

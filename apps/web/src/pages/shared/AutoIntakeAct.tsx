@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Link,useSearchParams } from 'react-router-dom';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -122,6 +123,7 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
   const [severity,setSeverity]=React.useState<Damage['severity']>('MINOR');
   const [photoArea,setPhotoArea]=React.useState<Area>('FRONT');
   const [photos,setPhotos]=React.useState<Photo[]>([]);
+  const [printActId,setPrintActId]=React.useState('');
   const valid=[org,loc,order].every(x=>uuid.test(x.trim()));
   const scope=[org.trim(),loc.trim(),order.trim()].join(':');
   const root='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
@@ -131,6 +133,7 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
   React.useEffect(()=>{
     setStatus(valid?'loading':'idle');setLoaded('');setData(null);
     setMessage('');setPending(null);setPhotos([]);setDamages([]);
+    setPrintActId('');
     setInventory(initialInventory());
     if(!valid)return;
     const ctl=new AbortController();
@@ -178,8 +181,76 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
     data.inspection!==null&&!data.locked&&data.latestVersion<20&&
     (!damages.length||photos.length>0);
   const last=data?.items.at(-1);
-  return <section aria-label="Версионированный акт приёмки автомобиля (dev)"
+  const printAct=data?.items.find(item=>item.id===(printActId||last?.id));
+  // Печатаем только один выбранный immutable-снимок, без остального журнала.
+  const printDocument=ready&&data&&printAct ? (
+        <article className="intake-act-print-document"
+          aria-label={'Контрольный экземпляр акта №'+printAct.version}>
+          <h2>Акт приёмки автомобиля — версия {printAct.version}</h2>
+          <p><strong>Синтетический технический экземпляр.</strong> Не подписан,
+            не является актом выдачи или юридическим подтверждением согласия.</p>
+          <p>Идентификатор заказ-наряда: <code>{order.trim()}</code>.
+            Тип ТС: {printAct.vehicleKind}.</p>
+          <p>Создан: {new Date(printAct.createdAt).toLocaleString('ru-RU')}.
+            Автор (UUID): <code>{printAct.actorId}</code>.</p>
+          <p>SHA-256 версии: <code>{printAct.sha256}</code></p>
+          {data.inspection&&<p>Осмотр: {data.inspection.odometerKm} км;
+            топливо {data.inspection.fuelPercent}%;
+            состояние кузова: {data.inspection.exteriorCode}.</p>}
+          <h3>Отмеченные повреждения</h3>
+          {printAct.damages.length===0?<p>Не отмечены.</p>:<ul>
+            {printAct.damages.map(d=><li key={d.areaCode+d.damageCode}>
+              {areaLabels[d.areaCode]} — {damageLabels[d.damageCode]} ({d.severity})
+            </li>)}</ul>}
+          <h3>Комплектность при приёмке</h3>
+          <ul>{printAct.inventory.map(i=><li key={i.itemCode}>
+            {inventoryLabels[i.itemCode]}: {inventoryStateLabels[i.condition]}
+          </li>)}</ul>
+          <h3>Фотодоказательства ({printAct.photos.length})</h3>
+          <div style={{display:'flex',flexWrap:'wrap',gap:12}}>
+            {printAct.photos.map(photo=><figure key={photo.index}
+              style={{margin:0,maxWidth:240}}>
+              <img alt={'Акт №'+printAct.version+': '+areaLabels[photo.areaCode]}
+                src={path+'/'+printAct.id+'/photos/'+photo.index}
+                style={{maxWidth:'100%'}}/>
+              <figcaption>{areaLabels[photo.areaCode]} ({photo.width}×{photo.height}).
+                <small> SHA-256: {photo.sha256}</small></figcaption>
+            </figure>)}
+          </div>
+          <p>Статус подписи: НЕ РЕАЛИЗОВАНО. Выдача не разрешена.</p>
+        </article>
+  ) : null;
+  return <>
+    <section aria-label="Версионированный акт приёмки автомобиля (dev)"
     style={{maxWidth:'75rem',margin:'2rem auto',overflowWrap:'anywhere'}}>
+    <style>{`
+      .intake-act-print-portal { display: none !important; }
+      @media print {
+        /* Журнал в приложении удаляется из печатной раскладки полностью. */
+        body > :not(.intake-act-print-portal) { display: none !important; }
+        body > .intake-act-print-portal {
+          display: block !important;
+          width: 100% !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: white;
+          color: black;
+        }
+        .intake-act-print-portal .intake-act-print-document {
+          display: block !important;
+          position: static !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          width: 100% !important;
+          background: white;
+          color: black;
+        }
+        .intake-act-print-portal img { max-height: 5cm; object-fit: contain; }
+        .intake-act-print-portal code,
+        .intake-act-print-portal small { overflow-wrap: anywhere; }
+        .intake-act-print-portal figure { break-inside: avoid; }
+      }
+    `}</style>
     <h1>{role==='staff'?'Оформление':'Просмотр'} акта приёмки автомобиля (dev)</h1>
     <p>Только синтетические данные. Документ хранит исторические версии, но
       не является юридически подписанным актом и не разрешает выдачу автомобиля.</p>
@@ -240,7 +311,18 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
         </li>)}</ol>}
       {last&&role==='staff'&&<p>Для следующей версии можно зафиксировать изменения.
         Старый акт №{last.version} останется неизменным.</p>}
-      <button type="button" onClick={()=>window.print()}>Печатать предпросмотр акта</button>
+      {printAct&&<section className="intake-act-print-preview"
+        aria-label="Контрольный предпросмотр одной версии">
+        <h2>Контрольный предпросмотр</h2>
+        <label>Версия для печати <select aria-label="Версия для печати"
+          value={printAct.id} onChange={e=>setPrintActId(e.target.value)}>
+          {data.items.map(item=><option key={item.id} value={item.id}>
+            Акт №{item.version}</option>)}
+        </select></label>
+        {printDocument}
+      </section>}
+      <button type="button" disabled={!printAct}
+        onClick={()=>window.print()}>Печатать выбранную версию</button>
       <button type="button" disabled={busy}
         onClick={()=>setRevision(v=>v+1)}>Обновить журнал актов</button>
       {role==='staff'&&data.inspection&&!data.locked&&data.latestVersion<20&&
@@ -340,5 +422,10 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
         setPending(null);setRevision(v=>v+1);
       }}>Перечитать журнал</button>
     </div>}
-  </section>;
+    </section>
+    {printDocument && typeof document!=='undefined' && createPortal(
+      <div className="intake-act-print-portal">{printDocument}</div>,
+      document.body,
+    )}
+  </>;
 }
