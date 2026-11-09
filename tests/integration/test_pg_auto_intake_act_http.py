@@ -118,6 +118,26 @@ def test_private_intake_photos_versions_client_scope_replay_and_qc_lock(monkeypa
     replay=publish(http,staff,path,act,key)
     assert replay.status_code==200 and replay.json()["replayed"] is True
     assert replay.json()["items"]==result["items"]
+    # The same image cannot masquerade as evidence for two different
+    # photo slots, whether submitted through HTTPS or direct PostgreSQL.
+    repeated=custody(raw)
+    repeated["photos"].append({"areaCode":"REAR",
+                               "imageBase64":base64.b64encode(raw).decode()})
+    assert publish(http,staff,path,repeated,version=1).status_code==422
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""
+                  INSERT INTO auto_work_order_intake_act
+                    (id,work_order_id,inspection_id,version,actor_id,request_key,
+                     fingerprint,vehicle_kind,damages,inventory,photo_meta,photo_bytes)
+                  SELECT gen_random_uuid(),work_order_id,inspection_id,version+1,
+                     actor_id,gen_random_uuid(),fingerprint,vehicle_kind,
+                     damages,inventory,jsonb_build_array(photo_meta->0,photo_meta->0),
+                     ARRAY[photo_bytes[1],photo_bytes[1]]
+                  FROM auto_work_order_intake_act
+                  WHERE id=%s
+                """,(UUID(result["items"][0]["id"]),))
     assert publish(http,staff,path,custody(raw,condition="MISSING"),key).status_code==409
     assert publish(http,staff,path,custody(raw,condition="DAMAGED"),version=0).status_code==409
 
