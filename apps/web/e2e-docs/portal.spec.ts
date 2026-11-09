@@ -238,7 +238,13 @@ test('ролевой навигатор открывается с клавиат
     const pageWidth = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, viewport: innerWidth }));
     expect(pageWidth.scroll, 'navigator must not overflow viewport').toBeLessThanOrEqual(pageWidth.viewport + 2);
     await page.goto('/docs/#/guides/ROLE_NAVIGATOR');
-    await page.locator('.markdown-section a', { hasText: 'Матрица доступов и E2E' }).click();
+    // On 390px Docsify can leave the sidebar open; it covers content clicks.
+    // Activate the actual Markdown link using the keyboard in both viewports.
+    const matrixLink = page.locator('.markdown-section a', { hasText: 'Матрица доступов и E2E' });
+    await expect(matrixLink).toBeVisible();
+    await matrixLink.focus();
+    await expect(matrixLink).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(page.locator('.markdown-section h1')).toContainText('Матрица ролей');
   }
 });
