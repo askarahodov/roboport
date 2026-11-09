@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link,useSearchParams } from 'react-router-dom';
 import { AutoAdditionalWork } from './AutoAdditionalWork';
+import { AutoTariffPolicies } from './AutoTariffPolicies';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Qualification='GENERAL'|'DIAGNOSTIC'|'MASTER';
@@ -12,7 +13,9 @@ type Revision={id:string;version:number;totalMinor:number;currency:'RUB';digest:
   lines:Line[];decision:'APPROVED'|'DECLINED'|null;createdAt:string;decidedAt:string|null;
   clarificationId?:string|null;clarificationReason?:'PRICE'|'WORK_SCOPE'|'TIMING'|'OTHER'|null;
   clarificationResolution?:'EXPLAINED'|'NEW_VERSION_REQUIRED'|null;
-  diagnostics?:{serviceId:string;findingCode:string;severityCode:string}[]};
+  diagnostics?:{serviceId:string;findingCode:string;severityCode:string}[];
+  tariffs?:{serviceId:string;policyId:string;version:number;qualificationCode:string;
+    rateMinorPerHour:number;maxDiscountBps:number}[]};
 type Estimates={items:Revision[];latestVersion:number;syntheticOnly:true;releaseAllowed:false};
 type Service={id:string;code:string;title:string;durationMinutes:number};
 type Pending={path:string;body:string};
@@ -68,6 +71,10 @@ function parseEstimate(raw:unknown):Estimates{
             'serviceId' in f&&typeof f.serviceId==='string'&&uuid.test(f.serviceId)&&
             'findingCode' in f&&['NO_FAULT','MAINTENANCE_DUE','FAULT_CONFIRMED','FURTHER_CHECK'].includes(String(f.findingCode))&&
             'severityCode' in f&&['ROUTINE','SOON','URGENT'].includes(String(f.severityCode)))))&&
+        (e.tariffs===undefined||(Array.isArray(e.tariffs)&&e.tariffs.length<=50&&
+          e.tariffs.every((t:unknown)=>t!==null&&typeof t==='object'&&
+            'policyId' in t&&typeof t.policyId==='string'&&uuid.test(t.policyId)&&
+            'serviceId' in t&&typeof t.serviceId==='string'&&uuid.test(t.serviceId))))&&
         Array.isArray(e.lines)&&e.lines.length<=50&&
         e.lines.every((line:unknown)=>line!==null&&typeof line==='object'&&
           'code' in line&&typeof line.code==='string'&&
@@ -91,6 +98,7 @@ function parseServices(raw:unknown):Service[]{
 export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   const [query]=useSearchParams();
   const [extraOpen,setExtraOpen]=React.useState(false);
+  const [tariffsOpen,setTariffsOpen]=React.useState(false);
   const [org,setOrg]=React.useState(query.get('org')??'');
   const [loc,setLoc]=React.useState(query.get('loc')??'');
   const [order,setOrder]=React.useState(query.get('order')??'');
@@ -119,7 +127,7 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
   React.useEffect(()=>{
     setStatus(valid?'loading':'idle');setData(null);setServices([]);
     setScopeLoaded('');setMessage('');setPending(null);setPrices({});
-    setExtraOpen(false);
+    setExtraOpen(false);setTariffsOpen(false);
     setRates({});setQualifications({});
     setQuantities({});setCoefficients({});setDiscounts({});
     if(!valid)return;
@@ -224,6 +232,15 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
           {item.clarificationId&&<p>Уточнение: {item.clarificationReason} ·
             {' '}{item.clarificationResolution??'ОЖИДАЕТ ОТВЕТА МЕНЕДЖЕРА'}</p>}
           <p>SHA-256 снимка: <code>{item.digest}</code></p>
+          {item.tariffs&&item.tariffs.length>0&&<section
+            aria-label={'Утверждённые тарифы версии '+item.version}>
+            <h4>Утверждённые тарифы филиала в версии</h4>
+            <ul>{item.tariffs.map(p=><li key={p.serviceId}>
+              Услуга {item.lines.find(line=>line.serviceId===p.serviceId)?.code??p.serviceId}:
+              {' '}категория {p.qualificationCode}, ставка {p.rateMinorPerHour} коп./час,
+              {' '}лимит скидки {p.maxDiscountBps}/100 %, версия политики {p.version}
+            </li>)}</ul>
+          </section>}
           {item.diagnostics&&item.diagnostics.length>0&&<section aria-label={'Диагностика версии '+item.version}>
             <h4>Диагностическое заключение, включённое в эту версию</h4>
             <ul>{item.diagnostics.map(f=><li key={f.serviceId}>
@@ -286,6 +303,13 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
               }}>Ответить: подготовить новую версию</button>
             </div>}
         </li>)}</ol>}
+      {role==='manager'&&<section aria-label="Управление тарифами филиала">
+        <button type="button" aria-expanded={tariffsOpen}
+          onClick={()=>setTariffsOpen(open=>!open)}>
+          {tariffsOpen?'Скрыть тарифы филиала':'Открыть тарифы филиала'}
+        </button>
+        {tariffsOpen&&<AutoTariffPolicies org={org.trim()} loc={loc.trim()}/>}
+      </section>}
       {latest?.decision==='APPROVED'&&<section aria-label="Новые работы после сметы">
         <button type="button" aria-expanded={extraOpen}
           onClick={()=>setExtraOpen(open=>!open)}>
