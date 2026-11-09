@@ -12,7 +12,6 @@ app = FastAPI(title="Airmatik automotive development API", version="0.1.0")
 
 from roboport_api.auth_http import router as synthetic_auth_router, legacy_router as legacy_auth_router
 app.include_router(synthetic_auth_router)
-app.include_router(legacy_auth_router)
 from roboport_api.oidc_http import router as oidc_router
 app.include_router(oidc_router)
 from roboport_api.guest_claim_http import router as guest_claim_router
@@ -1297,3 +1296,6 @@ async def dev_customer_preferences(request: Request):
 @app.post("/api/v1/dev/account/preferences",include_in_schema=False)
 async def dev_update_customer_preferences(request: Request):
     return await _customer_notification_preferences(request,True)
+
+# Historical ticket staff endpoints belong to this isolated test app only.
+app.include_router(legacy_auth_router)
