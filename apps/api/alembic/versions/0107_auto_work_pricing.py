@@ -115,7 +115,7 @@ def upgrade():
       IF NEW.total_minor<>total_minor
       THEN RAISE EXCEPTION 'priced quote total mismatch'; END IF;
       RETURN NEW;
-    END $f$""")
+    END; $f$""")
     op.execute("""CREATE TRIGGER auto_work_pricing_quote_guard
       BEFORE INSERT ON auto_work_order_estimate_revision
       FOR EACH ROW EXECUTE FUNCTION guard_auto_work_pricing_quote()""")
