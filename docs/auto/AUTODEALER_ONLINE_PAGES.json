@@ -353,6 +353,76 @@
       "gap": "Есть synthetic stocktake, нет утвержденного комиссионного документа",
       "evidence": "search_excerpt",
       "checkedOn": "2026-11-06"
+    },
+    {
+      "id": "ADP-026",
+      "url": "https://autodealer.ru/online/help/crm/kanban.html",
+      "title": "CRM: канбан",
+      "section": "CRM",
+      "matrixId": "D01",
+      "priority": "M2",
+      "issue": 444,
+      "status": "D_PARTIAL",
+      "scenario": "Настраиваемые стадии, причины переходов, ответственный, дедлайны, канбан/список",
+      "gap": "Есть синтетические leads/stage; нет configurable kanban, оплаты и бизнес-стадий",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-06"
+    },
+    {
+      "id": "ADP-027",
+      "url": "https://autodealer.ru/online/help/zarplata/skhemy-nachisleniia-zarplaty.html",
+      "title": "Схемы начисления зарплаты",
+      "section": "Кадры",
+      "matrixId": "D09",
+      "priority": "M3",
+      "issue": 448,
+      "status": "PLANNED",
+      "scenario": "Оклад, тариф manager/mechanic, KPI, история изменения правил и назначение схем",
+      "gap": "Нет верифицированных версий тарифов и employee payroll",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-06"
+    },
+    {
+      "id": "ADP-028",
+      "url": "https://autodealer.ru/online/help/nomenklatura/import-i-eksport-nomenklatury.html",
+      "title": "Импорт и экспорт номенклатуры",
+      "section": "Склад",
+      "matrixId": "E04",
+      "priority": "M2",
+      "issue": 447,
+      "status": "D_PARTIAL",
+      "scenario": "XLSX шаблон, пробная загрузка, массовый import/export и validation",
+      "gap": "Есть synthetic migration staging, но нет пользовательского XLSX roundtrip",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-06"
+    },
+    {
+      "id": "ADP-029",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/protcenka/zakaz-klienta.-zakaz-postavshchiku.html",
+      "title": "Заказ клиента и заказ поставщику",
+      "section": "Склад",
+      "matrixId": "C09",
+      "priority": "M2",
+      "issue": 443,
+      "status": "PLANNED",
+      "scenario": "Сопоставление клиентской потребности с поставщиком, частичный приход и статусы позиций",
+      "gap": "Есть synthetic ledger, но нет связанного purchase order flow",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-06"
+    },
+    {
+      "id": "ADP-030",
+      "url": "https://autodealer.ru/online/help/otchety-monitor-i-grafiki/otchety/otchety.-tovary.html",
+      "title": "Отчёты по товарам",
+      "section": "Отчёты",
+      "matrixId": "D10",
+      "priority": "M2",
+      "issue": 448,
+      "status": "D_PARTIAL",
+      "scenario": "Минимум/резерв/остаток, закупочная стоимость и детальная номенклатура",
+      "gap": "Есть synthetic stock counts, нет сверяемого item-level drilldown и cost reporting",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-06"
     }
   ]
 }

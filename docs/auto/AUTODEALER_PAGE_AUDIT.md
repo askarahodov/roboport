@@ -6,7 +6,7 @@
 
 ## Что точно проверено
 
-На дату фиксации подтверждены **25 страницы** в **12 тематических разделах**: 17 с частичным dev-покрытием (`D_PARTIAL`) и 8 без подтверждённого полного сценария (`PLANNED`). Никакая строка не называется `production` или `complete`. Статус оценивает **весь сценарий статьи**, а не наличие одноимённого модуля/кнопки. Проверка источника: `page` — публичный текст удалось прочитать; `search_excerpt` — факт страницы и содержание подтверждены поисковой выдачей сайта, **нужна повторная полная проверка**. Исходный сайт допускает кешированные статьи и встречающиеся отметки «Старый текст»: точная воспроизводимость на дату публикации требует отдельного ревью.
+На дату фиксации подтверждены **30 страниц** в **12 тематических разделах**: 20 с частичным dev-покрытием (`D_PARTIAL`) и 10 без подтверждённого полного сценария (`PLANNED`). Никакая строка не называется `production` или `complete`. Статус оценивает **весь сценарий статьи**, а не наличие одноимённого модуля/кнопки. Проверка источника: `page` — публичный текст удалось прочитать; `search_excerpt` — факт страницы и содержание подтверждены поисковой выдачей сайта, **нужна повторная полная проверка**. Исходный сайт допускает кешированные статьи и встречающиеся отметки «Старый текст»: точная воспроизводимость на дату публикации требует отдельного ревью.
 
 **Наши критерии:** `M1` — основной ремонтный/учётный контур, `M2` — расширенное управление/закупки, `M3` — мобильные и специализированные функции. Под `D_PARTIAL` понимаются только закрытые synthetic dev-интерфейсы, ограниченные тестовыми данными; legacy robot APIs не засчитываются. Контракт полноты и честных статусов: `python scripts/check_autodealer_audit.py` — offline CI, **не** crawler удалённого сайта.
 
@@ -37,6 +37,12 @@
 | ADP-023 | Клиенты | [Объединение дубликатов](https://autodealer.ru/online/help/klienty/obedinenie-dublikatov.html) | A01 | M2 | PLANNED | [#112](https://github.com/askarahodov/roboport/issues/112) | Нет safe owner/document merge и консистентной privacy истории |
 | ADP-024 | Склад | [Объединение дубликатов номенклатуры](https://autodealer.ru/online/help/nomenklatura/obedinenie-dublikatov.html) | C03 | M2 | PLANNED | [#447](https://github.com/askarahodov/roboport/issues/447) | Нет safe-merge с проверкой UOM, серий, SKU FK, rollback |
 | ADP-025 | Склад | [Инвентаризация](https://autodealer.ru/online/help/skladskoi-uchet/inventarizatciia.html) | C08 | M2 | D_PARTIAL | [#168](https://github.com/askarahodov/roboport/issues/168) | Есть synthetic stocktake, нет утвержденного комиссионного документа |
+
+| ADP-026 | CRM | [Канбан](https://autodealer.ru/online/help/crm/kanban.html) | D01 | M2 | D_PARTIAL | [#444](https://github.com/askarahodov/roboport/issues/444) | Нет конфигурируемого канбана и подтверждённого перехода к оплате |
+| ADP-027 | Кадры | [Схемы начисления зарплаты](https://autodealer.ru/online/help/zarplata/skhemy-nachisleniia-zarplaty.html) | D09 | M3 | PLANNED | [#448](https://github.com/askarahodov/roboport/issues/448) | Нет версий оклада/тарифа и employee payroll |
+| ADP-028 | Склад | [Импорт и экспорт номенклатуры](https://autodealer.ru/online/help/nomenklatura/import-i-eksport-nomenklatury.html) | E04 | M2 | D_PARTIAL | [#447](https://github.com/askarahodov/roboport/issues/447) | Нет защищённого массового XLSX UI и roundtrip |
+| ADP-029 | Склад | [Заказ клиента и поставщику](https://autodealer.ru/online/help/skladskoi-uchet/protcenka/zakaz-klienta.-zakaz-postavshchiku.html) | C09 | M2 | PLANNED | [#443](https://github.com/askarahodov/roboport/issues/443) | Нет supplier PO → частичный приход → связь с WorkOrder |
+| ADP-030 | Отчёты | [Отчёты по товарам](https://autodealer.ru/online/help/otchety-monitor-i-grafiki/otchety/otchety.-tovary.html) | D10 | M2 | D_PARTIAL | [#448](https://github.com/askarahodov/roboport/issues/448) | Нет item-level отчёта minimum/reserve/cost/drilldown |
 
 ## Главные полные вертикали, добавленные в backlog
 
@@ -77,3 +83,7 @@
 5. **Production:** gate [#119](https://github.com/askarahodov/roboport/issues/119) по security/privacy/backup/legal, а также полное удаление robot домена [#165](https://github.com/askarahodov/roboport/issues/165), до выпуска клиентского продукта.
 
 **Авторские права:** только сравнительный перечень *бизнес-возможностей* и ссылки на публичные статьи, без копирования интерфейса, скриншотов, программного кода, текстов и закрытых нормативов AutoDealer. Реальные ПДн/платежи до gate #119 не используются.
+
+## Результат дедупликации второго прохода (06.11.2026)
+
+При дополнительной сверке пяти вложенных статей найдено пересечение постановок #450–#459 с уже имеющимися полными вертикалями #439–#448. **Не следует вести два конкурирующих PR по одной бизнес-функции.** Сохраняем первоначальные owner Issues: #439 (акт), #440 (работы/комплексы/нормы/исполнители), #441 (FSM/выдача), #442 (виджет), #443 (закупка), #444 (CRM), #445 (касса/cashflow), #448 (выработка/зарплата). Дубли закрываются с явными связями и уникальными подробностями в комментариях owner Issues, без фиктивного закрытия самих функций. Машиночитаемый список теперь содержит 30 Online страниц в 12 разделах; это **по-прежнему не полный crawl** и не подтверждённый бизнес-аналитиком 100% gap audit.

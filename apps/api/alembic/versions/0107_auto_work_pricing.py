@@ -1,13 +1,13 @@
 """Versioned synthetic quote: work quantity, coefficient and bounded discount.
 
-Revision ID: 0106_auto_work_pricing
+Revision ID: 0107_auto_work_pricing
 Revises: 0105_auto_norm_hour_quote
 The old norm-hour SQL guard remains defined for downgrade compatibility.
 """
 from alembic import op
 
-revision="0106_auto_work_pricing"
-down_revision="0105_auto_norm_hour_quote"
+revision="0107_auto_work_pricing"
+down_revision="0106_auto_intake_photo_act"
 branch_labels=None
 depends_on=None
 
