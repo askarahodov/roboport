@@ -219,7 +219,9 @@ def upgrade():
                   "auto_stock_mechanic_handoff",
                   "auto_work_order_execution_finish",
                   "auto_work_order_qc_event"):
-        op.execute(f"""CREATE TRIGGER {table}_assignment_guard
+        # Handoff guard first resolves received_by from trusted transaction GUC.
+        name = ("zz_" if table == "auto_stock_mechanic_handoff" else "") + table + "_assignment_guard"
+        op.execute(f"""CREATE TRIGGER {name}
           BEFORE INSERT ON {table} FOR EACH ROW
           EXECUTE FUNCTION guard_auto_assignment_execution()""")
     op.execute("REVOKE ALL ON auto_work_order_assignment FROM PUBLIC")
@@ -231,7 +233,8 @@ def downgrade():
                   "auto_work_order_execution_finish",
                   "auto_stock_mechanic_handoff",
                   "auto_work_order_labor_entry"):
-        op.execute(f"DROP TRIGGER {table}_assignment_guard ON {table}")
+        name = ("zz_" if table == "auto_stock_mechanic_handoff" else "") + table + "_assignment_guard"
+        op.execute(f"DROP TRIGGER {name} ON {table}")
     op.execute("DROP FUNCTION guard_auto_assignment_execution()")
     op.execute("DROP TABLE auto_work_order_assignment_event")
     op.execute("DROP TABLE auto_work_order_assignment")
