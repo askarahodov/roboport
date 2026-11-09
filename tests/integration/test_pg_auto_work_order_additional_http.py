@@ -150,6 +150,56 @@ def test_additional_work_scope_replay_mutability_and_no_silent_approval(monkeypa
     assert http.get(endpoint).status_code==403
 
 
+@pytest.mark.parametrize("last_decision",["APPROVED","DECLINED"])
+def test_superseded_pending_extra_does_not_block_finish(monkeypatch,last_decision):
+    """The first pending revision is historical after a newer client decision."""
+    d,org,loc,order,base_service,additional,base=setup(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    endpoint=extra_path(org,loc,order)
+    execution=url(org,loc,order)
+    manager=session(http,d,d["intake"])
+    first=http.post(endpoint,headers=manager,
+                    json=quote(additional,base,version=0,discount=1000))
+    assert first.status_code==201,first.text
+    assert first.json()["items"][0]["decision"] is None
+    second=http.post(endpoint,headers=manager,
+                     json=quote(additional,base,version=1,discount=500))
+    assert second.status_code==201,second.text
+    latest=second.json()["items"][-1]
+    assert latest["version"]==2 and latest["decision"] is None
+
+    client=session(http,d,d["client_a"])
+    decision=http.post(endpoint+"/decision",headers=client,json={
+        "revisionId":latest["id"],"requestKey":str(uuid4()),
+        "decision":last_decision,
+    })
+    assert decision.status_code==201,decision.text
+    assert decision.json()["items"][0]["decision"] is None
+    assert decision.json()["items"][-1]["decision"]==last_decision
+
+    manager=session(http,d,d["intake"])
+    assert post(http,execution+"/start",manager).status_code==201
+    mechanic=session(http,d,d["manager"])
+    assert post(http,execution+"/labor",mechanic,
+                serviceId=str(base_service),actualMinutes=20).status_code==201
+    if last_decision=="APPROVED":
+        extra_labor=post(http,execution+"/labor",mechanic,
+                         serviceId=str(additional),actualMinutes=18)
+        assert extra_labor.status_code==201,extra_labor.text
+    else:
+        assert post(http,execution+"/labor",mechanic,
+                    serviceId=str(additional),actualMinutes=18).status_code==409
+    finished=post(http,execution+"/finish",mechanic)
+    assert finished.status_code==201,finished.text
+    assert finished.json()["status"]=="READY_FOR_QC"
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""
+          SELECT count(*) FROM auto_work_order_extra_revision r
+          LEFT JOIN auto_work_order_extra_decision d ON d.revision_id=r.id
+          WHERE r.work_order_id=%s AND d.id IS NULL
+        """,(order,)).fetchone()[0]==1
+
+
 def test_postgres_refuses_forged_additional_price_and_missing_consent(monkeypatch):
     d,org,loc,order,base_service,additional,base=setup(monkeypatch)
     good={"serviceId":str(additional),"code":"SYN-ADDITIONAL",
