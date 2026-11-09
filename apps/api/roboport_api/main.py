@@ -241,3 +241,21 @@ app.include_router(auto_customer_orders_router)
 app.include_router(auto_customer_booking_router)
 _ROUTE_BOOT_COUNTS = (len(auto_vehicle_router.routes), len(synthetic_auth_router.routes), len(app.routes))
 _ROUTE_BOOT_IDS = (id(app), id(app.router), id(app.routes))
+
+# Temporary CI diagnostic: identify who deletes already mounted ASGI routes.
+class _TraceRouteList(list):
+    def _fail(self, action):
+        import traceback
+        raise RuntimeError("ASGI ROUTES MUTATED: " + action + "\n" + "".join(traceback.format_stack(limit=12)))
+    def clear(self):
+        self._fail("clear")
+    def pop(self, *args):
+        self._fail("pop")
+    def remove(self, *args):
+        self._fail("remove")
+    def __delitem__(self, key):
+        self._fail("delete")
+    def __setitem__(self, key, value):
+        self._fail("setitem")
+
+app.router.routes = _TraceRouteList(app.router.routes)
