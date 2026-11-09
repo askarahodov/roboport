@@ -40,9 +40,9 @@ def _state(conn,order):
     if row:
         lines=conn.execute("""
            SELECT service_id,actual_minutes,created_at FROM auto_work_order_labor_entry
-           WHERE execution_id=%s ORDER BY created_at,id LIMIT 51
+           WHERE execution_id=%s ORDER BY created_at,id LIMIT 71
         """,(row[0],)).fetchall()
-        if len(lines)>50:
+        if len(lines)>70:
             raise ExecutionConflict("LIMIT")
         labor=[{"serviceId":str(s),"actualMinutes":m,"createdAt":at.isoformat()}
                for s,m,at in lines]
@@ -281,6 +281,13 @@ def finish_execution(conn,token,org,loc,order,request_key):
         issued={}
         for item in state["materials"]:
             issued[item["skuId"]]=issued.get(item["skuId"],0)+item["quantity"]
+        # A confirmed handoff is immutable audit evidence, not proof that
+        # material was retained: warehouse returns credit the original lot.
+        for sku,quantity in conn.execute("""
+          SELECT sku_id,SUM(quantity) FROM auto_stock_lot_work_order_return
+          WHERE work_order_id=%s GROUP BY sku_id
+        """,(order,)).fetchall():
+            issued[str(sku)]=issued.get(str(sku),0)-quantity
         if any(issued.get(str(sku),0)<need for sku,need in required):
             raise ExecutionConflict("COMPLEX_MATERIAL_ISSUE_INCOMPLETE")
         try:
