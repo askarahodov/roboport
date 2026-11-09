@@ -270,8 +270,26 @@ def finish_execution(conn,token,org,loc,order,request_key):
             raise ExecutionConflict("LABOR_INCOMPLETE")
         if any(not v["received"] for v in state["materials"]):
             raise ExecutionConflict("MATERIAL_HANDOFF_INCOMPLETE")
-        conn.execute("""
-          INSERT INTO auto_work_order_execution_finish(id,execution_id,actor_id,request_key)
-          VALUES(%s,%s,%s,%s)
-        """,(uuid4(),execution[0],actor,request_key))
+        required=conn.execute("""
+          SELECT component.sku_id,sum(component.quantity) AS required_qty
+          FROM auto_work_order_complex_selection chosen
+          JOIN auto_work_complex_material component
+            ON component.complex_id=chosen.complex_id
+          WHERE chosen.work_order_id=%s
+          GROUP BY component.sku_id
+        """,(order,)).fetchall()
+        issued={}
+        for item in state["materials"]:
+            issued[item["skuId"]]=issued.get(item["skuId"],0)+item["quantity"]
+        if any(issued.get(str(sku),0)<need for sku,need in required):
+            raise ExecutionConflict("COMPLEX_MATERIAL_ISSUE_INCOMPLETE")
+        try:
+            with conn.transaction():
+                conn.execute("""
+                  INSERT INTO auto_work_order_execution_finish
+                    (id,execution_id,actor_id,request_key)
+                  VALUES(%s,%s,%s,%s)
+                """,(uuid4(),execution[0],actor,request_key))
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
+            raise ExecutionConflict("EXECUTION_INTEGRITY_CONFLICT") from None
         return {"ok":True,"replayed":False,**_state(conn,order)}
