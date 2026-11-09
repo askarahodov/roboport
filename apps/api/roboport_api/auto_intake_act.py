@@ -166,9 +166,15 @@ def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[byte
         if base64.b64encode(data).decode("ascii")!=photo["imageBase64"]:
             raise IntakeActInvalid("INVALID_PHOTO")
         clean,width,height=sanitize_png(data)
+        digest=hashlib.sha256(clean).hexdigest()
+        # Identical binary evidence under multiple area labels misrepresents
+        # provenance. Reuse across immutable revisions is allowed, but not
+        # duplicate attachment slots within the same act version.
+        if any(m["sha256"]==digest for m in manifest):
+            raise IntakeActInvalid("DUPLICATE_PHOTO")
         blobs.append(clean)
         manifest.append({"areaCode":photo["areaCode"],"mime":"image/png",
-                         "sha256":hashlib.sha256(clean).hexdigest(),
+                         "sha256":digest,
                          "width":width,"height":height})
     return kind,damages,inventory,manifest,blobs
 
