@@ -7,74 +7,77 @@ from fastapi.responses import JSONResponse
 app = FastAPI(title="Airmatik automotive development API", version="0.1.0")
 
 from .auth_current_http import router as synthetic_auth_router
-app.include_router(synthetic_auth_router)
 from .oidc_http import router as oidc_router
-app.include_router(oidc_router)
 from .auto_vehicle_http import router as auto_vehicle_router
-app.include_router(auto_vehicle_router)
 from .auto_vehicle_claim_http import router as auto_vehicle_claim_router
-app.include_router(auto_vehicle_claim_router)
 from .auto_intake_delegation_http import router as auto_intake_delegation_router
-app.include_router(auto_intake_delegation_router)
 from .auto_org_staff_http import router as auto_org_staff_router
-app.include_router(auto_org_staff_router)
 from .auto_appointment_http import router as auto_appointment_router
-app.include_router(auto_appointment_router)
 from .auto_bay_occupancy import router as auto_bay_occupancy_router
-app.include_router(auto_bay_occupancy_router)
 from .auto_demo_finance_report import router as auto_demo_finance_report_router
-app.include_router(auto_demo_finance_report_router)
 from .auto_crm_leads_http import router as auto_crm_leads_router
-app.include_router(auto_crm_leads_router)
 from .auto_crm_followups_http import router as auto_crm_followups_router
-app.include_router(auto_crm_followups_router)
 from .auto_crm_inbox_http import router as auto_crm_inbox_router
-app.include_router(auto_crm_inbox_router)
 from .auto_crm_contact_choices_http import router as auto_crm_contact_choices_router
-app.include_router(auto_crm_contact_choices_router)
 from .auto_crm_funnel import router as auto_crm_funnel_router
-app.include_router(auto_crm_funnel_router)
 from .auto_stock_abc_xyz import router as auto_stock_abc_xyz_router
-app.include_router(auto_stock_abc_xyz_router)
 from .auto_opening_hours_http import router as auto_opening_hours_router
-app.include_router(auto_opening_hours_router)
 from .auto_stocktake_http import router as auto_stocktake_router
-app.include_router(auto_stocktake_router)
 from .auto_order_stock_read_http import router as auto_order_stock_read_router
-app.include_router(auto_order_stock_read_router)
 from .auto_order_customer_read_http import router as auto_order_customer_read_router
-app.include_router(auto_order_customer_read_router)
 from .auto_order_overview_http import router as auto_order_overview_router
-app.include_router(auto_order_overview_router)
 from .auto_order_financial_read_http import router as auto_order_financial_read_router
-app.include_router(auto_order_financial_read_router)
 from .auto_order_service_http import router as auto_order_service_router
-app.include_router(auto_order_service_router)
 from .auto_intake_act_http import router as auto_intake_act_router
-app.include_router(auto_intake_act_router)
 from .auto_workshop_qc_http import router as auto_workshop_qc_router
-app.include_router(auto_workshop_qc_router)
 from .auto_work_order_diagnostics_http import router as auto_work_order_diagnostics_router
-app.include_router(auto_work_order_diagnostics_router)
 from .auto_work_order_estimate_http import router as auto_work_order_estimate_router
-app.include_router(auto_work_order_estimate_router)
 from .auto_work_order_execution_http import router as auto_work_order_execution_router
-app.include_router(auto_work_order_execution_router)
 from .auto_work_order_assignment_http import router as auto_work_order_assignment_router
-app.include_router(auto_work_order_assignment_router)
 from .auto_work_order_additional_http import router as auto_work_order_additional_router
-app.include_router(auto_work_order_additional_router)
 from .auto_work_tariffs_http import router as auto_work_tariffs_router
-app.include_router(auto_work_tariffs_router)
 from .auto_work_complexes_http import router as auto_work_complexes_router
-app.include_router(auto_work_complexes_router)
 from .auto_demo_close_http import router as auto_demo_close_router
-app.include_router(auto_demo_close_router)
 from .auto_customer_orders_http import router as auto_customer_orders_router
-app.include_router(auto_customer_orders_router)
 from .auto_customer_booking_http import router as auto_customer_booking_router
-app.include_router(auto_customer_booking_router)
 
+
+# Register routes after every module has completed initialization.
+# Prevent partially populated routers if historical test modules import first.
+app.include_router(synthetic_auth_router)
+app.include_router(oidc_router)
+app.include_router(auto_vehicle_router)
+app.include_router(auto_vehicle_claim_router)
+app.include_router(auto_intake_delegation_router)
+app.include_router(auto_org_staff_router)
+app.include_router(auto_appointment_router)
+app.include_router(auto_bay_occupancy_router)
+app.include_router(auto_demo_finance_report_router)
+app.include_router(auto_crm_leads_router)
+app.include_router(auto_crm_followups_router)
+app.include_router(auto_crm_inbox_router)
+app.include_router(auto_crm_contact_choices_router)
+app.include_router(auto_crm_funnel_router)
+app.include_router(auto_stock_abc_xyz_router)
+app.include_router(auto_opening_hours_router)
+app.include_router(auto_stocktake_router)
+app.include_router(auto_order_stock_read_router)
+app.include_router(auto_order_customer_read_router)
+app.include_router(auto_order_overview_router)
+app.include_router(auto_order_financial_read_router)
+app.include_router(auto_order_service_router)
+app.include_router(auto_intake_act_router)
+app.include_router(auto_workshop_qc_router)
+app.include_router(auto_work_order_diagnostics_router)
+app.include_router(auto_work_order_estimate_router)
+app.include_router(auto_work_order_execution_router)
+app.include_router(auto_work_order_assignment_router)
+app.include_router(auto_work_order_additional_router)
+app.include_router(auto_work_tariffs_router)
+app.include_router(auto_work_complexes_router)
+app.include_router(auto_demo_close_router)
+app.include_router(auto_customer_orders_router)
+app.include_router(auto_customer_booking_router)
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
