@@ -1,6 +1,6 @@
 import React from 'react';
 
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Qualification='GENERAL'|'DIAGNOSTIC'|'MASTER';
 type Policy={id:string;qualificationCode:Qualification;version:number;
   rateMinorPerHour:number;maxDiscountBps:number;proposedBy:string;
