@@ -1,4 +1,4 @@
-# Полная функциональная матрица: AutoDealer Online → автомобильная платформа Airmatik
+# Полная функциональная матрица: AutoDealer Online → автомобильная платформа БоксРитм
 
 **Пересмотрено:** 28.10.2026 · Связанные [#107](https://github.com/askarahodov/roboport/issues/107), [#108](https://github.com/askarahodov/roboport/issues/108), [#174](https://github.com/askarahodov/roboport/issues/174). Цель — сравнимый **бизнес-функционал**, не копирование чужого кода, бренда, текстов или экранов.
 
