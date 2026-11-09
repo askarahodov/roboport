@@ -1,6 +1,6 @@
-"""Проверка реальных HTTP-ответов по JSON Schema из проектного OpenAPI 3.1.
+"""Реальные HTTP ответы и историческая JSON Schema: robot API отключён (#165).
 
-Проверяем только реализованные endpoints, не выдаём остальные операции за готовые.
+Исторический draft остаётся для миграционного аудита, не равен live OpenAPI.
 """
 from pathlib import Path
 from uuid import UUID
@@ -25,10 +25,16 @@ def validate_response(path, status, payload):
 
 
 @pytest.mark.parametrize("path", ["/api/v1/catalog/brands", "/api/v1/catalog/models"])
-def test_catalog_200_matches_openapi_schema(path):
+def test_retired_catalog_returns_canonical_404(path):
     response = CLIENT.get(path)
-    assert response.status_code == 200
-    validate_response(path, 200, response.json())
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-request-id"] == response.json()["requestId"]
+    UUID(response.json()["requestId"])
+    # Historical Error definition is still valid, but catalog operations
+    # themselves are intentionally missing from the live application.
+    validate_response("/api/v1/catalog/models/{modelId}", 404, response.json())
+    assert path not in CLIENT.get("/openapi.json").json()["paths"]
 
 
 def test_unknown_model_404_matches_error_schema():
