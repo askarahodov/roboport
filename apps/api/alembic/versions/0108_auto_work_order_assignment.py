@@ -126,17 +126,17 @@ def upgrade():
           NEW.accepted_at IS NULL OR NEW.accepted_at>clock_timestamp()
           OR NOT EXISTS (
             SELECT 1 FROM auto_organization_role_grant g
+            JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
+            JOIN auto_staff_shift s ON s.organization_id=g.organization_id
+              AND s.location_id=NEW.location_id AND s.user_id=g.user_id
+              AND s.canceled_at IS NULL
+              AND s.starts_at<=NEW.starts_at AND s.ends_at>=NEW.ends_at
             WHERE g.organization_id=NEW.organization_id
-              AND g.location_id IS NOT DISTINCT FROM
-                (SELECT location_id FROM auto_organization_role_grant
-                 WHERE organization_id=NEW.organization_id
-                   AND user_id=NEW.mechanic_id AND role_code='MECHANIC'
-                   AND revoked_at IS NULL
-                 ORDER BY (location_id IS NULL) LIMIT 1)
               AND g.user_id=NEW.mechanic_id AND g.role_code='MECHANIC'
               AND g.revoked_at IS NULL
+              AND (g.location_id=NEW.location_id OR g.location_id IS NULL)
           )
-        ) THEN RAISE EXCEPTION 'mechanic authority unavailable'; END IF;
+        ) THEN RAISE EXCEPTION 'mechanic authority or shift unavailable'; END IF;
         IF NEW.status='DECLINED' AND NEW.accepted_at IS NOT NULL
         THEN RAISE EXCEPTION 'declined assignment cannot be accepted'; END IF;
         RETURN NEW;

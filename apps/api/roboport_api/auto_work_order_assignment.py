@@ -61,14 +61,14 @@ def assign_mechanic(conn, token: str, organization_id: UUID, location_id: UUID,
         if order is None:
             raise AssignmentDenied("FORBIDDEN")
         prior=conn.execute("""
-          SELECT id,mechanic_id,starts_at,ends_at,status
+          SELECT id,work_order_id,organization_id,location_id,mechanic_id,starts_at,ends_at,status
           FROM auto_work_order_assignment WHERE request_key=%s
         """,(request_key,)).fetchone()
         if prior:
-            if prior[1:4]!=(mechanic_id,starts,ends):
+            if prior[1:7]!=(work_order_id,organization_id,location_id,mechanic_id,starts,ends):
                 raise AssignmentConflict("KEY_REUSED")
             return {"ok":True,"replayed":True,"assignmentId":str(prior[0]),
-                    "status":prior[4]}
+                    "status":prior[7]}
         grant=conn.execute("""
           SELECT 1 FROM auto_organization_role_grant g
           JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
