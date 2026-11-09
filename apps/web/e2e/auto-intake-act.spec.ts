@@ -88,9 +88,9 @@ test('intake → damage + custody + photo → immutable version → client previ
   await page.getByRole('button',{name:'Зафиксировать версию акта'}).click();
   await expect(page.getByRole('heading',{name:'Акт №1 · PASSENGER'})).toBeVisible();
   await expect(page.getByText('Царапина',{exact:false}).first()).toBeVisible();
-  await expect(page.getByText('Ключи: Есть')).toBeVisible();
+  await expect(page.getByText('Ключи: Есть').first()).toBeVisible();
   await expect(page.getByRole('img',{name:'Фото акта 1: Перед'})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Печатать предпросмотр акта'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Печатать выбранную версию'})).toBeVisible();
   expect(events).toEqual(['act']);
   expect(reads).toBeGreaterThanOrEqual(2);
   await page.setViewportSize({width:1280,height:800});
@@ -123,7 +123,7 @@ test('customer hides all act and photo evidence after revoked order scope',async
   await page.getByRole('button',{name:'Обновить журнал актов'}).click();
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByRole('heading',{name:'Акт №1 · PASSENGER'})).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Печатать предпросмотр акта'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Печатать выбранную версию'})).toHaveCount(0);
 });
 
 test('lost POST reply preserves exact requestKey and photo bytes for one safe replay',async({page})=>{
@@ -154,4 +154,40 @@ test('lost POST reply preserves exact requestKey and photo bytes for one safe re
     expectedVersion:0,act:{vehicleKind:'PASSENGER',damages:[],photos:[]},
   });
   expect(picture.areaCode).toBe('FRONT');
+});
+
+
+test('print preview isolates selected immutable revision at 390 and 1280',async({page})=>{
+  const versions=[1,2].map(n=>({
+    id:n===1?actId:'77777777-7777-4777-8777-777777777777',
+    version:n,vehicleKind:'PASSENGER',sha256:(n===1?'a':'c').repeat(64),
+    createdAt:'2030-01-01T10:00:00Z',actorId:org,
+    damages:n===1?[{areaCode:'FRONT',damageCode:'SCRATCH',severity:'MINOR'}]:[],
+    inventory:['KEYS','SPARE_WHEEL','TOOLS','DOCS','CHARGER'].map(itemCode=>
+      ({itemCode,condition:n===1?'PRESENT':'MISSING'})),
+    photos:[],
+  }));
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>
+    route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({...initial,locked:true,latestVersion:2,items:versions})}));
+  for(const width of [390,1280]){
+    await page.setViewportSize({width,height:844});
+    await page.goto('/account/auto-intake-act?'+query);
+    const preview=page.locator('.intake-act-print-document');
+    await expect(preview).toContainText('версия 2');
+    await expect(preview).toContainText('Комплектность');
+    await expect(preview).toContainText('Статус подписи: НЕ РЕАЛИЗОВАНО');
+    await page.getByRole('combobox',{name:'Версия для печати'}).selectOption(actId);
+    await expect(preview).toContainText('версия 1');
+    await expect(preview).toContainText('Царапина');
+    await expect(preview).not.toContainText('версия 2');
+    await page.emulateMedia({media:'print'});
+    await expect(preview).toHaveCSS('visibility','visible');
+    await expect(page.getByRole('heading',{
+      name:'Просмотр акта приёмки автомобиля (dev)',includeHidden:true
+    })).toHaveCSS('visibility','hidden');
+    await page.emulateMedia({media:'screen'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(width);
+  }
 });
