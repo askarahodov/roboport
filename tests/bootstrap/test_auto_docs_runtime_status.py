@@ -124,6 +124,6 @@ def test_navigator_has_clickable_and_existing_e2e_pg17_source_links():
     for name, relative in links:
         assert relative.endswith("/" + name), (name, relative)
         assert (ROOT / relative).is_file(), f"Broken test reference: {relative}"
-    assert not re.search(r"`[^\\n`]+\\.(?:spec\\.ts|py)`", navigator), (
+    assert not re.search(r"\x60[^\x60\n]+\.(?:spec\.ts|py)\x60", navigator), (
         "Unlinked test filename in role navigator"
     )
