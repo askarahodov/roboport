@@ -14,6 +14,10 @@ RETIRED = (
     "pages/staff/StaffGuestClaims.tsx",
     "pages/staff/TicketWorkflow.tsx",
     "shared/api/catalogClient.ts",
+    "pages/customer/CustomerSummary.tsx",
+    "pages/customer/EstimateActions.tsx",
+    "pages/staff/StaffOperations.tsx",
+    "pages/staff/StaffAudit.tsx",
 )
 
 FORBIDDEN_BROWSER_API = (
