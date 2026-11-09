@@ -2,8 +2,8 @@
 
 > **Статус:** `legacy`, **не** рабочая инструкция автомобильной СТО.
 > Документы сохранены для аудита, технического обслуживания старой системы
-> и будущей миграции. Никакого физического удаления URL/API/таблиц не
-> выполнено: это отдельный decommission-gate #165.
+> и будущей миграции. Рабочие robot HTTP-маршруты удалены из FastAPI, но физическое удаление
+> исторических SQL-таблиц и данных запрещено до recovery/approval-gate #119/#165.
 
 ## Что относится к старому продукту
 
@@ -17,8 +17,7 @@
 | QA старых клиентских и складских функций | [ACCEPTANCE_TESTS.md](../quality/ACCEPTANCE_TESTS.md), [INVENTORY_DEV_GATES.md](../quality/INVENTORY_DEV_GATES.md) | Отрицательные регрессионные проверки до cutover |
 | Старая авторизация/вложения | [SECURITY_MODEL.md](../security/SECURITY_MODEL.md), [LOCAL_AUTH_AND_MINIO.md](../security/LOCAL_AUTH_AND_MINIO.md) | Сохранить до независимого security review |
 
-Публичные robot-страницы `/robots`, `/catalog/*`, `/request-demo`, `/account/claim` исключены из React маршрутизации в автомобильном UI cutover; `/account/robots`, `/account/tickets`, `/account/estimates`, `/account/documents` больше не являются страницами клиентского кабинета; `/staff` открывает автомобильные рабочие разделы. Старые React компоненты сохранены лишь как неиспользуемый код до финальной очистки. Legacy REST, OpenAPI и SQL ещё существуют
-в коде. Это **не** означает, что они являются частью
+Публичные robot-страницы `/robots`, `/catalog/*`, `/request-demo`, `/account/claim` исключены из React маршрутизации в автомобильном UI cutover; `/account/robots`, `/account/tickets`, `/account/estimates`, `/account/documents` больше не являются страницами клиентского кабинета; `/staff` открывает автомобильные рабочие разделы. Неиспользуемые robot React-экраны удалены из frontend-исходников. Исторические HTTP-обработчики перенесены в `tests/legacy_runtime.py` (только test harness, не runtime), а SQL и архивный OpenAPI ещё сохраняются для миграции. Это **не** означает, что они являются частью
 новой автомобильной информационной системы. Не переименовывать сущность
 `service_ticket` в автомобильный `WorkOrder` без новой модели прав и
 согласий; не переносить историю по совпадению VIN. Робототехнические
@@ -34,11 +33,15 @@
 
 ## Граница UI cutover (09.11.2026)
 
-Автомобильный homepage, customer overview и staff workspace не вызывают старые robot API/queue; в E2E проверяются закрытые URL, роль, запрет старых вызовов и адаптивность 390/1280. **Это не физический backend decommission:** публичный draft `contracts/openapi.yaml` и legacy методы `apps/api/roboport_api/main.py` всё ещё требуют удаления/замены с миграцией тестов/контрактов. До независимой проверки не утверждаем, что все frontend source-файлы очищены от слова «робот».
+Автомобильный homepage, customer overview и staff workspace не вызывают старые robot API/queue; в E2E проверяются закрытые URL, роль, запрет старых вызовов и адаптивность 390/1280. **Это не физический backend decommission:** публичный draft `contracts/openapi.yaml` и исторические данные/архивные тесты всё ещё требуют безопасного переноса и утверждённой политики хранения. До независимой проверки не утверждаем, что все frontend source-файлы очищены от слова «робот».
 
 ## Выключение публичного robot API (после UI cutover)
 
-На текущем runtime FastAPI намеренно **не регистрируются** `GET /api/v1/catalog/brands`, `GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/{modelId}`. Запросы любых методов к этим адресам отвечают 404, а `/openapi.json` не включает robot catalog; соответствующая негативная bootstrap-проверка — `tests/bootstrap/test_public_catalog.py`. Текущий `/api/v1/meta` возвращает `Airmatik`. Это не означает удаления исторического `contracts/openapi.yaml`: draft контракт ещё содержит старый домен и должен быть либо заменён новой версией после contract review, либо окончательно архивирован, до того он **не** публичный контракт работающего автомобильного API. Внутренние opt-in legacy `/api/v1/dev/tickets`, `/api/v1/dev/catalog`, архив и robot SQL ещё существуют только для контролируемого вывода.
+На текущем runtime FastAPI намеренно **не регистрируются** `GET /api/v1/catalog/brands`, `GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/{modelId}`. Запросы любых методов к этим адресам отвечают 404, а `/openapi.json` не включает robot catalog; соответствующая негативная bootstrap-проверка — `tests/bootstrap/test_public_catalog.py`. Текущий `/api/v1/meta` возвращает `Airmatik`. Это не означает удаления исторического `contracts/openapi.yaml`: draft контракт ещё содержит старый домен и должен быть либо заменён новой версией после contract review, либо окончательно архивирован, до того он **не** публичный контракт работающего автомобильного API. Внутренние legacy `/api/v1/dev/tickets`, `/api/v1/dev/catalog`, `/api/v1/dev/guest-*`, `/api/v1/dev/staff/queue` и `/audit` теперь **отсутствуют** в рабочем FastAPI; старые тесты используют только `tests/legacy_runtime.py`. Общий dev staff access (`/api/v1/dev/staff/access`) пока остаётся техническим переходным auth-gate и требует отдельного автомобильного tenant-scoped replacement до production.
+
+## Runtime retirement: проверка
+
+После отдельной сборки актуального `roboport_api.main` все старые ticket/catalog/guest/estimate/robot-summary REST endpoints возвращают **404 даже при синтетических флагах**. Инвариант проверяет `tests/bootstrap/test_legacy_http_retirement.py`. Прежние негативные PostgreSQL/ACL тесты сохранены с `tests.legacy_runtime.app` только в тестовом контуре; `apps/api/roboport_api/main.py` не импортирует его. Старый `CustomerSettings` больше не вызывает робототехнический `/api/v1/dev/account/preferences`; клиентские предпочтения связи CRM используют отдельный synthetic endpoint без реальной отправки. **Не считать** это подтверждением правильного переноса исторических данных или разрешением удаления таблиц.
 
 ## Что ещё нужно для настоящего вывода из эксплуатации
 
