@@ -77,12 +77,33 @@ def _staff_and_scope(conn,token,org,loc,order):
         raise AutoEstimateDenied("FORBIDDEN") from None
 
 
+def _complex_material_snapshot(conn,order):
+    """Frozen priced PARTs and non-sold CONSUMABLEs from actual reserved stock."""
+    rows=conn.execute("""
+      SELECT sel.id,sku.id,sku.article,component.item_kind,
+             component.quantity,component.unit_price_minor
+      FROM auto_work_order_complex_selection sel
+      JOIN auto_work_complex_material_reserved receipt
+        ON receipt.selection_id=sel.id
+      JOIN auto_work_complex_material component
+        ON component.id=receipt.component_id
+      JOIN auto_stock_sku sku ON sku.id=component.sku_id
+      WHERE sel.work_order_id=%s ORDER BY sku.article,sku.id,sel.id LIMIT 101
+    """,(order,)).fetchall()
+    if len(rows)>100:
+        raise AutoEstimateConflict("MATERIAL_LIMIT")
+    return [{"selectionId":str(selection),"skuId":str(sku),"article":article,
+             "itemKind":kind,"quantity":quantity,"unitPriceMinor":unit,
+             "amountMinor":quantity*unit}
+            for selection,sku,article,kind,quantity,unit in rows]
+
+
 def _estimate_state(conn,order):
     revisions=conn.execute("""
        SELECT r.id,r.version,r.total_minor,r.fingerprint,r.service_lines,
               r.created_at,d.decision,d.created_at,
               q.id,q.reason_code,answer.resolution_code,r.diagnostics_snapshot,
-              r.tariff_snapshot
+              r.tariff_snapshot,r.material_lines
        FROM auto_work_order_estimate_revision r
        LEFT JOIN auto_work_order_estimate_decision d ON d.revision_id=r.id
        LEFT JOIN auto_estimate_clarification_request q ON q.revision_id=r.id
@@ -92,10 +113,11 @@ def _estimate_state(conn,order):
     if len(revisions)>30:
         raise AutoEstimateConflict("LIMIT")
     results=[]
-    for ident,version,total,digest,lines,created,decision,decided_at,question,reason,resolution,diagnostics,tariffs in revisions:
+    for ident,version,total,digest,lines,created,decision,decided_at,question,reason,resolution,diagnostics,tariffs,materials in revisions:
         results.append({"id":str(ident),"version":version,"totalMinor":total,
                         "currency":"RUB","digest":digest.strip(),
                         "lines":lines,"diagnostics":diagnostics,"tariffs":tariffs,
+                        "materialLines":materials,
                         "decision":decision,
                         "createdAt":created.isoformat(),
                         "decidedAt":decided_at.isoformat() if decided_at else None,
@@ -201,7 +223,8 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
             else:
                 line["amountMinor"]=supplied[i]["amountMinor"]
             lines.append(line)
-        total=sum(item["amountMinor"] for item in lines)
+        materials=_complex_material_snapshot(conn,order)
+        total=sum(item["amountMinor"] for item in lines)+sum(item["amountMinor"] for item in materials)
         if total>10**12:
             raise AutoEstimateDenied("INVALID_INPUT")
         try:
@@ -210,7 +233,8 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
             raise AutoEstimateConflict("TARIFF_MISMATCH") from None
         diagnostics=diagnostic_snapshot(conn,order)
         digest=_fingerprint({"order":str(order),"lines":lines,
-                             "diagnostics":diagnostics,"tariffs":tariffs,"totalMinor":total,
+                             "diagnostics":diagnostics,"tariffs":tariffs,
+                             "materials":materials,"totalMinor":total,
                              "currency":"RUB"})
         existing=conn.execute("""
           SELECT fingerprint FROM auto_work_order_estimate_revision
@@ -233,11 +257,11 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
                   INSERT INTO auto_work_order_estimate_revision
                   (id,work_order_id,organization_id,location_id,version,actor_id,
                    request_key,fingerprint,total_minor,service_lines,
-                   diagnostics_snapshot,tariff_snapshot)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+                   diagnostics_snapshot,tariff_snapshot,material_lines)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)
                 """,(uuid4(),order,org,loc,expected_version+1,actor,
                       request_key,digest,total,json.dumps(lines),
-                      json.dumps(diagnostics),json.dumps(tariffs)))
+                      json.dumps(diagnostics),json.dumps(tariffs),json.dumps(materials)))
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise AutoEstimateConflict("VERSION_CONFLICT") from None
