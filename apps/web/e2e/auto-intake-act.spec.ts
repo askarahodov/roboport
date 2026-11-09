@@ -158,7 +158,7 @@ test('lost POST reply preserves exact requestKey and photo bytes for one safe re
 });
 
 
-test('print keeps one page with 20 historic acts at 390 and 1280',async({page})=>{
+test('print keeps one page with 20 historic acts at 390 and 1280',async({page},testInfo)=>{
   // Длинный экранный журнал не должен создавать пустые страницы в PDF.
   const versions=Array.from({length:20},(_,index)=>{
     const n=index+1;
@@ -189,6 +189,13 @@ test('print keeps one page with 20 historic acts at 390 and 1280',async({page})=
     await expect(printable).toContainText('версия 1');
     await expect(printable).toContainText('Царапина');
     await expect(printable).not.toContainText('версия 20');
+    // Воспроизводимые снимки компонента в двух темах для review, без ПДн.
+    for(const mode of ['light','dark'] as const){
+      await page.emulateMedia({media:'screen',colorScheme:mode});
+      await preview.screenshot({
+        path:testInfo.outputPath(`intake-preview-${width}-${mode}.png`),
+      });
+    }
 
     await page.emulateMedia({media:'print'});
     const printRoot=page.locator('body > .intake-act-print-portal');
@@ -202,7 +209,8 @@ test('print keeps one page with 20 historic acts at 390 and 1280',async({page})=
     expect(dimensions.height).toBeGreaterThan(100);
     // A4 ~1122 CSS px at 96 dpi: never include the 20-version screen history.
     expect(dimensions.bodyHeight).toBeLessThan(1122);
-    const pdf=await page.pdf({format:'A4',printBackground:true});
+    const pdf=await page.pdf({format:'A4',printBackground:true,
+      path:testInfo.outputPath(`intake-selected-${width}.pdf`)});
     // Chromium emits one uncompressed /Type /Page object per printed page.
     const pages=pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)??[];
     expect(pages).toHaveLength(1);
