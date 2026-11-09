@@ -7,6 +7,11 @@ for(const width of [390,1280,1440]){
       await page.setViewportSize({width,height:844});
       await page.emulateMedia({colorScheme:theme==='auto'?'dark':'light'});
       await page.goto('/');
+      await expect(page).toHaveTitle(/БоксРитм/);
+      await expect(page.getByText('БоксРитм',{exact:true}).first()).toBeVisible();
+      const favicon=await page.request.get('/favicon.svg');
+      expect(favicon.ok()).toBeTruthy();
+      expect(await favicon.text()).toContain('БоксРитм');
       await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme);
       const main=page.locator('main');
       await expect(main).toHaveClass(theme==='dark'||theme==='auto'?/dark/:/app/);
@@ -40,4 +45,15 @@ test('тёмная тема и клавиатура доступны на зак
  expect(outline).not.toBe('none');
  await link.click();
  await expect(page.getByRole('alert')).toContainText('403');
+});
+
+
+test('служебная метаинформация использует БоксРитм, а авторизация не ослаблена ребрендингом', async ({page}) => {
+  await page.goto('/');
+  const meta=await page.request.get('/api/v1/meta');
+  expect(meta.ok()).toBeTruthy();
+  const data=await meta.json();
+  expect(data.service).toBe('БоксРитм');
+  await page.goto('/account');
+  await expect(page.getByRole('alert')).toContainText('403');
 });

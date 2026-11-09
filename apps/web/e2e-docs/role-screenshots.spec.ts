@@ -15,12 +15,12 @@ const roles=[
 ] as const;
 
 for(const role of roles){
-  test('безопасные скриншоты справки: '+role.id+' × 390/1280 × light/dark',async({page},info)=>{
+  test('безопасные скриншоты справки: '+role.id+' × 390/1280/1440 × light/dark/auto',async({page},info)=>{
     test.setTimeout(120_000);
-    for(const width of [390,1280]){
+    for(const width of [390,1280,1440]){
       await page.setViewportSize({width,height:844});
-      for(const colorScheme of ['light','dark'] as const){
-        await page.emulateMedia({colorScheme});
+      for(const colorScheme of ['light','dark','auto'] as const){
+        await page.emulateMedia({colorScheme: colorScheme==='auto'?'dark':colorScheme});
         await page.goto('/docs/#/guides/'+role.id);
         await expect(page.locator('.markdown-section h1')).toContainText(
           role.heading,{timeout:25_000});
@@ -49,7 +49,7 @@ test('скриншоты мобильной навигации и статусо
   await page.setViewportSize({width:390,height:844});
   await page.goto('/docs/');
   await expect(page.locator('.markdown-section h1')).toContainText(
-    'База знаний Airmatik Pro Service',{timeout:25_000});
+    'База знаний БоксРитм',{timeout:25_000});
   await page.locator('.sidebar-toggle').click();
   await expect(page.locator('.sidebar-nav a[href*="guides/QUICK_START"]')).toBeVisible();
   await expect(page.locator('.sidebar-nav a[href*="guides/FAQ"]')).toBeVisible();
@@ -66,12 +66,12 @@ test('скриншоты мобильной навигации и статусо
 });
 
 
-test('скриншоты навигатора задач: 390/1280 × light/dark', async ({ page }, info) => {
+test('скриншоты навигатора задач: 390/1280/1440 × light/dark/auto', async ({ page }, info) => {
   test.setTimeout(120_000);
-  for (const width of [390, 1280]) {
+  for (const width of [390, 1280, 1440]) {
     await page.setViewportSize({ width, height: 844 });
-    for (const colorScheme of ['light', 'dark'] as const) {
-      await page.emulateMedia({ colorScheme });
+    for (const colorScheme of ['light', 'dark', 'auto'] as const) {
+      await page.emulateMedia({ colorScheme: colorScheme==='auto'?'dark':colorScheme });
       await page.goto('/docs/#/guides/ROLE_NAVIGATOR');
       await expect(page.locator('.markdown-section h1')).toContainText(
         'Навигатор операций автосервиса', { timeout: 25_000 });
