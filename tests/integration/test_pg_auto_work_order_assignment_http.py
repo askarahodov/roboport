@@ -21,7 +21,6 @@ def test_shift_aware_assignment_accept_replay_and_authority(monkeypatch):
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
     d,org,loc,order,service,foreign,_=scenario()
     with psycopg.connect(DSN) as db:
-        grant(db,d["intake"],org,loc,"MANAGER")
         grant(db,d["manager"],org,loc,"MECHANIC")
         grant(db,d["other"],org,loc,"MECHANIC")
         starts=datetime.now(timezone.utc)+timedelta(hours=2)
@@ -80,7 +79,6 @@ def test_assignment_rejects_foreign_scope_and_revoked_mechanic(monkeypatch):
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
     d,org,loc,order,service,foreign,_=scenario()
     with psycopg.connect(DSN) as db:
-        grant(db,d["intake"],org,loc,"MANAGER")
         grant(db,d["manager"],org,loc,"MECHANIC")
         starts=datetime.now(timezone.utc)+timedelta(hours=3);ends=starts+timedelta(hours=1)
         db.execute("""INSERT INTO auto_staff_shift
