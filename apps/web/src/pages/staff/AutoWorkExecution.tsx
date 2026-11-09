@@ -8,6 +8,7 @@ type Snapshot={status:'NOT_APPROVED'|'APPROVED'|'IN_PROGRESS'|'READY_FOR_QC'|'QC
   approvedVersion:number|null;approvedTotalMinor:number|null;requiredServices:Service[];
   labor:Labor[];materials:Material[];qcStatus:string;executionId:string|null;
   syntheticOnly:true;releaseAllowed:false};
+type Assignment={assignmentId:string;workOrderId:string;mechanicId:string;startsAt:string;endsAt:string;status:'OFFERED'|'ACCEPTED'};
 type Pending={path:string;body:string};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -31,6 +32,10 @@ export function AutoWorkExecution(){
   const [minutes,setMinutes]=React.useState<Record<string,string>>({});
   const [lot,setLot]=React.useState(''),[qty,setQty]=React.useState('1');
   const [issue,setIssue]=React.useState('');
+  const [assignments,setAssignments]=React.useState<Assignment[]>([]);
+  const [mechanicId,setMechanicId]=React.useState('');
+  const [shiftStart,setShiftStart]=React.useState('');
+  const [shiftEnd,setShiftEnd]=React.useState('');
   const scope=[org.trim(),loc.trim(),order.trim()].join(':');
   const valid=[org,loc,order].every(x=>uuid.test(x.trim()));
   const root='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
@@ -51,6 +56,29 @@ export function AutoWorkExecution(){
       }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
   },[scope,valid,revision]);
+
+  React.useEffect(()=>{
+    setAssignments([]);
+    if(!valid)return;
+    const controller=new AbortController();
+    const queue='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
+      '/locations/'+encodeURIComponent(loc.trim())+'/assignments';
+    void fetch(queue,{credentials:'include',cache:'no-store',signal:controller.signal})
+      .then(async res=>{
+        if(!res.ok)return;
+        const data:unknown=await res.json();
+        if(!data||typeof data!=='object'||!('items' in data)||!Array.isArray(data.items))return;
+        const safe=data.items.filter((v):v is Assignment=>!!v&&typeof v==='object'
+          &&'assignmentId' in v&&typeof v.assignmentId==='string'
+          &&'workOrderId' in v&&typeof v.workOrderId==='string'
+          &&'mechanicId' in v&&typeof v.mechanicId==='string'
+          &&'startsAt' in v&&typeof v.startsAt==='string'
+          &&'endsAt' in v&&typeof v.endsAt==='string'
+          &&'status' in v&&(v.status==='OFFERED'||v.status==='ACCEPTED'));
+        if(!controller.signal.aborted)setAssignments(safe);
+      }).catch(()=>{});
+    return ()=>controller.abort();
+  },[org,loc,valid,revision]);
 
   async function act(path:string,body:string){
     if(!ready||busy)return;
@@ -107,6 +135,27 @@ export function AutoWorkExecution(){
       {snapshot.status==='NOT_APPROVED'&&<p>Без подтверждённой клиентом сметы работы запускать нельзя.</p>}
       {snapshot.status==='APPROVED'&&<button type="button" disabled={!active}
         onClick={()=>send('start',{})}>Начать работы (MANAGER)</button>}
+      <h3>Назначение исполнителя (MANAGER → MECHANIC)</h3>
+      <p>Назначение возможно только в пределах действующей смены. Один механик не может принять пересекающиеся задания.</p>
+      <label>UUID механика <input aria-label="UUID механика для назначения" value={mechanicId}
+        onChange={e=>setMechanicId(e.target.value)}/></label>
+      <label>Начало сменного интервала <input aria-label="Начало назначения" type="datetime-local"
+        value={shiftStart} onChange={e=>setShiftStart(e.target.value)}/></label>
+      <label>Окончание сменного интервала <input aria-label="Окончание назначения" type="datetime-local"
+        value={shiftEnd} onChange={e=>setShiftEnd(e.target.value)}/></label>
+      <button type="button" disabled={!active||!uuid.test(mechanicId)
+        ||!shiftStart||!shiftEnd||new Date(shiftEnd)<=new Date(shiftStart)}
+        onClick={()=>void act(root+'/assignments',JSON.stringify({
+          mechanicId,startsAt:new Date(shiftStart).toISOString(),
+          endsAt:new Date(shiftEnd).toISOString(),requestKey:crypto.randomUUID()
+        }))}>Предложить назначение</button>
+      {assignments.filter(a=>a.workOrderId===order.trim()).map(a=><p key={a.assignmentId}>
+        Назначение {a.status}; механик {a.mechanicId}; {new Date(a.startsAt).toLocaleString()} — {new Date(a.endsAt).toLocaleString()}
+        {a.status==='OFFERED'&&a.mechanicId===mechanicId&&<button type="button" disabled={!active}
+          onClick={()=>void act('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
+            '/locations/'+encodeURIComponent(loc.trim())+'/assignments/'+a.assignmentId+'/accept',
+            JSON.stringify({requestKey:crypto.randomUUID()}))}>Принять назначение</button>}
+      </p>)}
       <h3>Фактические трудозатраты (MECHANIC)</h3>
       {snapshot.requiredServices.length===0?<p>Нет согласованных услуг.</p>:<ul>
         {snapshot.requiredServices.map(s=>{
