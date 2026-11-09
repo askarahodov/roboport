@@ -12,6 +12,7 @@ from .auto_work_order_estimate import (
     _staff_and_scope,_client_and_scope,_estimate_state,_fingerprint,
     AutoEstimateDenied,
 )
+from .auto_work_tariffs import quote_tariff_snapshot,TariffConflict
 
 
 class ExtraDenied(ValueError):
@@ -25,7 +26,7 @@ class ExtraConflict(ValueError):
 def _state(conn,order):
     rows=conn.execute("""
       SELECT r.id,r.version,r.base_revision_id,r.total_minor,r.fingerprint,
-             r.service_lines,r.created_at,d.decision,d.created_at
+             r.service_lines,r.created_at,d.decision,d.created_at,r.tariff_snapshot
       FROM auto_work_order_extra_revision r
       LEFT JOIN auto_work_order_extra_decision d ON d.revision_id=r.id
       WHERE r.work_order_id=%s ORDER BY r.version LIMIT 11
@@ -35,7 +36,7 @@ def _state(conn,order):
     items=[{
         "id":str(r[0]),"version":r[1],"baseRevisionId":str(r[2]),
         "totalMinor":r[3],"currency":"RUB","digest":r[4].strip(),
-        "lines":r[5],"createdAt":r[6].isoformat(),
+        "lines":r[5],"createdAt":r[6].isoformat(),"tariffs":r[9],
         "decision":r[7],"decidedAt":r[8].isoformat() if r[8] else None,
     } for r in rows]
     return {"items":items,"latestVersion":items[-1]["version"] if items else 0,
@@ -117,8 +118,12 @@ def publish_extra(conn,token,org,loc,order,*,base_revision_id,
         total=sum(line["amountMinor"] for line in lines)
         if total>10**12:
             raise ExtraDenied("INVALID_INPUT")
+        try:
+            tariffs=quote_tariff_snapshot(conn,org,loc,lines)
+        except TariffConflict:
+            raise ExtraConflict("TARIFF_MISMATCH") from None
         digest=_fingerprint({"order":str(order),"baseRevisionId":str(base_revision_id),
-                             "lines":lines,"totalMinor":total,"currency":"RUB"})
+                             "lines":lines,"tariffs":tariffs,"totalMinor":total,"currency":"RUB"})
         prior=conn.execute("""
           SELECT fingerprint FROM auto_work_order_extra_revision
           WHERE work_order_id=%s AND request_key=%s
@@ -136,10 +141,11 @@ def publish_extra(conn,token,org,loc,order,*,base_revision_id,
                 conn.execute("""
                   INSERT INTO auto_work_order_extra_revision
                   (id,work_order_id,organization_id,location_id,base_revision_id,
-                   version,actor_id,request_key,fingerprint,total_minor,service_lines)
-                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                   version,actor_id,request_key,fingerprint,total_minor,service_lines,tariff_snapshot)
+                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb)
                 """,(uuid4(),order,org,loc,base_revision_id,
-                    expected_version+1,actor,request_key,digest,total,json.dumps(lines)))
+                    expected_version+1,actor,request_key,digest,total,json.dumps(lines),
+                    json.dumps(tariffs)))
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation):
             raise ExtraConflict("VERSION_CONFLICT") from None
