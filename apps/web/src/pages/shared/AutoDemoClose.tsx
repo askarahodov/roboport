@@ -26,6 +26,25 @@ function parse(raw:unknown):Snapshot{
     typeof v.simulatedPaidMinor!=='number'||typeof v.simulatedRefundedMinor!=='number'){
     throw new Error('invalid demo state');
   }
+  // Не показываем неполный или арифметически противоречивый финансовый итог.
+  const minor=(value:unknown):value is number=>
+    typeof value==='number'&&Number.isSafeInteger(value)&&value>=0;
+  const base=v.approvedBaseMinor,extra=v.approvedExtraMinor,total=v.approvedTotalMinor;
+  const paid=v.simulatedPaidMinor,refunded=v.simulatedRefundedMinor;
+  if((base!==null&&!minor(base))||!minor(extra)||
+    (total!==null&&!minor(total))||
+    (base===null?total!==null:total!==Number(base)+Number(extra))||
+    !minor(paid)||!minor(refunded)||refunded>paid||
+    (total!==null&&v.simulatedDueMinor!==Number(total)-paid+refunded)||
+    (total===null&&v.simulatedDueMinor!==null)||
+    (v.approvedExtraRevisionId===null?
+      v.approvedExtraVersion!==null||extra!==0:
+      typeof v.approvedExtraRevisionId!=='string'||
+      !uuid.test(v.approvedExtraRevisionId)||
+      !Number.isInteger(v.approvedExtraVersion)||
+      Number(v.approvedExtraVersion)<1)){
+    throw new Error('invalid reconciliation state');
+  }
   return v as Snapshot;
 }
 
