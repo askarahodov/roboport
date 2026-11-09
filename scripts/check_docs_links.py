@@ -88,6 +88,7 @@ def check_links(root: Path, sources: list[Path] | None = None) -> list[str]:
         source = source.resolve()
         content = source.read_text(encoding="utf-8")
         text = without_code(content)
+        sidebar_destinations: dict[str, int] = {}
         for match in LINK.finditer(text):
             raw = match.group(1).strip("<>")
             try:
@@ -101,6 +102,16 @@ def check_links(root: Path, sources: list[Path] | None = None) -> list[str]:
                 issues.append(f"{source.relative_to(root)}: недопустимая схема в ссылке {raw!r}")
                 continue
             target_path = unquote(url.path)
+            if source == root / "docs" / "_sidebar.md":
+                # В меню Docsify один маршрут должен иметь только один пункт.
+                # Разные якоря одной страницы допустимы как разные назначения.
+                destination = (target_path.rstrip("/") or "/") + ("#" + unquote(url.fragment) if url.fragment else "")
+                first_line = sidebar_destinations.get(destination)
+                if first_line is not None:
+                    line = text.count("\n", 0, match.start()) + 1
+                    issues.append(f"docs/_sidebar.md:{line}: повтор маршрута {destination} (первая строка {first_line})")
+                else:
+                    sidebar_destinations[destination] = text.count("\n", 0, match.start()) + 1
             if target_path.startswith("/"):
                 # Docsify читает /docs/_sidebar.md из собственного корня /docs/.
                 # Абсолютный sidebar-route /guides/client.md — НЕ /guides в репозитории.
