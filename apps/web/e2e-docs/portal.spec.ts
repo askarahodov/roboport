@@ -216,6 +216,20 @@ test('руководство СТО, FAQ и legacy-архив не смешив�
 });
 
 
+test('Docsify: поиск находит навигатор текущих задач и открывает его без несуществующих маршрутов', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/docs/');
+  await expect(page.locator('.markdown-section h1')).toContainText('База знаний', { timeout: 25_000 });
+  await expectIndexedDocsSearch(page, 'Навигатор операций автосервиса');
+  const navigatorResult = page.locator('.sidebar .results-panel a[href*="ROLE_NAVIGATOR"]').first();
+  await expect(navigatorResult).toBeVisible();
+  await navigatorResult.click();
+  await expect(page.locator('.markdown-section h1')).toContainText('Навигатор операций автосервиса');
+  await expect(page.locator('.markdown-section')).toContainText('Отсутствующие в продукте операции');
+  await expect(page.locator('.markdown-section')).not.toContainText('404 - Not found');
+});
+
 test('ролевой навигатор открывается с клавиатуры, ищется и различает planned/current-dev на 390/1280', async ({ page }) => {
   test.setTimeout(120_000);
   for (const width of [390, 1280]) {
