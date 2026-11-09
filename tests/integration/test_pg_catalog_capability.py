@@ -81,7 +81,7 @@ def test_rejected_capability_remains_unsupported():
 
 def test_catalog_http_exact_and_live_review(monkeypatch):
     from fastapi.testclient import TestClient
-    from roboport_api.main import app
+    from tests.legacy_runtime import app
     model,cap,engineer,manager,part=(uuid4() for _ in range(5))
     tokens=(new_token(),new_token())
     csrf=(new_token(),new_token())
