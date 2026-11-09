@@ -151,7 +151,7 @@ export function AutoWorkExecution(){
         }))}>Предложить назначение</button>
       {assignments.filter(a=>a.workOrderId===order.trim()).map(a=><p key={a.assignmentId}>
         Назначение {a.status}; механик {a.mechanicId}; {new Date(a.startsAt).toLocaleString()} — {new Date(a.endsAt).toLocaleString()}
-        {a.status==='OFFERED'&&a.mechanicId===mechanicId&&<button type="button" disabled={!active}
+        {a.status==='OFFERED'&&<button type="button" disabled={!active}
           onClick={()=>void act('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
             '/locations/'+encodeURIComponent(loc.trim())+'/assignments/'+a.assignmentId+'/accept',
             JSON.stringify({requestKey:crypto.randomUUID()}))}>Принять назначение</button>}
