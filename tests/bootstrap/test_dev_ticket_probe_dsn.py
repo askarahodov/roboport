@@ -1,6 +1,6 @@
 """Development ticket access probe must never connect to malformed or remote DB."""
 from fastapi.testclient import TestClient
-from roboport_api.main import app
+from tests.legacy_runtime import app
 
 
 def test_dev_ticket_probe_rejects_unsafe_database_urls(monkeypatch):
