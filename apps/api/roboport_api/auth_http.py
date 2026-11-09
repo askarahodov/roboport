@@ -16,6 +16,8 @@ from .session_cookie import set_session_cookie, clear_session_cookie
 _DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$SeTItVGGw+BtNGFsMzzl9A$/JMANrplfkaKb911s04/mF1zlsBuSozi3Vg46p9it20"
 
 router=APIRouter(include_in_schema=False)
+# Исторические очереди robot tickets не включаются в рабочее приложение.
+legacy_router=APIRouter(include_in_schema=False)
 
 
 class Credentials(BaseModel):
@@ -218,7 +220,7 @@ def staff_access(request: Request):
                         headers={"Cache-Control":"no-store"})
 
 
-@router.get("/api/v1/dev/staff/queue")
+@legacy_router.get("/api/v1/dev/staff/queue")
 def staff_queue(request: Request, limit: int = 20, offset: int = 0):
     """Minimal assigned ticket queue; no customer PII, deny unless live ACL."""
     dsn = _dsn(request)
@@ -261,7 +263,7 @@ def staff_queue(request: Request, limit: int = 20, offset: int = 0):
                         headers={"Cache-Control":"no-store"})
 
 
-@router.get("/api/v1/dev/staff/audit")
+@legacy_router.get("/api/v1/dev/staff/audit")
 def staff_audit(request: Request, limit: int = 30):
     """Read-only audit events limited to tickets with live auditor ACL."""
     dsn=_dsn(request)
