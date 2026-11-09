@@ -50,12 +50,15 @@ def test_runtime_route_registration_contains_zero_retired_robot_paths():
     import sys
     check = subprocess.run(
         [sys.executable, "-c",
-         "import json; from roboport_api.main import app; "
-         "print(json.dumps([r.path for r in app.routes if hasattr(r, 'path')]))"],
+         "import json; import roboport_api.main as m; "
+         "print(json.dumps({'mounted':[r.path for r in m.app.routes if hasattr(r, 'path')], "
+         "'vehicle':[r.path for r in m.auto_vehicle_router.routes], "
+         "'module_file':m.__file__}))"],
         capture_output=True, text=True, check=True, timeout=30,
     )
-    fresh_paths = json.loads(check.stdout)
-    assert any(path.startswith("/api/v1/dev/auto/") for path in fresh_paths), "\\n".join(fresh_paths)
+    report = json.loads(check.stdout)
+    fresh_paths = report["mounted"]
+    assert any(path.startswith("/api/v1/dev/auto/") for path in fresh_paths), report
     assert not [path for path in fresh_paths if _retired(path)]
 
 
