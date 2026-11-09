@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 app = FastAPI(title="Airmatik automotive development API", version="0.1.0")
 
-from .auth_current_http import router as synthetic_auth_router
+from .auth_http import router as synthetic_auth_router
 from .oidc_http import router as oidc_router
 from .auto_vehicle_http import router as auto_vehicle_router
 from .auto_vehicle_claim_http import router as auto_vehicle_claim_router
@@ -239,34 +239,11 @@ app.include_router(auto_work_complexes_router)
 app.include_router(auto_demo_close_router)
 app.include_router(auto_customer_orders_router)
 app.include_router(auto_customer_booking_router)
-_ROUTE_BOOT_COUNTS = (len(auto_vehicle_router.routes), len(synthetic_auth_router.routes), len(app.routes))
-_ROUTE_BOOT_IDS = (id(app), id(app.router), id(app.routes))
 
-# Temporary CI diagnostic: identify who deletes already mounted ASGI routes.
-class _TraceRouteList(list):
-    def _fail(self, action):
-        import traceback
-        raise RuntimeError("ASGI ROUTES MUTATED: " + action + "\n" + "".join(traceback.format_stack(limit=12)))
-    def clear(self):
-        self._fail("clear")
-    def pop(self, *args):
-        self._fail("pop")
-    def remove(self, *args):
-        self._fail("remove")
-    def __delitem__(self, key):
-        self._fail("delete")
-    def __setitem__(self, key, value):
-        self._fail("setitem")
-
-app.router.routes = _TraceRouteList(app.router.routes)
-
-# Temporary diagnostic for assignments that replace the route list outright.
-class _TraceRouter(type(app.router)):
-    def __setattr__(self, name, value):
-        if name == "routes":
-            import traceback
-            raise RuntimeError("ASGI ROUTE TABLE REPLACED\n" + "".join(traceback.format_stack(limit=12)))
-        return super().__setattr__(name, value)
-
-app.router.__class__ = _TraceRouter
-_ROUTE_AFTER_GUARD_ID = id(app.router.routes)
+# These two pre-automotive staff endpoints are not part of the Airmatik API.
+# Retain their implementation solely for historical tests outside this app.
+_RETIRED_STAFF_PATHS = {"/api/v1/dev/staff/queue", "/api/v1/dev/staff/audit"}
+app.router.routes[:] = [
+    route for route in app.router.routes
+    if getattr(route, "path", None) not in _RETIRED_STAFF_PATHS
+]
