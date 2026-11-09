@@ -226,7 +226,12 @@ def upgrade():
             AND NOT EXISTS (
               SELECT 1 FROM auto_work_order_extra_revision extra
               LEFT JOIN auto_work_order_extra_decision d ON d.revision_id=extra.id
-              WHERE extra.work_order_id=e.work_order_id AND d.id IS NULL
+              WHERE extra.work_order_id=e.work_order_id
+                AND extra.version=(
+                  SELECT MAX(latest.version) FROM auto_work_order_extra_revision latest
+                  WHERE latest.work_order_id=e.work_order_id
+                )
+                AND d.id IS NULL
             )
             AND (SELECT count(*) FROM auto_work_order_labor_entry labor
                 WHERE labor.execution_id=e.id)=
