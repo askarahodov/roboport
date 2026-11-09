@@ -127,6 +127,28 @@ def test_complete_demo_reconcile_reserve_seal_client_view_and_immutability(monke
                          actor_id,gen_random_uuid(),repeat('f',64),snapshot
                   FROM auto_order_demo_handover_preview WHERE work_order_id=%s
                 """,(order,))
+    # Регрессия независимого review: удаление обязательного nullable ключа
+    # + добавление флага выдачи сохраняет count=22 и корректный SHA-256.
+    # И 0113, и 0114 отдельно пропускали такой подложный snapshot.
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(psycopg.errors.RaiseException,
+                           match="preview key set mismatch"):
+            with db.transaction():
+                db.execute("""
+                  INSERT INTO auto_order_demo_handover_preview
+                    (id,work_order_id,revision_id,actor_id,request_key,
+                     fingerprint,snapshot)
+                  SELECT gen_random_uuid(),work_order_id,revision_id,
+                         actor_id,gen_random_uuid(),
+                         encode(sha256(convert_to(forged.payload::text,'UTF8')),'hex'),
+                         forged.payload
+                  FROM auto_order_demo_handover_preview doc
+                  CROSS JOIN LATERAL (
+                    SELECT (doc.snapshot - 'extraRevisionId' ||
+                         '{"handoverCompleted":true}'::jsonb) AS payload
+                  ) forged
+                  WHERE doc.work_order_id=%s
+                """,(order,))
     same=post(http,base+"/seal-preview",manager,seal_key)
     assert same.status_code==200 and same.json()["replayed"] is True
     assert post(http,base+"/seal-preview",manager).status_code==409
