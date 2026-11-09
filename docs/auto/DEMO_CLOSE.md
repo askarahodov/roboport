@@ -133,7 +133,7 @@ PG17 trigger: у создателя должен существовать дей
 `stockReservations=0`, `unreceivedMaterials=0`) и не содержит
 признаков юридической выдачи. Полный отпечаток `fingerprint` должен
 совпадать с `sha256(convert_to(snapshot::text,'UTF8'))`.
-Миграция `0115_auto_demo_preview_exact_keys` дополняет `0114`:
+Миграция `0115_demo_preview_exact_keys` дополняет `0114`:
 проверяет **наличие всех 22 разрешённых ключей** (включая три
 nullable поля `extraRevisionId/extraVersion/extraDigest`) вместе с
 их точным числом. Проверка только числа ключей недостаточна: злоумышленник
