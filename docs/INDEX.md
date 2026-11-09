@@ -18,6 +18,7 @@
 | [PARTS_CATALOG.md](auto/PARTS_CATALOG.md) | planned | Лицензированные OEM/aftermarket провайдеры |
 | [DOCUMENTATION_AUDIT.md](auto/DOCUMENTATION_AUDIT.md) | current | Сверка фактической реализации и устаревших разделов |
 | [Руководства по ролям](guides/INDEX.md) | частично current-dev / частично planned | Администратор, приёмщик, механик, склад, руководитель, бухгалтер, клиент |
+| [Навигатор задач по ролям](guides/ROLE_NAVIGATOR.md) | current-dev / planned | Задача → роль → экран → тест → отказ; запрет production |
 | [Быстрый старт СТО](guides/QUICK_START.md) | current-dev / planned | Сквозной пример авто-сервиса по ролям |
 | [Доступы и тесты](guides/ACCESS_AND_TEST_MATRIX.md) | current-dev | UI/API/PG17/E2E и отрицательные сценарии |
 | [FAQ и восстановление](guides/FAQ.md) | current-dev | 401/403/404/409/422/429, ревокация и повторы |
