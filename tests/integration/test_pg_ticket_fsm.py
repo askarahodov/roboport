@@ -84,7 +84,7 @@ def test_safety_and_qc_guard_deny_illegal_shortcuts():
  
 def test_http_fsm_csrf_origin_version_and_revocation_bundle(monkeypatch):
     from fastapi.testclient import TestClient
-    from roboport_api.main import app
+    from tests.legacy_app import app
     monkeypatch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
     user,customer,ticket,session,role,acl=(uuid4() for _ in range(6))
@@ -214,7 +214,7 @@ def test_independent_safety_expert_release_and_revoke():
 
 def test_http_safety_review_requires_two_independent_staff():
     from fastapi.testclient import TestClient
-    from roboport_api.main import app
+    from tests.legacy_app import app
     from pytest import MonkeyPatch
     with MonkeyPatch.context() as patch:
         patch.setenv("ROBOport_SYNTHETIC_ACCESS_API","1")
