@@ -38,5 +38,6 @@ def test_guides_map_actual_synthetic_automotive_navigation():
         "/account/auto-orders",
     ):
         assert f"`{route}`" in guides, route
-    for expected in ("не является", "не", "planned"):
-        assert expected in guides
+    assert "готового публичного автомобильного кабинета пока нет" in guides
+    assert "не пройдены" in guides
+    assert "`planned`" in guides
