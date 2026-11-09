@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from roboport_api.main import app
+ROUTES_AT_IMPORT = [route.path for route in app.routes if hasattr(route, 'path')]
 
 ROOT = Path(__file__).resolve().parents[2]
 RETIRED = (
@@ -46,7 +47,7 @@ def test_runtime_route_registration_contains_zero_retired_robot_paths():
     from roboport_api.auto_vehicle_http import router as vehicle_router
     from roboport_api.auto_appointment_http import router as appointment_router
     from roboport_api.auth_http import router as auth_router
-    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), ("SOURCE COUNTS " + str([len(vehicle_router.routes), len(appointment_router.routes), len(auth_router.routes)]) + " ACTUAL ROUTES:\n" + "\n".join(paths))
+    assert any(path.startswith("/api/v1/dev/auto/") for path in paths), ("SOURCE COUNTS " + str([len(vehicle_router.routes), len(appointment_router.routes), len(auth_router.routes)]) + " IMPORT ROUTES:\n" + "\n".join(ROUTES_AT_IMPORT) + " ACTUAL ROUTES:\n" + "\n".join(paths))
 
 
 def test_live_openapi_contains_no_legacy_routes():
