@@ -35,8 +35,9 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
           VALUES(%s,%s,%s,%s,%s,%s)
         """,(uuid4(),org,loc,d["manager"],starts-timedelta(minutes=5),
              ends+timedelta(minutes=5)))
-        part_lot=add_lot(db,org,loc,part,add_bin(db,org,loc))
-        consumable_lot=add_lot(db,org,loc,consumable,add_bin(db,org,loc))
+        stock_bin=add_bin(db,org,loc)
+        part_lot=add_lot(db,org,loc,part,stock_bin)
+        consumable_lot=add_lot(db,org,loc,consumable,stock_bin)
         allocate_lot(db,d,org,loc,part_lot,"ALLOCATE",2)
         allocate_lot(db,d,org,loc,consumable_lot,"ALLOCATE",1)
         submit_work_order_inspection(db,d["tokens"][d["intake"]],org,loc,order,
