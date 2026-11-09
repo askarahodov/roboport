@@ -38,7 +38,7 @@ def test_https_loopback_without_session_remains_denied(monkeypatch,path):
     response=TestClient(app,base_url="https://localhost").get(path)
     assert response.status_code==401
 
-def test_http_transport_does_not_change_public_catalog():
+def test_http_transport_keeps_retired_catalog_closed_and_health_alive():
     client=TestClient(app,base_url="http://testserver")
-    assert client.get("/api/v1/catalog/brands").status_code==200
+    assert client.get("/api/v1/catalog/brands").status_code==404
     assert client.get("/health/live").status_code==200

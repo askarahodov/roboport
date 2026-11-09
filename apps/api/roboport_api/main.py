@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="ROBOport development API", version="0.1.0")
+app = FastAPI(title="Airmatik automotive development API", version="0.1.0")
 
 from .auth_http import router as synthetic_auth_router
 app.include_router(synthetic_auth_router)
@@ -85,6 +85,10 @@ async def request_id_middleware(request: Request, call_next):
     # All synthetic dev endpoints must fail before DB/storage access on unsafe transports.
     # Apply to the exact /dev root and slash-delimited descendants, not lookalike paths.
     path = request.url.path
+    # Old robot catalog is retired even for direct HTTP callers and methods.
+    # Canonical 404 does not reveal the old entity identity or route table.
+    if path == "/api/v1/catalog" or path.startswith("/api/v1/catalog/"):
+        return not_found(request)
     # Never infer a trusted socket/TLS peer from caller-controlled proxy headers.
     # There is no approved reverse-proxy ingress for synthetic auto yet.
     # Reject these before API/database activity, even when ASGI scope already
@@ -164,22 +168,13 @@ def ready():
 
 @app.get("/api/v1/meta")
 def meta():
-    return {"service": "ROBOport", "environment": "development"}
+    return {"service": "Airmatik", "environment": "development"}
 
 
-@app.get("/api/v1/catalog/brands")
-def brands():
-    return {"items": []}
-
-
-@app.get("/api/v1/catalog/models")
-def models():
-    return {"items": []}
-
-
-@app.get("/api/v1/catalog/models/{modelId}")
-def model(modelId: str, request: Request):
-    return not_found(request)
+# Legacy robot brand/model catalog was deliberately retired from the live app
+# after automotive UI cutover #165. The archived draft contract still exists
+# for migration review; it is NOT a registered or published runtime route.
+# Avoid a compatibility redirect: robot model identifiers are not vehicle IDs.
 
 
 @app.get("/api/v1/dev/tickets/keyset", include_in_schema=False)

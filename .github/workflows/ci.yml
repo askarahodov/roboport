@@ -222,13 +222,15 @@ jobs:
           WEB_PID=$!
           trap 'kill "$API_PID" "$WEB_PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 40); do
-            if curl --fail --silent http://127.0.0.1:5173/api/v1/catalog/brands | grep -q '"items"'; then break; fi
+            if curl --fail --silent http://127.0.0.1:5173/api/v1/meta | grep -q '"Airmatik"'; then break; fi
             sleep 1
           done
-          curl --fail --silent http://127.0.0.1:5173/api/v1/catalog/models | grep -q '"items"'
-          curl --fail --silent http://127.0.0.1:5173/catalog/brands | grep -q 'root'
-          test "$(curl -s -o /tmp/roboport-error.json -w '%{http_code}' http://127.0.0.1:5173/api/v1/catalog/models/unknown)" = 404
-          grep -q '"requestId"' /tmp/roboport-error.json
+          curl --fail --silent http://127.0.0.1:8000/health/live | grep -q '"alive"'
+          curl --fail --silent http://127.0.0.1:5173/account/login | grep -q 'root'
+          for path in brands models models/unknown; do
+            test "$(curl -s -o /tmp/roboport-error.json -w '%{http_code}' "http://127.0.0.1:5173/api/v1/catalog/$path")" = 404
+            grep -q '"requestId"' /tmp/roboport-error.json
+          done
   browser-e2e:
     runs-on: ubuntu-latest
     # В официальном образе уже установлены Chromium и системные библиотеки.

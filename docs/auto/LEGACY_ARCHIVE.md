@@ -36,6 +36,10 @@
 
 Автомобильный homepage, customer overview и staff workspace не вызывают старые robot API/queue; в E2E проверяются закрытые URL, роль, запрет старых вызовов и адаптивность 390/1280. **Это не физический backend decommission:** публичный draft `contracts/openapi.yaml` и legacy методы `apps/api/roboport_api/main.py` всё ещё требуют удаления/замены с миграцией тестов/контрактов. До независимой проверки не утверждаем, что все frontend source-файлы очищены от слова «робот».
 
+## Выключение публичного robot API (после UI cutover)
+
+На текущем runtime FastAPI намеренно **не регистрируются** `GET /api/v1/catalog/brands`, `GET /api/v1/catalog/models`, `GET /api/v1/catalog/models/{modelId}`. Запросы любых методов к этим адресам отвечают 404, а `/openapi.json` не включает robot catalog; соответствующая негативная bootstrap-проверка — `tests/bootstrap/test_public_catalog.py`. Текущий `/api/v1/meta` возвращает `Airmatik`. Это не означает удаления исторического `contracts/openapi.yaml`: draft контракт ещё содержит старый домен и должен быть либо заменён новой версией после contract review, либо окончательно архивирован, до того он **не** публичный контракт работающего автомобильного API. Внутренние opt-in legacy `/api/v1/dev/tickets`, `/api/v1/dev/catalog`, архив и robot SQL ещё существуют только для контролируемого вывода.
+
 ## Что ещё нужно для настоящего вывода из эксплуатации
 
 1. Инвентаризировать каждый legacy URL, React route, OpenAPI operation,
