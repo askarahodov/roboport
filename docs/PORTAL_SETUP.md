@@ -31,7 +31,7 @@ npm run test:docs:e2e
 
 - `docs/README.md` — стартовая страница.
 - `docs/_sidebar.md` — единая навигация (не создавать ссылок на несуществующие Markdown).
-- `docs/guides/*.md` — пользовательские руководства с фактическим `current` или `planned`.
+- `docs/guides/*.md` — пользовательские руководства с фактическим `current-dev` или `planned`; [навигатор задач](guides/ROLE_NAVIGATOR.md) связывает роль, экран, проверку и безопасный отказ.
 - `docs/auto/*.md` — документация автомобильного домена.
 - `docs/theme.css` — локальная адаптивная тема.
 - `docs/index.html` — configuration + закреплённые CDN зависимости.

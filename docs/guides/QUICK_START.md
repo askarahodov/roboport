@@ -23,7 +23,9 @@
 
 ## Навигация после UI cutover
 
-Главная `/` относится только к автомобильному сервису. Клиентские разделы: `/account/vehicles`, `/account/auto-booking`, `/account/auto-orders`, `/account/settings`. В `/staff` открывается список автомобильных задач согласно действующим ролям, а не старая очередь `service_ticket`. Robot URLs `/robots`, `/catalog/*`, `/request-demo`, `/account/claim` больше не отображают страницы; закрытые клиентские `/account/robots`, `/account/tickets`, `/account/estimates`, `/account/documents` не дают доступ к старой истории. Старые backend endpoints и архивные данные ещё требуют отдельного decommission #165; в них нельзя вводить реальные сведения.
+Главная `/` относится только к автомобильному сервису. Клиентские разделы: `/account/vehicles`, `/account/auto-booking`, `/account/auto-orders`, `/account/settings`. В `/staff` открывается список автомобильных задач согласно действующим ролям, а не старая очередь `service_ticket`. Robot URLs `/robots`, `/catalog/*`, `/request-demo`, `/account/claim` больше не отображают страницы; закрытые клиентские `/account/robots`, `/account/tickets`, `/account/estimates`, `/account/documents` не дают доступ к старой истории. Исторические robot HTTP-маршруты удалены из live ASGI; архивные данные и контрактные черновики ещё требуют отдельного decommission #165; в них нельзя вводить реальные сведения.
+
+**Навигатор по конкретной задаче:** [роль → экран → проверка → отказ](ROLE_NAVIGATOR.md). Он различает доступный synthetic dev и запрещённые production-операции.
 
 ## Что выбрать в браузерной базе знаний
 
@@ -35,7 +37,7 @@
 | [Кладовщик](warehouse.md) | Проверка партии и резерва | `/staff/warehouse-stocktake`, `/staff/warehouse-receiving`, `/staff/warehouse-work-orders`, `/staff/auto-execution`, `/staff/auto-demo-close` | Закупки и отгрузка реальных товаров |
 | [Руководитель](manager.md) | Сметы и разделение обязанностей | `/staff/auto-estimates`, `/staff/auto-execution`, `/staff/auto-demo-close` | Реальные кассы, отчёты о прибыли, выдача |
 | [Бухгалтер/кассир](finance.md) | Различие учёта и симуляции | Отдельной кассовой роли и страницы **нет** | Платежи, возврат денег, 54-ФЗ, юридические акты |
-| [Клиент](client.md) | Свои автомобили и история | `/account/vehicles`, `/account/auto-orders` | Самозапись, реальные документы, оплата, фактическая выдача |
+| [Клиент](client.md) | Свои автомобили, запись и история | `/account/vehicles`, `/account/auto-booking`, `/account/auto-orders` | Production-запись, реальные документы, оплата, фактическая выдача |
 | [Mobile](mobile.md) | Описание будущего приложения | Нет отдельного приложения | iOS/Android вход, push, offline |
 
 ## Один воспроизводимый автомобильный заказ-наряд: от записи до технического пакета
