@@ -1,12 +1,12 @@
 """Append-only synthetic document lifecycle tied to exact intake and estimate.
 
-Revision ID: 0118_auto_technical_document_lifecycle
+Revision ID: 0118_auto_document_lifecycle
 Revises: 0117_auto_intake_client_review
 No legal posting, payments, e-signatures or physical car handover.
 """
 from alembic import op
 
-revision = "0118_auto_technical_document_lifecycle"
+revision = "0118_auto_document_lifecycle"
 down_revision = "0117_auto_intake_client_review"
 branch_labels = None
 depends_on = None
