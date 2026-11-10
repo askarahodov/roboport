@@ -277,3 +277,45 @@ def test_public_scope_rejects_foreign_service_and_unverified_link(monkeypatch):
     # A direct URL cannot expose queue to an anonymous request.
     http.cookies.clear()
     assert http.get(staff+"/queue").status_code==403
+
+
+
+def test_manager_withdraws_published_offer_and_prevents_stale_fulfillment(monkeypatch):
+    d,org,loc,bay,http,part,consumable,service,staff,offer=setup(monkeypatch)
+    slot=published_slot(http,org,loc,offer)
+    response,_=submit(http,offer,slot)
+    assert response.status_code==201,response.text
+    req=response.json()
+    linked,_=claim(http,d,req["requestId"],req["receiptKey"])
+    assert linked.status_code==201,linked.text
+    manager=_auth(http,d,d["intake"])
+    url=staff+"/offers/"+offer+"/revoke"
+    key=str(uuid4())
+    revoked=http.post(url,headers=manager,json={"requestKey":key})
+    assert revoked.status_code==201,revoked.text
+    assert revoked.json()=={"syntheticOnly":True,"revoked":True,"replayed":False}
+    assert http.post(url,headers=manager,json={"requestKey":key}).status_code==200
+    assert http.post(url,headers=manager,json={"requestKey":str(uuid4())}).status_code==409
+    assert http.get(PUB+"/offers",params={
+      "organizationId":str(org),"locationId":str(loc)}).json()["items"]==[]
+    assert http.get(PUB+"/slots",params={
+      "offerId":offer,"localDay":(datetime.now(timezone.utc)+timedelta(days=22)).date().isoformat()
+    }).status_code==403
+    assert http.post(PUB+"/challenges",headers=ANON,json={"offerId":offer}).status_code==403
+    current=http.post(PUB+f'/requests/{req["requestId"]}/status',
+      headers=ANON,json={"receiptKey":req["receiptKey"]})
+    assert current.status_code==200 and current.json()["status"]=="OFFER_WITHDRAWN"
+    queue=http.get(staff+"/queue")
+    assert queue.status_code==200 and queue.json()["items"][0]["status"]=="OFFER_WITHDRAWN"
+    denied,_=fulfill(http,d,staff,req["requestId"])
+    assert denied.status_code==403
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT count(*) FROM auto_appointment
+            WHERE organization_id=%s""",(org,)).fetchone()==(0,)
+        assert balance(db,part)==(2,0)
+        assert balance(db,consumable)==(5,0)
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("""INSERT INTO auto_public_booking_offer_revoke
+                    (offer_id,actor_id,request_key)
+                    VALUES(%s,%s,gen_random_uuid())""",(UUID(offer),d["client_b"]))
