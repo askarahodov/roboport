@@ -9,7 +9,7 @@ type Offer={id:string;organizationId:string;locationId:string;bayId:string;
   bayCode:string;timeZone:string;materialsReady:boolean};
 type Slot={startsAt:string;endsAt:string};
 type Item={requestId:string;offerId:string;startsAt:string;endsAt:string;createdAt:string;
-  status:'AWAITING_VERIFICATION'|'WAITING_FOR_STAFF'|'BOOKED';
+  status:'AWAITING_VERIFICATION'|'WAITING_FOR_STAFF'|'BOOKED'|'OFFER_WITHDRAWN';
   appointmentId:string|null;materials:{skuId:string;kind:'PART'|'CONSUMABLE';quantity:number}[]};
 type Receipt={requestId:string;receiptKey:string};
 type Pending={url:string;body:string;auth:boolean};
@@ -30,7 +30,7 @@ function parseQueue(data:unknown):Item[]{
   const x=data as {syntheticOnly?:boolean;items?:Item[]};
   if(!x||x.syntheticOnly!==true||!Array.isArray(x.items)||x.items.length>50||
      !x.items.every(i=>i&&uuid.test(i.requestId)&&uuid.test(i.offerId)&&
-      ['AWAITING_VERIFICATION','WAITING_FOR_STAFF','BOOKED'].includes(i.status)&&
+      ['AWAITING_VERIFICATION','WAITING_FOR_STAFF','BOOKED','OFFER_WITHDRAWN'].includes(i.status)&&
       (i.appointmentId===null||uuid.test(i.appointmentId))&&
       Array.isArray(i.materials)&&i.materials.length<=8&&
       i.materials.every(m=>uuid.test(m.skuId)&&
@@ -63,6 +63,8 @@ function codeMessage(c:string){
     ALREADY_CLAIMED:'Заявка уже подтверждена другим ключом. Обновите статус.',
     CLIENT_VERIFICATION_REQUIRED:'Ожидается вход клиента и verified-связь с автомобилем.',
     FULFILL_CONFLICT:'Пост занят, материалы недоступны или изменены права. Выберите новый процесс.',
+    OFFER_ALREADY_WITHDRAWN:'Предложение уже отозвано другим ключом.',
+    OFFER_REVOKE_CONFLICT:'Не удалось отозвать предложение: повторите или перечитайте данные.',
     INVALID_INPUT:'Проверьте UUID, дату, материалы и обязательные согласия.',
   };
   return labels[c]??('Операция отклонена: '+c);
@@ -173,6 +175,11 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
           ' (только dev, реальные уведомления запрещены).');
         const loaded=await read(staffPath+'/queue');
         if(loaded)setQueue(parseQueue(loaded));
+      }else if(entry.url.endsWith('/revoke')){
+        if(shape.revoked!==true)throw new Error('Недостоверное подтверждение отзыва');
+        setMessage('Публикация отозвана. Новые заявки и выполнение запрещены.');
+        const loaded=await read(staffPath+'/offers');
+        if(loaded)setOffers(parseOffers(loaded));
       }else if(entry.url.endsWith('/offers')){
         if(!uuid.test(String(shape.id)))throw new Error('Недостоверная публикация');
         setMessage('Опубликована услуга '+shape.id+'. Можно открыть публичный виджет.');
@@ -349,7 +356,12 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
         onClick={()=>void mutate(pub+'/requests/'+requestId+'/withdraw',{
           receiptKey,withdrawKey:newKey()},true)}>
         Отозвать тестовый выбор маркетинга</button>
-      {status&&<p role="status">Заявка: {status}.</p>}
+      {status&&<p role="status">Заявка: {status}.
+        {status==='BOOKED'&&<> Для последующего переноса/отмены
+          своей ещё не начатой записи откройте
+          {' '}<a href="/account/auto-booking">Мои записи</a>.</>}
+        {status==='OFFER_WITHDRAWN'&&' Публикация отозвана. Обратитесь в филиал через официальный канал.'}
+      </p>}
     </>}
 
     {mode==='staff'&&<>
@@ -369,7 +381,11 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
         <button type="button" disabled={busy} onClick={()=>void loadOffers(true)}>
           Показать публикации</button>
         {offers.map(o=><p key={o.id}>{o.serviceTitle} — {o.bayCode} — <code>{o.id}</code>
-          {' '}· {o.policyVersion}</p>)}
+          {' '}· {o.policyVersion}
+          {' '}<button type="button" disabled={busy}
+            onClick={()=>void mutate(staffPath+'/offers/'+o.id+'/revoke',
+              {requestKey:newKey()},true)}>Отозвать публикацию</button>
+          </p>)}
       </section>
       <section>
         <h2>2. Заявки (INTAKE, для резервов дополнительно WAREHOUSE)</h2>
