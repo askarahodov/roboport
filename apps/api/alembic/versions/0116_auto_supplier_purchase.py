@@ -169,6 +169,33 @@ def upgrade():
     for table in ("auto_supplier_purchase_receipt", "auto_supplier_purchase_cancel"):
         op.execute(f"""CREATE TRIGGER {table}_guard BEFORE INSERT ON {table}
           FOR EACH ROW EXECUTE FUNCTION guard_auto_supplier_purchase_event()""")
+    # A purchase-backed receipt cannot be valued with a different quote.
+    # Existing standalone warehouse receipts remain unaffected.
+    op.execute("""
+      CREATE FUNCTION guard_auto_supplier_purchase_valuation()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      DECLARE purchase record;
+      BEGIN
+        SELECT p.currency,p.purchase_unit_minor,p.quote_revision,p.quoted_at
+          INTO purchase
+          FROM auto_supplier_purchase_receipt r
+          JOIN auto_supplier_purchase_order p ON p.id=r.purchase_id
+          WHERE r.document_id=NEW.document_id;
+        IF FOUND AND
+            (NEW.currency,NEW.purchase_unit_net_minor,
+             NEW.supplier_price_revision,NEW.supplier_quoted_at)
+            IS DISTINCT FROM
+            (purchase.currency,purchase.purchase_unit_minor,
+             purchase.quote_revision,purchase.quoted_at)
+        THEN RAISE EXCEPTION 'supplier order price provenance mismatch'; END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE TRIGGER zzz_auto_supplier_purchase_valuation
+      BEFORE INSERT ON auto_stock_receipt_valuation
+      FOR EACH ROW EXECUTE FUNCTION guard_auto_supplier_purchase_valuation()
+    """)
     op.execute("""
       REVOKE ALL ON TABLE auto_supplier_purchase_order,
         auto_supplier_purchase_receipt, auto_supplier_purchase_cancel FROM PUBLIC
@@ -177,6 +204,8 @@ def upgrade():
 
 def downgrade():
     # Disposable dev database only; deliberate reverse order for linked immutable records.
+    op.execute("DROP TRIGGER zzz_auto_supplier_purchase_valuation ON auto_stock_receipt_valuation")
+    op.execute("DROP FUNCTION guard_auto_supplier_purchase_valuation()")
     for table in ("auto_supplier_purchase_cancel", "auto_supplier_purchase_receipt",
                   "auto_supplier_purchase_order"):
         op.execute(f"DROP TABLE {table}")
