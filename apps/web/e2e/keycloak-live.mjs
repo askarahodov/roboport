@@ -10,7 +10,7 @@ function revoke(sql){
     'import psycopg,os',
     "url=os.environ['ROBOport_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://',1)",
     'with psycopg.connect(url) as db:',
-    ' db.execute('+JSON.stringify(sql),
+    ' db.execute('+JSON.stringify(sql)+')',
   ].join('\n');
   execFileSync('python',['-c',program],{stdio:'inherit'});
 }
