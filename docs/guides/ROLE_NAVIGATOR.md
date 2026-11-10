@@ -118,3 +118,8 @@ MANAGER создаёт счёт и сверяет отчёты; CASHIER с от�
 ## Публичная запись #442 DEV-only
 
 Анонимный посетитель: `/book-dev` (услуга/время/арифметическая проверка/условия). Исходный CLIENT: `/account/auto-public-booking` (verified claim, receipt status, marketing withdrawal). MANAGER(+WAREHOUSE): `/staff/auto-public-booking` (публикация PART/CONSUMABLE). INTAKE(+WAREHOUSE): там же (appointment, WorkOrder, stock reserve, CRM lineage). Не открывать реальные данные/уведомления до #119. [Runbook](../auto/PUBLIC_BOOKING.md).
+
+
+## Справочник SKU и прайс-категорий (current-dev #447)
+
+**WAREHOUSE+MANAGER с двумя живыми grants** → `/staff/warehouse-catalog`: создание immutable SKU-profile, версии тестовых закупочных/продажных цен, ручной offline-аналог, **логическое** объединение только при безопасных нулевых остатках, XLSX dry-run/preview → atomic commit и export. Каждая мутация проходит CSRF+ACL+tenant/branch+SQL guard, после 409 нужна сверка версий, после 503 прежний idempotency key. Без real provider/платежей/OEM. [Пошаговая инструкция](warehouse.md) · [SQL/API/тесты](../auto/SKU_CATALOG.md).
