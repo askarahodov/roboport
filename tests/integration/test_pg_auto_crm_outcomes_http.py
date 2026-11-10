@@ -46,7 +46,7 @@ def test_crm_technical_conversion_counts_only_closed_and_simulated_settlement(mo
     endpoint = url(org, loc)
     query = {"fromDay": _day(), "toDay": _day()}
     assert http.get(endpoint, params=query).status_code == 403
-    http.cookies.set("rp_session", d["tokens"][d["intake"]])
+    http.cookies.set("rp_session", d["tokens"][d["other"]])
     assert http.get(endpoint, params=query).status_code == 403
 
     with psycopg.connect(DSN) as db:
@@ -62,18 +62,18 @@ def test_crm_technical_conversion_counts_only_closed_and_simulated_settlement(mo
         transition_lead(db, d["tokens"][d["intake"]], org, loc,
                         ident, uuid4(), "BOOKED", None, appointment)
 
-        grant(db, d["manager"], org, loc, "CASHIER")
-        account = create_account(db, d["tokens"][d["manager"]],
+        grant(db, d["intake"], org, loc, "CASHIER")
+        account = create_account(db, d["tokens"][d["intake"]],
                                  org, loc, request_key=uuid4(), code="CRM_SIM",
                                  label="Синтетическая касса", kind="CASH_SIM")
-        paid = record_event(db, d["tokens"][d["manager"]], org, loc, order,
+        paid = record_event(db, d["tokens"][d["intake"]], org, loc, order,
                             account_id=UUID(account["accountId"]),
                             request_key=uuid4(), kind="PAYMENT",
                             amount_minor=2500, reason="Только тестовый платёж")
         assert paid["syntheticOnly"] is True
         _posted(db, d, org, loc, order, act, preview, "POSTED", d["intake"])
 
-    http.cookies.set("rp_session", d["tokens"][d["manager"]])
+    http.cookies.set("rp_session", d["tokens"][d["intake"]])
     not_closed = http.get(endpoint, params=query)
     assert not_closed.status_code == 200, not_closed.text
     assert not_closed.json()["summary"] == {
@@ -130,7 +130,7 @@ def test_crm_outcomes_forbidden_invalid_and_restricted_scope(monkeypatch):
     endpoint = url(org, loc)
     query = {"fromDay": _day(), "toDay": _day()}
     http = _client()
-    http.cookies.set("rp_session", d["tokens"][d["manager"]])
+    http.cookies.set("rp_session", d["tokens"][d["intake"]])
     for first, last in [
         ("not-date", "2030-01-01"),
         ("2030-02-29", "2030-03-01"),
@@ -151,7 +151,7 @@ def test_crm_outcomes_forbidden_invalid_and_restricted_scope(monkeypatch):
             UPDATE auto_organization_role_grant SET revoked_at=now()
             WHERE organization_id=%s AND location_id=%s AND user_id=%s
               AND role_code='MANAGER'
-        """, (org, loc, d["manager"]))
+        """, (org, loc, d["intake"]))
     assert http.get(endpoint, params=query).status_code == 403
     assert http.get(endpoint + "/export", params=query).status_code == 403
 
