@@ -10,7 +10,7 @@ import psycopg
 
 from .session_lookup import session_subject
 
-STAFF_ROLES = frozenset({"MANAGER", "INTAKE", "MECHANIC", "WAREHOUSE"})
+STAFF_ROLES = frozenset({"MANAGER", "INTAKE", "MECHANIC", "WAREHOUSE", "CASHIER"})
 
 
 class OrgStaffDenied(ValueError):
