@@ -25,7 +25,7 @@ def get_work_order_balance(conn: psycopg.Connection, token: str,
         try:
             for cap in ("READ", "PRICE_SALES"):
                 require_document_access(conn, token, organization_id, location_id,
-                                        ("MANAGER",), "FINANCE", cap, order=order_id)
+                                        ("MANAGER","CASHIER"), "FINANCE", cap, order=order_id)
         except DocumentPolicyDenied:
             raise AutoStockDenied("FORBIDDEN") from None
         # Live customer/vehicle proof is mandatory, even for a manager.
