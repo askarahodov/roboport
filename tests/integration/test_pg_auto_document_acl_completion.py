@@ -389,3 +389,33 @@ def test_dual_role_cashier_deny_cannot_be_bypassed_using_manager_finance_routes(
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT COUNT(*) FROM auto_work_order_financial_event
           WHERE work_order_id=%s""",(order,)).fetchone()==(0,)
+
+
+def test_crm_sim_money_aggregate_obeys_finance_price_deny(monkeypatch):
+    """CRM booked cohorts are no backdoor to finance-sensitive SIM amounts."""
+    from test_pg_auto_document_lifecycle_http import ready
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    d,org,loc,order,act,preview=ready(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    http=TestClient(app,base_url="https://127.0.0.1")
+    endpoint=(f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+              "/crm/outcomes")
+    day=datetime.now(ZoneInfo("Europe/Berlin")).date().isoformat()
+    period={"fromDay":day,"toDay":day}
+    manager=token(http,d,d["intake"])
+    assert http.get(endpoint,params=period).status_code==200
+    owner=token(http,d,d["other"])
+    policies=policy_url(org)
+    assert set_rule(http,policies,owner,loc=loc,user=d["intake"],
+                    document="FINANCE",cap="PRICE_SALES").status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(endpoint,params=period).status_code==403
+    assert http.get(endpoint+"/export",params=period).status_code==403
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policies,owner,loc=loc,user=d["intake"],
+                    document="FINANCE",cap="PRICE_SALES",allowed=True).status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(endpoint,params=period).status_code==200
