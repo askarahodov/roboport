@@ -87,3 +87,20 @@ production-UI. В тестовом интерфейсе есть nav-ссылк�
 
 
 Отдельный customer booking HTTP и негативные PG17 проверки: `auto_customer_booking_http.py`, `test_pg_auto_customer_booking_http.py`; они не входят в публичный OpenAPI до #119.
+
+
+## Гранулярные staff-разрешения (synthetic dev, #446)
+
+| Реальное действие | Базовая роль и дополнительная политика | Защищённый путь | PG17/Browser proof |
+|---|---|---|---|
+| Настроить/снять ограничение; посмотреть аудит и effective preview | ADMIN своей организации после offline bootstrap; same-origin CSRF на POST | `/staff/auto-admin`, `/api/v1/dev/auto/organizations/{org}/access-policies` | `test_pg_auto_document_access_http.py`, `auto-document-access.spec.ts` |
+| Посмотреть/создать версию акта и приватное фото | INTAKE/MANAGER/MECHANIC + READ; INTAKE + CREATE | `/staff/auto-intake-act` | `test_pg_auto_intake_act_review_http.py` + ACL PG |
+| Опубликовать смету или ответить на уточнение | MANAGER + CREATE/EDIT + PRICE_SALES; DISCOUNT для ненулевой скидки | `/staff/auto-estimates` | `test_pg_auto_document_access_http.py` + estimate PG |
+| Условная сверка и technical CLOSE | MANAGER/WAREHOUSE + READ/PRICE_SALES; MANAGER + CREATE/CLOSE | `/staff/auto-demo-close` | `test_pg_auto_demo_close_http.py` + ACL PG |
+| Видеть закупочную цену, создать/принять/отменить заказ | WAREHOUSE + CREATE/EDIT/CLOSE, отдельная PRICE_PURCHASE; MANAGER/Warehouse READ, цена может быть скрыта | `/staff/warehouse-supplier-orders` | `test_pg_auto_supplier_purchase_http.py` + ACL PG |
+
+Правило только **сужает** права роли/объекта: `ALLOW` не является
+выдачей role grant. История создаётся append-only, отзыв grant
+действует сразу, чужой tenant/branch/документ недоступен.
+Скриншоты 390/1280 синтетические; независимый legal/QA
+и production gate #119 не пройдены. [Полная процедура](../auto/DOCUMENT_ACCESS.md).

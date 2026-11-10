@@ -12,6 +12,7 @@ from .session_lookup import session_subject
 from .auto_org_authority import organization_role_allows
 from .auto_work_order_diagnostics import diagnostic_snapshot
 from .auto_work_tariffs import quote_tariff_snapshot,TariffConflict
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 class AutoEstimateDenied(ValueError):
@@ -132,6 +133,13 @@ def read_auto_estimates(conn,token,org,loc,order):
     with conn.transaction():
         if organization_role_allows(conn,token,org,"MANAGER",loc,for_mutation=True):
             _staff_and_scope(conn,token,org,loc,order)
+            try:
+                require_document_access(conn,token,org,loc,("MANAGER",),
+                                        "ESTIMATE","READ",order=order)
+                require_document_access(conn,token,org,loc,("MANAGER",),
+                                        "ESTIMATE","PRICE_SALES",order=order)
+            except DocumentPolicyDenied:
+                raise AutoEstimateDenied("FORBIDDEN") from None
         else:
             _client_and_scope(conn,token,org,loc,order)
         return _estimate_state(conn,order)
@@ -184,6 +192,16 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
         supplied[service]=item
     with conn.transaction():
         actor=_staff_and_scope(conn,token,org,loc,order)
+        try:
+            require_document_access(conn,token,org,loc,("MANAGER",),
+                                    "ESTIMATE","CREATE",order=order)
+            require_document_access(conn,token,org,loc,("MANAGER",),
+                                    "ESTIMATE","PRICE_SALES",order=order)
+            if advanced and any(item["discountBps"]>0 for item in supplied.values()):
+                require_document_access(conn,token,org,loc,("MANAGER",),
+                                        "ESTIMATE","DISCOUNT",order=order)
+        except DocumentPolicyDenied:
+            raise AutoEstimateDenied("FORBIDDEN") from None
         services=conn.execute("""
            SELECT s.id,s.code,s.title,s.duration_minutes FROM auto_work_order_service link
            JOIN auto_service_catalog s ON s.id=link.service_id
@@ -347,6 +365,11 @@ def resolve_estimate_clarification(conn,token,org,loc,order,*,
         raise AutoEstimateDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_staff_and_scope(conn,token,org,loc,order)
+        try:
+            require_document_access(conn,token,org,loc,("MANAGER",),
+                                    "ESTIMATE","EDIT",order=order)
+        except DocumentPolicyDenied:
+            raise AutoEstimateDenied("FORBIDDEN") from None
         state=_estimate_state(conn,order)
         current=state["items"][-1] if state["items"] else None
         if current is None or current["id"]!=str(revision_id) or current["decision"] is not None:

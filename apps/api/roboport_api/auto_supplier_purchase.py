@@ -17,19 +17,27 @@ from .auto_supplier_offer import parse_supplier_offers
 from .auto_stock_receipt_document import create_receipt_document
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 from .session_lookup import session_subject
+from .auto_document_access import (
+    require_document_access,has_document_access,DocumentPolicyDenied,
+)
 
 
 def _valid_ids(*values: UUID) -> bool:
     return all(type(value) is UUID for value in values)
 
 
-def _role(conn, token: str, org: UUID, loc: UUID, role: str = "WAREHOUSE") -> UUID:
+def _role(conn, token: str, org: UUID, loc: UUID, role: str = "WAREHOUSE",
+          cap: str = "CREATE") -> UUID:
     if type(token) is not str or not token or not organization_role_allows(
             conn, token, org, role, loc, for_mutation=True):
         raise AutoStockDenied("FORBIDDEN")
     actor = session_subject(conn, token, for_mutation=True)
     if actor is None:
         raise AutoStockDenied("FORBIDDEN")
+    try:
+        require_document_access(conn,token,org,loc,(role,),"SUPPLIER_ORDER",cap)
+    except DocumentPolicyDenied:
+        raise AutoStockDenied("FORBIDDEN") from None
     return actor
 
 
@@ -77,6 +85,11 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
     selected, snapshot, parsed = _source(offers, supplier, offer_id)
     with conn.transaction():
         actor = _role(conn, token, org, loc)
+        try:
+            require_document_access(conn,token,org,loc,("WAREHOUSE",),
+                                    "SUPPLIER_ORDER","PRICE_PURCHASE")
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         scope = conn.execute("""SELECT s.id,s.article FROM auto_stock_lot l
           JOIN auto_stock_sku s ON s.id=l.sku_id
             AND s.organization_id=l.organization_id AND s.location_id=l.location_id
@@ -147,7 +160,7 @@ def record_supplier_delivery(conn: psycopg.Connection, token: str, org: UUID,
         supplier_reference!=supplier_reference.strip()):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        actor=_role(conn,token,org,loc)
+        actor=_role(conn,token,org,loc,cap="EDIT")
         row=conn.execute("""SELECT id,lot_id,ordered_quantity FROM auto_supplier_purchase_order
           WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
           (purchase,org,loc)).fetchone()
@@ -189,7 +202,7 @@ def cancel_supplier_remainder(conn: psycopg.Connection, token: str, org: UUID,
     if not _valid_ids(org,loc,purchase,request_id):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        actor=_role(conn,token,org,loc)
+        actor=_role(conn,token,org,loc,cap="CLOSE")
         row=conn.execute("""SELECT id,ordered_quantity FROM auto_supplier_purchase_order
           WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
           (purchase,org,loc)).fetchone()
@@ -223,10 +236,13 @@ def list_supplier_orders(conn: psycopg.Connection, token: str, org: UUID, loc: U
         (after_id is not None and type(after_id) is not UUID)):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        allowed=(organization_role_allows(conn,token,org,"WAREHOUSE",loc) or
-                 organization_role_allows(conn,token,org,"MANAGER",loc))
-        if not allowed:
-            raise AutoStockDenied("FORBIDDEN")
+        try:
+            cutoff=require_document_access(conn,token,org,loc,
+                ("WAREHOUSE","MANAGER"),"SUPPLIER_ORDER","READ")
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
+        price_visible=has_document_access(conn,token,org,loc,
+            ("WAREHOUSE","MANAGER"),"SUPPLIER_ORDER","PRICE_PURCHASE")
         rows=conn.execute("""SELECT p.id,p.work_order_id,p.lot_id,s.article,
              p.ordered_quantity,p.selected_supplier,p.selected_offer,
              p.quote_revision,p.purchase_unit_minor,p.currency,
@@ -250,13 +266,16 @@ def list_supplier_orders(conn: psycopg.Connection, token: str, org: UUID, loc: U
           WHERE p.organization_id=%s AND p.location_id=%s
             AND o.disabled_at IS NULL AND l.disabled_at IS NULL
             AND (%s::uuid IS NULL OR p.id>%s::uuid)
+            AND (%s::timestamptz IS NULL OR p.created_at >= %s::timestamptz)
           ORDER BY p.id LIMIT %s""",
-          (org,loc,after_id,after_id,limit+1)).fetchall()
+          (org,loc,after_id,after_id,cutoff,cutoff,limit+1)).fetchall()
         nxt=rows[limit-1][0] if len(rows)>limit else None
         return ([{
             "orderId":str(i),"workOrderId":str(w),"lotId":str(lot),
             "article":art,"orderedQuantity":qty,"supplierId":supplier,
-            "offerId":offer,"quoteRevision":rev,"purchaseUnitMinor":unit,
+            "offerId":offer,"quoteRevision":rev,
+            "purchaseUnitMinor":unit if price_visible else None,
+            "purchasePriceHidden":not price_visible,
             "currency":currency,"documentedQuantity":documented,
             "acceptedQuantity":accepted,"valuedQuantity":valued,
             "canceledQuantity":cancel or 0,

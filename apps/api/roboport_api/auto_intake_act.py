@@ -16,6 +16,7 @@ import psycopg
 from .auto_workshop_qc import _actor_and_order,InspectionDenied
 from .auto_customer_orders import _actor,_BASE,CustomerOrderDenied
 from .auto_work_order_estimate import _client_and_scope,AutoEstimateDenied
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 class IntakeActDenied(ValueError):
@@ -181,8 +182,13 @@ def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[byte
 
 def _authorize(conn,token,org,loc,order,*,allow_client):
     try:
-        return _actor_and_order(
+        actor=_actor_and_order(
             conn,token,org,loc,order,("INTAKE","MANAGER","MECHANIC"))
+        require_document_access(conn,token,org,loc,
+           ("INTAKE","MANAGER","MECHANIC"),"INTAKE_ACT","READ",order=order)
+        return actor
+    except DocumentPolicyDenied:
+        raise IntakeActDenied("FORBIDDEN") from None
     except InspectionDenied:
         if not allow_client:
             raise IntakeActDenied("FORBIDDEN") from None
@@ -293,7 +299,9 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
     with conn.transaction():
         try:
             actor=_actor_and_order(conn,token,org,loc,order,("INTAKE",))
-        except InspectionDenied:
+            require_document_access(conn,token,org,loc,
+                                    ("INTAKE",),"INTAKE_ACT","CREATE",order=order)
+        except (InspectionDenied,DocumentPolicyDenied):
             raise IntakeActDenied("FORBIDDEN") from None
         existing=conn.execute("""
            SELECT id,work_order_id,actor_id,fingerprint,version

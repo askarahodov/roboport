@@ -4,7 +4,8 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Quote={supplier:string;offerId:string;unit:string;available:string;days:string;revision:string};
 type Order={orderId:string;workOrderId:string;lotId:string;article:string;
   orderedQuantity:number;supplierId:string;offerId:string;quoteRevision:string;
-  purchaseUnitMinor:number;currency:string;documentedQuantity:number;
+  purchaseUnitMinor:number|null;purchasePriceHidden?:boolean;
+  currency:string;documentedQuantity:number;
   acceptedQuantity:number;valuedQuantity:number;canceledQuantity:number;
   outstandingQuantity:number};
 type Pending={kind:'order'|'delivery'|'cancel';path:string;body:string;
@@ -83,9 +84,14 @@ export function WarehouseSupplierOrders(){
            return ['orderId','workOrderId','lotId'].every(k=>
              typeof row[k]==='string'&&uuid.test(String(row[k])))&&
              ['orderedQuantity','documentedQuantity','acceptedQuantity',
-              'valuedQuantity','canceledQuantity','outstandingQuantity','purchaseUnitMinor']
+              'valuedQuantity','canceledQuantity','outstandingQuantity']
                .every(k=>typeof row[k]==='number'&&Number.isSafeInteger(row[k])&&
-                 Number(row[k])>=0)&&row.currency==='RUB';
+                 Number(row[k])>=0)&&
+             (typeof row.purchaseUnitMinor==='number'&&
+               Number.isSafeInteger(row.purchaseUnitMinor)&&
+               row.purchaseUnitMinor>=0||
+               row.purchaseUnitMinor===null&&row.purchasePriceHidden===true)&&
+             row.currency==='RUB';
          }))throw Error('invalid list');
       setRows(data.items as Order[]);
       setNext(data.nextOrderId as string|null);
@@ -225,7 +231,8 @@ export function WarehouseSupplierOrders(){
       {rows.length>0&&<ul>{rows.map(row=><li key={row.orderId}>
         <button aria-pressed={selectedOrder===row.orderId} onClick={()=>{setSelectedOrder(row.orderId);setCancelConfirmed(false);}}>
           Выбрать заказ {row.orderId}</button>
-        <p>{row.article}: {row.supplierId}, предложение {row.offerId}, закупочная цена {row.purchaseUnitMinor} коп./шт. (RUB).</p>
+        <p>{row.article}: {row.supplierId}, предложение {row.offerId}, закупочная цена {row.purchaseUnitMinor===null?'скрыта настройкой доступа':
+          row.purchaseUnitMinor+' коп./шт. (RUB)'}.</p>
         <p>Заказано {row.orderedQuantity}; документы {row.documentedQuantity}; принято {row.acceptedQuantity};
           оценено {row.valuedQuantity}; отменено {row.canceledQuantity}; к поставке {row.outstandingQuantity}.</p>
       </li>)}</ul>}
