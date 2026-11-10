@@ -80,7 +80,7 @@ test('compare two quotes → buy shortage → partial delivery → cancel only o
   await page.getByRole('button',{name:'Выбрать заказ '+purchase}).click();
   await page.getByLabel('Количество текущей поставки').fill('2');
   await page.getByRole('button',{name:'Принять частичную поставку в черновик'}).click();
-  await expect(page.getByRole('status')).toContainText('другой MANAGER');
+  await expect(page.getByRole('status')).toContainText('Менеджер отдельно подтвердит');
   expect(changes[1].url).toBe(urlPart+'/'+purchase+'/receipts');
   expect(changes[1].body).toEqual({
     locationId:loc,quantity:2,supplierReference:'SYNTH-DELIVERY-1',
@@ -115,7 +115,7 @@ test('unknown POST result retries same UUID key and unchanged immutable snapshot
   await page.goto('/staff/warehouse-supplier-orders');
   await fillOrder(page);
   await page.getByRole('button',{name:'Создать заказ поставщику'}).click();
-  await expect(page.getByRole('alert')).toContainText('Повторите с прежним ключом');
+  await expect(page.getByRole('alert')).toContainText('Повторить с прежним ключом');
   await expect(page.getByRole('button',{name:'Создать заказ поставщику'})).toBeDisabled();
   await page.getByRole('button',{name:'Повторить с прежним ключом'}).click();
   await expect(page.getByRole('status')).toContainText('Заказ создан');
