@@ -195,7 +195,7 @@ def test_no_shortage_untrusted_quote_scope_and_revoke():
 
 
 def test_two_partial_receipts_serialize_under_purchase_row_lock():
-    d,org,loc,item,lot,order,offers,_,_=environment(0)
+    d,org,loc,item,lot,order,offers,_,_=environment(1)
     with psycopg.connect(DSN) as db:
         purchase,_=create(db,d,org,loc,order,lot,offers,3)
     with psycopg.connect(DSN) as one,psycopg.connect(DSN) as two:
@@ -212,7 +212,7 @@ def test_two_partial_receipts_serialize_under_purchase_row_lock():
 
 
 def test_transaction_rolls_back_purchase_and_pending_receipt_together():
-    d,org,loc,item,lot,order,offers,_,_=environment(0)
+    d,org,loc,item,lot,order,offers,_,_=environment(1)
     with psycopg.connect(DSN) as db:
         with pytest.raises(RuntimeError):
             with db.transaction():
