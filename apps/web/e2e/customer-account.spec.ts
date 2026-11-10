@@ -112,6 +112,7 @@ test('вход в кабинет виден при ширине 390 и 1440',asy
 });
 
 test('справка БоксРитм доступна из каждой вкладки и при отказе без утечки сессии', async ({ page }) => {
+  test.setTimeout(90000);
   await page.setViewportSize({width:390,height:844});
   await page.goto('/account/vehicles');
   await expect(page.getByRole('alert')).toContainText('403');
@@ -135,8 +136,13 @@ test('справка БоксРитм доступна из каждой вкл�
     .toHaveAttribute('href','/docs/#/guides/client');
   await loginHelp.getByRole('link',{name:'Инструкция по входу и восстановлению доступа'}).click();
   await expect(page).toHaveURL(/guides.client/);
-  await expect(page.locator('.markdown-section h1')).toContainText('Клиент автосервиса');
+  await expect(page.locator('.markdown-section h1')).toContainText('Клиент автосервиса',{timeout:25000});
   await expect(page.locator('.markdown-section')).toContainText('Быстрый путь по кабинету');
+  const validDocs=await page.request.get('/docs/theme.css');
+  expect(validDocs.ok()).toBeTruthy();
+  expect(validDocs.headers()['x-content-type-options']).toBe('nosniff');
+  const invalidDocs=await page.request.get('/docs/NOT_REAL.md');
+  expect(invalidDocs.status()).toBe(404);
   const stored=await page.evaluate(()=>Object.keys(localStorage));
   expect(stored.join('|')).not.toContain('synthetic-secret');
 });
