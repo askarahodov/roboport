@@ -201,3 +201,89 @@ test('receipt manager queue fails closed on foreign branch, revoke and malformed
   await expect(drafts.getByRole('alert')).toContainText('Нет доступа');
   await expect(drafts.getByRole('button',{name:'Выбрать черновик '+receipt})).toHaveCount(0);
 });
+
+
+test('manager picks exact immutable purchase quote from pending valuation and keeps VAT separate',async({page})=>{
+  const purchase='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const quotedAt='2026-11-10T06:00:00.123+00:00';
+  const price={orderId:purchase,supplierId:'SYNTH-SUP-1',offerId:'OFFLINE-1',
+    currency:'RUB',unitNetMinor:1250,supplierPriceRevision:'SOURCE-REV-9',
+    supplierQuotedAt:quotedAt};
+  const payloads:any[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route('**/warehouse/receipts/pending?*',route=>{
+    const stage=new URL(route.request().url()).searchParams.get('stage');
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,stage,nextDocumentId:null,
+        items:stage==='value'?[{documentId:receipt,lotId:lot,article:'SYN-120',
+          batchCode:'LOT-A',binCode:'BIN-1',quantity:2,sourceReference:'SUP-9',
+          purchaseQuote:price}]:[]})});
+  });
+  await page.route('**/warehouse/receipts/valuation',route=>{
+    payloads.push(route.request().postDataJSON());
+    expect(route.request().headers()['x-csrf-token']).toBe('synthetic-csrf');
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({valuationId:valuation})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/warehouse-receiving');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const queue=page.getByLabel('Принятые документы без оценки');
+  await queue.getByRole('button',{name:'Показать документы без оценки'}).click();
+  await expect(queue).toContainText('SOURCE-REV-9');
+  await expect(queue).toContainText(quotedAt);
+  await queue.getByRole('button',{name:'Выбрать для оценки '+receipt}).click();
+  await expect(page.getByRole('status')).toContainText(purchase);
+  const unit=page.getByRole('spinbutton',{name:'Закупочная цена за единицу'});
+  const revision=page.getByRole('textbox',{name:'Ревизия цены поставщика'});
+  const timestamp=page.getByRole('textbox',{name:'Время цены поставщика ISO UTC'});
+  await expect(unit).toHaveValue('1250');
+  await expect(unit).toHaveJSProperty('readOnly',true);
+  await expect(revision).toHaveValue('SOURCE-REV-9');
+  await expect(timestamp).toHaveValue(quotedAt);
+  await expect(timestamp).toHaveJSProperty('readOnly',true);
+  await page.getByRole('spinbutton',{name:'НДС по документу'}).fill('250');
+  await page.getByRole('button',{name:'Сохранить закупочную стоимость'}).click();
+  await expect(page.getByRole('status').filter({hasText:'НДС зафиксированы отдельно'})).toBeVisible();
+  expect(payloads).toEqual([{locationId:loc,documentId:receipt,currency:'RUB',
+    unitNetMinor:1250,vatTotalMinor:250,supplierPriceRevision:'SOURCE-REV-9',
+    supplierQuotedAt:quotedAt}]);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+
+test('revoked manager receipt access clears previously displayed immutable supplier quote',async({page})=>{
+  let denied=false;
+  const quotedAt='2026-11-10T06:00:00.123+00:00';
+  await page.route('**/warehouse/receipts/pending?*',route=>{
+    const stage=new URL(route.request().url()).searchParams.get('stage');
+    return route.fulfill(denied?{status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'}:{
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,stage,nextDocumentId:null,
+        items:stage==='value'?[{documentId:receipt,lotId:lot,article:'SYN-120',
+          batchCode:'LOT-A',binCode:'BIN-1',quantity:2,sourceReference:'SUP-9',
+          purchaseQuote:{orderId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            supplierId:'SYNTH-SUP-1',offerId:'OFFLINE-1',currency:'RUB',
+            unitNetMinor:1250,supplierPriceRevision:'SECRET-SYNTH-REV',
+            supplierQuotedAt:quotedAt}}]:[]})});
+  });
+  await page.goto('/staff/warehouse-receiving');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const queue=page.getByLabel('Принятые документы без оценки');
+  const load=queue.getByRole('button',{name:'Показать документы без оценки'});
+  await load.click();
+  await queue.getByRole('button',{name:'Выбрать для оценки '+receipt}).click();
+  await expect(page.getByRole('textbox',{name:'Ревизия цены поставщика'})).toHaveValue('SECRET-SYNTH-REV');
+  denied=true;
+  await load.click();
+  await expect(queue.getByRole('alert')).toContainText('Нет доступа');
+  await expect(queue).not.toContainText('SECRET-SYNTH-REV');
+  await expect(page.getByRole('textbox',{name:'Ревизия цены поставщика'})).toHaveValue('');
+  await expect(page.getByRole('spinbutton',{name:'Закупочная цена за единицу'})).toHaveValue('0');
+  await expect(page.getByRole('status').filter({hasText:'Цена и время котировки'})).toHaveCount(0);
+});

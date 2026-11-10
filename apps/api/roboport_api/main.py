@@ -23,6 +23,7 @@ from .auto_crm_funnel import router as auto_crm_funnel_router
 from .auto_stock_abc_xyz import router as auto_stock_abc_xyz_router
 from .auto_opening_hours_http import router as auto_opening_hours_router
 from .auto_stocktake_http import router as auto_stocktake_router
+from .auto_supplier_purchase_http import router as auto_supplier_purchase_router
 from .auto_order_stock_read_http import router as auto_order_stock_read_router
 from .auto_order_customer_read_http import router as auto_order_customer_read_router
 from .auto_order_overview_http import router as auto_order_overview_router
@@ -71,6 +72,7 @@ app.include_router(auto_crm_funnel_router)
 app.include_router(auto_stock_abc_xyz_router)
 app.include_router(auto_opening_hours_router)
 app.include_router(auto_stocktake_router)
+app.include_router(auto_supplier_purchase_router)
 app.include_router(auto_order_stock_read_router)
 app.include_router(auto_order_customer_read_router)
 app.include_router(auto_order_overview_router)

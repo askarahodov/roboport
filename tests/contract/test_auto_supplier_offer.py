@@ -86,3 +86,12 @@ def test_atomic_batch_duplicate_identity_and_bound():
         with pytest.raises(CatalogError) as exc:
             parse_supplier_offers(bad)
         assert exc.value.code == CatalogErrorCode.UNAVAILABLE
+
+
+def test_synthetic_supplier_quote_has_bounded_lead_time_and_preserved_provenance():
+    assert parse_supplier_offer(offer(delivery_days=0)).delivery_days == 0
+    assert parse_supplier_offer(offer(delivery_days=12)).delivery_days == 12
+    assert parse_supplier_offer(offer()).delivery_days == 0
+    for value in (-1, 366, 1.5, True, "3", None):
+        rejects(offer(delivery_days=value))
+    rejects(offer(delivery_days=2, real_supplier_credentials="DO_NOT_COPY"))

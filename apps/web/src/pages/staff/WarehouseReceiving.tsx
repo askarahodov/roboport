@@ -5,8 +5,10 @@ type Kind='draft'|'accept'|'valuation';
 type Pending={kind:Kind;path:string;key:string;body:string;org:string;location:string};
 type Item={lotId:string;article:string;batchCode:string;binCode:string;allocated:number;onHand:number;reserved:number};
 type Stage='accept'|'value';
+type PurchaseQuote={orderId:string;supplierId:string;offerId:string;currency:string;
+  unitNetMinor:number;supplierPriceRevision:string;supplierQuotedAt:string};
 type ReviewItem={documentId:string;lotId:string;article:string;batchCode:string;
-  binCode:string;quantity:number;sourceReference:string};
+  binCode:string;quantity:number;sourceReference:string;purchaseQuote?:PurchaseQuote};
 type Review={items:ReviewItem[];nextDocumentId:string|null;cursor:string|null;
   status:'idle'|'loading'|'ready'|'denied'|'error'};
 const emptyReview=():Review=>({items:[],nextDocumentId:null,cursor:null,status:'idle'});
@@ -25,6 +27,7 @@ export function WarehouseReceiving(){
   const [vatTotal,setVatTotal]=React.useState('0');
   const [priceRevision,setPriceRevision]=React.useState('');
   const [quotedAt,setQuotedAt]=React.useState(()=>new Date().toISOString());
+  const [boundPurchase,setBoundPurchase]=React.useState('');
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
@@ -41,6 +44,7 @@ export function WarehouseReceiving(){
     setReviews({accept:emptyReview(),value:emptyReview()});
     setPending(null);setMessage('');setLots([]);
     setListState('idle');setDocumentId('');setAcceptanceId('');setValuationId('');
+    setBoundPurchase('');setPriceRevision('');setUnitCost('0');setQuotedAt(new Date().toISOString());
   },[org,location]);
   const validScope=uuid.test(org.trim())&&uuid.test(location.trim());
   const validDraft=validScope&&uuid.test(lot.trim())&&
@@ -99,6 +103,8 @@ export function WarehouseReceiving(){
          context.current.location!==scope.location)return;
       if([401,403,404].includes(response.status)){
         setDocumentId('');
+        setBoundPurchase('');setPriceRevision('');setUnitCost('0');
+        setQuotedAt(new Date().toISOString());
         setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'denied'}}));
         return;
       }
@@ -117,7 +123,19 @@ export function WarehouseReceiving(){
               typeof item[key]==='string'&&(item[key] as string).length>0&&
               (item[key] as string).length<=160)&&
             Number.isSafeInteger(item.quantity)&&Number(item.quantity)>=1&&
-            Number(item.quantity)<=1_000_000_000;
+            Number(item.quantity)<=1_000_000_000&&
+            (!('purchaseQuote' in item) || (()=>{
+              const quote=item.purchaseQuote;
+              if(!quote||typeof quote!=='object')return false;
+              const q=quote as Record<string,unknown>;
+              return ['orderId'].every(k=>typeof q[k]==='string'&&uuid.test(q[k] as string))&&
+                ['supplierId','offerId','supplierPriceRevision','supplierQuotedAt','currency']
+                  .every(k=>typeof q[k]==='string'&&(q[k] as string).length>0&&
+                    (q[k] as string).length<=160)&&
+                typeof q.unitNetMinor==='number'&&Number.isSafeInteger(q.unitNetMinor)&&
+                q.unitNetMinor>=0&&q.unitNetMinor<=1000000000&&q.currency==='RUB'&&
+                !Number.isNaN(Date.parse(q.supplierQuotedAt as string));
+            })());
         })||!(data.nextDocumentId===null||
           (typeof data.nextDocumentId==='string'&&uuid.test(data.nextDocumentId))))
         throw Error('invalid queue');
@@ -128,7 +146,26 @@ export function WarehouseReceiving(){
     }catch{
       if(seq===readSequence.current[stage]&&context.current.org===scope.org&&
          context.current.location===scope.location)
-        setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'error'}}));
+        {
+          setDocumentId('');
+          setBoundPurchase('');setPriceRevision('');setUnitCost('0');
+          setQuotedAt(new Date().toISOString());
+          setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'error'}}));
+        }
+    }
+  }
+  function chooseValuation(item:ReviewItem){
+    setDocumentId(item.documentId);
+    setBoundPurchase(item.purchaseQuote?.orderId??'');
+    setVatTotal('0'); // VAT needs a separate verified synthetic invoice input
+    if(item.purchaseQuote){
+      setCurrency(item.purchaseQuote.currency);
+      setUnitCost(String(item.purchaseQuote.unitNetMinor));
+      setPriceRevision(item.purchaseQuote.supplierPriceRevision);
+      setQuotedAt(item.purchaseQuote.supplierQuotedAt);
+    }else{
+      setCurrency('RUB');setUnitCost('0');setPriceRevision('');
+      setQuotedAt(new Date().toISOString());
     }
   }
   async function submit(kind:Kind,retry?:Pending){
@@ -253,7 +290,7 @@ export function WarehouseReceiving(){
       </section>
       <p>Используйте отдельную сессию MANAGER. Самостоятельное подтверждение не допускается.</p>
       <label>UUID приходного документа <input aria-label="UUID приходного документа"
-        value={documentId} onChange={e=>setDocumentId(e.target.value)}/></label>
+        value={documentId} onChange={e=>{setDocumentId(e.target.value);setBoundPurchase('');}}/></label>
       <button type="button" disabled={!validScope||!uuid.test(documentId.trim())||busy||!!pending}
         onClick={()=>void submit('accept')}>Подтвердить приёмку</button>
     </section>
@@ -272,8 +309,12 @@ export function WarehouseReceiving(){
           <ul>{reviews.value.items.map(item=><li key={item.documentId}>
             <strong>{item.article}</strong> · {item.batchCode} · ячейка {item.binCode}
             {' — '}{item.quantity} шт. · документ {item.sourceReference}
+            {item.purchaseQuote&&<p>По заказу {item.purchaseQuote.orderId} · {item.purchaseQuote.supplierId} ·
+              цена {item.purchaseQuote.unitNetMinor} коп. ({item.purchaseQuote.currency}) ·
+              ревизия {item.purchaseQuote.supplierPriceRevision} ·
+              котировка {item.purchaseQuote.supplierQuotedAt}</p>}
             <button type="button" disabled={busy||!!pending}
-              onClick={()=>setDocumentId(item.documentId)}>
+              onClick={()=>chooseValuation(item)}>
               Выбрать для оценки {item.documentId}</button>
           </li>)}</ul>:<p>Документов без оценки нет.</p>)}
         {reviews.value.status==='ready'&&reviews.value.nextDocumentId&&
@@ -285,16 +326,18 @@ export function WarehouseReceiving(){
             onClick={()=>void loadReview('value')}>Первая страница оценки</button>}
       </section>
       <p>Суммы вводятся в минимальных единицах валюты, НДС отдельно. Это не цена продажи и не расчёт налоговой ставки.</p>
+      {boundPurchase&&<p role="status">Цена и время котировки заполнены по неизменяемому заказу
+        {boundPurchase}. Их нельзя изменять; НДС по синтетическому документу вводится отдельно.</p>}
       <label>Валюта ISO <input aria-label="Валюта ISO" maxLength={3} value={currency}
-        onChange={e=>setCurrency(e.target.value.toUpperCase())}/></label>
+        readOnly={!!boundPurchase} onChange={e=>setCurrency(e.target.value.toUpperCase())}/></label>
       <label>Закупочная цена за единицу (minor units) <input type="number" min="0" max="1000000000" step="1"
-        aria-label="Закупочная цена за единицу" value={unitCost} onChange={e=>setUnitCost(e.target.value)}/></label>
+        aria-label="Закупочная цена за единицу" value={unitCost} readOnly={!!boundPurchase} onChange={e=>setUnitCost(e.target.value)}/></label>
       <label>НДС по документу (minor units) <input type="number" min="0" step="1"
         aria-label="НДС по документу" value={vatTotal} onChange={e=>setVatTotal(e.target.value)}/></label>
       <label>Ревизия цены поставщика <input aria-label="Ревизия цены поставщика" maxLength={160}
-        value={priceRevision} onChange={e=>setPriceRevision(e.target.value)}/></label>
+        value={priceRevision} readOnly={!!boundPurchase} onChange={e=>setPriceRevision(e.target.value)}/></label>
       <label>Время цены поставщика ISO UTC <input aria-label="Время цены поставщика ISO UTC"
-        value={quotedAt} onChange={e=>setQuotedAt(e.target.value)}/></label>
+        value={quotedAt} readOnly={!!boundPurchase} onChange={e=>setQuotedAt(e.target.value)}/></label>
       <button type="button" disabled={!validValuation||busy||!!pending}
         onClick={()=>void submit('valuation')}>Сохранить закупочную стоимость</button>
     </section>

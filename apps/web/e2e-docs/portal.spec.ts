@@ -309,3 +309,17 @@ test('ролевой Docsify хаб покрывает все рабочие р�
   await expect(body).toContainText('SHA');
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+test('документация заказа поставщику описывает частичные поставки и запрет реальной оплаты',async({page})=>{
+  test.setTimeout(90000);
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/docs/#/auto/SUPPLIER_PURCHASES');
+  const body=page.locator('.markdown-section');
+  await expect(body.locator('h1')).toContainText('Заказ поставщику по дефициту WorkOrder',{timeout:25000});
+  for(const word of ['WAREHOUSE','MANAGER','Idempotency-Key','409','422',
+    'quoted_at','delivery_days','planned','/staff/warehouse-supplier-orders']){
+    await expect(body).toContainText(word);
+  }
+  await expect(body.getByRole('link',{name:/auto_supplier_purchase.py/}).first()).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});

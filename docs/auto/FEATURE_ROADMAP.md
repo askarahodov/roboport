@@ -234,3 +234,8 @@ phantom Appointment/Reschedule находятся в
 Отдельный синтетический автомобильный акт с immutable версиями, структурированными зонами и типами повреждений, пятью состояниями комплектности, контролируемыми фото (PNG RGB(A), EXIF/metadata rejected/discarded, CRC+bounded pixels+SHA256), client original-link read, privacy-safe previous-visit comparison, 403 fail-closed, повтором requestKey и PostgreSQL-атомарностью фото/метаданных. Реализованы `/staff/auto-intake-act`, `/account/auto-intake-act`, `auto_intake_act.py`, `auto_intake_act_http.py` и Alembic `0106_auto_intake_photo_act`, PG17/E2E/Docsify тесты — [сценарий](WORKSHOP_OPERATIONS.md).
 
 **Ограничения:** фотографии физически хранятся в ограниченном синтетическом PG bytea[], не production object storage; нет AV/virus pipeline, юридически действующих подписей, retention policy, реального подписанного PDF, поэтому #439 и gate #119 остаются OPEN. Наличие клиентского предпросмотра **не** означает готовность промышленной фото-приёмки.
+
+
+### Procurement checkpoint #443 (current-dev, не коммерческая интеграция)
+
+Закрытый синтетический WorkOrder→SKU/lot shortage→две offline quotes/срок→immutable supplier order→частичные приёмочные документы→независимая приёмка и оценка→отмена непоставленного остатка в PG17 и React. Доказательства и политика источника: [SUPPLIER_PURCHASES.md](SUPPLIER_PURCHASES.md), контракт C02/C05/C06/C09. **P/planned:** live supplier adapter/договоры/счета, коммерческий прайс, реальная задолженность, подтверждение OEM fitment и release #119. Данный dev checkpoint не объявлять production или юридическим финальным учётом.
