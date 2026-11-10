@@ -52,7 +52,9 @@ def _authorize(conn,token,org,loc,order,manager,*,cap=None,discount=False):
             # Additional work is an immutable ESTIMATE revision, not a
             # separate pricing escape hatch. Apply the same live ACL as base
             # estimates including price, history and non-zero discounts.
-            for capability in (cap or "READ","PRICE_SALES"):
+            # READ must also be checked before CREATE/EDIT and *before*
+            # exact replay returns the full existing priced history.
+            for capability in dict.fromkeys(("READ","PRICE_SALES",cap or "READ")):
                 require_document_access(conn,token,org,loc,("MANAGER",),
                                         "ESTIMATE",capability,order=order)
             if discount:
