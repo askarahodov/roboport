@@ -74,7 +74,7 @@ def record_document_event(conn,token,org,loc,order,*,request_key,action,
             try:
                 actor=_scope(conn,token,org,loc,order,("MANAGER",))
                 require_document_access(conn,token,org,loc,("MANAGER",),
-                    "HANDOVER","WRITE" if action=="POSTED" else "CLOSE",
+                    "HANDOVER","CREATE" if action=="POSTED" else "CLOSE",
                     order=order)
             except (ExecutionDenied,DocumentPolicyDenied):
                 raise DocumentLifecycleDenied("FORBIDDEN") from None
