@@ -13,6 +13,9 @@ from test_pg_auto_stock_bin_lot import add_bin,add_lot
 from test_pg_baseline import DSN
 from test_pg_auto_work_order_stock import work_order
 from roboport_api.auto_work_order_return import return_work_order_stock
+from roboport_api.auto_stock_receipt_document import (
+    create_receipt_document, accept_receipt_document,
+)
 from test_pg_auto_stock_ledger import balance
 
 
@@ -421,3 +424,49 @@ def test_merge_refuses_outstanding_work_order_issue_then_allows_return(monkeypat
         # Returning after a denied merge succeeds with its ORIGINAL SKU.
         # Physical stock now makes merging unsafe independently.
         assert post(http,d,d["intake"],url(org)+"/merges",merge).status_code==409
+
+
+def test_merge_denied_for_unaccepted_receipt_then_manager_can_post(monkeypatch):
+    # A WAREHOUSE draft has zero stock until a different MANAGER accepts it.
+    # Merging the SKU while it is pending would make the stock posting fail.
+    d,org,loc,_,_,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        source=create(http,d,org,loc,"SYNTH-447-PENDING-RECEIPT")
+        target=create(http,d,org,loc,"SYNTH-447-RECEIPT-TARGET")
+        with psycopg.connect(DSN) as db:
+            grant(db,d["manager"],org,loc,"MANAGER")
+            lot=add_lot(db,org,loc,UUID(source),add_bin(db,org,loc))
+            doc=create_receipt_document(
+                db,d["tokens"][d["intake"]],org,loc,
+                lot,uuid4(),3,"SYNTH-UNACCEPTED-RECEIPT",
+            )
+            assert balance(db,UUID(source))==(0,0)
+            assert db.execute("""
+                SELECT count(*) FROM auto_stock_receipt_acceptance
+                WHERE document_id=%s
+            """,(doc,)).fetchone()==(0,)
+        m={"locationId":str(loc),"sourceSkuId":source,"targetSkuId":target}
+        rejected=post(http,d,d["intake"],url(org)+"/merges",m)
+        assert rejected.status_code==409,rejected.text
+        with psycopg.connect(DSN) as db:
+            # Other entrypoints cannot bypass the same Postgres trigger.
+            with pytest.raises(psycopg.errors.RaiseException):
+                with db.transaction():
+                    db.execute(
+                        "SELECT set_config('roboport.catalog_actor',%s,true)",
+                        (str(d["intake"]),),
+                    )
+                    db.execute("""
+                        INSERT INTO auto_catalog_merge(
+                          id,request_key,organization_id,location_id,
+                          source_sku_id,target_sku_id,created_by)
+                        VALUES(%s,%s,%s,%s,%s,%s,%s)
+                    """,(uuid4(),uuid4(),org,loc,UUID(source),
+                         UUID(target),d["intake"]))
+            accepted=accept_receipt_document(
+                db,d["tokens"][d["manager"]],org,loc,doc,uuid4(),
+            )
+            assert accepted is not None
+            assert balance(db,UUID(source))==(3,0)
+        # Posting retains the original document and original SKU lineage.
+        assert post(http,d,d["intake"],url(org)+"/merges",m).status_code==409
