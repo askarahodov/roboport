@@ -15,6 +15,7 @@ import psycopg
 
 from .auto_workshop_qc import _actor_and_order,InspectionDenied
 from .auto_customer_orders import _actor,_BASE,CustomerOrderDenied
+from .auto_work_order_estimate import _client_and_scope,AutoEstimateDenied
 
 
 class IntakeActDenied(ValueError):
@@ -206,10 +207,14 @@ def _read(conn,order,org,loc):
        FROM auto_work_order_inspection WHERE work_order_id=%s
     """,(order,)).fetchone()
     rows=conn.execute("""
-       SELECT id,version,vehicle_kind,damages,inventory,photo_meta,fingerprint,
-              created_at,actor_id
-       FROM auto_work_order_intake_act WHERE work_order_id=%s
-       ORDER BY version LIMIT 21
+       SELECT act.id,act.version,act.vehicle_kind,act.damages,act.inventory,
+              act.photo_meta,act.fingerprint,act.created_at,act.actor_id,
+              review.decision,review.reason_code,review.actor_id,
+              review.fingerprint,review.created_at
+       FROM auto_work_order_intake_act act
+       LEFT JOIN auto_work_order_intake_act_review review ON review.act_id=act.id
+       WHERE act.work_order_id=%s
+       ORDER BY act.version LIMIT 21
     """,(order,)).fetchall()
     if len(rows)>20:
         raise IntakeActConflict("VERSION_LIMIT")
@@ -219,13 +224,20 @@ def _read(conn,order,org,loc):
            "path":f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/intake-acts/{ident}/photos/{i+1}"}
            for i,m in enumerate(photo_meta)],
        "sha256":digest,"createdAt":created.isoformat(),
-       "actorId":str(actor)}
-       for ident,version,kind,damages,inventory,photo_meta,digest,created,actor
-       in rows]
+       "actorId":str(actor),
+       "review":None if decision is None else {
+          "decision":decision,"reasonCode":reason,
+          "actorId":str(reviewer),"fingerprint":review_digest,
+          "createdAt":reviewed_at.isoformat()}}
+       for ident,version,kind,damages,inventory,photo_meta,digest,created,actor,
+           decision,reason,reviewer,review_digest,reviewed_at in rows]
     frozen=conn.execute("""
        SELECT EXISTS(SELECT 1 FROM auto_work_order_qc_event WHERE work_order_id=%s),
               EXISTS(SELECT 1 FROM auto_work_order_estimate_revision WHERE work_order_id=%s)
     """,(order,order)).fetchone()
+    if any(item["review"] and item["review"]["decision"]=="ACKNOWLEDGED"
+           for item in versions):
+        frozen=(True,frozen[1])
     # Compare only visits under the EXACT SAME verified customer/vehicle link.
     # Same VIN and same vehicle under a different owner do not match.
     before=conn.execute("""
@@ -332,3 +344,56 @@ def read_act_photo(conn,token,org,loc,order,act_id,index):
         if hashlib.sha256(payload).hexdigest()!=meta["sha256"]:
             raise IntakeActConflict("PHOTO_INTEGRITY")
         return payload
+
+
+def review_intake_act(conn,token,org,loc,order,act_id,*,request_key,
+                      fingerprint,decision,reason_code):
+    """CLIENT-only immutable review; neither legal signature nor repair approval.
+
+    The original owner/session and WorkOrder row are locked before inspecting
+    the latest act. All exact replays are authorized again after revocation.
+    """
+    if (any(type(x) is not UUID for x in (org,loc,order,act_id,request_key))
+            or type(fingerprint) is not str or len(fingerprint)!=64
+            or any(ch not in "0123456789abcdef" for ch in fingerprint)
+            or decision not in ("ACKNOWLEDGED","DISPUTED")
+            or not ((decision=="ACKNOWLEDGED" and reason_code=="NONE")
+                    or (decision=="DISPUTED" and reason_code in
+                        ("DAMAGE_MISMATCH","INVENTORY_MISMATCH","OTHER")))):
+        raise IntakeActInvalid("INVALID_INPUT")
+    with conn.transaction():
+        try:
+            actor=_client_and_scope(conn,token,org,loc,order)
+        except AutoEstimateDenied:
+            raise IntakeActDenied("FORBIDDEN") from None
+        existing=conn.execute("""
+          SELECT work_order_id,act_id,actor_id,fingerprint,decision,reason_code
+          FROM auto_work_order_intake_act_review WHERE request_key=%s
+        """,(request_key,)).fetchone()
+        if existing:
+            if existing!=(order,act_id,actor,fingerprint,decision,reason_code):
+                raise IntakeActConflict("KEY_REUSED")
+            return {"ok":True,"replayed":True,**_read(conn,order,org,loc)}
+        latest=conn.execute("""
+          SELECT id,fingerprint FROM auto_work_order_intake_act
+          WHERE work_order_id=%s ORDER BY version DESC LIMIT 1
+        """,(order,)).fetchone()
+        if latest is None or latest!=(act_id,fingerprint):
+            raise IntakeActConflict("STALE_ACT")
+        if conn.execute("""
+           SELECT 1 FROM auto_work_order_intake_act_review WHERE act_id=%s
+        """,(act_id,)).fetchone():
+            raise IntakeActConflict("ALREADY_REVIEWED")
+        try:
+            with conn.transaction():
+                conn.execute("""
+                   INSERT INTO auto_work_order_intake_act_review
+                   (id,work_order_id,act_id,actor_id,request_key,
+                    fingerprint,decision,reason_code)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+                """,(uuid4(),order,act_id,actor,request_key,
+                     fingerprint,decision,reason_code))
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
+                psycopg.errors.CheckViolation,psycopg.errors.ForeignKeyViolation):
+            raise IntakeActConflict("REVIEW_CONFLICT") from None
+        return {"ok":True,"replayed":False,**_read(conn,order,org,loc)}
