@@ -40,8 +40,14 @@ def _finance_scope(conn,token,org,loc,cap,*,order=None):
     # the operational role. Both active scopes are checked on every read/write.
     try:
         for action in dict.fromkeys(("READ","PRICE_SALES",cap)):
-            require_document_access(conn,token,org,loc,("MANAGER","CASHIER"),
-                                    "FINANCE",action,order=order)
+            cutoff=require_document_access(
+                conn,token,org,loc,("MANAGER","CASHIER"),
+                "FINANCE",action,order=order)
+            # Account reports/closings expose aggregate balances from all
+            # prior days. With no exact WorkOrder to check against a cutoff,
+            # fail closed instead of leaking historical entries.
+            if order is None and cutoff is not None:
+                raise TreasuryDenied("HISTORY_DENIED")
     except DocumentPolicyDenied:
         raise TreasuryDenied("FORBIDDEN") from None
 
