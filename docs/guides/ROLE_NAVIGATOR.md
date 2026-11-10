@@ -81,4 +81,4 @@
 
 ## Проверка компонентов и визуальный аудит
 
-- **QA/дизайнер, только synthetic dev:** `/dev/ui-gallery` — статическая проверочная галерея кнопок, форм, состояний 403/409, пустого экрана и клавиатурного диалога. Она не открывает клиентские данные и не наделяет правами. Визуальные PNG/manifest по #92 генерирует `apps/web/e2e/visual-audit.spec.ts` для независимого sign-off; это не одобренный screenshot baseline. [Процедура проверки](SCREENSHOT_EVIDENCE.md).
+- **QA/дизайнер, только synthetic dev:** `/dev/ui-gallery` — статическая проверочная галерея кнопок, форм, состояний 403/409, пустого экрана и клавиатурного диалога. Она не открывает клиентские данные и не наделяет правами. Визуальные PNG/manifest по #92 генерирует [visual-audit.spec.ts](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/visual-audit.spec.ts) для независимого sign-off; это не одобренный screenshot baseline. [Процедура проверки](SCREENSHOT_EVIDENCE.md).
