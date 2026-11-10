@@ -75,3 +75,32 @@ def test_live_auto_dev_read_contract_and_bola(monkeypatch):
     rejected = http.get(path)
     assert rejected.status_code == 401
     _assert_schema(rejected.json(), "AutoDevError")
+
+
+def test_detail_live_revoke_and_nonpublication(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    a, b, ca, cb, va, vb, pending, (token_a, token_b), _vin = _seed()
+    path = "/api/v1/dev/auto/vehicles/"
+    client = TestClient(app, base_url="https://127.0.0.1")
+    client.cookies.set("rp_session", token_a)
+    detail = client.get(path + str(va))
+    assert detail.status_code == 200
+    _assert_schema(detail.json(), "AutoVehicle")
+    assert "vin" not in detail.json()
+    assert detail.headers["cache-control"] == "no-store"
+    for identifier in (vb, pending):
+        hidden = client.get(path + str(identifier))
+        assert hidden.status_code == 404
+        _assert_schema(hidden.json(), "AutoDevError")
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE vehicle_id=%s",
+            (va,),
+        )
+    assert client.get(path + str(va)).status_code == 404
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE user_session SET revoked_at=now() WHERE token_hash=%s",
+                   (token_digest(token_a),))
+    assert client.get(path + str(va)).status_code == 401

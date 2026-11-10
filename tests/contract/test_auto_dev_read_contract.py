@@ -67,3 +67,12 @@ def test_auto_dev_json_schema_rejects_full_vin_and_invalid_page():
     assert not check.is_valid({"items": [{**item, "vinLast4": "12345"}]})
     assert not check.is_valid({"items": [{**item, "modelYear": 1800}]})
     assert not check.is_valid({"items": [item], "customerId": "other"})
+
+
+def test_vehicle_detail_is_explicitly_private_and_nonpublic():
+    operation = SPEC["paths"][DETAIL_PATH]["get"]
+    assert operation["security"] == [{"localSession": []}]
+    assert set(operation["responses"]) >= {"200", "401", "403", "404"}
+    assert "не содержит историю" in SPEC["info"]["description"]
+    assert "Full VIN" in operation["description"]
+    assert DETAIL_PATH not in app.openapi()["paths"]

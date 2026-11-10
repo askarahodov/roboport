@@ -53,3 +53,26 @@ export async function getAutoDevVehicles(
   if (!isAutoPage(payload)) throw new Error('Invalid dev vehicle payload');
   return payload;
 }
+
+
+/**
+ * Только чтение подтверждённого автомобиля: сервер каждый раз проверяет сессию,
+ * CLIENT-роль и действующую связь. Не кэшировать результат после отказа.
+ */
+export async function getAutoDevVehicleDetails(
+  vehicleId: string, signal?: AbortSignal,
+): Promise<AutoDevVehicle> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(vehicleId)) {
+    throw new RangeError('Invalid dev vehicle identifier');
+  }
+  const response = await fetch('/api/v1/dev/auto/vehicles/' + encodeURIComponent(vehicleId), {
+    credentials: 'include', cache: 'no-store', signal,
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new AutoDevHttpError(response.status);
+  const payload: unknown = await response.json();
+  if (!isAutoVehicle(payload) || payload.id.toLowerCase() !== vehicleId.toLowerCase()) {
+    throw new Error('Invalid dev vehicle detail payload');
+  }
+  return payload;
+}
