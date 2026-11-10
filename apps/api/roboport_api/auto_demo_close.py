@@ -48,6 +48,8 @@ def _manager(conn,token,org,loc,order,*,cap="CREATE"):
     try:
         actor=_scope(conn,token,org,loc,order,("MANAGER",))
         require_document_access(conn,token,org,loc,
+                                ("MANAGER",),"HANDOVER","READ",order=order)
+        require_document_access(conn,token,org,loc,
                                 ("MANAGER",),"HANDOVER",cap,order=order)
         require_document_access(conn,token,org,loc,
                                 ("MANAGER",),"HANDOVER","PRICE_SALES",order=order)
@@ -59,6 +61,10 @@ def _manager(conn,token,org,loc,order,*,cap="CREATE"):
 def _warehouse(conn,token,org,loc,order):
     try:
         actor=_scope(conn,token,org,loc,order,("WAREHOUSE",))
+        require_document_access(conn,token,org,loc,
+                                ("WAREHOUSE",),"HANDOVER","READ",order=order)
+        require_document_access(conn,token,org,loc,
+                                ("WAREHOUSE",),"HANDOVER","PRICE_SALES",order=order)
         require_document_access(conn,token,org,loc,
                                 ("WAREHOUSE",),"HANDOVER","EDIT",order=order)
         return actor
