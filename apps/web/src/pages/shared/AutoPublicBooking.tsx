@@ -88,6 +88,8 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
   const [receiptKey,setReceiptKey]=React.useState('');
   const [vehicleLink,setVehicleLink]=React.useState('');
   const [queue,setQueue]=React.useState<Item[]>([]);
+  const [queuePage,setQueuePage]=React.useState(0);
+  const [queueHasMore,setQueueHasMore]=React.useState(false);
   const [bayId,setBayId]=React.useState('');
   const [serviceId,setServiceId]=React.useState('');
   const [policy,setPolicy]=React.useState('DEV-CONSENT-2026');
@@ -173,8 +175,7 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
         if(!uuid.test(String(shape.appointmentId)))throw new Error('Недостоверная запись');
         setMessage('Запись создана: '+shape.appointmentId+
           ' (только dev, реальные уведомления запрещены).');
-        const loaded=await read(staffPath+'/queue');
-        if(loaded)setQueue(parseQueue(loaded));
+        await refreshQueue();
       }else if(entry.url.endsWith('/revoke')){
         if(shape.revoked!==true)throw new Error('Недостоверное подтверждение отзыва');
         setMessage('Публикация отозвана. Новые заявки и выполнение запрещены.');
@@ -208,10 +209,14 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
       setMessage('Свободных кандидатов: '+items.length+' (без гарантии резерва).');
     }catch(e){setError(String(e));}}
   }
-  async function refreshQueue(){
+  async function refreshQueue(page=0){
     if(!uuid.test(org)||!uuid.test(loc)){setError('Введите организацию и филиал.');return;}
-    const data=await read(staffPath+'/queue');
-    if(data){try{setQueue(parseQueue(data));}catch(e){setQueue([]);setError(String(e));}}
+    const data=await read(staffPath+'/queue?page='+page);
+    if(data){try{
+      const shape=data as {page?:unknown;hasMore?:unknown};
+      if(shape.page!==page||typeof shape.hasMore!=='boolean')throw new Error('Некорректная страница');
+      setQueue(parseQueue(data));setQueuePage(page);setQueueHasMore(shape.hasMore);
+    }catch(e){setQueue([]);setQueueHasMore(false);setError(String(e));}}
   }
   async function loadStatus(){
     if(!uuid.test(requestId)||!uuid.test(receiptKey)){
@@ -391,6 +396,11 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
         <h2>2. Заявки (INTAKE, для резервов дополнительно WAREHOUSE)</h2>
         <button type="button" disabled={busy} onClick={()=>void refreshQueue()}>
           Обновить очередь</button>
+        <p>Страница {queuePage+1}. Сначала подтверждённые заявки; история доступна постранично.</p>
+        {queuePage>0&&<button type="button" disabled={busy}
+          onClick={()=>void refreshQueue(queuePage-1)}>Предыдущая страница</button>}
+        {queueHasMore&&<button type="button" disabled={busy}
+          onClick={()=>void refreshQueue(queuePage+1)}>Следующая страница</button>}
         <ol>{queue.map(item=><li key={item.requestId}>
           <p>{item.status} · {item.startsAt} · <code>{item.requestId}</code></p>
           <p>Материалы: {item.materials.length?item.materials.map(m=>
