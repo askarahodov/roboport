@@ -82,3 +82,24 @@
 ## Проверка компонентов и визуальный аудит
 
 - **QA/дизайнер, только synthetic dev:** `/dev/ui-gallery` — статическая проверочная галерея кнопок, форм, состояний 403/409, пустого экрана и клавиатурного диалога. Она не открывает клиентские данные и не наделяет правами. Визуальные PNG/manifest по #92 генерирует [visual-audit.spec.ts](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/visual-audit.spec.ts) для независимого sign-off; это не одобренный screenshot baseline. [Процедура проверки](SCREENSHOT_EVIDENCE.md).
+
+
+## Гранулярные права документов и закупочных цен (current-dev, #446)
+
+**ADMIN** в `/staff/auto-admin` → «Показать ограничения документов» →
+«Новая версия правила» → «Сохранить правило». Отдельная проверка:
+введите UUID действующего сотрудника/филиала и нажмите
+«Проверить эффективные права». Вывод отражает роль/политику,
+**не** разрешение доступа к чужому заказу. Запрет можно снять
+только новым событием ALLOW в том же scope; личное ALLOW не
+перепрыгнет шаблонный DENY. Роль сотрудников нельзя назначить
+самим ACL-правилом. Для **INTAKE** ограничения действуют на акт
+приёмки и приватные фото, для **MANAGER** — на сметы/скидки/
+технический пакет, для **WAREHOUSE** — на supplier order,
+историю и закупочные цены. `403` → проверить живой grant и
+филиал; `409` → перечитать аудит/версию; `422` → исправить
+тело; неизвестный POST → повторить **исходный** ключ.
+[Инструкция ADMIN](administrator.md) ·
+[контракт/матрица ACL](../auto/DOCUMENT_ACCESS.md) ·
+[PG17](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_document_access_http.py) ·
+[Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-document-access.spec.ts).
