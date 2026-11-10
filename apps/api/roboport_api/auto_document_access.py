@@ -182,3 +182,89 @@ def has_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
         return True
     except DocumentPolicyDenied:
         return False
+
+
+# This is an ADMIN preview, not impersonation or a permit for an object.
+# Business proof, session, order version and booking must still be validated
+# by the endpoint on the employee's actual session.
+ROLE_BASE={
+  "INTAKE_ACT":{
+    "READ":{"INTAKE","MANAGER","MECHANIC"},
+    "CREATE":{"INTAKE"},
+  },
+  "ESTIMATE":{
+    "READ":{"MANAGER"},"CREATE":{"MANAGER"},"EDIT":{"MANAGER"},
+    "PRICE_SALES":{"MANAGER"},"DISCOUNT":{"MANAGER"},
+  },
+  "HANDOVER":{
+    "READ":{"MANAGER","WAREHOUSE"},"CREATE":{"MANAGER"},
+    "EDIT":{"WAREHOUSE"},"CLOSE":{"MANAGER"},
+    "PRICE_SALES":{"MANAGER","WAREHOUSE"},
+  },
+  "SUPPLIER_ORDER":{
+    "READ":{"MANAGER","WAREHOUSE"},"CREATE":{"WAREHOUSE"},
+    "EDIT":{"WAREHOUSE"},"CLOSE":{"WAREHOUSE"},
+    "PRICE_PURCHASE":{"WAREHOUSE","MANAGER"},
+  },
+}
+
+
+def preview_employee_document_access(conn,token,org,loc,user,document):
+    if (any(type(x) is not UUID for x in (org,loc,user)) or
+            document not in DOCUMENTS):
+        raise DocumentPolicyInvalid("INVALID_INPUT")
+    with conn.transaction():
+        try:
+            _admin(conn,token,org)
+        except OrgStaffDenied:
+            raise DocumentPolicyDenied("FORBIDDEN") from None
+        conn.execute("""SELECT id FROM auto_organization
+          WHERE id=%s AND disabled_at IS NULL FOR SHARE""",(org,))
+        if not conn.execute("""SELECT id FROM auto_service_location
+              WHERE id=%s AND organization_id=%s AND disabled_at IS NULL
+              FOR SHARE""",(loc,org)).fetchone():
+            raise DocumentPolicyDenied("FORBIDDEN")
+        grants=conn.execute("""
+          SELECT g.role_code FROM auto_organization_role_grant g
+          JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
+          WHERE g.organization_id=%s AND g.user_id=%s
+            AND g.role_code IN ('MANAGER','INTAKE','MECHANIC','WAREHOUSE')
+            AND g.revoked_at IS NULL
+            AND (g.location_id IS NULL OR g.location_id=%s)
+          FOR SHARE OF g,u
+        """,(org,user,loc)).fetchall()
+        if not grants:
+            raise DocumentPolicyDenied("FORBIDDEN")
+        active=set(role for (role,) in grants)
+        rules=conn.execute("""
+          SELECT role_code,location_id,user_id,capability,allowed,not_before
+          FROM auto_document_access_policy
+          WHERE organization_id=%s AND document_kind=%s
+            AND role_code=ANY(%s)
+            AND (location_id IS NULL OR location_id=%s)
+            AND (user_id IS NULL OR user_id=%s)
+          ORDER BY created_at DESC,id DESC LIMIT 501
+          FOR SHARE
+        """,(org,document,list(active),loc,user)).fetchall()
+        if len(rules)>500:
+            raise DocumentPolicyDenied("ACL_LIMIT")
+        latest={}
+        for role,location,target,cap,allowed,not_before in rules:
+            key=(role,location,target,cap)
+            if key not in latest:
+                latest[key]=(allowed,not_before)
+        rights={}
+        for cap in CAPABILITIES:
+            applicable=active & ROLE_BASE[document].get(cap,active if cap=="WRITE" else set())
+            controls=(cap,"WRITE") if cap in ("CREATE","EDIT","CLOSE") else (cap,)
+            matching=[(allowed,stamp) for (role,location,target,rule_cap),(allowed,stamp)
+                      in latest.items() if role in applicable and rule_cap in controls]
+            permitted=bool(applicable) and all(allowed for allowed,_ in matching)
+            cutoffs=[stamp for allowed,stamp in matching
+                     if allowed and stamp is not None] if cap=="READ" else []
+            rights[cap]={"allowed":permitted,
+                         "notBefore":max(cutoffs).isoformat() if cutoffs else None}
+        return {"syntheticOnly":True,"subjectToObjectACL":True,
+                "documentKind":document,"userId":str(user),
+                "locationId":str(loc),"roles":sorted(active),
+                "capabilities":rights}
