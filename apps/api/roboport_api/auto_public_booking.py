@@ -277,9 +277,12 @@ def _match_slot(conn,p,start,end):
         end-start!=timedelta(minutes=p[8]) or start<=datetime.now(timezone.utc) or
         start>datetime.now(timezone.utc)+timedelta(days=60)):
         raise PublicBookingInvalid("INVALID_SLOT")
-    # Candidate slots are 30m UTC aligned and inside published hours.
-    utc=start.astimezone(timezone.utc)
-    if utc.second or utc.microsecond or utc.minute%30:
+    # Candidate slots are aligned from branch-local midnight, not UTC.
+    try:
+        local=start.astimezone(ZoneInfo(p[10]))
+    except ZoneInfoNotFoundError:
+        raise PublicBookingConflict("UNAVAILABLE") from None
+    if local.second or local.microsecond or local.minute%30:
         raise PublicBookingInvalid("INVALID_SLOT")
     row=conn.execute("""
        SELECT 1 FROM auto_bay_booking b
@@ -310,7 +313,6 @@ def submit_request(conn,offer_id,*,request_key,challenge_id,answer,
         conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,9099))",
                      (str(offer_id),))
         p=_offer(conn,offer_id)
-        _limit(conn,p[1],offer_id,"request",25)
         used=conn.execute("""
            SELECT id,offer_id,challenge_id,starts_at,ends_at,
                   processing_consent,marketing_consent
@@ -323,6 +325,9 @@ def submit_request(conn,offer_id,*,request_key,challenge_id,answer,
             return {"requestId":str(used[0]),"receiptKey":str(request_key),
                     "replayed":True,"status":"AWAITING_VERIFICATION",
                     "syntheticOnly":True,"noSlotHold":True}
+        # A lost-response retry is not a NEW request and must bypass the
+        # already exhausted quota. _limit still serializes all NEW inserts.
+        _limit(conn,p[1],offer_id,"request",25)
         _match_slot(conn,p,start,end)
         challenge_row=conn.execute("""
           SELECT answer_digest,expires_at,used_at,offer_id
@@ -448,7 +453,10 @@ def withdraw_marketing(conn,token,ident,receipt,key):
         return {"replayed":False,**_status(conn,req)}
 
 
-def staff_queue(conn,token,org,loc):
+def staff_queue(conn,token,org,loc,*,page=0):
+    _id(org,loc)
+    if type(page) is not int or not 0<=page<=100:
+        raise PublicBookingInvalid("INVALID_PAGE")
     with conn.transaction():
         _staff(conn,token,org,loc,("INTAKE",))
         rows=conn.execute("""
@@ -461,11 +469,19 @@ def staff_queue(conn,token,org,loc):
           LEFT JOIN auto_public_booking_claim c ON c.request_id=r.id
           LEFT JOIN auto_public_booking_fulfillment f ON f.request_id=r.id
           WHERE o.organization_id=%s AND o.location_id=%s
-          ORDER BY r.created_at DESC,r.id DESC LIMIT 51
-        """,(org,loc)).fetchall()
-        if len(rows)>50:
-            raise PublicBookingConflict("QUEUE_LIMIT")
-        return {"syntheticOnly":True,"items":[{
+          ORDER BY CASE
+             WHEN c.request_id IS NOT NULL AND f.appointment_id IS NULL
+               AND NOT EXISTS(SELECT 1 FROM auto_public_booking_offer_revoke rev
+                              WHERE rev.offer_id=r.offer_id) THEN 0
+             WHEN f.appointment_id IS NULL AND NOT EXISTS(
+               SELECT 1 FROM auto_public_booking_offer_revoke rev
+               WHERE rev.offer_id=r.offer_id) THEN 1
+             ELSE 2 END,
+             r.created_at DESC,r.id DESC LIMIT 51 OFFSET %s
+        """,(org,loc,page*50)).fetchall()
+        has_more=len(rows)>50
+        rows=rows[:50]
+        return {"syntheticOnly":True,"page":page,"hasMore":has_more,"items":[{
           "requestId":str(req),"offerId":str(offer),"startsAt":start.isoformat(),
           "endsAt":end.isoformat(),"createdAt":created.isoformat(),
           "status":"BOOKED" if appointment else "OFFER_WITHDRAWN" if revoked else
