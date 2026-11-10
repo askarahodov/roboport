@@ -210,6 +210,14 @@ def upgrade():
           SELECT on_hand,reserved INTO available FROM auto_stock_balance
             WHERE sku_id=NEW.source_sku_id;
           IF available.on_hand<>0 OR available.reserved<>0
+             OR EXISTS(
+               SELECT 1 FROM auto_work_order_stock_event wo
+               WHERE wo.sku_id=NEW.source_sku_id
+               GROUP BY wo.work_order_id
+               HAVING SUM(CASE WHEN wo.action='ISSUE' THEN wo.quantity
+                               WHEN wo.action='RETURN' THEN -wo.quantity
+                               ELSE 0 END) > 0
+             )
              OR EXISTS(SELECT 1 FROM auto_stock_lot src
                  JOIN auto_stock_lot dst ON dst.sku_id=NEW.target_sku_id
                  WHERE src.sku_id=NEW.source_sku_id AND
