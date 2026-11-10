@@ -242,6 +242,14 @@ def upgrade():
                    ),0)
                  )
              )
+             OR EXISTS(
+               SELECT 1 FROM auto_stock_lot_count counted
+               WHERE counted.sku_id=NEW.source_sku_id
+                 AND NOT EXISTS(
+                   SELECT 1 FROM auto_stock_lot_count_approval approved
+                   WHERE approved.count_id=counted.id
+                 )
+             )
              OR EXISTS(SELECT 1 FROM auto_stock_lot src
                  JOIN auto_stock_lot dst ON dst.sku_id=NEW.target_sku_id
                  WHERE src.sku_id=NEW.source_sku_id AND
@@ -297,6 +305,11 @@ def upgrade():
     op.execute("""CREATE TRIGGER aaa_catalog_merged_supplier_order
       BEFORE INSERT ON auto_supplier_purchase_order FOR EACH ROW
       EXECUTE FUNCTION guard_auto_catalog_merged_stock()""")
+    # A pending lot count can later produce COUNT_GAIN/COUNT_LOSS; once
+    # merged, fresh counts on retained old lots would be unapprovable.
+    op.execute("""CREATE TRIGGER aaa_catalog_merged_lot_count
+      BEFORE INSERT ON auto_stock_lot_count FOR EACH ROW
+      EXECUTE FUNCTION guard_auto_catalog_merged_stock()""")
 
 
 
@@ -304,6 +317,7 @@ def downgrade():
     # Disposable synthetic DB only: never erase imported catalog or history in production.
     op.execute("DROP TRIGGER aaa_catalog_merged_receipt_document ON auto_stock_receipt_document")
     op.execute("DROP TRIGGER aaa_catalog_merged_supplier_order ON auto_supplier_purchase_order")
+    op.execute("DROP TRIGGER aaa_catalog_merged_lot_count ON auto_stock_lot_count")
     op.execute("DROP TRIGGER aaa_catalog_merged_stock_event ON auto_stock_event")
     op.execute("DROP TRIGGER aaa_catalog_merged_lot ON auto_stock_lot")
     op.execute("DROP FUNCTION guard_auto_catalog_merged_stock()")
