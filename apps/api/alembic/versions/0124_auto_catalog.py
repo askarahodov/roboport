@@ -210,6 +210,11 @@ def upgrade():
           SELECT on_hand,reserved INTO available FROM auto_stock_balance
             WHERE sku_id=NEW.source_sku_id;
           IF available.on_hand<>0 OR available.reserved<>0
+             OR EXISTS(SELECT 1 FROM auto_stock_lot src
+                 JOIN auto_stock_lot dst ON dst.sku_id=NEW.target_sku_id
+                 WHERE src.sku_id=NEW.source_sku_id AND
+                   (src.batch_code,src.source_revision) IS DISTINCT FROM
+                   (dst.batch_code,dst.source_revision))
              OR EXISTS(SELECT 1 FROM auto_stock_lot_balance lb
                JOIN auto_stock_lot l ON l.id=lb.lot_id
                WHERE l.sku_id=NEW.source_sku_id AND lb.allocated<>0)
