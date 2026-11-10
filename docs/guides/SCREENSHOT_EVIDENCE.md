@@ -136,3 +136,7 @@ Playwright `apps/web/e2e/auto-treasury.spec.ts` сохраняет
 в browser-evidence artifact. Снимки содержат только фиксированные
 synthetic UUID, no PII/payment data. Визуальные baseline и
 независимая ручная приёмка остаются в #92/#76.
+
+## Public booking #442 — DEV screenshots
+
+`apps/web/e2e/auto-public-booking.spec.ts` фиксирует 390px страницу публичной заявки и 1280px staff-консоль, тестирует повтор потерянного POST и 403-clearing. CI browser evidence после успешного прогона.
