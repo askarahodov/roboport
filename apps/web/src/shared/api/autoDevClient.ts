@@ -56,8 +56,8 @@ export async function getAutoDevVehicles(
 
 
 /**
- * Read-only details of a *currently* verified vehicle. The server rechecks session,
- * CLIENT role and ownership; never cache or reuse stale details after an error.
+ * Только чтение подтверждённого автомобиля: сервер каждый раз проверяет сессию,
+ * CLIENT-роль и действующую связь. Не кэшировать результат после отказа.
  */
 export async function getAutoDevVehicleDetails(
   vehicleId: string, signal?: AbortSignal,

@@ -315,3 +315,41 @@ test('401 при запросе карточки немедленно скрыв
   await expect(page.locator('.account-record')).toHaveCount(0);
   await expect(page.getByTestId('vehicle-details')).toHaveCount(0);
 });
+
+test('запаздывающий ответ списка не возвращает карточки после 401 в detail',async({page})=>{
+  await authorized(page);
+  const id='11111111-1111-4111-8111-111111111111';
+  const car={id,make:'Synthetic',model:'Car',variant:null,modelYear:2026,vinLast4:'1234'};
+  let started=false;
+  let release!:()=>void;
+  const hold=new Promise<void>(resolve=>{release=resolve;});
+  await page.route(vehiclesUrl,async route=>{
+    const offset=new URL(route.request().url()).searchParams.get('offset');
+    if(offset==='20'){
+      started=true;
+      await hold;
+    }
+    try{
+      await route.fulfill({
+        status:200,contentType:'application/json',
+        body:JSON.stringify({items:offset==='0'?Array.from({length:20},(_,index)=>({
+          ...car,id:'00000000-0000-4000-8000-'+(index+1).toString(16).padStart(12,'0'),
+        })): [car]}),
+      });
+    }catch{/* отменённый запрос списка ожидаемо нельзя завершить */}
+  });
+  await page.route('**/api/v1/dev/auto/vehicles/'+
+    '00000000-0000-4000-8000-000000000001',route=>route.fulfill({
+      status:401,contentType:'application/json',body:'{"code":"UNAUTHENTICATED"}',
+    }));
+  await page.goto('/account/vehicles');
+  await expect(page.locator('.account-record')).toHaveCount(20);
+  await page.getByRole('button',{name:'Показать ещё автомобили'}).click();
+  await expect.poll(()=>started).toBe(true);
+  await page.getByRole('button',{name:'Подробнее об автомобиле Synthetic Car'}).first().click();
+  await expect(page.getByText('Доступ к автомобилям не предоставлен',{exact:false})).toBeVisible();
+  release();
+  await expect(page.locator('.account-record')).toHaveCount(0);
+  await expect(page.getByTestId('vehicle-details')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Показать ещё автомобили'})).toHaveCount(0);
+});

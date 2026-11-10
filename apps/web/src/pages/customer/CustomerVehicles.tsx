@@ -21,7 +21,11 @@ export function CustomerVehicles() {
   const [selected, setSelected] = React.useState<AutoDevVehicle | null>(null);
   const [detailStatus, setDetailStatus] = React.useState<'idle' | 'loading' | 'error'>('idle');
   const detailAbort = React.useRef<AbortController | null>(null);
-  React.useEffect(() => () => detailAbort.current?.abort(), []);
+  const listAbort = React.useRef<AbortController | null>(null);
+  React.useEffect(() => () => {
+    detailAbort.current?.abort();
+    listAbort.current?.abort();
+  }, []);
 
   function clearDetails() {
     detailAbort.current?.abort();
@@ -47,12 +51,16 @@ export function CustomerVehicles() {
       setDetailStatus('error');
       if (error instanceof AutoDevHttpError) {
         if (error.status === 401 || error.status === 403) {
+          // Отказ доступа должен инвалидировать и незавершённую загрузку
+          // списка: запоздавший HTTP 200 не вправе восстановить старые данные.
+          listAbort.current?.abort();
+          setPageLoading(false);
           setItems([]);
           setNextOffset(null);
           setStatus('denied');
         } else if (error.status === 404) {
-          // A formerly verified link can be revoked at any time. Remove the stale
-          // card immediately, then re-check every visible page with a fresh request.
+          // Подтверждённая связь может быть отозвана в любой момент:
+          // сразу скрыть карточку и заново проверить все страницы на сервере.
           setItems(previous => previous.filter(vehicle => vehicle.id !== vehicleId));
           refresh();
         }
@@ -62,6 +70,8 @@ export function CustomerVehicles() {
 
   React.useEffect(() => {
     const controller = new AbortController();
+    listAbort.current?.abort();
+    listAbort.current = controller;
     if (offset === 0) {
       clearDetails();
       setStatus('loading');
