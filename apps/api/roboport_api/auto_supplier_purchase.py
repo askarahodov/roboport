@@ -45,8 +45,6 @@ def _source(offers: object, supplier: str, offer_id: str):
     chosen = [x for x in parsed if x.supplier_id == supplier and x.offer_id == offer_id]
     if len(chosen) != 1 or chosen[0].currency != "RUB":
         raise AutoStockDenied("INVALID_INPUT")
-    if chosen[0].expires_at <= datetime.now(timezone.utc):
-        raise AutoStockConflict("EXPIRED_QUOTE")
     # Preserve the provider's original fixture metadata, not UI-formatted currency.
     snapshot = json.dumps(offers, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return chosen[0], snapshot, parsed
@@ -92,6 +90,10 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
                 and old[7] == actor):
                 return old[0], old[8]
             raise AutoStockConflict("REPLAY_MISMATCH")
+        # Exact replay stays possible after offer expiry; no *new* order may
+        # be created against a stale quote.
+        if selected.expires_at <= datetime.now(timezone.utc):
+            raise AutoStockConflict("EXPIRED_QUOTE")
         work = conn.execute("""SELECT w.id FROM auto_work_order w
           JOIN auto_appointment a ON a.id=w.appointment_id
           JOIN auto_bay_booking b ON b.id=a.booking_id
