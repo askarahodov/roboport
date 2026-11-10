@@ -45,7 +45,8 @@ test('ADMIN creates restricted role/employee rule, audits, previews effective ac
         locationId:loc,userId:user});
       submits.push(body);
       rules.push({
-        eventId:'44444444-4444-4444-8444-444444444444',
+        eventId:rules.length===0?'44444444-4444-4444-8444-444444444444':
+          '55555555-5555-4555-8555-555555555555',
         role,userId:user,locationId:loc,documentKind:kind,
         capability:'READ',allowed:body.allowed,notBefore:body.notBefore,
         actorId:user,createdAt:'2030-01-01T10:00:00Z',
@@ -70,12 +71,13 @@ test('ADMIN creates restricted role/employee rule, audits, previews effective ac
   await page.getByRole('button',{name:'Проверить эффективные права'}).click();
   await expect(page.getByRole('listitem').filter({hasText:'READ: Запрещено'})).toBeVisible();
   expect(previewReads).toBe(1);
+  await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
   await page.screenshot({path:testInfo.outputPath('admin-deny-390-dark.png'),
     fullPage:true,animations:'disabled'});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
   await page.getByRole('combobox',{name:'Результат политики'}).selectOption('ALLOW');
-  await page.getByRole('textbox',{name:'История с даты (UTC)'}).fill('2099-01-01');
+  await page.getByLabel('История с даты (UTC)').fill('2099-01-01');
   await page.getByRole('button',{name:'Сохранить правило'}).click();
   await expect.poll(()=>submits.length).toBe(2);
   expect(submits[1].notBefore).toBe('2099-01-01T00:00:00.000Z');
@@ -125,6 +127,6 @@ test('lost request reuses same rule key; 403 clears previous sensitive audit',as
   expect(bodies[0]).toBe(bodies[1]);
   revoked=true;
   await page.getByRole('textbox',{name:'UUID организации'}).fill(other);
-  await expect(page.getByRole('alert',{name:''}).first()).toBeVisible();
+  await expect(page.getByText('Доступ запрещён или dev API отключён.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Сохранить правило'})).toHaveCount(0);
 });
