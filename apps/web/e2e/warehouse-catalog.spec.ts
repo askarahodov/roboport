@@ -174,3 +174,48 @@ test('successful POST invalidates pending catalog GET and allows immediate reloa
   await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
   await expect(page.getByText('SYNTH-A',{exact:true})).toHaveCount(0);
 });
+
+
+test('stale preview POST JSON never restores old-branch rows after scope switch',async({page})=>{
+  // Simulate the race after response HEADERS but before Response.json() resolves.
+  await page.addInitScript(()=>{
+    const original=window.fetch.bind(window);
+    (window as any).__previewWaiting=false;
+    window.fetch=async (...args)=>{
+      const res=await original(...args);
+      const url=typeof args[0]==='string'?args[0]:args[0] instanceof Request?
+        args[0].url:String(args[0]);
+      if(url.includes('/imports/preview')&&res.ok){
+        const parse=res.json.bind(res);
+        res.json=async ()=>{
+          (window as any).__previewWaiting=true;
+          await new Promise<void>(resolve=>{
+            (window as any).__releasePreviewJson=resolve;
+          });
+          return parse();
+        };
+      }
+      return res;
+    };
+  });
+  await page.route('**/warehouse/catalog/imports/preview?*',route=>json(route,{
+    previewId:preview,sha256:digest,syntheticOnly:true,replayed:false,
+    items:[{article:'SYNTH-OLD-BRANCH',skuId:a,version:1}]
+  },201));
+  await visit(page);
+  await page.locator('input[type=file]').setInputFiles({
+    name:'synthetic.xlsx',
+    mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer:Buffer.from('synthetic fixture')
+  });
+  await page.getByRole('button',{name:'Проверить XLSX без записи в каталог'}).click();
+  await expect.poll(()=>page.evaluate(()=>
+    (window as any).__previewWaiting===true)).toBe(true);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(
+    '77777777-7777-4777-8777-777777777777');
+  await page.evaluate(()=>(window as any).__releasePreviewJson());
+  await expect(page.getByText('Предпросмотр: 1 строк')).toHaveCount(0);
+  await expect(page.getByText('SYNTH-OLD-BRANCH')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Подтвердить весь XLSX атомарно'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Проверить XLSX без записи в каталог'})).toBeEnabled();
+});
