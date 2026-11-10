@@ -126,3 +126,13 @@ screenshots для независимого просмотра**, не утве�
 ACL проверяется сервером. Без отдельного owner sign-off изображения
 **не** считаются утверждёнными baseline #92 и не доказывают
 независимый WCAG AA/manual PASS.
+
+
+## Касса — скриншоты 390/1280 (#445)
+
+Playwright `apps/web/e2e/auto-treasury.spec.ts` сохраняет
+`treasury-390-light.png` (тестовый аванс, lost POST/replay),
+`treasury-1280-dark-closed.png` (закрытый день, сверка)
+в browser-evidence artifact. Снимки содержат только фиксированные
+synthetic UUID, no PII/payment data. Визуальные baseline и
+независимая ручная приёмка остаются в #92/#76.
