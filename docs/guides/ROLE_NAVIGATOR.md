@@ -113,3 +113,7 @@ MANAGER создаёт счёт и сверяет отчёты; CASHIER с от�
 зачёт, возврат и закрывает день. Маршрут dev, без денег, ККТ,
 банковских callback или юридически действительных документов.
 [Ролевой walkthrough](finance.md) · [полная модель](../auto/FINANCE.md).
+
+## Публичная запись #442 DEV-only
+
+Анонимный посетитель: `/book-dev` (услуга/время/арифметическая проверка/условия). Исходный CLIENT: `/account/auto-public-booking` (verified claim, receipt status, marketing withdrawal). MANAGER(+WAREHOUSE): `/staff/auto-public-booking` (публикация PART/CONSUMABLE). INTAKE(+WAREHOUSE): там же (appointment, WorkOrder, stock reserve, CRM lineage). Не открывать реальные данные/уведомления до #119. [Runbook](../auto/PUBLIC_BOOKING.md).

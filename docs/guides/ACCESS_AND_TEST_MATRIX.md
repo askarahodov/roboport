@@ -118,3 +118,8 @@ PG17 trigger проверяет последнюю согласованную с
 Тесты `test_pg_auto_treasury_http.py` и
 `auto-treasury.spec.ts` + штатные five CI jobs на PR и main.
 Нет независимого human security signoff: production release #119 blocked.
+
+
+| Публичная заявка #442 | Только DEV loopback: anonymous challenge/offer/slot/submit без PII; CLIENT verified claim/withdraw; MANAGER+WAREHOUSE publish; INTAKE+WAREHOUSE staff fulfill; stock+CRM+outbox atomically | `test_pg_auto_public_booking_http.py`, `auto-public-booking.spec.ts`, полный 5/5 CI | Реальная CAPTCHA, уведомления, public ingress и legal #119 — blocked |
+
+| Публичная заявка #442 | DEV loopback anonymous challenge/slot/request без VIN и ПДн; verified CLIENT claim/withdraw; MANAGER/WAREHOUSE publish; INTAKE/WAREHOUSE fulfill; atomic stock+CRM+outbox | `test_pg_auto_public_booking_http.py`, `auto-public-booking.spec.ts`, 5/5 CI | Реальная CAPTCHA, внешний ingress, legal consent, настоящие уведомления и #119 blocked |

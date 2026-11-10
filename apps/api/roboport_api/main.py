@@ -42,6 +42,7 @@ from .auto_work_complexes_http import router as auto_work_complexes_router
 from .auto_demo_close_http import router as auto_demo_close_router
 from .auto_customer_orders_http import router as auto_customer_orders_router
 from .auto_customer_booking_http import router as auto_customer_booking_router
+from .auto_public_booking_http import router as auto_public_booking_router
 
 
 
@@ -92,6 +93,7 @@ app.include_router(auto_work_complexes_router)
 app.include_router(auto_demo_close_router)
 app.include_router(auto_customer_orders_router)
 app.include_router(auto_customer_booking_router)
+app.include_router(auto_public_booking_router)
 
 
 

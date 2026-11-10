@@ -107,3 +107,19 @@ MANAGER создаёт тестовые счета; только CASHIER мож�
 не означает этого права; не назначайте CASHIER по одной только
 галочке в меню. Права только synthetic-dev, не для настоящих денег.
 [Контракт кассы](../auto/FINANCE.md).
+
+
+## Публичный dev-виджет #442 — релизные ограничения
+
+Отдельные разрешения: MANAGER публикация, WAREHOUSE
+материальная политика и резервы, INTAKE исполнение,
+CLIENT с оригинальной verified-связью подтверждение.
+Ограничение HTTPS loopback, Origin, rate cap и слабый
+арифметический challenge — **не production CAPTCHA**.
+Не указывайте реальные ПДн и не поднимайте публичный ingress
+до независимого privacy/security/legal/ops согласования #119.
+[Процесс](../auto/PUBLIC_BOOKING.md).
+
+## Публичный dev-виджет #442 — граница безопасности
+
+Анонимная заявка без ПДн, подтверждение только CLIENT с исходной verified-связью, публикация MANAGER(+WAREHOUSE), исполнение INTAKE(+WAREHOUSE). HTTPS loopback, Origin, лимиты и арифметический вопрос НЕ являются полноценной production CAPTCHA. Внешний ingress и реальные маркетинговые сообщения запрещены до независимых privacy/security/legal/ops approvals #119. [Runbook](../auto/PUBLIC_BOOKING.md).
