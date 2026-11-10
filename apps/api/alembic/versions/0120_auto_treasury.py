@@ -251,12 +251,13 @@ def upgrade():
         THEN RAISE EXCEPTION 'treasury cashier close denied'; END IF;
         IF NEW.business_day>(clock_timestamp() AT TIME ZONE timezone_name)::date
           OR abs(extract(epoch FROM NEW.created_at-clock_timestamp()))>10
-          OR EXISTS(SELECT 1 FROM auto_treasury_day_close old
-               WHERE old.account_id=NEW.account_id AND old.business_day>=NEW.business_day)
+          OR EXISTS(SELECT 1 FROM auto_treasury_day_close earlier_close
+               WHERE earlier_close.account_id=NEW.account_id AND earlier_close.business_day>=NEW.business_day)
           OR EXISTS(SELECT 1 FROM auto_treasury_event e
                WHERE e.account_id=NEW.account_id AND e.business_day<NEW.business_day
-                 AND NOT EXISTS(SELECT 1 FROM auto_treasury_day_close old
-                   WHERE old.account_id=e.account_id AND old.business_day=e.business_day))
+                 AND NOT EXISTS(SELECT 1 FROM auto_treasury_day_close missing_close
+                   WHERE missing_close.account_id=e.account_id
+                     AND missing_close.business_day=e.business_day))
         THEN RAISE EXCEPTION 'treasury close ordering/date invalid'; END IF;
         SELECT
           COALESCE(sum(CASE WHEN business_day<NEW.business_day AND
