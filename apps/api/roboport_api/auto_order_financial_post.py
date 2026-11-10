@@ -21,7 +21,7 @@ def post_work_order_financial(conn: psycopg.Connection, token: str,
         get_work_order_balance(conn, token, organization, location, order)
         try:
             require_document_access(conn, token, organization, location,
-                                    ("MANAGER",), "FINANCE", "EDIT", order=order)
+                                    ("MANAGER","CASHIER"), "FINANCE", "EDIT", order=order)
         except DocumentPolicyDenied:
             raise AutoStockDenied("FORBIDDEN") from None
         try:
