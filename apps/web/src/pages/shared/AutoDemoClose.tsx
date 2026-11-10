@@ -5,7 +5,15 @@ type Event={id:string;kind:'SIM_PAYMENT'|'SIM_REFUND';amountMinor:number;created
 type Stock={skuId:string;quantity:number};
 type Preview={id:string;revisionId:string;digest:string;createdAt:string;
   snapshot:Record<string,unknown>};
+type DocumentEvent={id:string;action:'POSTED'|'CLIENT_ACK'|'CLIENT_DISPUTE'|'CLOSED_TECHNICAL';
+  actorId:string;previewId:string;previewDigest:string;intakeActId:string;intakeDigest:string;
+  createdAt:string};
+type DocumentWorkflow={syntheticOnly:true;releaseAllowed:false;legalSignatureStatus:'NOT_IMPLEMENTED';
+  status:'DRAFT'|'POSTED'|'CLIENT_ACKNOWLEDGED'|'CLIENT_DISPUTED'|'CLOSED_TECHNICAL';
+  intakeAct:{id:string;version:number;digest:string;clientDecision:string|null}|null;
+  events:DocumentEvent[];canReview:boolean;canClose:boolean};
 type Snapshot={syntheticOnly:true;releaseAllowed:false;legalGatePassed:false;
+  documentWorkflow?:DocumentWorkflow;
   currency:'RUB';approvedVersion:number|null;
   approvedBaseMinor:number|null;approvedExtraMinor:number;
   approvedExtraVersion:number|null;approvedExtraRevisionId:string|null;
@@ -44,6 +52,25 @@ function parse(raw:unknown):Snapshot{
       !Number.isInteger(v.approvedExtraVersion)||
       Number(v.approvedExtraVersion)<1)){
     throw new Error('invalid reconciliation state');
+  }
+  // Older synthetic UI fixtures omit this field. The live dev endpoint
+  // always includes it; never infer posting or legal release from omission.
+  if(v.documentWorkflow!==undefined){
+    const flow=v.documentWorkflow as DocumentWorkflow;
+    if(!flow||flow.syntheticOnly!==true||flow.releaseAllowed!==false||
+      flow.legalSignatureStatus!=='NOT_IMPLEMENTED'||
+      !['DRAFT','POSTED','CLIENT_ACKNOWLEDGED','CLIENT_DISPUTED','CLOSED_TECHNICAL'].includes(flow.status)||
+      !Array.isArray(flow.events)||flow.events.length>4||
+      typeof flow.canReview!=='boolean'||typeof flow.canClose!=='boolean'||
+      !(flow.intakeAct===null||(uuid.test(flow.intakeAct.id)&&
+        Number.isInteger(flow.intakeAct.version)&&
+        /^[0-9a-f]{64}$/.test(flow.intakeAct.digest)))||
+      !flow.events.every(e=>uuid.test(e.id)&&uuid.test(e.actorId)&&
+        uuid.test(e.previewId)&&uuid.test(e.intakeActId)&&
+        /^[0-9a-f]{64}$/.test(e.previewDigest)&&
+        /^[0-9a-f]{64}$/.test(e.intakeDigest))){
+      throw new Error('invalid document workflow');
+    }
   }
   return v as Snapshot;
 }
@@ -124,6 +151,17 @@ export function AutoDemoClose({role}:{role:'staff'|'client'}){
   const validAmount=amount.trim()!==''&&Number.isSafeInteger(numeric)&&numeric>=1&&numeric<=1e12;
   const validQty=qty.trim()!==''&&Number.isSafeInteger(qtyNumber)&&qtyNumber>=1&&qtyNumber<=1e9;
   const active=ready&&!busy&&!pending;
+  const workflow=data?.documentWorkflow;
+  function documentAction(action:DocumentEvent['action']){
+    if(!active||!data?.preview||!workflow?.intakeAct||
+      workflow.intakeAct.clientDecision!=='ACKNOWLEDGED')return;
+    if((role==='staff'&& !['POSTED','CLOSED_TECHNICAL'].includes(action))||
+       (role==='client'&& !['CLIENT_ACK','CLIENT_DISPUTE'].includes(action)))return;
+    submit('document-events',{
+      action,previewId:data.preview.id,previewDigest:data.preview.digest,
+      intakeActId:workflow.intakeAct.id,intakeDigest:workflow.intakeAct.digest,
+    });
+  }
   return <section aria-label="Сверка и пакет перед выдачей (dev)"
     style={{maxWidth:'76rem',margin:'2rem auto',overflowWrap:'anywhere'}}>
     <h1>{role==='client'?'Просмотр пакета заказ-наряда (dev)':'Сверка и пакет перед выдачей (dev)'}</h1>
@@ -199,6 +237,45 @@ export function AutoDemoClose({role}:{role:'staff'|'client'}){
         <p>SHA-256: <code>{data.preview.digest}</code></p>
         <p>Снимок версии сметы, QC и сверки неизменяем. Нет юридической подписи,
           фискального чека или факта передачи автомобиля.</p>
+      </section>}
+      {workflow&&<section aria-label="Технический жизненный цикл документа">
+        <h2>Проведение и закрытие — только технический DEV</h2>
+        <p role="status">Статус документа: {workflow.status}.
+          {' '}Даже CLOSED_TECHNICAL означает только закрытие тестового журнала,
+          не юридическое закрытие ЗН или выдачу машины.</p>
+        {workflow.intakeAct?<p>Акт приёмки №{workflow.intakeAct.version};
+          {' '}отметка клиента: {workflow.intakeAct.clientDecision??'отсутствует'}.
+          {' '}SHA-256 акта: <code>{workflow.intakeAct.digest}</code>.</p>:
+          <p>Нет версии акта приёмки; техническое проведение недоступно.</p>}
+        <h3>Неизменяемый журнал переходов</h3>
+        {workflow.events.length===0?<p>Технических проводок документа нет.</p>:
+          <ol>{workflow.events.map(event=><li key={event.id}>
+            {event.action} · {new Date(event.createdAt).toLocaleString('ru-RU')}
+            {' '}· автор: <code>{event.actorId}</code>
+            {' '}· SHA-256 пакета: <code>{event.previewDigest}</code>
+          </li>)}</ol>}
+        {role==='staff'&&workflow.status==='DRAFT'&&
+          <button type="button" disabled={!active||!data.preview||
+              workflow.intakeAct?.clientDecision!=='ACKNOWLEDGED'}
+            onClick={()=>documentAction('POSTED')}>
+            Технически провести документ (MANAGER)</button>}
+        {role==='client'&&workflow.canReview&&<>
+          <p>Сверьте сумму, SHA-256 пакета и акт приёмки.
+            Эта отметка — не электронная подпись, не согласие на выдачу и не платёж.</p>
+          <button type="button" disabled={!active}
+            onClick={()=>documentAction('CLIENT_ACK')}>
+            Подтвердить просмотр пакета (не подпись)</button>
+          <button type="button" disabled={!active}
+            onClick={()=>documentAction('CLIENT_DISPUTE')}>
+            Оспорить технический пакет</button>
+        </>}
+        {workflow.status==='CLIENT_DISPUTED'&&<p role="alert">
+          Клиент оспорил пакет. Техническое закрытие запрещено;
+          исправление требует нового разрешённого процесса и юридической проверки.</p>}
+        {role==='staff'&&workflow.canClose&&
+          <button type="button" disabled={!active}
+            onClick={()=>documentAction('CLOSED_TECHNICAL')}>
+            Технически закрыть журнал (НЕ выдавать автомобиль)</button>}
       </section>}
       <p role="note">Разрешение на выдачу: НЕТ. Юридический и security gate: НЕ ПРОЙДЕН.</p>
       <button type="button" disabled={busy}

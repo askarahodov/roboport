@@ -11,6 +11,11 @@ from .auto_demo_close import (
     release_unused_reserve,seal_handover_preview,
 )
 
+from .auto_document_lifecycle import (
+    record_document_event,DocumentLifecycleDenied,
+    DocumentLifecycleInvalid,DocumentLifecycleConflict,
+)
+
 router=APIRouter(include_in_schema=False)
 prefix="/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/demo-close"
 
@@ -28,6 +33,14 @@ class CashEvent(RequestKey):
 class ReserveRelease(RequestKey):
     skuId:UUID
     quantity:int=Field(ge=1,le=1_000_000_000)
+
+
+class DocumentEvent(RequestKey):
+    action:str=Field(pattern="^(POSTED|CLIENT_ACK|CLIENT_DISPUTE|CLOSED_TECHNICAL)$")
+    previewId:UUID
+    previewDigest:str=Field(pattern="^[0-9a-f]{64}$")
+    intakeActId:UUID
+    intakeDigest:str=Field(pattern="^[0-9a-f]{64}$")
 
 
 def _scope(request,org_id,loc_id,order_id):
@@ -106,3 +119,32 @@ async def release(org_id:str,loc_id:str,order_id:str,request:Request):
 @router.post(prefix+"/seal-preview")
 async def preview(org_id:str,loc_id:str,order_id:str,request:Request):
     return await _write(request,org_id,loc_id,order_id,"preview")
+
+
+@router.post(prefix+"/document-events")
+async def document_event(org_id:str,loc_id:str,order_id:str,request:Request):
+    scoped=_scope(request,org_id,loc_id,order_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,org,loc,order=scoped
+    try:
+        body=DocumentEvent.model_validate(await request.json())
+    except (ValidationError,ValueError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            outcome=record_document_event(
+                db,request.cookies.get("rp_session",""),org,loc,order,
+                request_key=body.requestKey,action=body.action,
+                preview_id=body.previewId,preview_digest=body.previewDigest,
+                intake_act_id=body.intakeActId,intake_digest=body.intakeDigest)
+        except DocumentLifecycleConflict as exc:
+            return _response(request,409,str(exc))
+        except DocumentLifecycleInvalid:
+            return _response(request,422,"INVALID_INPUT")
+        except DocumentLifecycleDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(status_code=200 if outcome["replayed"] else 201,
+                        content=outcome,headers={"Cache-Control":"no-store"})
