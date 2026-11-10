@@ -104,3 +104,17 @@ production-UI. В тестовом интерфейсе есть nav-ссылк�
 действует сразу, чужой tenant/branch/документ недоступен.
 Скриншоты 390/1280 синтетические; независимый legal/QA
 и production gate #119 не пройдены. [Полная процедура](../auto/DOCUMENT_ACCESS.md).
+
+
+## Синтетическая касса #445: проверенный контур
+
+`/staff/auto-treasury`: API проверяет actual CASHIER grant
+(запись и закрытие) или MANAGER (создание счёта и чтение),
+live сессию, tenant, филиал, текущий WorkOrder и доказательство
+связи с автомобилем. Запрещены чужие UUID и revoked grant.
+PG17 trigger проверяет последнюю согласованную смету/QC,
+нет двойного зачёта или возврата, сохранность счетов,
+невозможность переплаты или изменения закрытого дня.
+Тесты `test_pg_auto_treasury_http.py` и
+`auto-treasury.spec.ts` + штатные five CI jobs на PR и main.
+Нет независимого human security signoff: production release #119 blocked.
