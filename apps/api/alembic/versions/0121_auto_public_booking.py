@@ -139,14 +139,14 @@ def upgrade():
           SELECT 1 FROM auto_public_booking_offer offer
           JOIN auto_organization org ON org.id=offer.organization_id
             AND org.disabled_at IS NULL
-          JOIN auto_organization_role_grant grant
-            ON grant.organization_id=offer.organization_id
-            AND grant.user_id=NEW.actor_id AND grant.role_code='MANAGER'
-            AND grant.revoked_at IS NULL
-            AND (grant.location_id IS NULL OR grant.location_id=offer.location_id)
+          JOIN auto_organization_role_grant g
+            ON g.organization_id=offer.organization_id
+            AND g.user_id=NEW.actor_id AND g.role_code='MANAGER'
+            AND g.revoked_at IS NULL
+            AND (g.location_id IS NULL OR g.location_id=offer.location_id)
           JOIN app_user actor ON actor.id=NEW.actor_id AND actor.status='ACTIVE'
           WHERE offer.id=NEW.offer_id
-          FOR SHARE OF offer,org,grant,actor
+          FOR SHARE OF offer,org,g,actor
         ) THEN RAISE EXCEPTION 'only live scoped MANAGER can revoke offer'; END IF;
         RETURN NEW;
       END $f$
