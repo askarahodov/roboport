@@ -26,6 +26,7 @@ import { WarehouseWorkOrders } from './pages/staff/WarehouseWorkOrders';
 import { WarehouseReclassification } from './pages/staff/WarehouseReclassification';
 import { WarehouseSupplierReturns } from './pages/staff/WarehouseSupplierReturns';
 import { WarehouseSerialMovements } from './pages/staff/WarehouseSerialMovements';
+import { AutoUiGallery } from './pages/AutoUiGallery';
 
 type Theme = 'light' | 'dark' | 'auto';
 
@@ -85,6 +86,7 @@ function App() {
       <label>Тема <select aria-label="Тема оформления" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="auto">Авто</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
     </header>
     <Routes>
+      <Route path="/dev/ui-gallery" element={<AutoUiGallery />} />
       <Route path="/" element={<div className="landing">
         <section className="hero" aria-labelledby="hero-title">
           <div className="hero-content">

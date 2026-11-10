@@ -34,3 +34,14 @@
 
 ## Проверки и sign-off
 `python scripts/check_brand_tokens.py` проверяет SVG geometry, наличие русских названий в текущем UI/API/Docsify и token roles/contrast. `apps/web/e2e/brand-accessibility.spec.ts` и `visual-audit.spec.ts` — 390/1280/1440 Light/Dark/Auto, фокус, root overflow и снимки. `docs/guides/SCREENSHOT_EVIDENCE.md` — ролевые Docsify снимки. Все 5 PR+main CI jobs на точных SHA. **Ручная QA/независимая визуальная и юридическая приёмка пока не проводятся**, локальные ИИ-агенты отключены по решению владельца. Отдельный #92/#76 review не отмечать PASS; внешний выпуск запрещён #119.
+
+
+## Проверочная UI-галерея
+
+Статическая страница `/dev/ui-gallery` использует действующие
+кнопки, поля, бейджи, alert, skeleton, пустое состояние и диалог. Она не
+получает данные клиента и не добавляет production API. Новый Playwright
+visual audit фиксирует 21 актуальный автомобильный маршрут в девяти
+viewport/theme комбинациях, не подменяя независимый UX review.
+Порядок просмотра PNG/manifest и критерии подписания —
+[SCREENSHOT_EVIDENCE.md](../guides/SCREENSHOT_EVIDENCE.md).
