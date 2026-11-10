@@ -87,18 +87,34 @@ export function CustomerAccount() {
   if (state === 'loading') return <section><h1>Личный кабинет</h1><p role="status">Проверка серверной сессии…</p></section>;
   if (state === 'unauthorized') return <section><h1>Личный кабинет</h1>
     <p role="status">401 — требуется локальная авторизация.</p>
+    <nav className="account-help-links" aria-label="Помощь клиенту">
+      <a href="/docs/#/guides/client">Как пользоваться кабинетом</a>
+      <a href="/docs/#/guides/FAQ">Частые вопросы и ошибки</a>
+    </nav>
     <Link to="/account/login">Войти</Link> <Link to="/">На главную</Link></section>;
   if (state === 'forbidden') return <section><h1>Доступ ограничен</h1>
     <p role="alert">403 — доступ запрещён или отозван. Обратитесь к администратору.</p>
     <div className="auth-recovery"><Link to="/account/login">Войти под другой учётной запись</Link><button type="button" onClick={() => setAttempt(n => n + 1)}>Повторить проверку</button></div>
     <p className="auth-help">Авторизация и разрешение на просмотр кабинета — разные проверки. Если доступ отозван, повторный вход не восстановит права автоматически.</p>
+    <nav className="account-help-links" aria-label="Помощь клиенту">
+      <a href="/docs/#/guides/client">Как пользоваться кабинетом</a>
+      <a href="/docs/#/guides/FAQ">Частые вопросы и ошибки</a>
+    </nav>
     <Link to="/">На главную</Link></section>;
   if (state === 'error') return <section><h1>Не удалось открыть кабинет</h1>
     <p role="alert">Не удалось проверить серверную сессию. Личные данные не загружены.</p>
+    <nav className="account-help-links" aria-label="Помощь клиенту">
+      <a href="/docs/#/guides/client">Как пользоваться кабинетом</a>
+      <a href="/docs/#/guides/FAQ">Частые вопросы и ошибки</a>
+    </nav>
     <button type="button" onClick={() => setAttempt(value => value + 1)}>Повторить проверку</button></section>;
 
   return <PageShell className="customer-account">
     <h1>Личный кабинет</h1>
+    <nav className="account-help-links" aria-label="Помощь клиенту">
+      <a href="/docs/#/guides/client">Как пользоваться кабинетом</a>
+      <a href="/docs/#/guides/FAQ">Частые вопросы и ошибки</a>
+    </nav>
     <div className="account-layout"><aside className="account-sidebar"><p className="ui-eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p><Tabs label="Разделы личного кабинета" items={sections.map(section => ({to:section.path,label:section.title,end:'end' in section && section.end}))} /></aside><div className="account-content">
     <h2>{selected.title}</h2>
     <p className="account-subtitle">Ваши автомобили, запись на СТО и заказ-наряды. Только синтетический dev-контур.</p>

@@ -47,5 +47,9 @@ export function CustomerLogin() {
     </form>
     {error && <p role="alert">{error}</p>}
     <p><Link to="/account">Назад</Link></p>
+    <nav className="account-help-links" aria-label="Помощь клиенту">
+      <a href="/docs/#/guides/client">Инструкция по входу и восстановлению доступа</a>
+      <a href="/docs/#/guides/FAQ">Частые вопросы и ошибки</a>
+    </nav>
   </Card></PageShell>;
 }
