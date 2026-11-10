@@ -155,6 +155,14 @@ def test_analog_merge_history_and_active_stock_denied(monkeypatch):
             with pytest.raises(psycopg.errors.RaiseException):
                 with db.transaction():
                     add_lot(db,org,loc,UUID(source),add_bin(db,org,loc,"B-04"))
+            # New unpostable receipt drafts must also be rejected after
+            # merge, even if an old, empty lot still exists on source.
+            from roboport_api.auto_stock_service import AutoStockConflict
+            with pytest.raises(AutoStockConflict):
+                create_receipt_document(
+                    db,d["tokens"][d["intake"]],org,loc,
+                    source_lot,uuid4(),1,"POST-MERGE-DRAFT-BLOCK",
+                )
             assert db.execute("SELECT sku_id FROM auto_stock_lot WHERE id=%s",
                 (source_lot,)).fetchone()==(UUID(source),)
             assert db.execute("SELECT sku_id FROM auto_catalog_price_event WHERE sku_id=%s",
