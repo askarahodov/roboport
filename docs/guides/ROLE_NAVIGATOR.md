@@ -74,3 +74,7 @@
 - Автоматические тесты в GitHub Actions **не** заменяют независимое review/ручную QA #76 и security/legal/ops gate #119. Доступные dev-операции не означают готовность коммерческой СТО.
 
 **Статус приёмки:** эта карта — current-dev документация, не подтверждение полного выполнения #173. После изменения UI или серверной роли исправляйте в том же PR эту карту, ролевое руководство, матрицу и тесты.
+
+## Заказ поставщику по дефициту (current-dev #443)
+
+[Кладовщик](warehouse.md) → `/staff/warehouse-supplier-orders`: синтетический WorkOrder/SKU, сравнение двух offline предложений, частичные документы и отмена оставшейся поставки. Физическая приёмка/стоимость — по действующему `/staff/warehouse-receiving`, отдельно подтверждает MANAGER. Исходники и негативные доказательства: [SQL/ACL/PG17](../../tests/integration/test_pg_auto_supplier_purchase.py), [HTTP](../../tests/integration/test_pg_auto_supplier_purchase_http.py), [Browser E2E](../../apps/web/e2e/warehouse-supplier-orders.spec.ts), [полная процедура](../auto/SUPPLIER_PURCHASES.md). 403/409/422 не обходить подстановкой UUID; настоящий supplier/оплата `planned` до #119.
