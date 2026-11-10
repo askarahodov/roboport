@@ -259,8 +259,10 @@ def test_catalog_replay_is_scoped_to_original_tenant_branch(monkeypatch):
         assert post(http,d,d["intake"],url(foreign)+
             "/imports/preview?locationId="+str(foreign_loc),
             workbook,preview_key,xlsx=True).status_code==409
+        # Commit checks the preview's original tenant *before* replay:
+        # an inaccessible preview is hidden with 403 rather than 409.
         assert post(http,d,d["intake"],url(foreign)+"/imports/commit",
-            {**committed,"locationId":str(foreign_loc)},commit_key).status_code==409
+            {**committed,"locationId":str(foreign_loc)},commit_key).status_code==403
         assert listed(http,d,foreign,foreign_loc).json()["items"]==[]
 
 
