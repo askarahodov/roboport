@@ -131,7 +131,7 @@ export function AutoWorkExecution(){
     {ready&&snapshot&&<>
       <h2>Этап: {snapshot.status}</h2>
       <p>Согласованная версия: {snapshot.approvedVersion??'нет'}, сумма:
-         {' '}{snapshot.approvedTotalMinor??'нет'} коп.; QC: {snapshot.qcStatus}</p>
+         {' '}{snapshot.approvedTotalMinor??(snapshot.approvedVersion!==null?'скрыта настройкой доступа':'нет')} {snapshot.approvedTotalMinor===null?'':'коп.'}; QC: {snapshot.qcStatus}</p>
       {snapshot.status==='NOT_APPROVED'&&<p>Без подтверждённой клиентом сметы работы запускать нельзя.</p>}
       {snapshot.status==='APPROVED'&&<button type="button" disabled={!active}
         onClick={()=>send('start',{})}>Начать работы (MANAGER)</button>}
