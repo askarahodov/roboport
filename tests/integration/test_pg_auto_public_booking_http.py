@@ -319,3 +319,61 @@ def test_manager_withdraws_published_offer_and_prevents_stale_fulfillment(monkey
                 db.execute("""INSERT INTO auto_public_booking_offer_revoke
                     (offer_id,actor_id,request_key)
                     VALUES(%s,%s,gen_random_uuid())""",(UUID(offer),d["client_b"]))
+
+
+def test_quota_saturated_request_exact_replay_and_paged_queue(monkeypatch):
+    """A lost 25th POST is replayable; queue stays functional past burst saturation."""
+    d,org,loc,bay,http,part,consumable,service,staff,offer=setup(monkeypatch)
+    slot=published_slot(http,org,loc,offer)
+    last_payload=None
+    last_id=None
+    for _ in range(25):
+        created,payload=submit(http,offer,slot)
+        assert created.status_code==201,created.text
+        last_payload=payload
+        last_id=created.json()["requestId"]
+    # The org is now exactly at 25 submissions / 10 min: new requests
+    # are throttled, but an identical lost response must be recovered.
+    repeated=http.post(PUB+"/requests",headers=ANON,json=last_payload)
+    assert repeated.status_code==200,repeated.text
+    assert repeated.json()["requestId"]==last_id
+    assert repeated.json()["replayed"] is True
+    new_challenge,new_answer=challenge(http,offer)
+    different={**last_payload,"requestKey":str(uuid4()),
+               "challengeId":new_challenge,"answer":new_answer}
+    rejected=http.post(PUB+"/requests",headers=ANON,json=different)
+    assert rejected.status_code==429,rejected.text
+    # Retrying a known key with a changed payload is still KEY_REUSED, not 429.
+    assert http.post(PUB+"/requests",headers=ANON,json={
+        **last_payload,"marketingConsent":not last_payload["marketingConsent"]
+    }).status_code==409
+    _auth(http,d,d["intake"])
+    queue=http.get(staff+"/queue?page=0")
+    assert queue.status_code==200,queue.text
+    assert queue.json()["page"]==0
+    assert queue.json()["hasMore"] is False
+    assert len(queue.json()["items"])==25
+    assert http.get(staff+"/queue?page=1").json()["items"]==[]
+    assert http.get(staff+"/queue?page=-1").status_code==422
+    assert http.get(staff+"/queue?page=101").status_code==422
+    assert http.get(staff+"/queue?page=no").status_code==422
+
+
+def test_unusual_branch_timezone_slot_candidates_are_accepted(monkeypatch):
+    """A local half-hour can be a UTC :15/:45 in Asia/Kathmandu."""
+    d,org,loc,bay,http,part,consumable,service,staff,offer=setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_service_location SET timezone_name='Asia/Kathmandu'
+                      WHERE id=%s AND organization_id=%s""",(loc,org))
+    day=(datetime.now(timezone.utc)+timedelta(days=22)).date().isoformat()
+    slots=http.get(PUB+"/slots",params={"offerId":offer,"localDay":day})
+    assert slots.status_code==200,slots.text
+    assert slots.json()["timeZone"]=="Asia/Kathmandu"
+    values=slots.json()["items"]
+    assert values
+    assert all(datetime.fromisoformat(x["startsAt"]).astimezone(timezone.utc).minute
+               in (15,45) for x in values)
+    created,payload=submit(http,offer,values[0])
+    assert created.status_code==201,created.text
+    # Without local-zone matching the generated candidate would return 422.
+    assert created.json()["noSlotHold"] is True
