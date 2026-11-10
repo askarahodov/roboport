@@ -44,6 +44,7 @@ jobs:
       ROBOport_OIDC_ENABLED: '1'
       ROBOport_SYNTHETIC_AUTH_API: '1'
       ROBOport_SYNTHETIC_ACCESS_API: '1'
+      ROBOport_SYNTHETIC_AUTO_API: '1'
       ROBOport_OIDC_ISSUER: https://localhost:9443/realms/roboport-demo
       ROBOport_OIDC_AUTHORIZE: https://localhost:9443/realms/roboport-demo/protocol/openid-connect/auth
       ROBOport_OIDC_TOKEN: https://localhost:9443/realms/roboport-demo/protocol/openid-connect/token
@@ -125,10 +126,12 @@ jobs:
           WEB_PID=$!
           trap 'kill "$API_PID" "$WEB_PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 40); do
-            if curl --silent --fail --cacert tls.crt https://127.0.0.1:8444/api/v1/catalog/brands >/dev/null; then break; fi
+            if curl --silent --fail --cacert tls.crt https://127.0.0.1:8444/api/v1/meta >/dev/null; then break; fi
             sleep 1
           done
-          curl --fail --cacert tls.crt https://127.0.0.1:8444/api/v1/catalog/brands >/dev/null
+          curl --fail --cacert tls.crt https://127.0.0.1:8444/api/v1/meta >/dev/null
+          # Retired robot catalog must return 404, not become the app readiness check.
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --cacert tls.crt https://127.0.0.1:8444/api/v1/catalog/brands)" = 404
           node apps/web/e2e/keycloak-live.mjs
       - name: Debug only on failure
         if: failure()

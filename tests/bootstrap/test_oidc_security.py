@@ -74,3 +74,22 @@ def test_multiple_audiences_require_authorized_party():
     claims["azp"]="synthetic-client"
     assert validate_id_token(signed(private,claims),issuer=claims["iss"],
                              audience="synthetic-client",nonce="n",jwks=jwks,now=1500)["sub"]=="client-a"
+
+
+def test_live_keycloak_ci_tracks_automotive_bola_after_robot_cutover():
+    """The live IdP test must not silently drift back to retired robot URLs."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    workflow = (root / ".github/workflows/oidc-keycloak.yml").read_text(encoding="utf-8")
+    browser = (root / "apps/web/e2e/keycloak-live.mjs").read_text(encoding="utf-8")
+    seed = (root / "tests/integration/seed_oidc_keycloak.py").read_text(encoding="utf-8")
+    assert "ROBOport_SYNTHETIC_AUTO_API: '1'" in workflow
+    assert "https://127.0.0.1:8444/api/v1/meta" in workflow
+    assert "if curl --silent --fail --cacert tls.crt https://127.0.0.1:8444/api/v1/catalog/brands" not in workflow
+    assert "/api/v1/dev/auto/vehicles" in browser
+    assert "/api/v1/dev/account/tickets" not in browser
+    assert "foreign.status()!==404" in browser
+    assert "revoked link still exposes individual vehicle" in browser
+    assert "revoked session still reads automotive data" in browser
+    assert "auto_vehicle_customer_link" in seed
+    assert "service_ticket" not in seed
