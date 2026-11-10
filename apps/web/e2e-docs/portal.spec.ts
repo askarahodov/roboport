@@ -287,3 +287,25 @@ test('единая клиентская справка соответствуе�
   await expect(body.getByRole('link',{name:'FAQ'}).first()).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+test('ролевой Docsify хаб покрывает все рабочие роли и различает тестовый финансовый контур',async({page})=>{
+  test.setTimeout(90000);
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/docs/#/guides/STAFF_TASKS');
+  const body=page.locator('.markdown-section');
+  await expect(body.locator('h1')).toContainText('Карта рабочих операций БоксРитм',{timeout:25000});
+  for(const role of ['Администратор','Мастер-приёмщик','Механик и диагност',
+    'Кладовщик и закупщик','Руководитель','Бухгалтер и кассир']){
+    await expect(body).toContainText(role);
+  }
+  for(const route of ['/staff/auto-calendar','/staff/auto-diagnostics','/staff/auto-estimates',
+    '/staff/auto-execution','/staff/auto-demo-finance-report','/staff/warehouse-work-orders']){
+    await expect(body).toContainText(route);
+  }
+  await expect(body).toContainText('planned');
+  await expect(body).toContainText('401');
+  await expect(body).toContainText('403');
+  await expect(body).toContainText('409');
+  await expect(body).toContainText('SHA');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
