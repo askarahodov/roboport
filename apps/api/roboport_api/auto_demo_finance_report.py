@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from .auto_bay_occupancy import _day, OccupancyInvalid
 from .auto_org_authority import organization_role_allows
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 from .auto_vehicle_claim_http import _request_dsn, _response
 
 
@@ -44,6 +45,12 @@ def daily_demo_finance(conn: psycopg.Connection, token: str, *,
             conn,token,organization_id,"MANAGER",location_id,for_mutation=True
         ):
             raise FinanceReportDenied("FORBIDDEN")
+        try:
+            for cap in ("READ", "PRICE_SALES"):
+                require_document_access(conn,token,organization_id,location_id,
+                                        ("MANAGER",),"FINANCE",cap)
+        except DocumentPolicyDenied:
+            raise FinanceReportDenied("FORBIDDEN") from None
         location=conn.execute(
             """SELECT timezone_name FROM auto_service_location
                WHERE id=%s AND organization_id=%s AND disabled_at IS NULL
