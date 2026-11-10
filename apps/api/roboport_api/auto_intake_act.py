@@ -300,7 +300,7 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
         try:
             actor=_actor_and_order(conn,token,org,loc,order,("INTAKE",))
             require_document_access(conn,token,org,loc,
-                                    ("INTAKE",),"INTAKE_ACT","WRITE",order=order)
+                                    ("INTAKE",),"INTAKE_ACT","CREATE",order=order)
         except (InspectionDenied,DocumentPolicyDenied):
             raise IntakeActDenied("FORBIDDEN") from None
         existing=conn.execute("""
