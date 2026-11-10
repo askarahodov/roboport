@@ -148,7 +148,7 @@ def test_analog_merge_history_and_active_stock_denied(monkeypatch):
                                (UUID(source),uuid4()))
             with pytest.raises(psycopg.errors.RaiseException):
                 with db.transaction():
-                    add_lot(db,org,loc,UUID(source),add_bin(db,org,loc))
+                    add_lot(db,org,loc,UUID(source),add_bin(db,org,loc,"B-04"))
             assert db.execute("SELECT sku_id FROM auto_stock_lot WHERE id=%s",
                 (source_lot,)).fetchone()==(UUID(source),)
             assert db.execute("SELECT sku_id FROM auto_catalog_price_event WHERE sku_id=%s",
