@@ -117,7 +117,7 @@ class PolicyBody(BaseModel):
     locationId:UUID|None=None
     userId:UUID|None=None
     documentKind:str=Field(pattern="^(INTAKE_ACT|ESTIMATE|HANDOVER|SUPPLIER_ORDER)$")
-    capability:str=Field(pattern="^(READ|WRITE|CLOSE|PRICE_SALES|PRICE_PURCHASE|DISCOUNT)$")
+    capability:str=Field(pattern="^(READ|CREATE|EDIT|WRITE|CLOSE|PRICE_SALES|PRICE_PURCHASE|DISCOUNT)$")
     allowed:StrictBool
     notBefore:datetime|None=None
 
