@@ -21,6 +21,7 @@ from .auto_crm_followups_http import router as auto_crm_followups_router
 from .auto_crm_inbox_http import router as auto_crm_inbox_router
 from .auto_crm_contact_choices_http import router as auto_crm_contact_choices_router
 from .auto_crm_funnel import router as auto_crm_funnel_router
+from .auto_crm_outcomes import router as auto_crm_outcomes_router
 from .auto_stock_abc_xyz import router as auto_stock_abc_xyz_router
 from .auto_opening_hours_http import router as auto_opening_hours_router
 from .auto_stocktake_http import router as auto_stocktake_router
@@ -72,6 +73,7 @@ app.include_router(auto_crm_followups_router)
 app.include_router(auto_crm_inbox_router)
 app.include_router(auto_crm_contact_choices_router)
 app.include_router(auto_crm_funnel_router)
+app.include_router(auto_crm_outcomes_router)
 app.include_router(auto_stock_abc_xyz_router)
 app.include_router(auto_opening_hours_router)
 app.include_router(auto_stocktake_router)
