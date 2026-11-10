@@ -68,9 +68,16 @@ def _staff(conn,token,org,loc,roles,*,cap="READ"):
 def _order(conn,token,org,loc,order,roles,*,cap="READ"):
     _valid_uuids(org,loc,order)
     try:
-        # Lock the ACL organization before locking the WorkOrder identity.
-        _finance_scope(conn,token,org,loc,cap,order=order)
+        # ADMIN policy publisher first locks org UPDATE. Hold a shared org
+        # lock to prevent policy changes during this order's transaction,
+        # then acquire WorkOrder UPDATE before FINANCE cutoff may request
+        # WorkOrder SHARE. Never upgrade two concurrent SHARE holders.
+        tenant=conn.execute("""SELECT id FROM auto_organization
+            WHERE id=%s AND disabled_at IS NULL FOR SHARE""",(org,)).fetchone()
+        if tenant is None:
+            raise TreasuryDenied("FORBIDDEN")
         actor=_actor_and_order(conn,token,org,loc,order,roles)
+        _finance_scope(conn,token,org,loc,cap,order=order)
         return actor
     except InspectionDenied:
         raise TreasuryDenied("FORBIDDEN") from None
