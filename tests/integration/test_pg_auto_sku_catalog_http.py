@@ -286,3 +286,69 @@ def test_estimate_read_history_cutoff_masks_old_sales_price_and_export(monkeypat
         http.cookies.set("rp_session",d["tokens"][d["intake"]])
         assert http.get(url(org)+"/export",
              params={"locationId":str(loc)}).status_code==403
+
+
+def test_xlsx_cannot_override_existing_sku_edit_deny_even_on_replay(monkeypatch):
+    from roboport_api.auto_document_access import publish_policy
+    from test_pg_auto_document_access_http import admin
+    from datetime import datetime,timezone
+    d,org,loc,_,_,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        item=create(http,d,org,loc,"SYNTH-447-EDIT")
+        workbook=export_catalog_xlsx([row("SYNTH-447-EDIT",1450,2450)])
+        uri=url(org)+"/imports/preview?locationId="+str(loc)
+        key=uuid4()
+        prepared=post(http,d,d["intake"],uri,workbook,key,xlsx=True)
+        assert prepared.status_code==201,prepared.text
+        proof=prepared.json()
+        assert proof["items"][0]["skuId"]==item
+        # A successful import receipt is not an authorization to replay
+        # or further modify after an explicit WAREHOUSE EDIT denial.
+        body={"locationId":str(loc),"previewId":proof["previewId"],
+              "sha256":proof["sha256"]}
+        committed_key=uuid4()
+        completed=post(http,d,d["intake"],url(org)+"/imports/commit",
+                       body,committed_key)
+        assert completed.status_code==201,completed.text
+        with psycopg.connect(DSN) as db:
+            admin(db,org,d["manager"])
+            publish_policy(db,d["tokens"][d["manager"]],org,
+                request_key=uuid4(),role="WAREHOUSE",loc=loc,
+                user=d["intake"],document="SUPPLIER_ORDER",cap="EDIT",
+                allowed=False,not_before=None)
+        assert post(http,d,d["intake"],url(org)+"/prices",{
+            "locationId":str(loc),"entries":[{
+                "skuId":item,"expectedVersion":2,
+                "purchaseMinor":1550,"saleMinor":2550}]}).status_code==403
+        assert post(http,d,d["intake"],uri,workbook,
+                    uuid4(),xlsx=True).status_code==403
+        assert post(http,d,d["intake"],uri,workbook,
+                    key,xlsx=True).status_code==403
+        assert post(http,d,d["intake"],url(org)+"/imports/commit",
+                    body,committed_key).status_code==403
+        with psycopg.connect(DSN) as db:
+            assert db.execute("""SELECT count(*) FROM auto_catalog_price_event
+                WHERE sku_id=%s""",(UUID(item),)).fetchone()==(2,)
+
+
+def test_export_after_merge_never_refers_to_retired_analog(monkeypatch):
+    d,org,loc,_,_,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        source=create(http,d,org,loc,"SYNTH-447-RETIRED")
+        target=create(http,d,org,loc,"SYNTH-447-ACTIVE")
+        link={"locationId":str(loc),"leftSkuId":source,"rightSkuId":target,
+              "evidenceNote":"Unverified offline pair"}
+        assert post(http,d,d["intake"],url(org)+"/analogs",link).status_code==201
+        assert post(http,d,d["intake"],url(org)+"/merges",{
+            "locationId":str(loc),"sourceSkuId":source,
+            "targetSkuId":target}).status_code==201
+        http.cookies.set("rp_session",d["tokens"][d["intake"]])
+        exported=http.get(url(org)+"/export",params={"locationId":str(loc)})
+        assert exported.status_code==200,exported.text[:120]
+        values=parse_catalog_xlsx(exported.content)
+        assert len(values)==1 and values[0]["article"]=="SYNTH-447-ACTIVE"
+        assert values[0]["analogArticle"] is None
+        preview=post(http,d,d["intake"],url(org)+
+            "/imports/preview?locationId="+str(loc),
+            exported.content,xlsx=True)
+        assert preview.status_code==201,preview.text
