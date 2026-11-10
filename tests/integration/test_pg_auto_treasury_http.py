@@ -194,15 +194,22 @@ def test_full_cashier_lifecycle_precise_amounts_report_replay_and_immutable(monk
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
                 db.execute("DELETE FROM auto_treasury_day_close WHERE account_id=%s",(account,))
+    # A second empty account permits a direct-SQL forged close test without
+    # interfering with the already sealed day above.
+    manager=session(http,d,d["intake"])
+    second=create(http,base,manager,"CASH-02")
+    assert second.status_code==201,second.text
+    account2=UUID(second.json()["accountId"])
+    with psycopg.connect(DSN) as db:
         with pytest.raises(psycopg.errors.RaiseException,match="treasury close totals mismatch"):
             with db.transaction():
                 db.execute("""
                   INSERT INTO auto_treasury_day_close(
                    id,account_id,business_day,actor_id,request_key,
                    opening_minor,incoming_minor,outgoing_minor,closing_minor)
-                  VALUES(gen_random_uuid(),%s,(now()-interval '1 day')::date,%s,
-                  gen_random_uuid(),0,0,0,99)
-                """,(account,d["manager"]))
+                  VALUES(gen_random_uuid(),%s,%s::date,%s,
+                  gen_random_uuid(),99,0,0,99)
+                """,(account2,day,d["manager"]))
     assert http.get(report_path,params={
        "fromDay":"2030-01-02","toDay":"2030-01-01"}).status_code==422
     assert http.get(report_path,params={
