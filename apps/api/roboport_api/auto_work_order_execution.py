@@ -7,6 +7,8 @@ from .auto_work_order_additional import _state as _extra_state
 from .auto_stock_lot_work_order_issue import issue_work_order_from_lot
 from .auto_stock_mechanic_handoff import acknowledge_mechanic_handoff
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
+from .auto_org_authority import organization_role_allows
+from .auto_document_access import has_document_access
 
 
 class ExecutionDenied(ValueError):
@@ -85,10 +87,28 @@ def _state(conn,order):
             "releaseAllowed":False,"syntheticOnly":True}
 
 
+def _present_state(conn,token,org,loc,order):
+    """Only a live MANAGER with unrestricted ESTIMATE sales-price ACL sees
+    billable totals. MECHANIC/WAREHOUSE still see work quantities and QC.
+    This applies to every response, including idempotent mutation replays.
+    """
+    result=_state(conn,order)
+    price_visible=organization_role_allows(conn,token,org,"MANAGER",loc,
+                                           for_mutation=True)
+    if price_visible:
+        price_visible=all(has_document_access(
+            conn,token,org,loc,("MANAGER","MECHANIC","WAREHOUSE"),
+            "ESTIMATE",cap,order=order) for cap in ("READ","PRICE_SALES"))
+    if not price_visible:
+        result["approvedTotalMinor"]=None
+        result["approvedExtraTotalMinor"]=None
+    return result
+
+
 def read_execution(conn,token,org,loc,order):
     with conn.transaction():
         _scope(conn,token,org,loc,order,("MANAGER","MECHANIC","WAREHOUSE"))
-        return _state(conn,order)
+        return _present_state(conn,token,org,loc,order)
 
 
 def start_execution(conn,token,org,loc,order,request_key):
@@ -104,7 +124,7 @@ def start_execution(conn,token,org,loc,order,request_key):
         if prior:
             if (prior[1],prior[2])!=(request_key,actor):
                 raise ExecutionConflict("ALREADY_STARTED")
-            return {"ok":True,"replayed":True,**_state(conn,order)}
+            return {"ok":True,"replayed":True,**_present_state(conn,token,org,loc,order)}
         if state["approvedVersion"] is None:
             raise ExecutionConflict("APPROVAL_REQUIRED")
         if _snapshot(conn,order)["inspection"] is None:
@@ -124,7 +144,7 @@ def start_execution(conn,token,org,loc,order,request_key):
           (id,work_order_id,revision_id,organization_id,location_id,actor_id,request_key)
           VALUES(%s,%s,%s,%s,%s,%s,%s)
         """,(uuid4(),order,revision[0],org,loc,actor,request_key))
-        return {"ok":True,"replayed":False,**_state(conn,order)}
+        return {"ok":True,"replayed":False,**_present_state(conn,token,org,loc,order)}
 
 
 def labor_execution(conn,token,org,loc,order,service_id,minutes,request_key):
@@ -147,7 +167,7 @@ def labor_execution(conn,token,org,loc,order,service_id,minutes,request_key):
             if (execution_row is None or
                     prior!=(execution_row[0],service_id,minutes,actor,request_key)):
                 raise ExecutionConflict("LABOR_IMMUTABLE")
-            return {"ok":True,"replayed":True,**_state(conn,order)}
+            return {"ok":True,"replayed":True,**_present_state(conn,token,org,loc,order)}
         state=_state(conn,order)
         if state["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
@@ -166,7 +186,7 @@ def labor_execution(conn,token,org,loc,order,service_id,minutes,request_key):
           (id,execution_id,service_id,actor_id,actual_minutes,request_key)
           VALUES(%s,%s,%s,%s,%s,%s)
         """,(uuid4(),execution,service_id,actor,minutes,request_key))
-        return {"ok":True,"replayed":False,**_state(conn,order)}
+        return {"ok":True,"replayed":False,**_present_state(conn,token,org,loc,order)}
 
 
 def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
@@ -182,7 +202,7 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
             if (prior[1],prior[2],prior[3])!=(order,lot_id,quantity):
                 raise ExecutionConflict("STOCK_CONFLICT")
             return {"ok":True,"replayed":True,"issueId":str(prior[0]),
-                    **_state(conn,order)}
+                    **_present_state(conn,token,org,loc,order)}
         if _state(conn,order)["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
         try:
@@ -193,7 +213,7 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
         except AutoStockConflict:
             raise ExecutionConflict("STOCK_CONFLICT") from None
         return {"ok":True,"replayed":False,"issueId":str(issue),
-                **_state(conn,order)}
+                **_present_state(conn,token,org,loc,order)}
 
 
 def _require_assigned_mechanic(conn,order,actor):
@@ -228,7 +248,7 @@ def receive_material(conn,token,org,loc,order,issue_id,request_key):
             if (prior[1],prior[2])!=(issue_id,actor):
                 raise ExecutionConflict("HANDOFF_CONFLICT")
             return {"ok":True,"replayed":True,"handoffId":str(prior[0]),
-                    **_state(conn,order)}
+                    **_present_state(conn,token,org,loc,order)}
         if _state(conn,order)["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
         _require_assigned_mechanic(conn,order,actor)
@@ -239,7 +259,7 @@ def receive_material(conn,token,org,loc,order,issue_id,request_key):
         except AutoStockConflict:
             raise ExecutionConflict("HANDOFF_CONFLICT") from None
         return {"ok":True,"replayed":False,"handoffId":str(receipt),
-                **_state(conn,order)}
+                **_present_state(conn,token,org,loc,order)}
 
 
 def finish_execution(conn,token,org,loc,order,request_key):
@@ -260,7 +280,7 @@ def finish_execution(conn,token,org,loc,order,request_key):
         if previous:
             if previous!=(actor,request_key):
                 raise ExecutionConflict("ALREADY_FINISHED")
-            return {"ok":True,"replayed":True,**state}
+            return {"ok":True,"replayed":True,**_present_state(conn,token,org,loc,order)}
         if state["status"]!="IN_PROGRESS":
             raise ExecutionConflict("NOT_IN_PROGRESS")
         _require_assigned_mechanic(conn,order,actor)
@@ -299,4 +319,4 @@ def finish_execution(conn,token,org,loc,order,request_key):
                 """,(uuid4(),execution[0],actor,request_key))
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
             raise ExecutionConflict("EXECUTION_INTEGRITY_CONFLICT") from None
-        return {"ok":True,"replayed":False,**_state(conn,order)}
+        return {"ok":True,"replayed":False,**_present_state(conn,token,org,loc,order)}
