@@ -112,3 +112,17 @@ screenshots для независимого просмотра**, не утве�
 проблемы и утверждённые изображения; только после sign-off допустимо
 зафиксировать golden PNG и threshold для автоматического pixel-diff.
 Автоматическое обновление baseline при падении теста запрещено.
+
+
+## Снимки гранулярных ограничений (current-dev #446)
+
+Тест `apps/web/e2e/auto-document-access.spec.ts` воспроизводит
+в тестовом браузере 390 px и 1280 px: `/staff/auto-admin`,
+публикацию DENY и ALLOW правил, аудит, effective preview,
+отзыв доступа и тёмную тему. PNG `admin-deny-390-dark.png`
+и `admin-allowed-1280-dark.png` попадают в CI
+`roboport-browser-evidence`. Все имена сотрудников и ID
+в тесте синтетические. Открыть UI по прямому адресу недостаточно:
+ACL проверяется сервером. Без отдельного owner sign-off изображения
+**не** считаются утверждёнными baseline #92 и не доказывают
+независимый WCAG AA/manual PASS.
