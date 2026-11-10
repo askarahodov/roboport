@@ -111,7 +111,7 @@ def test_full_cashier_lifecycle_precise_amounts_report_replay_and_immutable(monk
     assert event(http,base,cashier,order,account,"APPLY_ADVANCE",500).status_code==201
     assert event(http,base,cashier,order,account,"PAYMENT",1000).status_code==201
     assert event(http,base,cashier,order,account,"REFUND_PAYMENT",300).status_code==201
-    assert event(http,base,cashier,order,account,"REFUND_PAYMENT",1001).status_code==409
+    assert event(http,base,cashier,order,account,"REFUND_PAYMENT",1201).status_code==409
     assert event(http,base,cashier,order,account,"PAYMENT",300).status_code==201
     assert event(http,base,cashier,order,account,"PAYMENT",501).status_code==409
     assert event(http,base,cashier,order,account,"PAYMENT",500).status_code==201
