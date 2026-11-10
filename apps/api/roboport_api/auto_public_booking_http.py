@@ -302,14 +302,14 @@ async def staff_publish(org_id:str,loc_id:str,request:Request):
 
 
 @router.get(STAFF+"/queue")
-def staff_requests(org_id:str,loc_id:str,request:Request):
+def staff_requests(org_id:str,loc_id:str,request:Request,page:int=0):
     scoped=_scope(request,org_id,loc_id)
     if isinstance(scoped,JSONResponse):
         return scoped
     dsn,org,loc=scoped
     with psycopg.connect(dsn) as db:
         try:
-            result=staff_queue(db,request.cookies.get("rp_session",""),org,loc)
+            result=staff_queue(db,request.cookies.get("rp_session",""),org,loc,page=page)
         except (PublicBookingDenied,PublicBookingInvalid,PublicBookingConflict) as exc:
             return _error(request,exc)
     return _json(result)
