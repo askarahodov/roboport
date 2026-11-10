@@ -496,7 +496,7 @@ def catalog_commit(conn,token,org,loc,key,preview_id,digest):
 
 def catalog_xlsx_export(conn,token,org,loc):
     with conn.transaction():
-        cutoff,purchase,sale=_read_scope(conn,token,org,loc)
+        cutoff,purchase,sale,sale_cutoff=_read_scope(conn,token,org,loc)
         # No partial export that silently leaks denied historical/price data.
         if cutoff is not None or sale_cutoff is not None or not purchase or not sale:
             raise CatalogDenied("EXPORT_NEEDS_FULL_PRICE_RIGHTS")
