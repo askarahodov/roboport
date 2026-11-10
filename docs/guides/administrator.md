@@ -119,3 +119,7 @@ CLIENT с оригинальной verified-связью подтвержден�
 Не указывайте реальные ПДн и не поднимайте публичный ingress
 до независимого privacy/security/legal/ops согласования #119.
 [Процесс](../auto/PUBLIC_BOOKING.md).
+
+## Публичный dev-виджет #442 — граница безопасности
+
+Анонимная заявка без ПДн, подтверждение только CLIENT с исходной verified-связью, публикация MANAGER(+WAREHOUSE), исполнение INTAKE(+WAREHOUSE). HTTPS loopback, Origin, лимиты и арифметический вопрос НЕ являются полноценной production CAPTCHA. Внешний ingress и реальные маркетинговые сообщения запрещены до независимых privacy/security/legal/ops approvals #119. [Runbook](../auto/PUBLIC_BOOKING.md).
