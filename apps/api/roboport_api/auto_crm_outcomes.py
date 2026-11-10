@@ -64,6 +64,10 @@ def crm_outcomes(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
                 conn, token, org, loc, ("MANAGER",), "HANDOVER", "READ")
             require_document_access(
                 conn, token, org, loc, ("MANAGER",), "HANDOVER", "PRICE_SALES")
+            finance_cutoff = require_document_access(
+                conn, token, org, loc, ("MANAGER","CASHIER"), "FINANCE", "READ")
+            require_document_access(
+                conn, token, org, loc, ("MANAGER","CASHIER"), "FINANCE", "PRICE_SALES")
         except DocumentPolicyDenied:
             raise OutcomeDenied("FORBIDDEN") from None
 
@@ -83,7 +87,10 @@ def crm_outcomes(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
         day_after = last + timedelta(days=1)
         end = datetime(day_after.year, day_after.month, day_after.day,
                        tzinfo=zone).astimezone(timezone.utc)
-        cutoffs = [x for x in (estimate_cutoff, handover_cutoff)
+        # Financial policy applies to the SIM columns too. An active
+        # historical cutoff excludes those orders from attribution rather
+        # than exposing their prior balances via the CRM aggregate.
+        cutoffs = [x for x in (estimate_cutoff, handover_cutoff, finance_cutoff)
                    if x is not None]
         min_order_created = max(cutoffs) if cutoffs else None
 
