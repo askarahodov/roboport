@@ -110,3 +110,39 @@ test('вход в кабинет виден при ширине 390 и 1440',asy
     await expect(page.getByRole('navigation',{name:'Разделы сервиса'}).getByRole('link',{name:'Войти'})).toBeVisible();
   }
 });
+
+test('справка БоксРитм доступна из каждой вкладки и при отказе без утечки сессии', async ({ page }) => {
+  test.setTimeout(90000);
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/vehicles');
+  await expect(page.getByRole('alert')).toContainText('403');
+  const deniedHelp=page.getByRole('navigation',{name:'Помощь клиенту'});
+  await expect(deniedHelp.getByRole('link',{name:'Как пользоваться кабинетом'}))
+    .toHaveAttribute('href','/docs/#/guides/client');
+  await expect(deniedHelp.getByRole('link',{name:'Частые вопросы и ошибки'}))
+    .toHaveAttribute('href','/docs/#/guides/FAQ');
+  await authorize(page);
+  for (const path of ['/account','/account/vehicles','/account/auto-booking','/account/auto-orders','/account/settings']) {
+    await page.goto(path);
+    const help=page.getByRole('navigation',{name:'Помощь клиенту'});
+    await expect(help).toBeVisible();
+    await expect(help.getByRole('link',{name:'Как пользоваться кабинетом'}))
+      .toHaveAttribute('href','/docs/#/guides/client');
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  }
+  await page.goto('/account/login');
+  const loginHelp=page.getByRole('navigation',{name:'Помощь клиенту'});
+  await expect(loginHelp.getByRole('link',{name:'Инструкция по входу и восстановлению доступа'}))
+    .toHaveAttribute('href','/docs/#/guides/client');
+  await loginHelp.getByRole('link',{name:'Инструкция по входу и восстановлению доступа'}).click();
+  await expect(page).toHaveURL(/guides.client/);
+  await expect(page.locator('.markdown-section h1')).toContainText('Клиент автосервиса',{timeout:25000});
+  await expect(page.locator('.markdown-section')).toContainText('Быстрый путь по кабинету');
+  const validDocs=await page.request.get('/docs/theme.css');
+  expect(validDocs.ok()).toBeTruthy();
+  expect(validDocs.headers()['x-content-type-options']).toBe('nosniff');
+  const invalidDocs=await page.request.get('/docs/NOT_REAL.md');
+  expect(invalidDocs.status()).toBe(404);
+  const stored=await page.evaluate(()=>Object.keys(localStorage));
+  expect(stored.join('|')).not.toContain('synthetic-secret');
+});

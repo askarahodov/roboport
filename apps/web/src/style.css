@@ -133,3 +133,9 @@ body{font-family:Manrope,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFon
 .app .hero h1 span{color:var(--rp-accent)}
 .app .hero-mark{letter-spacing:-.09em;transform:none;font-size:clamp(10rem,18vw,18rem)}
 @media(max-width:720px){.app .hero-mark{font-size:10rem}}
+
+/* Client help stays reachable even if the private session is denied or unavailable. */
+.account-help-links{display:flex;flex-wrap:wrap;align-items:center;gap:.7rem;margin:.7rem 0 1.3rem}
+.account-help-links a{display:inline-flex;align-items:center;min-height:44px;padding:.65rem .9rem;border:1px solid var(--rp-border);border-radius:.7rem;color:var(--rp-foreground);background:var(--rp-surface);text-decoration:underline;text-underline-offset:3px;font-weight:650}
+.account-help-links a:hover{border-color:var(--rp-action)}
+@media(max-width:500px){.account-help-links{display:grid;grid-template-columns:minmax(0,1fr)}.account-help-links a{overflow-wrap:anywhere}}

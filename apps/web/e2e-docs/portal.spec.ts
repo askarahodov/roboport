@@ -267,3 +267,23 @@ test('ролевой навигатор открывается с клавиат
     await expect(page.locator('.markdown-section h1')).toContainText('Матрица ролей');
   }
 });
+
+test('единая клиентская справка соответствует текущим пяти экранам БоксРитм', async ({ page }) => {
+  test.setTimeout(90000);
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/docs/#/guides/client');
+  const body=page.locator('.markdown-section');
+  await expect(body.locator('h1')).toContainText('Клиент автосервиса');
+  for (const route of ['/account/login','/account/vehicles','/account/auto-booking','/account/auto-orders','/account/settings']) {
+    await expect(body).toContainText(route);
+  }
+  for (const action of ['Предъявить код','Показать свободные окна','Перенести свою запись',
+    'Отменить свою запись','Подробнее о заказе','Согласовать последнюю версию',
+    'Сохранить настройки','Повторить проверку']) {
+    await expect(body).toContainText(action);
+  }
+  await expect(body).toContainText('planned');
+  await expect(body).toContainText('БоксРитм');
+  await expect(body.getByRole('link',{name:'FAQ'}).first()).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
