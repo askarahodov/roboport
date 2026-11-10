@@ -29,7 +29,7 @@ export default defineConfig({
     name: 'local-dev-docsify-help',
     configureServer(server) {
       server.middlewares.use('/docs', (req, res) => {
-        const requestPath = (req.url || '/').split('?', 1)[0];
+        const requestPath = ((req as unknown as { url?: string }).url || '/').split('?', 1)[0];
         let relative: string;
         try { relative = decodeURIComponent(requestPath); }
         catch { res.statusCode = 400; res.end('Invalid docs URL'); return; }
