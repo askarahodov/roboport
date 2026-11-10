@@ -6,6 +6,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 def record_receipt_valuation(conn: psycopg.Connection,token: str,
@@ -38,6 +39,11 @@ def record_receipt_valuation(conn: psycopg.Connection,token: str,
           (document_id,organization_id,location_id)).fetchone()
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
+        try:
+            require_document_access(conn,token,organization_id,location_id,
+                                    ("MANAGER",),"SUPPLIER_ORDER","PRICE_PURCHASE")
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:
             raise AutoStockDenied("FORBIDDEN")

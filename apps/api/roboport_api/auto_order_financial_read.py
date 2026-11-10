@@ -6,6 +6,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .auto_order_customer_read import get_order_customer_summary
 from .auto_stock_service import AutoStockDenied
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 
 
 def get_work_order_balance(conn: psycopg.Connection, token: str,
@@ -20,6 +21,13 @@ def get_work_order_balance(conn: psycopg.Connection, token: str,
         if not organization_role_allows(conn, token, organization_id, "MANAGER",
                                         location_id, for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
+        # Policy organization lock precedes object/branch proof locks.
+        try:
+            for cap in ("READ", "PRICE_SALES"):
+                require_document_access(conn, token, organization_id, location_id,
+                                        ("MANAGER","CASHIER"), "FINANCE", cap, order=order_id)
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         # Live customer/vehicle proof is mandatory, even for a manager.
         get_order_customer_summary(conn, token, organization_id, location_id, order_id)
         row = conn.execute(

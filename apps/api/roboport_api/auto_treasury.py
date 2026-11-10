@@ -10,6 +10,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .auto_workshop_qc import _actor_and_order,InspectionDenied
 from .session_lookup import session_subject
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 class TreasuryDenied(ValueError):
@@ -34,7 +35,24 @@ def _valid_uuids(*values):
         raise TreasuryInvalid("INVALID_INPUT")
 
 
-def _staff(conn,token,org,loc,roles):
+def _finance_scope(conn,token,org,loc,cap,*,order=None):
+    # A dual MANAGER/CASHIER cannot evade a restrictive policy by switching
+    # the operational role. Both active scopes are checked on every read/write.
+    try:
+        for action in dict.fromkeys(("READ","PRICE_SALES",cap)):
+            cutoff=require_document_access(
+                conn,token,org,loc,("MANAGER","CASHIER"),
+                "FINANCE",action,order=order)
+            # Account reports/closings expose aggregate balances from all
+            # prior days. With no exact WorkOrder to check against a cutoff,
+            # fail closed instead of leaking historical entries.
+            if order is None and cutoff is not None:
+                raise TreasuryDenied("HISTORY_DENIED")
+    except DocumentPolicyDenied:
+        raise TreasuryDenied("FORBIDDEN") from None
+
+
+def _staff(conn,token,org,loc,roles,*,cap="READ"):
     _valid_uuids(org,loc)
     if type(token) is not str or not token:
         raise TreasuryDenied("FORBIDDEN")
@@ -42,14 +60,25 @@ def _staff(conn,token,org,loc,roles):
         if organization_role_allows(conn,token,org,role,loc,for_mutation=True):
             actor=session_subject(conn,token,for_mutation=True)
             if actor is not None:
+                _finance_scope(conn,token,org,loc,cap)
                 return actor
     raise TreasuryDenied("FORBIDDEN")
 
 
-def _order(conn,token,org,loc,order,roles):
+def _order(conn,token,org,loc,order,roles,*,cap="READ"):
     _valid_uuids(org,loc,order)
     try:
-        return _actor_and_order(conn,token,org,loc,order,roles)
+        # ADMIN policy publisher first locks org UPDATE. Hold a shared org
+        # lock to prevent policy changes during this order's transaction,
+        # then acquire WorkOrder UPDATE before FINANCE cutoff may request
+        # WorkOrder SHARE. Never upgrade two concurrent SHARE holders.
+        tenant=conn.execute("""SELECT id FROM auto_organization
+            WHERE id=%s AND disabled_at IS NULL FOR SHARE""",(org,)).fetchone()
+        if tenant is None:
+            raise TreasuryDenied("FORBIDDEN")
+        actor=_actor_and_order(conn,token,org,loc,order,roles)
+        _finance_scope(conn,token,org,loc,cap,order=order)
+        return actor
     except InspectionDenied:
         raise TreasuryDenied("FORBIDDEN") from None
 
@@ -100,7 +129,7 @@ def create_account(conn,token,org,loc,*,request_key,code,label,kind):
         or kind not in ("CASH_SIM","BANK_SIM")):
         raise TreasuryInvalid("INVALID_INPUT")
     with conn.transaction():
-        actor=_staff(conn,token,org,loc,("MANAGER",))
+        actor=_staff(conn,token,org,loc,("MANAGER",),cap="CREATE")
         row=conn.execute("""SELECT id,organization_id,location_id,code,label,kind,actor_id
            FROM auto_treasury_account WHERE request_key=%s""",(request_key,)).fetchone()
         if row is not None:
@@ -193,7 +222,7 @@ def record_event(conn,token,org,loc,order,*,account_id,request_key,
         or not 3<=len(reason.strip())<=160):
         raise TreasuryInvalid("INVALID_INPUT")
     with conn.transaction():
-        actor=_order(conn,token,org,loc,order,("CASHIER",))
+        actor=_order(conn,token,org,loc,order,("CASHIER",),cap="EDIT")
         _account(conn,org,loc,account_id,lock=True)
         existing=conn.execute("""
           SELECT id,account_id,work_order_id,actor_id,kind,amount_minor,reason
@@ -257,7 +286,7 @@ def close_day(conn,token,org,loc,account,*,request_key,day):
     _valid_uuids(org,loc,account,request_key)
     date_value=_day(day)
     with conn.transaction():
-        actor=_staff(conn,token,org,loc,("CASHIER",))
+        actor=_staff(conn,token,org,loc,("CASHIER",),cap="CLOSE")
         _account(conn,org,loc,account,lock=True)
         prior=conn.execute("""
           SELECT id,account_id,actor_id,business_day FROM auto_treasury_day_close

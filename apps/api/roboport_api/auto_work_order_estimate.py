@@ -194,6 +194,8 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
         actor=_staff_and_scope(conn,token,org,loc,order)
         try:
             require_document_access(conn,token,org,loc,("MANAGER",),
+                                    "ESTIMATE","READ",order=order)
+            require_document_access(conn,token,org,loc,("MANAGER",),
                                     "ESTIMATE","CREATE",order=order)
             require_document_access(conn,token,org,loc,("MANAGER",),
                                     "ESTIMATE","PRICE_SALES",order=order)
@@ -366,6 +368,10 @@ def resolve_estimate_clarification(conn,token,org,loc,order,*,
     with conn.transaction():
         actor=_staff_and_scope(conn,token,org,loc,order)
         try:
+            require_document_access(conn,token,org,loc,("MANAGER",),
+                                    "ESTIMATE","READ",order=order)
+            require_document_access(conn,token,org,loc,("MANAGER",),
+                                    "ESTIMATE","PRICE_SALES",order=order)
             require_document_access(conn,token,org,loc,("MANAGER",),
                                     "ESTIMATE","EDIT",order=order)
         except DocumentPolicyDenied:

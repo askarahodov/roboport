@@ -12,8 +12,8 @@ from .auto_org_staff import _admin,OrgStaffDenied
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
 
-ROLES=("MANAGER","INTAKE","MECHANIC","WAREHOUSE")
-DOCUMENTS=("INTAKE_ACT","ESTIMATE","HANDOVER","SUPPLIER_ORDER")
+ROLES=("MANAGER","INTAKE","MECHANIC","WAREHOUSE","CASHIER")
+DOCUMENTS=("INTAKE_ACT","ESTIMATE","HANDOVER","SUPPLIER_ORDER","FINANCE")
 CAPABILITIES=("READ","CREATE","EDIT","WRITE","CLOSE","PRICE_SALES","PRICE_PURCHASE","DISCOUNT")
 
 
@@ -210,6 +210,11 @@ ROLE_BASE={
     "EDIT":{"WAREHOUSE"},"CLOSE":{"WAREHOUSE"},
     "PRICE_PURCHASE":{"WAREHOUSE","MANAGER"},
   },
+  "FINANCE":{
+    "READ":{"MANAGER","CASHIER"},"CREATE":{"MANAGER"},
+    "EDIT":{"CASHIER","MANAGER"},"CLOSE":{"CASHIER"},
+    "PRICE_SALES":{"MANAGER","CASHIER"},
+  },
 }
 
 
@@ -232,7 +237,7 @@ def preview_employee_document_access(conn,token,org,loc,user,document):
           SELECT g.role_code FROM auto_organization_role_grant g
           JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
           WHERE g.organization_id=%s AND g.user_id=%s
-            AND g.role_code IN ('MANAGER','INTAKE','MECHANIC','WAREHOUSE')
+            AND g.role_code IN ('MANAGER','INTAKE','MECHANIC','WAREHOUSE','CASHIER')
             AND g.revoked_at IS NULL
             AND (g.location_id IS NULL OR g.location_id=%s)
           FOR SHARE OF g,u

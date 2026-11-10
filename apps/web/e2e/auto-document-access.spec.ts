@@ -130,3 +130,68 @@ test('lost request reuses same rule key; 403 clears previous sensitive audit',as
   await expect(page.getByText('Доступ запрещён или dev API отключён.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Сохранить правило'})).toHaveCount(0);
 });
+
+test('FINANCE CASHIER restrictive policy and effective preview never grant by UI',async({page})=>{
+  let blocked=false;
+  const events:any[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const request=route.request(),path=new URL(request.url()).pathname;
+    if(path.endsWith('/staff'))return route.fulfill({
+      status:200,contentType:'application/json',body:'{"items":[]}',
+    });
+    if(blocked)return route.fulfill({status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'});
+    if(path===base&&request.method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:events})});
+    if(path===base+'/effective'){
+      const params=new URL(request.url()).searchParams;
+      expect(params.get('documentKind')).toBe('FINANCE');
+      expect(params.get('userId')).toBe(user);
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({syntheticOnly:true,subjectToObjectACL:true,
+          documentKind:'FINANCE',userId:user,locationId:loc,roles:['CASHIER'],
+          capabilities:Object.fromEntries(capabilities.map(cap=>[
+            cap,{allowed:cap!=='PRICE_SALES',notBefore:null},
+          ]))})});
+    }
+    if(path===base&&request.method()==='POST'){
+      expect(request.headers()['x-csrf-token']).toBe('synthetic-csrf');
+      const body=request.postDataJSON();
+      expect(body).toMatchObject({role:'CASHIER',documentKind:'FINANCE',
+        capability:'PRICE_SALES',allowed:false,userId:user,locationId:loc});
+      events.push({eventId:'55555555-5555-4555-8555-555555555555',
+        role:'CASHIER',userId:user,locationId:loc,documentKind:'FINANCE',
+        capability:'PRICE_SALES',allowed:false,notBefore:null,
+        actorId:user,createdAt:'2030-01-01T10:00:00Z'});
+      return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify({syntheticOnly:true,ok:true,replayed:false,items:events})});
+    }
+    throw Error('Unexpected '+request.method()+' '+path);
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-admin');
+  await page.getByLabel('UUID организации').fill(org);
+  await page.getByRole('button',{name:'Показать ограничения документов'}).click();
+  await page.getByLabel('Роль политики').selectOption('CASHIER');
+  await page.getByLabel('Документ политики').selectOption('FINANCE');
+  await page.getByLabel('Действие политики').selectOption('PRICE_SALES');
+  await page.getByLabel('UUID филиала правила').fill(loc);
+  await page.getByLabel('UUID сотрудника правила').fill(user);
+  await page.getByRole('button',{name:'Сохранить правило'}).click();
+  await expect(page.getByText('DENY',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Проверить эффективные права'}).click();
+  await expect(page.getByRole('listitem').filter({hasText:'PRICE_SALES: Запрещено'})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.setViewportSize({width:1280,height:800});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  blocked=true;
+  await page.getByRole('button',{name:'Показать ограничения документов'}).click();
+  await expect(page.getByRole('alert')).toContainText('403');
+  await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
+});

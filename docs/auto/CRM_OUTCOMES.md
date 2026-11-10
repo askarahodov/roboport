@@ -41,6 +41,8 @@
    нет ID, ФИО, VIN, деталей заказа и формул Excel. При 403 интерфейс
    очищает старые данные.
 
+Дополнительная защита после #446: агрегаты SIM и CSV теперь требуют `FINANCE READ/PRICE_SALES` одновременно с ESTIMATE/HANDOVER ACL. Шаблонный `CASHIER`/`MANAGER` DENY запрещает ответ даже при действующем личном ALLOW; `FINANCE READ` исторический cutoff удаляет старые WorkOrder из атрибуции технического закрытия и денег. `bookedLeads` считается по текущим verified BOOKED лидам за период.
+
 ## API, защита и критерии
 
 - `GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/outcomes?fromDay=YYYY-MM-DD&toDay=YYYY-MM-DD`

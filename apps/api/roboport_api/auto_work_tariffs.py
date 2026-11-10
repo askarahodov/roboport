@@ -3,6 +3,7 @@ from uuid import UUID,uuid4
 import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 class TariffDenied(ValueError):
@@ -22,6 +23,31 @@ def _actor(conn,token,org,loc):
         conn,token,org,"MANAGER",loc,for_mutation=True):
         raise TariffDenied("FORBIDDEN")
     return actor
+
+
+def _tariff_policy(conn,token,org,loc,*,write=False,discount=False):
+    # Tariff pages return ALL past rates, so an ESTIMATE history cutoff must
+    # deny their complete-history endpoint rather than disclose older prices.
+    try:
+        for cap in ("READ","PRICE_SALES",*(
+                ("EDIT",) if write else ()),
+                *(("DISCOUNT",) if discount else ())):
+            cutoff=require_document_access(conn,token,org,loc,("MANAGER",),
+                                           "ESTIMATE",cap)
+            if cutoff is not None:
+                raise TariffDenied("HISTORY_DENIED")
+    except DocumentPolicyDenied:
+        raise TariffDenied("FORBIDDEN") from None
+
+
+def _org_policy_lock(conn,org):
+    # Always lock the organization before branch UPDATE. Policy publisher
+    # takes organization UPDATE first and must wait for this operation; the
+    # branch mutex is exclusive BEFORE role/ACL checks acquire branch SHARE.
+    row=conn.execute("""SELECT id FROM auto_organization
+      WHERE id=%s AND disabled_at IS NULL FOR SHARE""",(org,)).fetchone()
+    if row is None:
+        raise TariffDenied("FORBIDDEN")
 
 
 def _branch_lock(conn,org,loc,lock="FOR UPDATE"):
@@ -60,6 +86,7 @@ def _state(conn,org,loc):
 def read_tariffs(conn,token,org,loc):
     with conn.transaction():
         _actor(conn,token,org,loc)
+        _tariff_policy(conn,token,org,loc)
         return _state(conn,org,loc)
 
 
@@ -75,8 +102,10 @@ def propose_tariff(conn,token,org,loc,*,request_key,expected_version,
         raise TariffDenied("INVALID_INPUT")
     with conn.transaction():
         # Acquire the branch mutex before role SHARE locks and approval writes.
+        _org_policy_lock(conn,org)
         _branch_lock(conn,org,loc)
         actor=_actor(conn,token,org,loc)
+        _tariff_policy(conn,token,org,loc,write=True,discount=max_discount_bps>0)
         prior=conn.execute("""
           SELECT organization_id,location_id,actor_id,qualification_code,version,
             rate_minor_per_hour,max_discount_bps
@@ -111,8 +140,10 @@ def approve_tariff(conn,token,org,loc,policy_id,request_key):
     if any(type(v) is not UUID for v in (org,loc,policy_id,request_key)):
         raise TariffDenied("INVALID_INPUT")
     with conn.transaction():
+        _org_policy_lock(conn,org)
         _branch_lock(conn,org,loc)
         actor=_actor(conn,token,org,loc)
+        _tariff_policy(conn,token,org,loc,write=True,discount=True)
         row=conn.execute("""
           SELECT p.actor_id,p.qualification_code,p.version,
                  a.approved_by,a.request_key

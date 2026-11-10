@@ -3,6 +3,7 @@ from uuid import UUID
 import psycopg
 from .auto_order_financial_read import get_work_order_balance
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 
 
 def post_work_order_financial(conn: psycopg.Connection, token: str,
@@ -18,6 +19,11 @@ def post_work_order_financial(conn: psycopg.Connection, token: str,
         # Same live manager/verified customer proof as the sensitive read API.
         # Keep the permission locks until the posting commits.
         get_work_order_balance(conn, token, organization, location, order)
+        try:
+            require_document_access(conn, token, organization, location,
+                                    ("MANAGER","CASHIER"), "FINANCE", "EDIT", order=order)
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         try:
             with conn.transaction():
                 result = conn.execute(

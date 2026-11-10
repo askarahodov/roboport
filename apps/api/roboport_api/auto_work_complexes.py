@@ -8,8 +8,9 @@ from uuid import UUID,uuid4
 
 import psycopg
 
-from .auto_work_tariffs import _actor,_branch_lock,TariffDenied
+from .auto_work_tariffs import _actor,_branch_lock,_org_policy_lock,TariffDenied
 from .auto_work_order_estimate import _staff_and_scope,AutoEstimateDenied
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 class ComplexDenied(ValueError):
@@ -18,6 +19,20 @@ class ComplexDenied(ValueError):
 
 class ComplexConflict(ValueError):
     pass
+
+
+def _priced_scope(conn,token,org,loc,cap,*,order=None):
+    # Work complexes contain sales prices. They are an ESTIMATE input and
+    # cannot bypass price or write restrictions of the estimate document.
+    try:
+        for action in dict.fromkeys(("READ","PRICE_SALES",cap)):
+            cutoff=require_document_access(conn,token,org,loc,("MANAGER",),
+                                           "ESTIMATE",action,order=order)
+            if cutoff is not None and order is None:
+                # List/catalog returns all immutable historical templates.
+                raise ComplexDenied("HISTORY_DENIED")
+    except DocumentPolicyDenied:
+        raise ComplexDenied("FORBIDDEN") from None
 
 
 def _validate_catalog(request_key,code,title,services,materials):
@@ -93,6 +108,7 @@ def _scope(conn,token,org,loc):
 def list_complexes(conn,token,org,loc):
     with conn.transaction():
         _scope(conn,token,org,loc)
+        _priced_scope(conn,token,org,loc,"READ")
         ids=conn.execute("""
           SELECT c.id FROM auto_work_complex c
           JOIN auto_work_complex_activation active ON active.complex_id=c.id
@@ -107,8 +123,15 @@ def list_complexes(conn,token,org,loc):
 def create_complex(conn,token,org,loc,*,request_key,code,title,services,materials):
     _validate_catalog(request_key,code,title,services,materials)
     with conn.transaction():
+        # Acquire org SHARE then branch UPDATE before any role/ACL helpers
+        # take branch SHARE, avoiding two concurrent SHARE→UPDATE upgrades.
+        try:
+            _org_policy_lock(conn,org)
+        except TariffDenied:
+            raise ComplexDenied("FORBIDDEN") from None
         _branch_lock(conn,org,loc)
         actor=_scope(conn,token,org,loc)
+        _priced_scope(conn,token,org,loc,"CREATE")
         prior=conn.execute("""
           SELECT id,organization_id,location_id FROM auto_work_complex
           WHERE request_key=%s
@@ -197,6 +220,7 @@ def selected_complexes(conn,token,org,loc,order):
             _staff_and_scope(conn,token,org,loc,order)
         except AutoEstimateDenied:
             raise ComplexDenied("FORBIDDEN") from None
+        _priced_scope(conn,token,org,loc,"READ",order=order)
         return _selected(conn,order)
 
 
@@ -208,6 +232,7 @@ def select_complex(conn,token,org,loc,order,*,request_key,complex_id):
             actor=_staff_and_scope(conn,token,org,loc,order)
         except AutoEstimateDenied:
             raise ComplexDenied("FORBIDDEN") from None
+        _priced_scope(conn,token,org,loc,"CREATE",order=order)
         prior=conn.execute("""
           SELECT work_order_id,complex_id,actor_id FROM auto_work_order_complex_selection
           WHERE request_key=%s

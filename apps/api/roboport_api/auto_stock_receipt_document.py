@@ -4,6 +4,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 from .session_lookup import session_subject
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 def _invoke(conn,token,organization_id,location_id,lot_id,role,sql,args):
@@ -86,6 +87,19 @@ def pending_receipt_reviews(conn: psycopg.Connection,token: str,
         if not organization_role_allows(conn,token,organization_id,"MANAGER",
                                          location_id,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
+        # Queue includes actual supplier quotation cost even in accept view.
+        # Denied purchase-price rights may not be bypassed via receiving.
+        try:
+            for cap in ("READ","PRICE_PURCHASE"):
+                cutoff=require_document_access(
+                    conn,token,organization_id,location_id,("MANAGER",),
+                    "SUPPLIER_ORDER",cap)
+                if cutoff is not None:
+                    # This list mixes old and new supplier documents.
+                    # A cutoff would otherwise expose historical quotations.
+                    raise AutoStockDenied("HISTORY_DENIED")
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         rows=conn.execute("""
             SELECT d.id,l.id,s.article,l.batch_code,b.code,
                    d.quantity,d.source_reference,

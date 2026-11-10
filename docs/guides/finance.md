@@ -108,3 +108,22 @@ QC PASS разрешены `APPLY_ADVANCE` (зачёт без движения �
 Банк, ККТ и реальный refund **planned** до #119.
 
 [Полная инструкция, формулы и API](../auto/FINANCE.md).
+
+
+## Проверка прав кассы на финансовые документы — dev #446
+
+Даже с активным `CASHIER` сервер повторно проверяет `FINANCE READ` и
+`FINANCE PRICE_SALES` перед просмотром счетов, заказа, остатков и отчёта.
+`FINANCE EDIT` отдельно нужен для `ADVANCE`, `PAYMENT`,
+`APPLY_ADVANCE`, `REFUND_ADVANCE`, `REFUND_PAYMENT`;
+`FINANCE CLOSE` — для дня, `FINANCE CREATE` — для открытия счёта
+MANAGER. Общий `WRITE=DENY` запрещает все записи; личный ALLOW
+не преодолевает роль/шаблон DENY. После отзыва прав повтор операции
+тоже вернёт 403. Финансовая correction `CHARGE/CREDIT` у MANAGER
+также требует `FINANCE EDIT`; отдельный `demo-finance-report`
+требует `FINANCE READ/PRICE_SALES`.
+
+Если перестали отображаться тестовые суммы (403), откройте ролевую
+инструкцию ADMIN и запросите проверку effective-policy — не пытайтесь
+повторно записать платёж с новым ключом. Список и предпросмотр доступны
+только ADMIN, не кассиру. [Полная матрица](../auto/DOCUMENT_ACCESS.md).
