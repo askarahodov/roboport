@@ -17,6 +17,10 @@ from roboport_api.auto_stock_receipt_document import (
     create_receipt_document, accept_receipt_document,
 )
 from test_pg_auto_stock_ledger import balance
+from roboport_api.auto_supplier_purchase import (
+    place_supplier_order, record_supplier_delivery,
+)
+from test_pg_auto_supplier_purchase import quotes
 
 
 def fixture(monkeypatch):
@@ -477,4 +481,45 @@ def test_merge_denied_for_unaccepted_receipt_then_manager_can_post(monkeypatch):
             assert accepted is not None
             assert balance(db,UUID(source))==(3,0)
         # Posting retains the original document and original SKU lineage.
+        assert post(http,d,d["intake"],url(org)+"/merges",m).status_code==409
+
+
+def test_merge_blocks_unfilled_supplier_purchase_and_preserves_delivery(monkeypatch):
+    # A supplier order for a shortage has no stock yet, but can produce
+    # future draft receipts. Merge must not strand it behind an immutable
+    # source-SKU identity.
+    d,org,loc,_,_,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        source=create(http,d,org,loc,"SYNTH-447-OPEN-PURCHASE")
+        target=create(http,d,org,loc,"SYNTH-447-PURCHASE-TARGET")
+        with psycopg.connect(DSN) as db:
+            bay=db.execute(
+                "SELECT id FROM auto_work_bay WHERE organization_id=%s AND location_id=%s",
+                (org,loc),
+            ).fetchone()[0]
+            order,_=work_order(db,d,org,loc,bay)
+            lot=add_lot(db,org,loc,UUID(source),add_bin(db,org,loc))
+            offers=quotes(db,UUID(source))
+            purchase,shortage=place_supplier_order(
+                db,d["tokens"][d["intake"]],org,loc,order,lot,uuid4(),
+                3,offers,"SYNTH-SUP-1","OFFLINE-1",
+            )
+            assert shortage==3 and balance(db,UUID(source))==(0,0)
+        m={"locationId":str(loc),"sourceSkuId":source,"targetSkuId":target}
+        blocked=post(http,d,d["intake"],url(org)+"/merges",m)
+        assert blocked.status_code==409,blocked.text
+        with psycopg.connect(DSN) as db:
+            # Pending supplier delivery is still legal under the original SKU.
+            event_id,receipt_id=record_supplier_delivery(
+                db,d["tokens"][d["intake"]],org,loc,purchase,uuid4(),
+                2,"SYNTH-DELIVERY-AFTER-DENIED-MERGE",
+            )
+            assert event_id is not None and receipt_id is not None
+            assert balance(db,UUID(source))==(0,0)
+            grant(db,d["manager"],org,loc,"MANAGER")
+            accepted=accept_receipt_document(
+                db,d["tokens"][d["manager"]],org,loc,receipt_id,uuid4(),
+            )
+            assert accepted is not None
+            assert balance(db,UUID(source))==(2,0)
         assert post(http,d,d["intake"],url(org)+"/merges",m).status_code==409
