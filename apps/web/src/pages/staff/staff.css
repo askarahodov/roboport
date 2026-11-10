@@ -24,3 +24,11 @@
 /* Автомобильный workbench: ссылки ведут в существующие scoped dev кабинеты. */
 .crm-menu a{text-decoration:none;overflow-wrap:anywhere}
 .crm-menu a:focus-visible{outline:3px solid var(--rp-action);outline-offset:2px}
+
+/* Documentation is available even for 401/403; role-specific links need live roles. */
+.staff-help-links,.staff-role-guides{display:flex;flex-wrap:wrap;gap:.65rem;margin:.75rem 0 1rem}
+.staff-help-links a,.staff-role-guides a,.crm-help a{display:inline-flex;align-items:center;min-height:44px;border:1px solid var(--rp-border);border-radius:.65rem;padding:.55rem .85rem;color:var(--rp-foreground);background:var(--rp-surface);overflow-wrap:anywhere;text-decoration:underline;text-underline-offset:3px}
+.crm-help{display:grid;gap:.35rem;margin:1rem 0;min-width:0}
+.crm-help a{font-size:.83rem;text-decoration:underline;justify-content:flex-start}
+.staff-help-links a:focus-visible,.staff-role-guides a:focus-visible,.crm-help a:focus-visible{outline:3px solid var(--rp-focus);outline-offset:2px}
+@media(max-width:500px){.staff-help-links,.staff-role-guides{display:grid;grid-template-columns:minmax(0,1fr)}}
