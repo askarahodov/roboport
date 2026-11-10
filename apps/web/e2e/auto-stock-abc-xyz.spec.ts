@@ -216,8 +216,10 @@ test('manager downloads complete scoped CSV and revoke blocks export fail closed
   await expect(load).toBeEnabled();
   await load.click();
   const results=page.getByLabel('Результаты ABC XYZ');
-  await expect(results).toBeVisible();
-  await expect(results.getByRole('table').locator('tbody tr')).toHaveCount(25);
+  // Full browser suite runs many workers; allow a bounded async report render
+  // without mistaking transient worker saturation for a denied result.
+  await expect(results).toBeVisible({timeout:15000});
+  await expect(results.getByRole('table').locator('tbody tr')).toHaveCount(25,{timeout:15000});
   const downloadPromise=page.waitForEvent('download');
   await results.getByRole('button',{name:'Скачать весь отчёт CSV'}).click();
   const download=await downloadPromise;

@@ -212,6 +212,8 @@ test('manager withdraws publication: offer vanishes, exact CSRF key and no false
   await ui.getByRole('button',{name:'Показать публикации'}).click();
   await expect(ui.getByText('Синтетический осмотр',{exact:false})).toBeVisible();
   await ui.getByRole('button',{name:'Отозвать публикацию'}).click();
-  expect(mutations).toHaveLength(1);
+  // The network route is invoked asynchronously after the click handler;
+  // do not assert the in-memory request list in the same event-loop tick.
+  await expect.poll(()=>mutations.length,{timeout:15000}).toBe(1);
   await expect(ui.getByRole('button',{name:'Отозвать публикацию'})).toHaveCount(0);
 });
