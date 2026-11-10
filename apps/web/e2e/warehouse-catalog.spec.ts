@@ -62,7 +62,7 @@ test('desktop full catalog → price → analog → logical merge → XLSX previ
   });
   await visit(page);
   await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
-  await expect(page.getByText('SYNTH-A',{exact:true})).toBeVisible();
+  await expect(page.getByRole('table').getByText('SYNTH-A',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Создать SKU и исходную версию цены'}).click();
   await expect(page.getByText('Операция записана в неизменяемый журнал.')).toBeVisible();
   await page.getByRole('textbox',{name:'Строки обновления цены'}).fill(a+';1;1280;2600');
@@ -118,10 +118,10 @@ test('403 list denies and clears prior warehouse prices',async({page})=>{
     json(route,{syntheticOnly:true,items,nextSkuId:null}));
   await visit(page);
   await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
-  await expect(page.getByText('SYNTH-A',{exact:true})).toBeVisible();
+  await expect(page.getByRole('table').getByText('SYNTH-A',{exact:true})).toBeVisible();
   denied=true;
   await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
-  await expect(page.getByText('SYNTH-A',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('table').getByText('SYNTH-A',{exact:true})).toHaveCount(0);
   await expect(page.getByText('403 — нет активных прав')).toBeVisible();
 });
 
@@ -145,5 +145,5 @@ test('changing branch while GET is inflight restores enabled reload and clears s
   await expect(page.getByRole('button',{name:'Загрузить номенклатуру'})).toBeEnabled();
   release();
   await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
-  await expect(page.getByText('SYNTH-A',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('table').getByText('SYNTH-A',{exact:true})).toHaveCount(0);
 });
