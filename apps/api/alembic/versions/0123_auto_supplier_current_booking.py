@@ -1,6 +1,6 @@
 """Procurement order guard follows rescheduled appointment's latest active booking.
 
-Revision ID: 0123_auto_supplier_current_booking
+Revision ID: 0123_supplier_booking
 Revises: 0122_auto_financial_document_acl
 
 No destructive schema change and no real supplier/purchasing enablement.
@@ -8,7 +8,7 @@ The append-only purchase audit/quote/stock invariants remain intact.
 """
 from alembic import op
 
-revision="0123_auto_supplier_current_booking"
+revision="0123_supplier_booking"
 down_revision="0122_auto_financial_document_acl"
 branch_labels=None
 depends_on=None
