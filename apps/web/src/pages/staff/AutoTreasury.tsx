@@ -1,6 +1,6 @@
 import React from 'react';
 
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const digestDay=/^\d{4}-\d{2}-\d{2}$/;
 type Account={id:string;code:string;label:string;kind:'CASH_SIM'|'BANK_SIM';
   currency:'RUB';balanceMinor:number;lastClosedDay:string|null};
