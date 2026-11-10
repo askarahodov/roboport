@@ -488,3 +488,18 @@ GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/inbox?mode=OVERDUE&
 `tests/integration/test_pg_auto_crm_inbox_http.py`,
 `apps/web/e2e/auto-crm-inbox.spec.ts`. Не закрывает весь #169
 или production gate #119.
+
+
+## Публичная заявка → проверенный клиент → WEB lead #442 — current-dev
+
+Анонимная заявка создаётся **без клиента, VIN и контактных
+полей**. На шаге verified claim клиент привязывает единственную
+исходную подтверждённую связь с автомобилем. Staff fulfill
+атомарно создаёт appointment и существующий
+`auto_crm_lead(source_code='WEB')` с этапами QUALIFIED→BOOKED
+или reuse уже существующего WEB-лида; дополнительная
+`auto_public_booking_fulfillment` фиксирует lineage
+каждой отдельной заявки. Сообщения и callback **не отправляются**:
+outbox только dev sink. Отзыв маркетингового выбора записывается
+неизменяемо; не путать его с правовым согласием для рекламы.
+[Контракт](PUBLIC_BOOKING.md).
