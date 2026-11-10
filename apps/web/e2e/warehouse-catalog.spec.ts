@@ -147,3 +147,30 @@ test('changing branch while GET is inflight restores enabled reload and clears s
   await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
   await expect(page.getByRole('table').getByText('SYNTH-A',{exact:true})).toHaveCount(0);
 });
+
+
+test('successful POST invalidates pending catalog GET and allows immediate reload',async({page})=>{
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  let first=true;
+  await page.route('**/warehouse/catalog?*',async route=>{
+    if(first){
+      first=false;
+      await gate;
+      return json(route,{syntheticOnly:true,items,nextSkuId:null});
+    }
+    return json(route,{syntheticOnly:true,items:[],nextSkuId:null});
+  });
+  await page.route('**/warehouse/catalog/skus',route=>json(route,{
+    batchId:commit,items:[{skuId:a,version:1}],
+    syntheticOnly:true,replayed:false
+  },201));
+  await visit(page);
+  await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
+  await page.getByRole('button',{name:'Создать SKU и исходную версию цены'}).click();
+  await expect(page.getByText('Операция записана в неизменяемый журнал.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Загрузить номенклатуру'})).toBeEnabled();
+  release();
+  await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
+  await expect(page.getByText('SYNTH-A',{exact:true})).toHaveCount(0);
+});
