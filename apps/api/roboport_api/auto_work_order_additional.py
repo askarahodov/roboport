@@ -13,6 +13,7 @@ from .auto_work_order_estimate import (
     AutoEstimateDenied,
 )
 from .auto_work_tariffs import quote_tariff_snapshot,TariffConflict
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 class ExtraDenied(ValueError):
@@ -43,11 +44,22 @@ def _state(conn,order):
             "syntheticOnly":True,"releaseAllowed":False}
 
 
-def _authorize(conn,token,org,loc,order,manager):
+def _authorize(conn,token,org,loc,order,manager,*,cap=None,discount=False):
     try:
-        return (_staff_and_scope(conn,token,org,loc,order) if manager
-                else _client_and_scope(conn,token,org,loc,order))
-    except AutoEstimateDenied:
+        actor=(_staff_and_scope(conn,token,org,loc,order) if manager
+               else _client_and_scope(conn,token,org,loc,order))
+        if manager:
+            # Additional work is an immutable ESTIMATE revision, not a
+            # separate pricing escape hatch. Apply the same live ACL as base
+            # estimates including price, history and non-zero discounts.
+            for capability in (cap or "READ","PRICE_SALES"):
+                require_document_access(conn,token,org,loc,("MANAGER",),
+                                        "ESTIMATE",capability,order=order)
+            if discount:
+                require_document_access(conn,token,org,loc,("MANAGER",),
+                                        "ESTIMATE","DISCOUNT",order=order)
+        return actor
+    except (AutoEstimateDenied,DocumentPolicyDenied):
         raise ExtraDenied("FORBIDDEN") from None
 
 
@@ -82,7 +94,8 @@ def publish_extra(conn,token,org,loc,order,*,base_revision_id,
             raise ExtraDenied("INVALID_INPUT")
         supplied[item["serviceId"]]=item
     with conn.transaction():
-        actor=_authorize(conn,token,org,loc,order,True)
+        actor=_authorize(conn,token,org,loc,order,True,cap="CREATE",
+                         discount=any(x["discountBps"]>0 for x in supplied.values()))
         base=_estimate_state(conn,order)["items"]
         if not base or base[-1]["id"]!=str(base_revision_id) or base[-1]["decision"]!="APPROVED":
             raise ExtraConflict("BASE_APPROVAL_REQUIRED")
