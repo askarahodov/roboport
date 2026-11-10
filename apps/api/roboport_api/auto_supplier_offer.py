@@ -19,6 +19,7 @@ class SupplierOffer:
     unit_purchase_minor: int
     available_quantity: int
     article: str
+    delivery_days: int = 0
 
     def __post_init__(self) -> None:
         # This object has no applicability, selling price, reservation or ordering authority.
@@ -32,6 +33,8 @@ class SupplierOffer:
             raise ValueError("invalid purchase price")
         if type(self.available_quantity) is not int or not 0 <= self.available_quantity <= 10**9:
             raise ValueError("invalid quantity")
+        if type(self.delivery_days) is not int or not 0 <= self.delivery_days <= 365:
+            raise ValueError("invalid delivery days")
         for stamp in (self.quoted_at, self.expires_at):
             if not isinstance(stamp, datetime) or stamp.tzinfo is None or stamp.utcoffset() is None:
                 raise ValueError("timestamp requires timezone")
@@ -51,7 +54,7 @@ def parse_supplier_offer(raw: object) -> SupplierOffer:
         "offer_id", "supplier_id", "source_revision", "quoted_at", "expires_at",
         "currency", "unit_purchase_minor", "available_quantity", "article",
     )
-    if type(raw) is not dict or set(raw) != set(fields):
+    if type(raw) is not dict or set(raw) not in (set(fields), set(fields) | {'delivery_days'}):
         raise CatalogError(CatalogErrorCode.UNAVAILABLE)
     try:
         return SupplierOffer(
@@ -61,6 +64,7 @@ def parse_supplier_offer(raw: object) -> SupplierOffer:
             expires_at=_timestamp(raw["expires_at"]),
             currency=raw["currency"], unit_purchase_minor=raw["unit_purchase_minor"],
             available_quantity=raw["available_quantity"], article=raw["article"],
+            delivery_days=raw.get("delivery_days", 0),
         )
     except (ValueError, TypeError, OverflowError):
         raise CatalogError(CatalogErrorCode.UNAVAILABLE) from None
