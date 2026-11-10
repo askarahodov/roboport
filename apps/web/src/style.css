@@ -139,3 +139,21 @@ body{font-family:Manrope,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFon
 .account-help-links a{display:inline-flex;align-items:center;min-height:44px;padding:.65rem .9rem;border:1px solid var(--rp-border);border-radius:.7rem;color:var(--rp-foreground);background:var(--rp-surface);text-decoration:underline;text-underline-offset:3px;font-weight:650}
 .account-help-links a:hover{border-color:var(--rp-action)}
 @media(max-width:500px){.account-help-links{display:grid;grid-template-columns:minmax(0,1fr)}.account-help-links a{overflow-wrap:anywhere}}
+
+
+/* Public synthetic booking: untrusted long IDs and receipt tokens must never
+   expand the document at 390px. Keep focusable controls fully accessible. */
+.app>section.auto-public-booking{width:100%;max-width:72rem;min-width:0;overflow-wrap:anywhere}
+.auto-public-booking section{min-width:0;max-width:100%;margin:1.5rem 0}
+.auto-public-booking fieldset{min-width:0;max-width:100%;border:1px solid var(--rp-border);border-radius:.7rem}
+.auto-public-booking label{display:block;min-width:0;max-width:100%;margin:.65rem 0}
+.auto-public-booking :is(input:not([type="checkbox"]),select,textarea){
+  display:block;width:100%;max-width:100%;min-width:0;
+  background:var(--rp-surface);color:var(--rp-foreground);
+  border-radius:.5rem;border:1px solid var(--rp-border);margin:.4rem 0;
+}
+.auto-public-booking :is(p,li,code,a,fieldset,legend){overflow-wrap:anywhere;word-break:normal}
+.auto-public-booking code{word-break:break-all}
+.auto-public-booking button{max-width:100%;white-space:normal;overflow-wrap:anywhere;min-height:44px;margin:.3rem .4rem .3rem 0}
+.auto-public-booking ol{padding-inline-start:1.4rem;min-width:0;max-width:100%}
+@media(max-width:500px){.app>section.auto-public-booking{padding:0 1rem}}
