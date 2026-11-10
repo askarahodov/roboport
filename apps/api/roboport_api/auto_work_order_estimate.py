@@ -194,7 +194,7 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
         actor=_staff_and_scope(conn,token,org,loc,order)
         try:
             require_document_access(conn,token,org,loc,("MANAGER",),
-                                    "ESTIMATE","WRITE",order=order)
+                                    "ESTIMATE","CREATE",order=order)
             require_document_access(conn,token,org,loc,("MANAGER",),
                                     "ESTIMATE","PRICE_SALES",order=order)
             if advanced and any(item["discountBps"]>0 for item in supplied.values()):
@@ -367,7 +367,7 @@ def resolve_estimate_clarification(conn,token,org,loc,order,*,
         actor=_staff_and_scope(conn,token,org,loc,order)
         try:
             require_document_access(conn,token,org,loc,("MANAGER",),
-                                    "ESTIMATE","WRITE",order=order)
+                                    "ESTIMATE","EDIT",order=order)
         except DocumentPolicyDenied:
             raise AutoEstimateDenied("FORBIDDEN") from None
         state=_estimate_state(conn,order)
