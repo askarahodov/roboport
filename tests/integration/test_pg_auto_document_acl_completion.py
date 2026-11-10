@@ -434,7 +434,7 @@ def test_cashier_finance_cutoff_concurrent_read_and_payment_no_lock_upgrade(monk
     Both reads and writes request WorkOrder UPDATE before any history
     WorkOrder SHARE. The loser never sees an unhandled DeadlockDetected.
     """
-    from roboport_api.auto_treasury import read_order
+    from roboport_api.auto_treasury import read_order,record_event
     d,org,loc,order,service,http,base,_=treasury_prepare(monkeypatch)
     with psycopg.connect(DSN) as db:
         admin(db,org,d["other"])
