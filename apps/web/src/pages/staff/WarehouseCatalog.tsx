@@ -87,6 +87,10 @@ export function WarehouseCatalog(){
          target.loc!==context.current.loc)return;
       if(!res.ok){setRows([]);setCursor(null);setListStatus(reason(res.status));return;}
       const data:unknown=await res.json();
+      // JSON streaming may finish after a branch switch even when headers
+      // were received under the old scope. Never reintroduce old prices.
+      if(current!==seq.current||target.org!==context.current.org||
+         target.loc!==context.current.loc)return;
       if(!data||typeof data!=='object')throw Error('shape');
       const d=data as {syntheticOnly?:unknown;items?:unknown;nextSkuId?:unknown};
       if(d.syntheticOnly!==true||!Array.isArray(d.items)||d.items.length>30||
@@ -144,7 +148,8 @@ export function WarehouseCatalog(){
         kind==='commit'?'Импорт применён атомарно. Прочитайте номенклатуру заново.':
         kind==='merge'?'Объединение зарегистрировано без изменения исторических FK и остатков.':
         'Операция записана в неизменяемый журнал. Перечитайте каталог.');
-      seq.current++;setRows([]);setCursor(null);setListStatus('');
+      seq.current++;setReading(false);
+      setRows([]);setCursor(null);setListStatus('');
     }catch{
       if(snap.org===context.current.org&&snap.loc===context.current.loc){
         setPending(snap);setMessage('Результат POST неизвестен. Повторите дословно тот же запрос и UUID-ключ.');
