@@ -22,6 +22,7 @@
   - [Услуги автомобильного заказ-наряда](/auto/WORKSHOP_OPERATIONS.md)
   - [Версии и согласование автомобильной сметы](/auto/ESTIMATES.md)
   - [Работы, детали и независимый QC](/auto/EXECUTION.md)
+  - [Заказ поставщику и частичные поставки (dev)](/auto/SUPPLIER_PURCHASES.md)
   - [Условная сверка и пакет перед выдачей](/auto/DEMO_CLOSE.md)
   - [Аудит актуальности](/auto/DOCUMENTATION_AUDIT.md)
   - [Реестр доказательств операций](/auto/OPERATIONS_EVIDENCE.md)
