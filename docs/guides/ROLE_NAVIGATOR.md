@@ -78,3 +78,7 @@
 ## Заказ поставщику по дефициту (current-dev #443)
 
 [Кладовщик](warehouse.md) → `/staff/warehouse-supplier-orders`: синтетический WorkOrder/SKU, сравнение двух offline предложений, частичные документы и отмена оставшейся поставки. Физическая приёмка/стоимость — по действующему `/staff/warehouse-receiving`, отдельно подтверждает MANAGER. Исходники и негативные доказательства: [SQL/ACL/PG17](../../tests/integration/test_pg_auto_supplier_purchase.py), [HTTP](../../tests/integration/test_pg_auto_supplier_purchase_http.py), [Browser E2E](../../apps/web/e2e/warehouse-supplier-orders.spec.ts), [полная процедура](../auto/SUPPLIER_PURCHASES.md). 403/409/422 не обходить подстановкой UUID; настоящий supplier/оплата `planned` до #119.
+
+## Проверка компонентов и визуальный аудит
+
+- **QA/дизайнер, только synthetic dev:** `/dev/ui-gallery` — статическая проверочная галерея кнопок, форм, состояний 403/409, пустого экрана и клавиатурного диалога. Она не открывает клиентские данные и не наделяет правами. Визуальные PNG/manifest по #92 генерирует `apps/web/e2e/visual-audit.spec.ts` для независимого sign-off; это не одобренный screenshot baseline. [Процедура проверки](SCREENSHOT_EVIDENCE.md).
