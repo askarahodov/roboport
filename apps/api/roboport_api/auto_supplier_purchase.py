@@ -114,9 +114,23 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
         # be created against a stale quote.
         if selected.expires_at <= datetime.now(timezone.utc):
             raise AutoStockConflict("EXPIRED_QUOTE")
+        # Reschedule keeps auto_appointment.booking_id immutable, while
+        # canceling that original bay booking. Use only the latest live booking.
+        # A non-current or canceled slot never authorizes purchasing.
         work = conn.execute("""SELECT w.id FROM auto_work_order w
           JOIN auto_appointment a ON a.id=w.appointment_id
-          JOIN auto_bay_booking b ON b.id=a.booking_id
+            AND a.organization_id=w.organization_id
+            AND a.location_id=w.location_id
+          JOIN LATERAL (
+            SELECT COALESCE((
+              SELECT r.new_booking_id FROM auto_appointment_reschedule r
+              WHERE r.appointment_id=a.id
+              ORDER BY r.created_at DESC,r.id DESC LIMIT 1
+            ),a.booking_id) AS current_booking_id
+          ) latest ON TRUE
+          JOIN auto_bay_booking b ON b.id=latest.current_booking_id
+            AND b.organization_id=w.organization_id
+            AND b.location_id=w.location_id
           JOIN auto_organization o ON o.id=w.organization_id
           JOIN auto_service_location l ON l.id=w.location_id
             AND l.organization_id=w.organization_id
