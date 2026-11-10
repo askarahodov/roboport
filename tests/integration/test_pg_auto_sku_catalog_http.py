@@ -155,6 +155,18 @@ def test_analog_merge_history_and_active_stock_denied(monkeypatch):
                 (UUID(source),)).fetchone()==(UUID(source),)
         assert next(r for r in listed(http,d,org,loc).json()["items"]
                     if r["skuId"]==source)["mergedInto"]==target
+        # Two independent historical batches with different identifiers
+        # must not be silently conflated, even with zero on-hand stock.
+        incompatible_source=create(http,d,org,loc,"SYNTH-447-BATCH-SRC")
+        incompatible_target=create(http,d,org,loc,"SYNTH-447-BATCH-DST")
+        with psycopg.connect(DSN) as db:
+            add_lot(db,org,loc,UUID(incompatible_source),
+                    add_bin(db,org,loc,"B-02"),batch="BATCH-02")
+            add_lot(db,org,loc,UUID(incompatible_target),
+                    add_bin(db,org,loc,"B-03"),batch="BATCH-03")
+        assert post(http,d,d["intake"],url(org)+"/merges",{
+            "locationId":str(loc),"sourceSkuId":incompatible_source,
+            "targetSkuId":incompatible_target}).status_code==409
 
 
 def test_denied_scope_bad_input_stale_preview_and_role_revoke(monkeypatch):
