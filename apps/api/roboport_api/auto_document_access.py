@@ -176,7 +176,8 @@ def require_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
 
 def has_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
     try:
-        return require_document_access(conn,token,org,loc,roles,document,cap,
-                                       order=order)
+        require_document_access(conn,token,org,loc,roles,document,cap,
+                                order=order)
+        return True
     except DocumentPolicyDenied:
         return False
