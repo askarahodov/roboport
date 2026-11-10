@@ -365,6 +365,11 @@ def resolve_estimate_clarification(conn,token,org,loc,order,*,
         raise AutoEstimateDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_staff_and_scope(conn,token,org,loc,order)
+        try:
+            require_document_access(conn,token,org,loc,("MANAGER",),
+                                    "ESTIMATE","WRITE",order=order)
+        except DocumentPolicyDenied:
+            raise AutoEstimateDenied("FORBIDDEN") from None
         state=_estimate_state(conn,order)
         current=state["items"][-1] if state["items"] else None
         if current is None or current["id"]!=str(revision_id) or current["decision"] is not None:
