@@ -150,6 +150,37 @@ def publish_offer(conn,token,org,loc,*,bay,service,materials,policy,key):
         return {"replayed":False,**_safe_offer(_offer(conn,ident),_ready(conn,ident))}
 
 
+def revoke_offer(conn,token,org,loc,offer_id,key):
+    """Immutable MANAGER withdrawal. Never edits existing requests/receipts."""
+    _id(org,loc,offer_id,key)
+    with conn.transaction():
+        actor=_staff(conn,token,org,loc,("MANAGER",))
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,9099))",
+                     (str(offer_id),))
+        row=conn.execute("""
+            SELECT organization_id,location_id FROM auto_public_booking_offer
+            WHERE id=%s FOR UPDATE
+        """,(offer_id,)).fetchone()
+        if row is None or row!=(org,loc):
+            raise PublicBookingDenied("FORBIDDEN")
+        prior=conn.execute("""
+          SELECT actor_id,request_key FROM auto_public_booking_offer_revoke
+          WHERE offer_id=%s
+        """,(offer_id,)).fetchone()
+        if prior:
+            if prior!=(actor,key):
+                raise PublicBookingConflict("OFFER_ALREADY_WITHDRAWN")
+            return {"syntheticOnly":True,"revoked":True,"replayed":True}
+        try:
+            with conn.transaction():
+                conn.execute("""INSERT INTO auto_public_booking_offer_revoke
+                    (offer_id,actor_id,request_key) VALUES(%s,%s,%s)
+                """,(offer_id,actor,key))
+        except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation):
+            raise PublicBookingConflict("OFFER_REVOKE_CONFLICT") from None
+        return {"syntheticOnly":True,"revoked":True,"replayed":False}
+
+
 def _local_day(text):
     if type(text) is not str or len(text)!=10:
         raise PublicBookingInvalid("INVALID_DAY")
@@ -271,6 +302,10 @@ def submit_request(conn,offer_id,*,request_key,challenge_id,answer,
         type(marketing) is not bool):
         raise PublicBookingInvalid("INVALID_INPUT")
     with conn.transaction():
+        # Serialize an anonymous submission with explicit MANAGER publication
+        # withdrawal. No request can commit after the manager revokes the offer.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,9099))",
+                     (str(offer_id),))
         p=_offer(conn,offer_id)
         _limit(conn,p[1],offer_id,"request",25)
         used=conn.execute("""
@@ -332,8 +367,11 @@ def _status(conn,req):
                            WHERE request_id=%s""",(req[0],)).fetchone()
     withdrew=conn.execute("""SELECT 1 FROM auto_public_booking_consent_withdrawal
                              WHERE request_id=%s""",(req[0],)).fetchone()
+    revoked=conn.execute("""SELECT 1 FROM auto_public_booking_offer_revoke
+                            WHERE offer_id=%s""",(req[1],)).fetchone()
     return {"syntheticOnly":True,"realDelivery":False,"noSlotHold":filled is None,
             "requestId":str(req[0]),"status":"BOOKED" if filled else
+                 "OFFER_WITHDRAWN" if revoked else
                  "WAITING_FOR_STAFF" if claim else "AWAITING_VERIFICATION",
             "marketingEnabled":bool(req[4]) and not bool(withdrew),
             "appointmentId":str(filled[0]) if filled else None,
@@ -412,7 +450,9 @@ def staff_queue(conn,token,org,loc):
         _staff(conn,token,org,loc,("INTAKE",))
         rows=conn.execute("""
           SELECT r.id,r.offer_id,r.starts_at,r.ends_at,r.created_at,
-            c.request_id,f.appointment_id
+            c.request_id,f.appointment_id,
+            EXISTS(SELECT 1 FROM auto_public_booking_offer_revoke revoke
+                   WHERE revoke.offer_id=r.offer_id)
           FROM auto_public_booking_request r
           JOIN auto_public_booking_offer o ON o.id=r.offer_id
           LEFT JOIN auto_public_booking_claim c ON c.request_id=r.id
@@ -425,12 +465,12 @@ def staff_queue(conn,token,org,loc):
         return {"syntheticOnly":True,"items":[{
           "requestId":str(req),"offerId":str(offer),"startsAt":start.isoformat(),
           "endsAt":end.isoformat(),"createdAt":created.isoformat(),
-          "status":"BOOKED" if appointment else
+          "status":"BOOKED" if appointment else "OFFER_WITHDRAWN" if revoked else
               "WAITING_FOR_STAFF" if claimed else "AWAITING_VERIFICATION",
           "appointmentId":str(appointment) if appointment else None,
           "materials":[{"skuId":str(sku),"kind":kind,"quantity":qty}
               for sku,kind,qty in _materials(conn,offer)]
-        } for req,offer,start,end,created,claimed,appointment in rows]}
+        } for req,offer,start,end,created,claimed,appointment,revoked in rows]}
 
 
 def fulfill_request(conn,token,org,loc,ident,key):
