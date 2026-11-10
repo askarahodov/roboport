@@ -224,6 +224,10 @@ def test_full_cashier_lifecycle_precise_amounts_report_replay_and_immutable(monk
         db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
           WHERE organization_id=%s AND user_id=%s AND role_code='CASHIER' AND
             location_id=%s""",(org,d["manager"],loc))
+    # The manager opened the second account above; reset the cookie to the
+    # actual revoked cashier. Otherwise GET still runs as a live MANAGER and
+    # correctly responds 200, masking the intended revocation check.
+    cashier=session(http,d,d["manager"])
     assert http.get(base+"/accounts").status_code==403
     assert event(http,base,cashier,order,account,"REFUND_PAYMENT",1).status_code==403
 
