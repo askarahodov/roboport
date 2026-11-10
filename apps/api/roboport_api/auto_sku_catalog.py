@@ -56,11 +56,19 @@ def _read_scope(conn,token,org,loc):
         raise CatalogDenied("FORBIDDEN") from None
     purchase=has_document_access(conn,token,org,loc,
         ("WAREHOUSE","MANAGER"),"SUPPLIER_ORDER","PRICE_PURCHASE")
-    sale=(has_document_access(conn,token,org,loc,
-        ("MANAGER",),"ESTIMATE","READ") and
-        has_document_access(conn,token,org,loc,
-        ("MANAGER",),"ESTIMATE","PRICE_SALES"))
-    return cutoff,purchase,sale
+    # ESTIMATE.READ may carry a stricter independent history cutoff.
+    # A boolean price grant alone does not authorize older sale prices.
+    sale=False
+    sale_cutoff=None
+    if has_document_access(conn,token,org,loc,
+                           ("MANAGER",),"ESTIMATE","PRICE_SALES"):
+        try:
+            sale_cutoff=require_document_access(conn,token,org,loc,
+                ("MANAGER",),"ESTIMATE","READ")
+            sale=True
+        except DocumentPolicyDenied:
+            sale=False
+    return cutoff,purchase,sale,sale_cutoff
 
 
 def _write_scope(conn,token,org,loc,cap):
@@ -146,7 +154,7 @@ def list_catalog(conn,token,org,loc,limit=30,after=None):
         or not 1<=limit<=50 or (after is not None and type(after) is not UUID)):
         raise CatalogInvalid("INVALID_INPUT")
     with conn.transaction():
-        cutoff,purchase,sale=_read_scope(conn,token,org,loc)
+        cutoff,purchase,sale,sale_cutoff=_read_scope(conn,token,org,loc)
         rows=conn.execute("""
           SELECT s.id,s.article,p.category_code,p.uom,p.barcode,p.brand,
             p.created_at,e.version,e.purchase_minor,e.sale_minor,e.created_at,
@@ -176,22 +184,26 @@ def list_catalog(conn,token,org,loc,limit=30,after=None):
                 "category":category,"uom":uom,"barcode":barcode,"brand":brand,
                 "version":version or 0,
                 "purchaseMinor":buy if purchase and current_price else None,
-                "saleMinor":sell if sale and current_price else None,
+                "saleMinor":sell if sale and current_price and
+                    (sale_cutoff is None or priced is not None and priced>=sale_cutoff)
+                    else None,
                 "purchaseHidden":not purchase or not current_price,
-                "saleHidden":not sale or not current_price,
+                "saleHidden":not sale or not current_price or
+                    (sale_cutoff is not None and (priced is None or priced<sale_cutoff)),
                 "mergedInto":str(merged) if merged else None})
         return {"syntheticOnly":True,"items":values,
                 "nextSkuId":str(nxt) if nxt else None}
 
 
-def _batch_replay(conn,request_key,actor,source,digest):
-    row=conn.execute("""SELECT id,source,payload_digest,created_by
+def _batch_replay(conn,request_key,actor,org,loc,source,digest):
+    row=conn.execute("""SELECT id,source,payload_digest,created_by,
+        organization_id,location_id
         FROM auto_catalog_price_batch WHERE request_key=%s""",
         (request_key,)).fetchone()
     if row is None:
         return None
-    if row[1:]!=(source,digest,actor):
-        raise CatalogConflict("REPLAY_MISMATCH")
+    if row[1:]!=(source,digest,actor,org,loc):
+        raise CatalogConflict("REPLAY_SCOPE_OR_PAYLOAD_MISMATCH")
     events=conn.execute("""SELECT sku_id,version FROM auto_catalog_price_event
         WHERE batch_id=%s ORDER BY sku_id""",(row[0],)).fetchall()
     return {"batchId":str(row[0]),"items":[
@@ -245,7 +257,7 @@ def create_catalog_sku(conn,token,org,loc,key,row):
     digest=_digest(normalized)
     with conn.transaction():
         actor=_write_scope(conn,token,org,loc,"CREATE")
-        previous=_batch_replay(conn,key,actor,"CREATE",digest)
+        previous=_batch_replay(conn,key,actor,org,loc,"CREATE",digest)
         if previous:
             return previous
         if _sku_info(conn,org,loc,normalized["article"]) is not None:
@@ -281,7 +293,7 @@ def bulk_prices(conn,token,org,loc,key,entries):
     digest=_digest([{**x,"skuId":str(x["skuId"])} for x in ordered])
     with conn.transaction():
         actor=_write_scope(conn,token,org,loc,"EDIT")
-        old=_batch_replay(conn,key,actor,"MANUAL",digest)
+        old=_batch_replay(conn,key,actor,org,loc,"MANUAL",digest)
         if old:
             return old
         for row in ordered:
@@ -378,11 +390,13 @@ def catalog_preview(conn,token,org,loc,key,raw):
     with conn.transaction():
         actor=_write_scope(conn,token,org,loc,"CREATE")
         old=conn.execute("""SELECT id,source_sha256,staged_rows,snapshots,created_by,
-             expires_at FROM auto_catalog_import_preview WHERE request_key=%s""",
+             expires_at,organization_id,location_id
+             FROM auto_catalog_import_preview WHERE request_key=%s""",
              (key,)).fetchone()
         if old:
             if (old[1]!=digest or old[2]!=rows or old[4]!=actor or
-                old[5]<=datetime.now(timezone.utc)):
+                old[5]<=datetime.now(timezone.utc) or
+                old[6:]!=(org,loc)):
                 raise CatalogConflict("PREVIEW_REPLAY_MISMATCH")
             return {"previewId":str(old[0]),"sha256":digest,
                     "items":old[3],"replayed":True,"syntheticOnly":True}
@@ -404,11 +418,12 @@ def catalog_commit(conn,token,org,loc,key,preview_id,digest):
         raise CatalogInvalid("INVALID_INPUT")
     with conn.transaction():
         actor=_write_scope(conn,token,org,loc,"CREATE")
-        prior=conn.execute("""SELECT id,preview_id,source_sha256,created_by
+        prior=conn.execute("""SELECT id,preview_id,source_sha256,created_by,
+            organization_id,location_id
             FROM auto_catalog_import_commit WHERE request_key=%s""",
             (key,)).fetchone()
         if prior:
-            if prior[1:]!=(preview_id,digest,actor):
+            if prior[1:]!=(preview_id,digest,actor,org,loc):
                 raise CatalogConflict("REPLAY_MISMATCH")
             return {"commitId":str(prior[0]),"replayed":True,
                     "syntheticOnly":True}
@@ -483,7 +498,7 @@ def catalog_xlsx_export(conn,token,org,loc):
     with conn.transaction():
         cutoff,purchase,sale=_read_scope(conn,token,org,loc)
         # No partial export that silently leaks denied historical/price data.
-        if cutoff is not None or not purchase or not sale:
+        if cutoff is not None or sale_cutoff is not None or not purchase or not sale:
             raise CatalogDenied("EXPORT_NEEDS_FULL_PRICE_RIGHTS")
         rows=conn.execute("""SELECT s.article,p.category_code,p.uom,
                 p.barcode,p.brand,e.purchase_minor,e.sale_minor,
