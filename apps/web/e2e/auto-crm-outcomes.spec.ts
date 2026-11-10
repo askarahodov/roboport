@@ -42,6 +42,7 @@ test('CRM completed orders and SIM sums: responsive and explicit no-revenue cave
   const load=view.getByRole('button',{name:'Проверить техническую конверсию'});
   await expect(load).toBeDisabled();
   await scope(page);
+  await expect(load).toBeEnabled();
   await load.focus();
   await page.keyboard.press('Enter');
   const report=page.getByLabel('Результаты технической конверсии');
@@ -72,6 +73,7 @@ test('CRM outcomes deny on revoked scope, malformed totals and stale data',async
   await page.goto('/staff/auto-crm-outcomes');
   await scope(page);
   const load=page.getByRole('button',{name:'Проверить техническую конверсию'});
+  await expect(load).toBeEnabled();
   await load.click();
   await expect(page.getByLabel('Результаты технической конверсии')).toBeVisible();
   mode='bad';
@@ -99,7 +101,9 @@ test('CRM outcomes CSV export rechecks grants and clears report on 403',async({p
       body:denied?'{"code":"FORBIDDEN"}':'\ufeffИсточник;Записанных лидов\r\nСайт;2\r\n'}));
   await page.goto('/staff/auto-crm-outcomes');
   await scope(page);
-  await page.getByRole('button',{name:'Проверить техническую конверсию'}).click();
+  const button=page.getByRole('button',{name:'Проверить техническую конверсию'});
+  await expect(button).toBeEnabled();
+  await button.click();
   const report=page.getByLabel('Результаты технической конверсии');
   await expect(report).toBeVisible();
   const download=page.waitForEvent('download');
