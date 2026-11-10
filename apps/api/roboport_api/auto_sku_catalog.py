@@ -98,6 +98,16 @@ def _write_scope(conn,token,org,loc,cap):
     return actor
 
 
+def _require_catalog_edit(conn,token,org,loc):
+    # Import CREATE authority cannot bypass explicit EDIT deny when an
+    # existing SKU receives a new price version. Recheck before replays too.
+    try:
+        require_document_access(conn,token,org,loc,("WAREHOUSE",),
+                                "SUPPLIER_ORDER","EDIT")
+    except DocumentPolicyDenied:
+        raise CatalogDenied("FORBIDDEN") from None
+
+
 def _sku_info(conn,org,loc,article):
     row=conn.execute("""SELECT s.id,p.category_code,p.uom,p.barcode,p.brand,
         COALESCE((SELECT max(version) FROM auto_catalog_price_event
@@ -401,6 +411,8 @@ def catalog_preview(conn,token,org,loc,key,raw):
             return {"previewId":str(old[0]),"sha256":digest,
                     "items":old[3],"replayed":True,"syntheticOnly":True}
         snapshots=_prepare_snapshots(conn,org,loc,rows)
+        if any(item["skuId"] is not None for item in snapshots):
+            _require_catalog_edit(conn,token,org,loc)
         ident=uuid4()
         conn.execute("""INSERT INTO auto_catalog_import_preview(
             id,request_key,organization_id,location_id,source_sha256,
@@ -418,6 +430,15 @@ def catalog_commit(conn,token,org,loc,key,preview_id,digest):
         raise CatalogInvalid("INVALID_INPUT")
     with conn.transaction():
         actor=_write_scope(conn,token,org,loc,"CREATE")
+        # This must precede idempotent replay: an EDIT revoke also blocks
+        # already-committed XLSX price updates from being acknowledged.
+        referenced=conn.execute("""SELECT snapshots FROM auto_catalog_import_preview
+             WHERE id=%s AND organization_id=%s AND location_id=%s
+               AND created_by=%s FOR SHARE""",(preview_id,org,loc,actor)).fetchone()
+        if referenced is None:
+            raise CatalogDenied("FORBIDDEN")
+        if any(item["skuId"] is not None for item in referenced[0]):
+            _require_catalog_edit(conn,token,org,loc)
         prior=conn.execute("""SELECT id,preview_id,source_sha256,created_by,
             organization_id,location_id
             FROM auto_catalog_import_commit WHERE request_key=%s""",
@@ -507,6 +528,8 @@ def catalog_xlsx_export(conn,token,org,loc):
                   JOIN auto_stock_sku other ON other.id=
                      CASE WHEN a.left_sku_id=s.id THEN a.right_sku_id ELSE a.left_sku_id END
                   WHERE (a.left_sku_id=s.id OR a.right_sku_id=s.id)
+                    AND NOT EXISTS(SELECT 1 FROM auto_catalog_merge merged
+                                   WHERE merged.source_sku_id=other.id)
                   ORDER BY other.article LIMIT 1) AS analog
             FROM auto_stock_sku s
             JOIN auto_catalog_profile p ON p.sku_id=s.id
