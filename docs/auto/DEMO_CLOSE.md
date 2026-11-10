@@ -207,7 +207,7 @@ payload:
 `status`, `intakeAct`, `events`, `canReview`, `canClose` и
 `legalSignatureStatus=NOT_IMPLEMENTED`. Ответы `Cache-Control: no-store`.
 
-**PG17:** миграция `0118_auto_technical_document_lifecycle` создаёт
+**PG17:** миграция `0118_auto_document_lifecycle` создаёт
 `auto_order_demo_document_event` (append-only, один POST, один
 CLIENT_ACK/CLIENT_DISPUTE на WorkOrder, один CLOSE, уникальный requestKey).
 Триггер держит блокировку WorkOrder, независимо от API повторно сверяет
