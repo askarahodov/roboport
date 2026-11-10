@@ -26,7 +26,8 @@ def _valid_ids(*values: UUID) -> bool:
     return all(type(value) is UUID for value in values)
 
 
-def _role(conn, token: str, org: UUID, loc: UUID, role: str = "WAREHOUSE") -> UUID:
+def _role(conn, token: str, org: UUID, loc: UUID, role: str = "WAREHOUSE",
+          cap: str = "CREATE") -> UUID:
     if type(token) is not str or not token or not organization_role_allows(
             conn, token, org, role, loc, for_mutation=True):
         raise AutoStockDenied("FORBIDDEN")
@@ -34,7 +35,7 @@ def _role(conn, token: str, org: UUID, loc: UUID, role: str = "WAREHOUSE") -> UU
     if actor is None:
         raise AutoStockDenied("FORBIDDEN")
     try:
-        require_document_access(conn,token,org,loc,(role,),"SUPPLIER_ORDER","WRITE")
+        require_document_access(conn,token,org,loc,(role,),"SUPPLIER_ORDER",cap)
     except DocumentPolicyDenied:
         raise AutoStockDenied("FORBIDDEN") from None
     return actor
@@ -159,7 +160,7 @@ def record_supplier_delivery(conn: psycopg.Connection, token: str, org: UUID,
         supplier_reference!=supplier_reference.strip()):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        actor=_role(conn,token,org,loc)
+        actor=_role(conn,token,org,loc,cap="EDIT")
         row=conn.execute("""SELECT id,lot_id,ordered_quantity FROM auto_supplier_purchase_order
           WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
           (purchase,org,loc)).fetchone()
@@ -201,12 +202,7 @@ def cancel_supplier_remainder(conn: psycopg.Connection, token: str, org: UUID,
     if not _valid_ids(org,loc,purchase,request_id):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        actor=_role(conn,token,org,loc)
-        try:
-            require_document_access(conn,token,org,loc,("WAREHOUSE",),
-                                    "SUPPLIER_ORDER","CLOSE")
-        except DocumentPolicyDenied:
-            raise AutoStockDenied("FORBIDDEN") from None
+        actor=_role(conn,token,org,loc,cap="CLOSE")
         row=conn.execute("""SELECT id,ordered_quantity FROM auto_supplier_purchase_order
           WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
           (purchase,org,loc)).fetchone()
