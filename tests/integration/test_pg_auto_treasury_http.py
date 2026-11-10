@@ -64,6 +64,9 @@ def local_day(db,loc):
 
 def test_full_cashier_lifecycle_precise_amounts_report_replay_and_immutable(monkeypatch):
     d,org,loc,order,service,http,base,manager=prepare(monkeypatch)
+    # prepare() obtains manager CSRF headers but leaves its live cookie;
+    # explicitly clear before asserting anonymous access.
+    http.cookies.clear()
     assert http.get(base+"/accounts").status_code==403
     client=session(http,d,d["client_a"])
     assert http.get(base+"/accounts").status_code==403
