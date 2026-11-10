@@ -183,7 +183,7 @@ def test_analog_merge_history_and_active_stock_denied(monkeypatch):
                     uuid4(),1,quotes(db,UUID(source)),
                     "SYNTH-SUP-1","OFFLINE-1",
                 )
-         assert next(r for r in listed(http,d,org,loc).json()["items"]
+        assert next(r for r in listed(http,d,org,loc).json()["items"]
                     if r["skuId"]==source)["mergedInto"]==target
         # Two independent historical batches with different identifiers
         # must not be silently conflated, even with zero on-hand stock.
