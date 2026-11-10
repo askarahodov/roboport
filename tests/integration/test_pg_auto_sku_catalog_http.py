@@ -11,6 +11,9 @@ from test_pg_auto_bay_booking import _org_and_bay
 from test_pg_auto_stock_service import grant
 from test_pg_auto_stock_bin_lot import add_bin,add_lot
 from test_pg_baseline import DSN
+from test_pg_auto_work_order_stock import work_order
+from roboport_api.auto_work_order_return import return_work_order_stock
+from test_pg_auto_stock_ledger import balance
 
 
 def fixture(monkeypatch):
@@ -354,3 +357,67 @@ def test_export_after_merge_never_refers_to_retired_analog(monkeypatch):
             "/imports/preview?locationId="+str(loc),
             exported.content,xlsx=True)
         assert preview.status_code==201,preview.text
+
+
+def test_merge_refuses_outstanding_work_order_issue_then_allows_return(monkeypatch):
+    # Zero physical stock alone does NOT imply safe merge: an automobile
+    # WorkOrder can still return previously issued parts under the source SKU.
+    d, org, loc, _, _, _, _ = fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        source=create(http,d,org,loc,"SYNTH-447-ISSUED")
+        target=create(http,d,org,loc,"SYNTH-447-REPLACEMENT")
+        with psycopg.connect(DSN) as db:
+            bay=db.execute(
+                "SELECT id FROM auto_work_bay WHERE organization_id=%s AND location_id=%s",
+                (org,loc),
+            ).fetchone()[0]
+            order,_=work_order(db,d,org,loc,bay)
+            db.execute("SELECT record_auto_stock(%s,%s,'RECEIPT',2)",
+                       (UUID(source),uuid4()))
+            reserve=uuid4()
+            issued=uuid4()
+            db.execute(
+                "SELECT record_auto_work_order_stock(%s,%s,%s,'RESERVE',2)",
+                (order,UUID(source),reserve),
+            )
+            db.execute(
+                "SELECT record_auto_work_order_stock(%s,%s,%s,'ISSUE',2)",
+                (order,UUID(source),issued),
+            )
+            assert balance(db,UUID(source))==(0,0)
+            assert db.execute("""
+                SELECT SUM(CASE WHEN action='ISSUE' THEN quantity
+                                WHEN action='RETURN' THEN -quantity
+                                ELSE 0 END)
+                FROM auto_work_order_stock_event
+                WHERE work_order_id=%s AND sku_id=%s
+            """,(order,UUID(source))).fetchone()==(2,)
+
+        merge={"locationId":str(loc),"sourceSkuId":source,"targetSkuId":target}
+        denied=post(http,d,d["intake"],url(org)+"/merges",merge)
+        assert denied.status_code==409,denied.text
+        with psycopg.connect(DSN) as db:
+            # Inserting via a SQL owner cannot bypass the immutable
+            # DB guard either, even when on_hand and reserved are zero.
+            with pytest.raises(psycopg.errors.RaiseException):
+                with db.transaction():
+                    db.execute(
+                        "SELECT set_config('roboport.catalog_actor',%s,true)",
+                        (str(d["intake"]),),
+                    )
+                    db.execute("""
+                        INSERT INTO auto_catalog_merge(
+                            id,request_key,organization_id,location_id,
+                            source_sku_id,target_sku_id,created_by)
+                        VALUES(%s,%s,%s,%s,%s,%s,%s)
+                    """,(uuid4(),uuid4(),org,loc,UUID(source),
+                         UUID(target),d["intake"]))
+            returned=return_work_order_stock(
+                db,d["tokens"][d["intake"]],org,loc,order,
+                UUID(source),uuid4(),2,
+            )
+            assert returned is not None
+            assert balance(db,UUID(source))==(2,0)
+        # Returning after a denied merge succeeds with its ORIGINAL SKU.
+        # Physical stock now makes merging unsafe independently.
+        assert post(http,d,d["intake"],url(org)+"/merges",merge).status_code==409
