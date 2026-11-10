@@ -14,7 +14,7 @@ from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_org_staff import grant_staff, revoke_staff, list_staff, list_staff_audit, OrgStaffDenied, OrgStaffConflict
 
 from .auto_document_access import (
-    publish_policy,list_policies,DocumentPolicyDenied,
+    publish_policy,list_policies,preview_employee_document_access,DocumentPolicyDenied,
     DocumentPolicyInvalid,DocumentPolicyConflict,
 )
 
@@ -170,3 +170,25 @@ async def set_document_policy(org_id:str,request:Request):
     return JSONResponse(status_code=200 if result["replayed"] else 201,
                         content={"syntheticOnly":True,**result},
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/access-policies/effective")
+def get_effective_document_policy(org_id:str,request:Request,
+                                  locationId:str,userId:str,documentKind:str):
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc,user=UUID(org_id),UUID(locationId),UUID(userId)
+    except (TypeError,ValueError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            result=preview_employee_document_access(
+                db,request.cookies.get("rp_session",""),
+                org,loc,user,documentKind)
+        except DocumentPolicyInvalid:
+            return _response(request,422,"INVALID_INPUT")
+        except DocumentPolicyDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
