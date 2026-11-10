@@ -33,7 +33,8 @@ export default defineConfig({
         let relative: string;
         try { relative = decodeURIComponent(requestPath); }
         catch { res.statusCode = 400; res.end('Invalid docs URL'); return; }
-        relative = relative === '/' ? 'index.html' : relative.replace(/^\\/+/, '');
+        if (relative === '/') relative = 'index.html';
+        else while (relative.startsWith('/')) relative = relative.slice(1);
         const file = resolve(docsRoot, relative);
         const ext = extname(file).toLowerCase();
         try {
