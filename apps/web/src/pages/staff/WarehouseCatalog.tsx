@@ -68,6 +68,7 @@ export function WarehouseCatalog(){
     context.current={org:org.trim(),loc:loc.trim()};
     seq.current++;
     setRows([]);setCursor(null);setListStatus('');
+    setReading(false); // The old async read will not clear itself after seq invalidation.
     setPreview(null);setMessage('');setMergeConfirmed(false);
     setPending(null);
   },[org,loc]);
