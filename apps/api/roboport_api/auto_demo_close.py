@@ -119,7 +119,10 @@ def _state_snapshot(conn,order):
     }
     if doc:
         blockers=[]  # The sealed snapshot is immutable; its historical checks passed.
-    return {"syntheticOnly":True,"releaseAllowed":False,"legalGatePassed":False,
+    from .auto_document_lifecycle import _state as document_state
+    lifecycle=document_state(conn,order)
+    return {"documentWorkflow":lifecycle,
+            "syntheticOnly":True,"releaseAllowed":False,"legalGatePassed":False,
             "currency":"RUB","approvedRevisionId":approved["id"] if approved else None,
             "approvedVersion":approved["version"] if approved else None,
             "approvedBaseMinor":base_total,"approvedExtraMinor":extra_total,
