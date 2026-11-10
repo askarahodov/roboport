@@ -71,7 +71,7 @@ def upgrade():
     op.execute("""
       CREATE FUNCTION guard_auto_supplier_purchase_order()
       RETURNS trigger LANGUAGE plpgsql AS $fn$
-      DECLARE actor uuid; work record; stock record; quote jsonb; matching_count int;
+      DECLARE actor uuid; work record; sku_ok uuid; available_qty bigint; matching_count int;
       BEGIN
         actor:=NULLIF(current_setting('roboport.purchase_actor',true),'')::uuid;
         IF actor IS NULL OR NEW.created_by<>actor
@@ -94,7 +94,7 @@ def upgrade():
           IS DISTINCT FROM (NEW.organization_id,NEW.location_id) THEN
           RAISE EXCEPTION 'supplier order work order scope unavailable';
         END IF;
-        SELECT s.id INTO stock FROM auto_stock_sku s
+        SELECT s.id INTO sku_ok FROM auto_stock_sku s
           JOIN auto_stock_lot lot ON lot.sku_id=s.id
             AND lot.organization_id=s.organization_id
             AND lot.location_id=s.location_id
@@ -102,10 +102,10 @@ def upgrade():
             AND s.organization_id=NEW.organization_id
             AND s.location_id=NEW.location_id FOR SHARE OF lot;
         IF NOT FOUND THEN RAISE EXCEPTION 'supplier purchase lot scope mismatch'; END IF;
-        SELECT greatest(on_hand-reserved,0)::bigint INTO stock
+        SELECT greatest(on_hand-reserved,0)::bigint INTO available_qty
           FROM auto_stock_balance WHERE sku_id=NEW.sku_id;
-        IF NEW.available_at_order<>stock.id OR
-           NEW.ordered_quantity<>NEW.desired_quantity-stock.id OR
+        IF NEW.available_at_order<>available_qty OR
+           NEW.ordered_quantity<>NEW.desired_quantity-available_qty OR
            NEW.ordered_quantity<1 THEN
           RAISE EXCEPTION 'supplier order does not match current shortage';
         END IF;
