@@ -67,18 +67,18 @@ test('desktop full catalog → price → analog → logical merge → XLSX previ
   await expect(page.getByText('Операция записана в неизменяемый журнал.')).toBeVisible();
   await page.getByRole('textbox',{name:'Строки обновления цены'}).fill(a+';1;1280;2600');
   await page.getByRole('button',{name:'Сохранить пакет версий цен'}).click();
-  expect(posted.find(p=>p.path.endsWith('/prices'))?.body).toEqual({
+  await expect.poll(()=>posted.find(p=>p.path.endsWith('/prices'))?.body).toEqual({
     locationId:loc,entries:[{skuId:a,expectedVersion:1,
       purchaseMinor:1280,saleMinor:2600}]});
   await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
   await page.getByLabel('Исходный SKU').selectOption(a);
   await page.getByLabel('Целевой SKU').selectOption(b);
   await page.getByRole('button',{name:'Сохранить аналог (не OEM-подтверждение)'}).click();
-  expect(posted.find(p=>p.path.endsWith('/analogs'))?.body).toMatchObject({
+  await expect.poll(()=>posted.find(p=>p.path.endsWith('/analogs'))?.body).toMatchObject({
     locationId:loc,leftSkuId:a,rightSkuId:b});
   await page.getByLabel('Подтверждаю только логическое объединение').check();
   await page.getByRole('button',{name:'Объединить SKU с сохранением истории'}).click();
-  expect(posted.find(p=>p.path.endsWith('/merges'))?.body).toEqual({
+  await expect.poll(()=>posted.find(p=>p.path.endsWith('/merges'))?.body).toEqual({
     locationId:loc,sourceSkuId:a,targetSkuId:b});
   await page.locator('input[type=file]').setInputFiles({
     name:'synthetic.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -86,7 +86,7 @@ test('desktop full catalog → price → analog → logical merge → XLSX previ
   await page.getByRole('button',{name:'Проверить XLSX без записи в каталог'}).click();
   await expect(page.getByText('Предпросмотр: 2 строк')).toBeVisible();
   await page.getByRole('button',{name:'Подтвердить весь XLSX атомарно'}).click();
-  expect(posted.find(p=>p.path.endsWith('/commit'))?.body).toEqual({
+  await expect.poll(()=>posted.find(p=>p.path.endsWith('/commit'))?.body).toEqual({
     locationId:loc,previewId:preview,sha256:digest});
   expect(posted.map(p=>p.key).length).toBe(new Set(posted.map(p=>p.key)).size);
 });
