@@ -12,6 +12,7 @@ from .auto_work_order_additional import _state as _extra_state
 from .auto_org_authority import organization_role_allows
 from .auto_work_order_stock import mutate_work_order_stock
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
+from .auto_document_access import require_document_access,DocumentPolicyDenied
 
 
 class DemoCloseDenied(ValueError):
@@ -30,7 +31,11 @@ def _authority(conn, token, org, loc, order):
             or organization_role_allows(conn,token,org,"WAREHOUSE",loc,for_mutation=True)):
         try:
             _scope(conn,token,org,loc,order,("MANAGER","WAREHOUSE"))
-        except ExecutionDenied:
+            require_document_access(conn,token,org,loc,
+                                    ("MANAGER","WAREHOUSE"),"HANDOVER","READ",order=order)
+            require_document_access(conn,token,org,loc,
+                                    ("MANAGER","WAREHOUSE"),"HANDOVER","PRICE_SALES",order=order)
+        except (ExecutionDenied,DocumentPolicyDenied):
             raise DemoCloseDenied("FORBIDDEN") from None
         return
     try:
@@ -41,15 +46,23 @@ def _authority(conn, token, org, loc, order):
 
 def _manager(conn,token,org,loc,order):
     try:
-        return _scope(conn,token,org,loc,order,("MANAGER",))
-    except ExecutionDenied:
+        actor=_scope(conn,token,org,loc,order,("MANAGER",))
+        require_document_access(conn,token,org,loc,
+                                ("MANAGER",),"HANDOVER","WRITE",order=order)
+        require_document_access(conn,token,org,loc,
+                                ("MANAGER",),"HANDOVER","PRICE_SALES",order=order)
+        return actor
+    except (ExecutionDenied,DocumentPolicyDenied):
         raise DemoCloseDenied("FORBIDDEN") from None
 
 
 def _warehouse(conn,token,org,loc,order):
     try:
-        return _scope(conn,token,org,loc,order,("WAREHOUSE",))
-    except ExecutionDenied:
+        actor=_scope(conn,token,org,loc,order,("WAREHOUSE",))
+        require_document_access(conn,token,org,loc,
+                                ("WAREHOUSE",),"HANDOVER","WRITE",order=order)
+        return actor
+    except (ExecutionDenied,DocumentPolicyDenied):
         raise DemoCloseDenied("FORBIDDEN") from None
 
 
@@ -209,6 +222,11 @@ def seal_handover_preview(conn,token,org,loc,order,*,request_key):
         raise DemoCloseDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_manager(conn,token,org,loc,order)
+        try:
+            require_document_access(conn,token,org,loc,
+                                    ("MANAGER",),"HANDOVER","CLOSE",order=order)
+        except DocumentPolicyDenied:
+            raise DemoCloseDenied("FORBIDDEN") from None
         current=_state_snapshot(conn,order)
         found=conn.execute("""
           SELECT actor_id,request_key FROM auto_order_demo_handover_preview
