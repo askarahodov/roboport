@@ -94,7 +94,7 @@ test('full cashier workstation, exact lost POST retry and day close 390/1280 dar
   await page.getByRole('textbox',{name:'UUID заказ-наряда'}).fill(order);
   await expect(page.getByRole('heading',{name:'Создать тестовую кассу / счёт (MANAGER)'})).toBeVisible();
   await page.getByRole('button',{name:'Создать тестовый счёт'}).click();
-  await expect(page.getByText('CASH-01 · Тестовая касса',{exact:false})).toBeVisible();
+  await expect(page.getByRole('listitem').getByText('CASH-01 · Тестовая касса',{exact:false})).toBeVisible();
   await page.getByRole('combobox',{name:'Счёт для операций'}).selectOption(account);
   await page.getByRole('spinbutton',{name:'Сумма, коп.'}).fill('1200');
   await page.getByRole('button',{name:'Записать движение (не реальные деньги)'}).click();
@@ -148,5 +148,5 @@ test('revocation and cross-scope 403 clear prices and events',async({page})=>{
   await page.getByRole('button',{name:'Обновить журнал'}).click();
   await expect(page.getByRole('alert')).toContainText('доступ запрещён');
   await expect(page.getByText('Незачтённый аванс:',{exact:false})).toHaveCount(0);
-  await expect(page.getByText('CASH-01 · Тестовая касса',{exact:false})).toHaveCount(0);
+  await expect(page.getByRole('listitem').getByText('CASH-01 · Тестовая касса',{exact:false})).toHaveCount(0);
 });
