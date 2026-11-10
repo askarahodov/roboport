@@ -154,9 +154,12 @@ def revoke_offer(conn,token,org,loc,offer_id,key):
     """Immutable MANAGER withdrawal. Never edits existing requests/receipts."""
     _id(org,loc,offer_id,key)
     with conn.transaction():
-        actor=_staff(conn,token,org,loc,("MANAGER",))
+        # Lock in the same order as anonymous submit: offer advisory first,
+        # then live MANAGER scope, then offer row. Avoid org SHARE -> UPDATE
+        # upgrade deadlocks against the anonymous organization quota lock.
         conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,9099))",
                      (str(offer_id),))
+        actor=_staff(conn,token,org,loc,("MANAGER",))
         row=conn.execute("""
             SELECT organization_id,location_id FROM auto_public_booking_offer
             WHERE id=%s FOR UPDATE
