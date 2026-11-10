@@ -47,15 +47,19 @@ def publish_policy(conn,token,org,*,request_key,role,loc,user,
                    document,cap,allowed,not_before):
     _valid_policy(org,role,loc,user,document,cap,allowed,not_before,request_key)
     with conn.transaction():
+        # Acquire the exclusive org lock FIRST, before _admin() acquires
+        # FOR SHARE of the same org. SHARE -> UPDATE lock promotion by two
+        # concurrent admins creates a PostgreSQL upgrade deadlock.
+        # All scoped document readers take FOR SHARE and must complete
+        # before this policy change can commit.
+        org_row=conn.execute("""SELECT id FROM auto_organization
+                        WHERE id=%s AND disabled_at IS NULL FOR UPDATE""",(org,)).fetchone()
+        if org_row is None:
+            raise DocumentPolicyDenied("FORBIDDEN")
         try:
             actor=_admin(conn,token,org)
         except OrgStaffDenied:
             raise DocumentPolicyDenied("FORBIDDEN") from None
-        # Hold exclusive organization lock until commit; all scoped readers
-        # hold a shared lock. No in-flight forbidden request can race through
-        # after an ADMIN restriction commits.
-        conn.execute("""SELECT id FROM auto_organization
-                        WHERE id=%s AND disabled_at IS NULL FOR UPDATE""",(org,))
         existing=conn.execute("""
             SELECT organization_id,location_id,role_code,user_id,
                    document_kind,capability,allowed,not_before,actor_id
