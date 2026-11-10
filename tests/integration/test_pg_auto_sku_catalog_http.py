@@ -171,6 +171,18 @@ def test_analog_merge_history_and_active_stock_denied(monkeypatch):
                 (source_lot,)).fetchone()==(UUID(source),)
             assert db.execute("SELECT sku_id FROM auto_catalog_price_event WHERE sku_id=%s",
                 (UUID(source),)).fetchone()==(UUID(source),)
+            # A purchase created only after logical merge would later leave
+            # a supplier delivery unpostable. The new order guard refuses it.
+            bay=db.execute("SELECT id FROM auto_work_bay WHERE organization_id=%s AND location_id=%s",
+                           (org,loc)).fetchone()[0]
+            order,_=work_order(db,d,org,loc,bay)
+            with pytest.raises(Exception) as blocked_purchase:
+                place_supplier_order(
+                    db,d["tokens"][d["intake"]],org,loc,order,source_lot,
+                    uuid4(),1,quotes(db,UUID(source)),
+                    "SYNTH-SUP-1","OFFLINE-1",
+                )
+            assert "CONFLICT" in str(blocked_purchase.value)
         assert next(r for r in listed(http,d,org,loc).json()["items"]
                     if r["skuId"]==source)["mergedInto"]==target
         # Two independent historical batches with different identifiers
