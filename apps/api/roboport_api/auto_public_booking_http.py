@@ -15,7 +15,7 @@ from pydantic import BaseModel,Field,ConfigDict,ValidationError,StrictBool
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auth_http import _mutation_ok
 from .auto_public_booking import (
-    list_offers,publish_offer,slot_candidates,challenge,submit_request,status,
+    list_offers,publish_offer,revoke_offer,slot_candidates,challenge,submit_request,status,
     claim_request,withdraw_marketing,staff_queue,fulfill_request,
     PublicBookingDenied,PublicBookingInvalid,PublicBookingConflict,
 )
@@ -73,6 +73,10 @@ class WithdrawBody(ReceiptBody):
 
 
 class FulfillBody(SafeBody):
+    requestKey:UUID
+
+
+class RevokeBody(SafeBody):
     requestKey:UUID
 
 
@@ -328,6 +332,28 @@ async def staff_fulfill(org_id:str,loc_id:str,request_id:str,request:Request):
         try:
             result=fulfill_request(db,request.cookies.get("rp_session",""),
                   org,loc,ident,body.requestKey)
+        except (PublicBookingDenied,PublicBookingInvalid,PublicBookingConflict) as exc:
+            return _error(request,exc)
+    return _json(result,200 if result["replayed"] else 201)
+
+
+@router.post(STAFF+"/offers/{offer_id}/revoke")
+async def staff_revoke(org_id:str,loc_id:str,offer_id:str,request:Request):
+    scoped=_scope(request,org_id,loc_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,org,loc=scoped
+    try:
+        ident=UUID(offer_id)
+        body=await _read_body(request,RevokeBody)
+    except (ValueError,PublicBookingInvalid):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            result=revoke_offer(db,request.cookies.get("rp_session",""),
+                                org,loc,ident,body.requestKey)
         except (PublicBookingDenied,PublicBookingInvalid,PublicBookingConflict) as exc:
             return _error(request,exc)
     return _json(result,200 if result["replayed"] else 201)
