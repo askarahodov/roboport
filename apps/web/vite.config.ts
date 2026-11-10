@@ -17,7 +17,6 @@ const ssl = secureLocal ? {
 // publishing: /docs/ is deliberately unavailable from Vite's static build.
 // Limit the middleware to versioned public documentation assets and reject
 // traversal/symlink escapes instead of letting SPA fallback spoof a 200.
-const docsRoot = realpathSync(resolve('../../docs'));
 const docsMime: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml',
@@ -28,6 +27,7 @@ export default defineConfig({
   plugins: [{
     name: 'local-dev-docsify-help',
     configureServer(server) {
+      const docsRoot = realpathSync(resolve('../../docs'));
       server.middlewares.use('/docs', (req, res) => {
         const requestPath = ((req as unknown as { url?: string }).url || '/').split('?', 1)[0];
         let relative: string;
