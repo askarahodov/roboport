@@ -36,7 +36,7 @@
 | [Администратор](administrator.md) | Журнал полномочий | `/staff/auto-admin` | Реальный bootstrap организаций, пользовательский onboarding |
 | [Мастер-приёмщик](intake.md) | Подтверждение клиент–авто | `/staff`, `/staff/auto-calendar`, `/staff/auto-order-services`, `/staff/auto-workshop-qc` | Подпись клиента/юридический приёмочный акт |
 | [Механик](mechanic.md) | Выполнение согласованных работ | `/staff/auto-execution`, `/staff/auto-workshop-qc` | Самостоятельное согласование сметы, QC собственных работ |
-| [Кладовщик](warehouse.md) | Проверка партии и резерва | `/staff/warehouse-stocktake`, `/staff/warehouse-receiving`, `/staff/warehouse-work-orders`, `/staff/auto-execution`, `/staff/auto-demo-close` | Закупки и отгрузка реальных товаров |
+| [Кладовщик](warehouse.md) | Проверка партии и резерва | `/staff/warehouse-stocktake`, `/staff/warehouse-receiving`, `/staff/warehouse-supplier-orders`, `/staff/warehouse-work-orders`, `/staff/auto-execution`, `/staff/auto-demo-close` | Закупки и отгрузка реальных товаров |
 | [Руководитель](manager.md) | Сметы и разделение обязанностей | `/staff/auto-estimates`, `/staff/auto-execution`, `/staff/auto-demo-close` | Реальные кассы, отчёты о прибыли, выдача |
 | [Бухгалтер/кассир](finance.md) | Различие учёта и симуляции | Отдельной кассовой роли и страницы **нет** | Платежи, возврат денег, 54-ФЗ, юридические акты |
 | [Клиент](client.md) | Свои автомобили, запись и история | `/account/vehicles`, `/account/auto-booking`, `/account/auto-orders` | Production-запись, реальные документы, оплата, фактическая выдача |
