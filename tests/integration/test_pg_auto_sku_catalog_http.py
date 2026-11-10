@@ -140,6 +140,15 @@ def test_analog_merge_history_and_active_stock_denied(monkeypatch):
                "skuId":source,"expectedVersion":1,
                "purchaseMinor":1500,"saleMinor":3000}]}).status_code in (403,409)
         with psycopg.connect(DSN) as db:
+            # Merged SKU cannot quietly acquire physical stock afterward,
+            # even through a lower-level stock API bypassing catalog HTTP.
+            with pytest.raises(psycopg.errors.RaiseException):
+                with db.transaction():
+                    db.execute("SELECT record_auto_stock(%s,%s,'RECEIPT',1)",
+                               (UUID(source),uuid4()))
+            with pytest.raises(psycopg.errors.RaiseException):
+                with db.transaction():
+                    add_lot(db,org,loc,UUID(source),add_bin(db,org,loc))
             assert db.execute("SELECT sku_id FROM auto_stock_lot WHERE id=%s",
                 (source_lot,)).fetchone()==(UUID(source),)
             assert db.execute("SELECT sku_id FROM auto_catalog_price_event WHERE sku_id=%s",
