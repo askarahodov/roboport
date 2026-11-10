@@ -217,3 +217,60 @@ def test_price_batch_lock_serialize_competing_versions(monkeypatch):
             bulk_prices(second,d["tokens"][d["intake"]],org,loc,uuid4(),[line])
         assert second.execute("SELECT max(version) FROM auto_catalog_price_event WHERE sku_id=%s",
                               (UUID(item),)).fetchone()==(2,)
+
+
+def test_catalog_replay_is_scoped_to_original_tenant_branch(monkeypatch):
+    d,org,loc,foreign,foreign_loc,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        body={"locationId":str(loc),**{
+          k:v for k,v in row("SYNTH-447-SCOPED").items() if k!="analogArticle"}}
+        key=uuid4()
+        assert post(http,d,d["intake"],url(org)+"/skus",body,key).status_code==201
+        workbook=export_catalog_xlsx([row("SYNTH-447-SCOPED",1400,2500)])
+        preview_key=uuid4()
+        p=post(http,d,d["intake"],url(org)+"/imports/preview?locationId="+str(loc),
+               workbook,preview_key,xlsx=True)
+        assert p.status_code==201,p.text
+        proof=p.json()
+        commit_key=uuid4()
+        committed={"locationId":str(loc),"previewId":proof["previewId"],
+                   "sha256":proof["sha256"]}
+        assert post(http,d,d["intake"],url(org)+"/imports/commit",
+                    committed,commit_key).status_code==201
+        with psycopg.connect(DSN) as db:
+            grant(db,d["intake"],foreign,foreign_loc,"WAREHOUSE")
+            grant(db,d["intake"],foreign,foreign_loc,"MANAGER")
+        # Same actor, same payload/digest and same UUID replay key are still
+        # NOT permission to return another branch's catalog receipts.
+        assert post(http,d,d["intake"],url(foreign)+"/skus",
+                    {**body,"locationId":str(foreign_loc)},key).status_code==409
+        assert post(http,d,d["intake"],url(foreign)+
+            "/imports/preview?locationId="+str(foreign_loc),
+            workbook,preview_key,xlsx=True).status_code==409
+        assert post(http,d,d["intake"],url(foreign)+"/imports/commit",
+            {**committed,"locationId":str(foreign_loc)},commit_key).status_code==409
+        assert listed(http,d,foreign,foreign_loc).json()["items"]==[]
+
+
+def test_estimate_read_history_cutoff_masks_old_sales_price_and_export(monkeypatch):
+    from datetime import datetime,timezone
+    from roboport_api.auto_document_access import publish_policy
+    from test_pg_auto_document_access_http import admin
+    d,org,loc,_,_,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        item=create(http,d,org,loc,"SYNTH-447-CUTOFF")
+        before=listed(http,d,org,loc).json()["items"][0]
+        assert before["saleMinor"]==2300 and before["purchaseMinor"]==1250
+        with psycopg.connect(DSN) as db:
+            admin(db,org,d["manager"])
+            publish_policy(db,d["tokens"][d["manager"]],org,
+               request_key=uuid4(),role="MANAGER",loc=loc,
+               user=d["intake"],document="ESTIMATE",cap="READ",
+               allowed=True,not_before=datetime(2099,1,1,tzinfo=timezone.utc))
+        after=listed(http,d,org,loc).json()["items"][0]
+        assert after["skuId"]==item
+        assert after["purchaseMinor"]==1250
+        assert after["saleMinor"] is None and after["saleHidden"] is True
+        http.cookies.set("rp_session",d["tokens"][d["intake"]])
+        assert http.get(url(org)+"/export",
+             params={"locationId":str(loc)}).status_code==403
