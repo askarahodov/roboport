@@ -13,9 +13,11 @@
 UUID организации, затем **«Показать ограничения документов»**.
 Форма **«Новая версия правила»** позволяет задать:
 
-- **Роль политики:** `MANAGER`, `INTAKE`, `MECHANIC`, `WAREHOUSE`.
+- **Роль политики:** `MANAGER`, `INTAKE`, `MECHANIC`, `WAREHOUSE`, `CASHIER`.
 - **Документ политики:** `INTAKE_ACT`, `ESTIMATE`, `HANDOVER`,
-  `SUPPLIER_ORDER`. `HANDOVER` означает только синтетический пакет,
+  `SUPPLIER_ORDER`, `FINANCE`. `FINANCE` охватывает **только**
+  синтетический финансовый журнал, кассы, авансы, возвраты и ДДС; это
+  не юридическая первичка и не право на настоящие платежи. `HANDOVER` означает только синтетический пакет,
   условную сверку и техническое закрытие, не реальную выдачу.
 - **Действие:** `READ`, `CREATE`, `EDIT`, `CLOSE`, `WRITE` (запрет
   всех изменений), `PRICE_SALES`, `PRICE_PURCHASE`, `DISCOUNT`.
@@ -54,7 +56,11 @@ UUID организации, затем **«Показать ограничен�
 | Акт приёмки `INTAKE_ACT` | Staff `READ` проверяет актуальный WorkOrder + порог истории. CLIENT прежнего владельца работает только через собственную customer ACL, без staff-rule | INTAKE `CREATE`, новые immutable версии; изменение существующей версии не существует |
 | Смета `ESTIMATE` | Staff MANAGER `READ` + `PRICE_SALES`; при deny возвращается 403, **никакая сумма не утечёт**. CLIENT собственной сметы продолжает читать её | MANAGER `CREATE` для версии, `EDIT` для ответа на уточнение, `DISCOUNT` обязательно для ненулевого `discountBps`; действует общий `WRITE` deny |
 | Технический пакет `HANDOVER` | MANAGER/WAREHOUSE `READ` + `PRICE_SALES`, обычный клиент только по подтверждённому исходному заказу | MANAGER `CREATE` — условное движение и технический POSTED; WAREHOUSE `EDIT` — освободить резерв; MANAGER `CLOSE` — seal-preview и `CLOSED_TECHNICAL`; `WRITE` deny блокирует все три |
-| Заказ поставщику `SUPPLIER_ORDER` | WAREHOUSE/MANAGER `READ`, сервер фильтрует историю; при `PRICE_PURCHASE=DENY` отдаёт `purchaseUnitMinor:null`, `purchasePriceHidden:true` (UI показывает «скрыта настройкой доступа») | WAREHOUSE `CREATE` требует `PRICE_PURCHASE` для выбора предложения; `EDIT` — частичный приход; `CLOSE` — отменить непоставленный остаток; `WRITE` deny распространяется на все операции |
+| Заказ поставщику `SUPPLIER_ORDER` | WAREHOUSE/MANAGER `READ`, сервер фильтрует историю; при `PRICE_PURCHASE=DENY` отдаёт `purchaseUnitMinor:null`, `purchasePriceHidden:true` (UI показывает «скрыта настройкой доступа»). Менеджерская очередь прихода/оценки полностью запрещена при price deny или историческом cutoff: в ней есть supplier quote | WAREHOUSE `CREATE` требует `PRICE_PURCHASE` для выбора предложения; `EDIT` — частичный приход; `CLOSE` — отменить непоставленный остаток; менеджерский `record_receipt_valuation` требует `PRICE_PURCHASE`; `WRITE` deny распространяется на операции заказа |
+
+| Финансовый документ `FINANCE` | MANAGER/CASHIER `READ` и `PRICE_SALES`; защищены `financial-balance/history`, менеджерский `demo-finance-report`, все кассовые accounts/orders/report и CSV/привязанные суммы, а также ответ после повтора операции. Исторический cutoff проверяется на WorkOrder, общие филиальные отчёты с нефильтруемой историей блокируются | MANAGER `CREATE` — открыть синтетическую кассу, `EDIT` — корректировка `CHARGE/CREDIT`; CASHIER `EDIT` — аванс/платёж/возврат, `CLOSE` — закрытие дня. Во всех случаях чтение и цены необходимы отдельно; `WRITE=DENY` сильнее личного `EDIT=ALLOW` |
+
+**Дополнительные пути цен основной сметы:** допработы ЗН (`/extras`) используют `ESTIMATE READ/PRICE_SALES`, `CREATE` для новой версии и `DISCOUNT` при ненулевой скидке; WAREHOUSE/MECHANIC не получают продажные суммы из `/execution` (значения `approvedTotalMinor`/`approvedExtraTotalMinor` становятся `null`), даже при успешной работе/QC. Каталог комплексов `/work-complexes` и тарифы `/tariff-policies` также требуют `ESTIMATE PRICE_SALES`, каталог не показывает исторические тарифы/цены при применимом cutoff; запись/выбор комплексов и новые тарифы дополнительно проверяют `CREATE`/`EDIT` и `DISCOUNT` где применимо. Для получения цен сотрудником обязателен live MANAGER, отдельно от обычного права видеть объём работы.
 
 **Fail-closed:** приложению нельзя использовать `ALLOW` как выдачу новой роли
 или новой предметной области. В проверках удерживаются совместимые
@@ -110,8 +116,9 @@ production OpenAPI.
 - Сервис `auto_document_access.py` повторно вычисляет разрешения
   перед чтением/записью существующих документов. Разрешение как
   отсутствие специального DENY **не заменяет** проверку бизнеса.
+- Миграция `0122_auto_financial_document_acl` (после `0121_auto_public_booking`) расширяет неизменяемую таблицу проверяемыми enum-check на `FINANCE`/`CASHIER`. Откат до `0121` разрешён **только если не было ни одного** финансового ACL события: иначе БД откажет, чтобы не уничтожить аудит. Реальных банковских таблиц/проводок/сессий миграция не создаёт.
 - Интеграционный PG17/HTTPS тест
-  `tests/integration/test_pg_auto_document_access_http.py`:
+  `tests/integration/test_pg_auto_document_access_http.py` и `tests/integration/test_pg_auto_document_acl_completion.py`:
   пересечение шаблона/исключения, разные роли/филиалы, ненулевые скидки,
   сокрытие закупочной цены и коммерческой сметы, ограничения истории,
   replay/409/403/422, отзыв grant и конкуренция с ADMIN-публикацией.
@@ -120,16 +127,13 @@ production OpenAPI.
   ответа/точный повтор, 403 и скрытие прежних данных. Скриншоты
   остаются **кандидатами** для review #92, не approved golden baselines.
 
-**Rollback:** только на disposable synthetic PG17:
-`alembic downgrade 0118_auto_document_lifecycle` удалит журнал
-ограничений. Нельзя применять на производственной БД или удалять
+**Rollback:** только на disposable synthetic PG17 без записей нового типа:
+`alembic downgrade 0121_auto_public_booking` вернёт прежний набор типов без удаления журнала; если есть `FINANCE`/`CASHIER` события, migration **намеренно остановится**. 
+`alembic downgrade 0118_auto_document_lifecycle` удалит весь журнал
+ограничений и не является безопасным production rollback. Нельзя применять на производственной БД или удалять
 действующий аудит. Базовая роль ADMIN по-прежнему создаётся только
 в доверенном offline synthetic bootstrap; настоящая identity,
 GDPR/PII, право реальных финансовых операций, независимые QA,
 security и legal signoff и production release #119 остаются blocked.
 
-**Границы:** эта вертикаль защищает перечисленные staff-пути, но
-**не объявляет** универсальную готовность ACL во всех складских,
-CRM, user management и налоговых API; полная инвентаризация
-потребителей чувствительных закупочных цен/документов нужна для
-закрытия общего #446 и релизного #119.
+**Границы:** инвентаризация показателей на текущих dev API закрывает документные и ценовые пути: базовый акт, смету, допработы, тарифы, комплексы, техпакет, закупку, очередь прихода/оценку и финансовые журналы/кассы. Quantity-only склад, записи и CRM не получают разрешений на цены через эту политику. Это **не универсальная production IAM** для всех будущих API, не legal approval и не основание закрывать #119. Любой новый денежный/первичный API обязан встроить live-document ACL и отдельный regression test до релиза.
