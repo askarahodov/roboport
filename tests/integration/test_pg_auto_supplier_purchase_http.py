@@ -69,12 +69,34 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
             f"/api/v1/dev/auto/organizations/{org}/warehouse/receipts/accept",
             {"locationId":str(loc),"documentId":created.json()["documentId"]})
         assert acceptance.status_code==201,acceptance.text
+        # Manager receives *exact* immutable quote provenance in the existing
+        # scoped valuation queue; the UI should not guess the source timestamp.
+        http.cookies.set("rp_session",d["tokens"][d["manager"]])
+        pending=http.get(
+            f"/api/v1/dev/auto/organizations/{org}/warehouse/receipts/pending",
+            params={"locationId":str(loc),"stage":"value"})
+        assert pending.status_code==200,pending.text
+        source=next(row["purchaseQuote"] for row in pending.json()["items"]
+                    if row["documentId"]==created.json()["documentId"])
+        assert source["orderId"]==ident
+        assert source["supplierId"]=="SYNTH-SUP-1"
+        assert source["currency"]=="RUB" and source["unitNetMinor"]==1200
+        assert source["supplierPriceRevision"]==offers[0]["source_revision"]
+        assert source["supplierQuotedAt"].replace("Z","+00:00")==offers[0]["quoted_at"]
+        wrong=post(http,d,d["manager"],
+            f"/api/v1/dev/auto/organizations/{org}/warehouse/receipts/valuation",
+            {"locationId":str(loc),"documentId":created.json()["documentId"],
+             "currency":"RUB","unitNetMinor":1201,"vatTotalMinor":240,
+             "supplierPriceRevision":source["supplierPriceRevision"],
+             "supplierQuotedAt":source["supplierQuotedAt"]})
+        assert wrong.status_code==409,wrong.text
         valuation=post(http,d,d["manager"],
             f"/api/v1/dev/auto/organizations/{org}/warehouse/receipts/valuation",
             {"locationId":str(loc),"documentId":created.json()["documentId"],
-             "currency":"RUB","unitNetMinor":1200,"vatTotalMinor":240,
-             "supplierPriceRevision":offers[0]["source_revision"],
-             "supplierQuotedAt":offers[0]["quoted_at"]})
+             "currency":source["currency"],"unitNetMinor":source["unitNetMinor"],
+             "vatTotalMinor":240,
+             "supplierPriceRevision":source["supplierPriceRevision"],
+             "supplierQuotedAt":source["supplierQuotedAt"]})
         assert valuation.status_code==201,valuation.text
         second=post(http,d,d["intake"],receipt_url,
               {"locationId":str(loc),"quantity":1,"supplierReference":"SUPPLIER-DELIVERY-002"})
