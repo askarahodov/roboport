@@ -54,7 +54,7 @@ test('пользовательские разделы явно разделяю�
         ['administrator','mechanic'].includes(path) ? 'Статус: частично current-dev'
           : ['client', 'intake', 'manager'].includes(path)
             ? 'Статус: частично current в синтетическом dev'
-            : 'Статус: planned',
+            : path === 'finance' ? 'Статус: частично current-dev' : 'Статус: planned',
       );
     }
     await expect(page.locator('.markdown-section')).not.toContainText(
