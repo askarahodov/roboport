@@ -88,6 +88,8 @@ def crm_outcomes(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
         min_order_created = max(cutoffs) if cutoffs else None
 
         # The live verified link and branch are checked BEFORE aggregation.
+        # Resolve the latest appointment booking after any reschedule: the
+        # original a.booking_id remains immutable, but is canceled by move.
         # One appointment may be claimed by multiple leads, or multiple
         # WorkOrders: such ambiguous attribution must NEVER allocate money.
         # CASH_SIM / BANK_SIM events are not real revenue or posted money.
@@ -133,8 +135,19 @@ def crm_outcomes(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
              AND a.organization_id=cohort.organization_id
              AND a.location_id=cohort.location_id
              AND a.customer_link_id=cohort.customer_link_id
+            LEFT JOIN LATERAL (
+              SELECT COALESCE((
+                SELECT reschedule.new_booking_id
+                FROM auto_appointment_reschedule reschedule
+                WHERE reschedule.appointment_id=a.id
+                ORDER BY reschedule.created_at DESC,reschedule.id DESC LIMIT 1
+              ),a.booking_id) AS current_id
+            ) current_booking ON a.id IS NOT NULL
             LEFT JOIN auto_bay_booking booking
-              ON booking.id=a.booking_id AND booking.canceled_at IS NULL
+              ON booking.id=current_booking.current_id
+             AND booking.organization_id=cohort.organization_id
+             AND booking.location_id=cohort.location_id
+             AND booking.canceled_at IS NULL
             LEFT JOIN auto_work_order w
               ON w.appointment_id=a.id
              AND booking.id IS NOT NULL
