@@ -408,6 +408,8 @@ def catalog_preview(conn,token,org,loc,key,raw):
                 old[5]<=datetime.now(timezone.utc) or
                 old[6:]!=(org,loc)):
                 raise CatalogConflict("PREVIEW_REPLAY_MISMATCH")
+            if any(item["skuId"] is not None for item in old[3]):
+                _require_catalog_edit(conn,token,org,loc)
             return {"previewId":str(old[0]),"sha256":digest,
                     "items":old[3],"replayed":True,"syntheticOnly":True}
         snapshots=_prepare_snapshots(conn,org,loc,rows)
