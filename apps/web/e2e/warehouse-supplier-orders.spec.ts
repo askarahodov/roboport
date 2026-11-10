@@ -80,7 +80,7 @@ test('compare two quotes → buy shortage → partial delivery → cancel only o
   await page.getByRole('button',{name:'Выбрать заказ '+purchase}).click();
   await page.getByLabel('Количество текущей поставки').fill('2');
   await page.getByRole('button',{name:'Принять частичную поставку в черновик'}).click();
-  await expect(page.getByRole('status')).toContainText('Менеджер отдельно подтвердит');
+  await expect(page.getByRole('status')).toContainText('Другой MANAGER отдельно подтвердит');
   expect(changes[1].url).toBe(urlPart+'/'+purchase+'/receipts');
   expect(changes[1].body).toEqual({
     locationId:loc,quantity:2,supplierReference:'SYNTH-DELIVERY-1',
