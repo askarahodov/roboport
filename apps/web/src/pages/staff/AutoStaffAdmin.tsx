@@ -268,7 +268,7 @@ export function AutoStaffAdmin() {
       }}>
         <h2>Назначить сотрудника</h2>
         <label>UUID пользователя <input required value={user} onChange={e => setUser(e.target.value)} /></label>
-        <label>Роль <select value={role} onChange={e => setRole(e.target.value as typeof roles[number])}>
+        <label>Роль <select value={role} onChange={e => setRole(e.target.value as typeof staffRoles[number])}>
           {staffRoles.map(r => <option key={r} value={r}>{r}</option>)}</select></label>
         <label>UUID филиала (необязательно) <input value={location} onChange={e => setLocation(e.target.value)} /></label>
         <button disabled={busy || !uuid.test(user.trim()) || !!location.trim() && !uuid.test(location.trim())} type="submit">
