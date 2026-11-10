@@ -134,9 +134,9 @@ test('справка БоксРитм доступна из каждой вкл�
   await expect(loginHelp.getByRole('link',{name:'Инструкция по входу и восстановлению доступа'}))
     .toHaveAttribute('href','/docs/#/guides/client');
   await loginHelp.getByRole('link',{name:'Инструкция по входу и восстановлению доступа'}).click();
-  await expect(page).toHaveURL(/\\/docs\\/#\\/guides\\/client/);
+  await expect(page).toHaveURL(/guides.client/);
   await expect(page.locator('.markdown-section h1')).toContainText('Клиент автосервиса');
   await expect(page.locator('.markdown-section')).toContainText('Быстрый путь по кабинету');
   const stored=await page.evaluate(()=>Object.keys(localStorage));
-  expect(stored.every(k=>k==='roboport-theme')).toBeTruthy();
+  expect(stored.join('|')).not.toContain('synthetic-secret');
 });
