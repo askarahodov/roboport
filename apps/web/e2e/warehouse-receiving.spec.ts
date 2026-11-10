@@ -253,3 +253,37 @@ test('manager picks exact immutable purchase quote from pending valuation and ke
     supplierQuotedAt:quotedAt}]);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+
+test('revoked manager receipt access clears previously displayed immutable supplier quote',async({page})=>{
+  let denied=false;
+  const quotedAt='2026-11-10T06:00:00.123+00:00';
+  await page.route('**/warehouse/receipts/pending?*',route=>{
+    const stage=new URL(route.request().url()).searchParams.get('stage');
+    return route.fulfill(denied?{status:403,contentType:'application/json',
+      body:'{"code":"FORBIDDEN"}'}:{
+      status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,stage,nextDocumentId:null,
+        items:stage==='value'?[{documentId:receipt,lotId:lot,article:'SYN-120',
+          batchCode:'LOT-A',binCode:'BIN-1',quantity:2,sourceReference:'SUP-9',
+          purchaseQuote:{orderId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            supplierId:'SYNTH-SUP-1',offerId:'OFFLINE-1',currency:'RUB',
+            unitNetMinor:1250,supplierPriceRevision:'SECRET-SYNTH-REV',
+            supplierQuotedAt:quotedAt}}]:[]})});
+  });
+  await page.goto('/staff/warehouse-receiving');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const queue=page.getByLabel('Принятые документы без оценки');
+  const load=queue.getByRole('button',{name:'Показать документы без оценки'});
+  await load.click();
+  await queue.getByRole('button',{name:'Выбрать для оценки '+receipt}).click();
+  await expect(page.getByRole('textbox',{name:'Ревизия цены поставщика'})).toHaveValue('SECRET-SYNTH-REV');
+  denied=true;
+  await load.click();
+  await expect(queue.getByRole('alert')).toContainText('Нет доступа');
+  await expect(queue).not.toContainText('SECRET-SYNTH-REV');
+  await expect(page.getByRole('textbox',{name:'Ревизия цены поставщика'})).toHaveValue('');
+  await expect(page.getByRole('spinbutton',{name:'Закупочная цена за единицу'})).toHaveValue('0');
+  await expect(page.getByRole('status').filter({hasText:'Цена и время котировки'})).toHaveCount(0);
+});
