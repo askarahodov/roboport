@@ -23,6 +23,7 @@
   - [Версии и согласование автомобильной сметы](/auto/ESTIMATES.md)
   - [Работы, детали и независимый QC](/auto/EXECUTION.md)
   - [Заказ поставщику и частичные поставки (dev)](/auto/SUPPLIER_PURCHASES.md)
+  - [Номенклатура, версии цен и XLSX (dev)](/auto/SKU_CATALOG.md)
   - [Условная сверка и пакет перед выдачей](/auto/DEMO_CLOSE.md)
   - [Аудит актуальности](/auto/DOCUMENTATION_AUDIT.md)
   - [Реестр доказательств операций](/auto/OPERATIONS_EVIDENCE.md)
