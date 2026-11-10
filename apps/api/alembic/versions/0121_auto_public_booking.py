@@ -40,6 +40,7 @@ def upgrade():
       CREATE TABLE auto_public_booking_offer_revoke (
         offer_id uuid PRIMARY KEY REFERENCES auto_public_booking_offer(id),
         actor_id uuid NOT NULL REFERENCES app_user(id),
+        request_key uuid NOT NULL UNIQUE,
         created_at timestamptz NOT NULL DEFAULT clock_timestamp()
       )
     """)
@@ -130,6 +131,29 @@ def upgrade():
     """)
     op.execute("""CREATE TRIGGER auto_public_offer_guard BEFORE INSERT
        ON auto_public_booking_offer FOR EACH ROW EXECUTE FUNCTION guard_auto_public_offer()""")
+    op.execute("""
+      CREATE FUNCTION guard_auto_public_offer_revoke()
+      RETURNS trigger LANGUAGE plpgsql AS $f$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM auto_public_booking_offer offer
+          JOIN auto_organization org ON org.id=offer.organization_id
+            AND org.disabled_at IS NULL
+          JOIN auto_organization_role_grant grant
+            ON grant.organization_id=offer.organization_id
+            AND grant.user_id=NEW.actor_id AND grant.role_code='MANAGER'
+            AND grant.revoked_at IS NULL
+            AND (grant.location_id IS NULL OR grant.location_id=offer.location_id)
+          JOIN app_user actor ON actor.id=NEW.actor_id AND actor.status='ACTIVE'
+          WHERE offer.id=NEW.offer_id
+          FOR SHARE OF offer,org,grant,actor
+        ) THEN RAISE EXCEPTION 'only live scoped MANAGER can revoke offer'; END IF;
+        RETURN NEW;
+      END $f$
+    """)
+    op.execute("""CREATE TRIGGER auto_public_offer_revoke_guard BEFORE INSERT
+       ON auto_public_booking_offer_revoke FOR EACH ROW
+       EXECUTE FUNCTION guard_auto_public_offer_revoke()""")
     op.execute("""
       CREATE FUNCTION guard_auto_public_material()
       RETURNS trigger LANGUAGE plpgsql AS $f$
@@ -261,6 +285,7 @@ def downgrade():
     op.execute("DROP TABLE auto_public_booking_request")
     op.execute("DROP TABLE auto_public_booking_challenge")
     op.execute("DROP TABLE auto_public_booking_offer_revoke")
+    op.execute("DROP FUNCTION guard_auto_public_offer_revoke()")
     op.execute("DROP TABLE auto_public_booking_material")
     op.execute("DROP FUNCTION guard_auto_public_material()")
     op.execute("DROP TABLE auto_public_booking_offer")
