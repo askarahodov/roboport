@@ -180,3 +180,38 @@ test('staff 403 after revoked grant clears formerly visible requests',async({pag
   await expect(staffUI.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(staffUI.getByText('WAITING_FOR_STAFF',{exact:false})).toHaveCount(0);
 });
+
+
+test('manager withdraws publication: offer vanishes, exact CSRF key and no false booking',async({page})=>{
+  let revoked=false;
+  const mutations:Record<string,unknown>[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:'{"csrfToken":"synthetic-csrf"}',
+  }));
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const req=route.request(),path=new URL(req.url()).pathname;
+    if(path===staff+'/offers'&&req.method()==='GET'){
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({...offers,items:revoked?[]:offers.items})});
+    }
+    if(path===staff+'/offers/'+offer+'/revoke'&&req.method()==='POST'){
+      expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+      const body=req.postDataJSON();
+      expect(body.requestKey).toMatch(/^[0-9a-f-]{36}$/);
+      mutations.push(body);revoked=true;
+      return route.fulfill({status:201,contentType:'application/json',
+        body:'{"syntheticOnly":true,"revoked":true,"replayed":false}'});
+    }
+    throw Error('Unexpected '+path);
+  });
+  await page.goto('/staff/auto-public-booking');
+  const ui=page.getByRole('region',{name:'Публикации и публичные заявки СТО (DEV)'});
+  await ui.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await ui.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await ui.getByRole('button',{name:'Показать публикации'}).click();
+  await expect(ui.getByText('Синтетический осмотр',{exact:false})).toBeVisible();
+  await ui.getByRole('button',{name:'Отозвать публикацию'}).click();
+  expect(mutations).toHaveLength(1);
+  await expect(ui.getByRole('button',{name:'Отозвать публикацию'})).toHaveCount(0);
+});
