@@ -87,7 +87,7 @@ test('public 390 guest no-PII -> exact lost response retry -> verified client ->
     }
     if(path===staff+'/queue'&&verb==='GET'){
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
-        syntheticOnly:true,items:registered?[{
+        syntheticOnly:true,page:0,hasMore:false,items:registered?[{
           requestId:reqId,offerId:offer,startsAt:slot.startsAt,
           endsAt:slot.endsAt,createdAt:'2030-01-01T10:00:00Z',
           status:booked?'BOOKED':claimed?'WAITING_FOR_STAFF':'AWAITING_VERIFICATION',
@@ -161,7 +161,7 @@ test('staff 403 after revoked grant clears formerly visible requests',async({pag
     const path=new URL(route.request().url()).pathname;
     if(path===staff+'/queue'){
       return route.fulfill({status:revoked?403:200,contentType:'application/json',
-        body:revoked?'{"code":"FORBIDDEN"}':JSON.stringify({syntheticOnly:true,items:[{
+        body:revoked?'{"code":"FORBIDDEN"}':JSON.stringify({syntheticOnly:true,page:0,hasMore:false,items:[{
           requestId:reqId,offerId:offer,startsAt:slot.startsAt,
           endsAt:slot.endsAt,createdAt:'2030-01-01T00:00:00Z',
           status:'WAITING_FOR_STAFF',appointmentId:null,materials:[],
