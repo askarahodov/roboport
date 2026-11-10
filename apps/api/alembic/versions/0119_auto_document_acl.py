@@ -26,7 +26,7 @@ def upgrade():
         document_kind text NOT NULL CHECK (
           document_kind IN ('INTAKE_ACT','ESTIMATE','HANDOVER','SUPPLIER_ORDER')),
         capability text NOT NULL CHECK (
-          capability IN ('READ','WRITE','CLOSE','PRICE_SALES',
+          capability IN ('READ','CREATE','EDIT','WRITE','CLOSE','PRICE_SALES',
                          'PRICE_PURCHASE','DISCOUNT')),
         allowed boolean NOT NULL,
         not_before timestamptz,
