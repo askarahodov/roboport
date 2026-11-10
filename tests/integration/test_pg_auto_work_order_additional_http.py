@@ -79,7 +79,11 @@ def test_additional_work_requires_new_client_consent_before_labor_and_qc(monkeyp
               actualMinutes=25)
     assert line.status_code==201,line.text
     assert line.json()["approvedExtraVersion"]==1
-    assert line.json()["approvedExtraTotalMinor"]==11251
+    # Execution staff sees actual work and QC, not a sales-price snapshot.
+    assert line.json()["approvedExtraTotalMinor"] is None
+    manager=session(http,d,d["intake"])
+    assert http.get(execution).json()["approvedExtraTotalMinor"]==11251
+    mech=session(http,d,d["manager"])
     assert {x["serviceId"] for x in line.json()["requiredServices"]}=={
         str(base_service),str(additional)}
     finished=post(http,execution+"/finish",mech)
