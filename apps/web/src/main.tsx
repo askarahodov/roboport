@@ -13,6 +13,7 @@ import { AutoTreasury } from './pages/staff/AutoTreasury';
 import { AutoPublicBooking } from './pages/shared/AutoPublicBooking';
 import { AutoCrmLeads } from './pages/staff/AutoCrmLeads';
 import { AutoCrmFunnel } from './pages/staff/AutoCrmFunnel';
+import { AutoCrmOutcomes } from './pages/staff/AutoCrmOutcomes';
 import { AutoStockAbcXyz } from './pages/staff/AutoStockAbcXyz';
 import { AutoOrderServices } from './pages/staff/AutoOrderServices';
 import { AutoWorkshopQc } from './pages/staff/AutoWorkshopQc';
@@ -73,6 +74,7 @@ function App() {
         <NavLink to="/staff/auto-treasury" end>Тестовая касса (dev)</NavLink>
         <NavLink to="/staff/auto-crm-leads" end>Обращения CRM (dev)</NavLink>
         <NavLink to="/staff/auto-crm-funnel" end>Воронка CRM (dev)</NavLink>
+        <NavLink to="/staff/auto-crm-outcomes" end>CRM → закрытие (dev)</NavLink>
         <NavLink to="/staff/auto-stock-abc-xyz" end>ABC/XYZ склада (dev)</NavLink>
         <NavLink to="/staff/auto-order-services" end>Услуги наряда (dev)</NavLink>
         <NavLink to="/staff/auto-workshop-qc" end>Осмотр и QC (dev)</NavLink>
@@ -140,6 +142,7 @@ function App() {
       <Route path="/staff/auto-public-booking" element={<AutoPublicBooking mode="staff" />} />
       <Route path="/staff/auto-crm-leads" element={<AutoCrmLeads />} />
       <Route path="/staff/auto-crm-funnel" element={<AutoCrmFunnel />} />
+      <Route path="/staff/auto-crm-outcomes" element={<AutoCrmOutcomes />} />
       <Route path="/staff/auto-stock-abc-xyz" element={<AutoStockAbcXyz />} />
       <Route path="/staff/auto-order-services" element={<AutoOrderServices />} />
       <Route path="/staff/auto-workshop-qc" element={<AutoWorkshopQc />} />
