@@ -1,6 +1,6 @@
 """PG17 + HTTPS regression: CRM lead → closed technical order → SIM treasury only."""
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from io import StringIO
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -10,9 +10,11 @@ from fastapi.testclient import TestClient
 
 from roboport_api.main import app
 from roboport_api.auto_crm_leads import create_lead, transition_lead
+from roboport_api.auto_appointment_service import reschedule_appointment
 from roboport_api.auto_crm_outcomes import _csv, _blank
 from roboport_api.auto_document_lifecycle import record_document_event
 from roboport_api.auto_treasury import create_account, record_event
+import test_pg_auto_document_lifecycle_http as lifecycle_fixture
 from test_pg_auto_document_lifecycle_http import ready
 from test_pg_auto_stock_service import grant
 from test_pg_baseline import DSN
@@ -165,3 +167,69 @@ def test_crm_outcomes_empty_export_remains_numeric_and_csv_safe():
     assert rows[1] == ["Все источники", "0", "0", "0", "0"]
     assert all(not cell.startswith(("=", "+", "-", "@")) for row in rows
                for cell in row)
+
+
+def test_crm_outcomes_uses_current_booking_after_real_reschedule(monkeypatch):
+    """A moved appointment keeps the immutable a.booking_id (now canceled).
+
+    Complete the REAL closed-technical path after moving it, to prevent
+    silently dropping revenue-like SIM evidence from the scoped aggregate.
+    """
+    original = lifecycle_fixture.estimate_scenario
+
+    def moved_scenario():
+        scenario = original()
+        d, org, loc, order, *_ = scenario
+        with psycopg.connect(DSN) as db:
+            appointment, bay, starts, ends, initial_booking = db.execute("""
+                SELECT a.id,b.bay_id,b.starts_at,b.ends_at,b.id
+                FROM auto_work_order w
+                JOIN auto_appointment a ON a.id=w.appointment_id
+                JOIN auto_bay_booking b ON b.id=a.booking_id
+                WHERE w.id=%s
+            """, (order,)).fetchone()
+            replacement = reschedule_appointment(
+                db, d["tokens"][d["intake"]], org, appointment, bay,
+                starts + timedelta(days=7), ends + timedelta(days=7),
+            )
+            assert replacement != initial_booking
+            assert db.execute("""
+                SELECT canceled_at IS NOT NULL FROM auto_bay_booking WHERE id=%s
+            """, (initial_booking,)).fetchone() == (True,)
+        return scenario
+
+    monkeypatch.setattr(lifecycle_fixture, "estimate_scenario", moved_scenario)
+    d, org, loc, order, act, preview = ready(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        appointment = db.execute(
+            "SELECT appointment_id FROM auto_work_order WHERE id=%s",
+            (order,),
+        ).fetchone()[0]
+        lead = create_lead(db, d["tokens"][d["intake"]],
+                           org, loc, d["link"], "WEB", uuid4())
+        ident = UUID(lead["leadId"])
+        transition_lead(db, d["tokens"][d["intake"]], org, loc,
+                        ident, uuid4(), "QUALIFIED", None, None)
+        transition_lead(db, d["tokens"][d["intake"]], org, loc,
+                        ident, uuid4(), "BOOKED", None, appointment)
+        grant(db, d["intake"], org, loc, "CASHIER")
+        account = create_account(db, d["tokens"][d["intake"]],
+                                 org, loc, request_key=uuid4(), code="MOVE_SIM",
+                                 label="Тестовый перенос", kind="CASH_SIM")
+        record_event(db, d["tokens"][d["intake"]], org, loc, order,
+                     account_id=UUID(account["accountId"]),request_key=uuid4(),
+                     kind="PAYMENT",amount_minor=2500,reason="Тест после переноса")
+        _posted(db, d, org, loc, order, act, preview, "POSTED", d["intake"])
+        _posted(db, d, org, loc, order, act, preview, "CLIENT_ACK", d["client_a"])
+        _posted(db, d, org, loc, order, act, preview, "CLOSED_TECHNICAL", d["intake"])
+
+    client = _client()
+    client.cookies.set("rp_session", d["tokens"][d["intake"]])
+    response = client.get(url(org, loc), params={
+        "fromDay": _day(), "toDay": _day(),
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["summary"] == {
+        "sourceCode": "ALL", "bookedLeads": 1, "closedTechnical": 1,
+        "simSettledMinor": "2500", "simRefundMinor": "0",
+    }
