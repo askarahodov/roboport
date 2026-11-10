@@ -168,7 +168,7 @@ export function WarehouseSupplierOrders(){
       setMessage(snap.kind==='order'?
         'Заказ создан. Дефицит заказан; физический остаток не изменился.':
         snap.kind==='delivery'?
-        'Частичный приход зарегистрирован как черновик. Менеджер отдельно подтвердит приёмку и закупочную стоимость. Документ: '+d.documentId:
+        'Частичный приход зарегистрирован как черновик. Другой MANAGER отдельно подтвердит приёмку и закупочную стоимость. Документ: '+d.documentId:
         'Непоставленный остаток заказа отменён; уже созданные приходные документы сохранены.');
       // Existing list may now be stale; clear it until a deliberate fresh fetch.
       requestSeq.current+=1;setRows([]);setNext(null);setListStatus('idle');
