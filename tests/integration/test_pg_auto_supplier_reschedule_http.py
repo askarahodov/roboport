@@ -34,6 +34,13 @@ def move(db, d, org, loc, order):
     # The real rescheduler needs a live scoped INTAKE role in addition to
     # the WAREHOUSE grant used by supplier ordering.
     grant(db, d["intake"], org, loc, "INTAKE")
+    # The legacy work_order() fixture confirms the proof but does not
+    # create a vehicle↔branch binding. The real rescheduler requires it.
+    db.execute("""
+        INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id)
+        SELECT a.vehicle_id,%s FROM auto_appointment a WHERE a.id=%s
+        ON CONFLICT DO NOTHING
+    """,(loc,appointment))
     fresh = reschedule_appointment(
         db, d["tokens"][d["intake"]], org, appointment, bay,
         starts + timedelta(hours=2), ends + timedelta(hours=2),
