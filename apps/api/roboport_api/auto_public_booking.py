@@ -313,6 +313,12 @@ def submit_request(conn,offer_id,*,request_key,challenge_id,answer,
         conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,9099))",
                      (str(offer_id),))
         p=_offer(conn,offer_id)
+        # Lock the organization before reading the request key. This keeps
+        # exact-key concurrent retries serialized even at quota saturation.
+        if conn.execute("""SELECT id FROM auto_organization
+           WHERE id=%s AND disabled_at IS NULL FOR UPDATE""",
+           (p[1],)).fetchone() is None:
+            raise PublicBookingDenied("UNAVAILABLE")
         used=conn.execute("""
            SELECT id,offer_id,challenge_id,starts_at,ends_at,
                   processing_consent,marketing_consent
