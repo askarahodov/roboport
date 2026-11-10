@@ -103,6 +103,8 @@ export function WarehouseReceiving(){
          context.current.location!==scope.location)return;
       if([401,403,404].includes(response.status)){
         setDocumentId('');
+        setBoundPurchase('');setPriceRevision('');setUnitCost('0');
+        setQuotedAt(new Date().toISOString());
         setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'denied'}}));
         return;
       }
@@ -144,7 +146,12 @@ export function WarehouseReceiving(){
     }catch{
       if(seq===readSequence.current[stage]&&context.current.org===scope.org&&
          context.current.location===scope.location)
-        setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'error'}}));
+        {
+          setDocumentId('');
+          setBoundPurchase('');setPriceRevision('');setUnitCost('0');
+          setQuotedAt(new Date().toISOString());
+          setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'error'}}));
+        }
     }
   }
   function chooseValuation(item:ReviewItem){
