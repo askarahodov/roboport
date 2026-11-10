@@ -81,7 +81,7 @@ function validState(raw:unknown):State{
       Array.isArray(item.photos)&&item.photos.length<=3&&
       item.photos.every(p=>p&&areas.includes(p.areaCode)&&p.mime==='image/png'&&
         sha.test(p.sha256)&&Number.isInteger(p.width)&&Number.isInteger(p.height)&&
-        Number.isInteger(p.index)&&p.index>=1&&p.index<=3))&&
+        Number.isInteger(p.index)&&p.index>=1&&p.index<=3)&&
        (item.review===undefined||item.review===null||
         (item.review&&
          ['ACKNOWLEDGED','DISPUTED'].includes(item.review.decision)&&
