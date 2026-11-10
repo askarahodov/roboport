@@ -44,11 +44,11 @@ def _authority(conn, token, org, loc, order):
         raise DemoCloseDenied("FORBIDDEN") from None
 
 
-def _manager(conn,token,org,loc,order):
+def _manager(conn,token,org,loc,order,*,cap="CREATE"):
     try:
         actor=_scope(conn,token,org,loc,order,("MANAGER",))
         require_document_access(conn,token,org,loc,
-                                ("MANAGER",),"HANDOVER","WRITE",order=order)
+                                ("MANAGER",),"HANDOVER",cap,order=order)
         require_document_access(conn,token,org,loc,
                                 ("MANAGER",),"HANDOVER","PRICE_SALES",order=order)
         return actor
@@ -60,7 +60,7 @@ def _warehouse(conn,token,org,loc,order):
     try:
         actor=_scope(conn,token,org,loc,order,("WAREHOUSE",))
         require_document_access(conn,token,org,loc,
-                                ("WAREHOUSE",),"HANDOVER","WRITE",order=order)
+                                ("WAREHOUSE",),"HANDOVER","EDIT",order=order)
         return actor
     except (ExecutionDenied,DocumentPolicyDenied):
         raise DemoCloseDenied("FORBIDDEN") from None
@@ -221,12 +221,7 @@ def seal_handover_preview(conn,token,org,loc,order,*,request_key):
     if type(request_key) is not UUID:
         raise DemoCloseDenied("INVALID_INPUT")
     with conn.transaction():
-        actor=_manager(conn,token,org,loc,order)
-        try:
-            require_document_access(conn,token,org,loc,
-                                    ("MANAGER",),"HANDOVER","CLOSE",order=order)
-        except DocumentPolicyDenied:
-            raise DemoCloseDenied("FORBIDDEN") from None
+        actor=_manager(conn,token,org,loc,order,cap="CLOSE")
         current=_state_snapshot(conn,order)
         found=conn.execute("""
           SELECT actor_id,request_key FROM auto_order_demo_handover_preview
