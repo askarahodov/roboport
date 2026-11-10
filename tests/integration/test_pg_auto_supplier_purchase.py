@@ -121,9 +121,9 @@ def test_shortage_order_two_partial_receipts_and_real_stock_posting():
 
 
 def test_cancel_only_remaining_and_retry_without_losing_receipt():
-    d,org,loc,item,lot,order,offers,_,_=environment(0)
+    d,org,loc,item,lot,order,offers,_,_=environment(1)
     with psycopg.connect(DSN) as db:
-        purchase,qty=create(db,d,org,loc,order,lot,offers,4)
+        purchase,qty=create(db,d,org,loc,order,lot,offers,5)
         assert qty==4
         event,document=delivery(db,d,org,loc,purchase,1)
         key=uuid4()
@@ -137,10 +137,10 @@ def test_cancel_only_remaining_and_retry_without_losing_receipt():
                                       org,loc,purchase,uuid4())
         with pytest.raises(AutoStockConflict):
             delivery(db,d,org,loc,purchase,1)
-        assert balance(db,item)==(0,0)
+        assert balance(db,item)==(1,0)
         accept_receipt_document(db,d["tokens"][d["manager"]],
                                 org,loc,document,uuid4())
-        assert balance(db,item)==(1,0)
+        assert balance(db,item)==(2,0)
         rows,_=list_supplier_orders(db,d["tokens"][d["manager"]],org,loc)
         assert rows[0]["canceledQuantity"]==3
         assert rows[0]["documentedQuantity"]==1
@@ -156,7 +156,7 @@ def test_no_shortage_untrusted_quote_scope_and_revoke():
     with psycopg.connect(DSN) as db:
         with pytest.raises(AutoStockConflict):
             create(db,d,org,loc,order,lot,offers,2)
-        with pytest.raises(AutoStockConflict):
+        with pytest.raises(AutoStockDenied):
             create(db,d,org,loc,order,lot,offers,5,
                    actor=d["manager"])
         with pytest.raises(AutoStockDenied):
@@ -189,7 +189,7 @@ def test_no_shortage_untrusted_quote_scope_and_revoke():
 def test_two_partial_receipts_serialize_under_purchase_row_lock():
     d,org,loc,item,lot,order,offers,_,_=environment(0)
     with psycopg.connect(DSN) as db:
-        purchase,_=create(db,d,org,loc,order,lot,offers,2)
+        purchase,_=create(db,d,org,loc,order,lot,offers,3)
     with psycopg.connect(DSN) as one,psycopg.connect(DSN) as two:
         with one.transaction():
             delivery(one,d,org,loc,purchase,2)
@@ -208,7 +208,7 @@ def test_transaction_rolls_back_purchase_and_pending_receipt_together():
     with psycopg.connect(DSN) as db:
         with pytest.raises(RuntimeError):
             with db.transaction():
-                purchase,_=create(db,d,org,loc,order,lot,offers,3)
+                purchase,_=create(db,d,org,loc,order,lot,offers,4)
                 delivery(db,d,org,loc,purchase,2)
                 raise RuntimeError("disposable rollback")
         assert db.execute("SELECT count(*) FROM auto_supplier_purchase_order WHERE work_order_id=%s",
