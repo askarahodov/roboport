@@ -71,3 +71,7 @@
 **Исходники UI:** `apps/web/src/pages/staff/StaffPortal.tsx`, страницы `apps/web/src/pages/staff/` и `apps/web/src/pages/shared/`. **Browser E2E:** `apps/web/e2e/staff-access.spec.ts`, `auto-staff-console.spec.ts`, `auto-calendar.spec.ts`, `auto-workshop-qc.spec.ts`, `warehouse-work-orders.spec.ts`, плюс Docsify `apps/web/e2e-docs/portal.spec.ts` и `role-screenshots.spec.ts`. Проверки 390/1280/1440 Light/Dark/Auto создают синтетические PNG по SHA. [Реестр evidence](../auto/OPERATIONS_EVIDENCE.md).
 
 **Не пройдено:** отдельная ручная ролевое QA #76, визуальная проверка владельцем #92, юридическая/безопасностная публикация #119. Локальные ИИ-агенты отключены; автоматические браузерные проверки НЕ считать независимой QA-приёмкой. `main` не означает production.
+
+### Закупка по дефициту WorkOrder (дополнение #443)
+
+WAREHOUSE открывает `/staff/warehouse-supplier-orders`, вводит WorkOrder и партию, сравнивает **две синтетические** оферты по цене/сроку, заказывает только недостаток, записывает частичную поставку с неизменяемым источником. MANAGER может видеть реестр, а действующим WAREHOUSE grant создаётся документ; независимо от этого физический приход и cost valuation утверждаются другим MANAGER в `/staff/warehouse-receiving`. Отмена касается **только непоставленного остатка**. Ошибки 403/409/422, повтор с исходным ключом и отсутствие реального supplier EDI/оплаты подробно: [закупка по дефициту](../auto/SUPPLIER_PURCHASES.md). Нельзя считать эту операцию производственной бухгалтерией.
