@@ -124,3 +124,26 @@ test('403 list denies and clears prior warehouse prices',async({page})=>{
   await expect(page.getByText('SYNTH-A',{exact:true})).toHaveCount(0);
   await expect(page.getByText('403 — нет активных прав')).toBeVisible();
 });
+
+
+test('changing branch while GET is inflight restores enabled reload and clears stale rows',async({page})=>{
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  let started=false;
+  await page.route('**/warehouse/catalog?*',async route=>{
+    if(!started){
+      started=true;
+      await gate;
+      return json(route,{syntheticOnly:true,items,nextSkuId:null});
+    }
+    return json(route,{syntheticOnly:true,items:[],nextSkuId:null});
+  });
+  await visit(page);
+  await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(
+    '77777777-7777-4777-8777-777777777777');
+  await expect(page.getByRole('button',{name:'Загрузить номенклатуру'})).toBeEnabled();
+  release();
+  await page.getByRole('button',{name:'Загрузить номенклатуру'}).click();
+  await expect(page.getByText('SYNTH-A',{exact:true})).toHaveCount(0);
+});
