@@ -14,6 +14,7 @@ from test_pg_baseline import DSN
 from test_pg_auto_work_order_stock import work_order
 from roboport_api.auto_work_order_return import return_work_order_stock
 from roboport_api.auto_stock_service import AutoStockConflict
+from roboport_api.auto_stock_lot_stocktake import count_stock_lot,approve_stock_lot_count
 from roboport_api.auto_stock_receipt_document import (
     create_receipt_document, accept_receipt_document,
 )
@@ -167,6 +168,11 @@ def test_analog_merge_history_and_active_stock_denied(monkeypatch):
                 create_receipt_document(
                     db,d["tokens"][d["intake"]],org,loc,
                     source_lot,uuid4(),1,"POST-MERGE-DRAFT-BLOCK",
+                )
+            with pytest.raises(AutoStockConflict):
+                count_stock_lot(
+                    db,d["tokens"][d["intake"]],org,loc,
+                    source_lot,uuid4(),1,"POST-MERGE-COUNT-BLOCK",
                 )
             assert db.execute("SELECT sku_id FROM auto_stock_lot WHERE id=%s",
                 (source_lot,)).fetchone()==(UUID(source),)
@@ -534,4 +540,33 @@ def test_merge_blocks_unfilled_supplier_purchase_and_preserves_delivery(monkeypa
             )
             assert accepted is not None
             assert balance(db,UUID(source))==(2,0)
+        assert post(http,d,d["intake"],url(org)+"/merges",m).status_code==409
+
+
+def test_merge_denies_unapproved_stocktake_but_manager_can_post(monkeypatch):
+    d,org,loc,_,_,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        source=create(http,d,org,loc,"SYNTH-447-COUNT-OPEN")
+        target=create(http,d,org,loc,"SYNTH-447-COUNT-TARGET")
+        with psycopg.connect(DSN) as db:
+            lot=add_lot(db,org,loc,UUID(source),add_bin(db,org,loc))
+            pending=count_stock_lot(
+                db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),
+                1,"SYNTH-STOCKTAKE-RECOUNT",
+            )
+            assert balance(db,UUID(source))==(0,0)
+            assert db.execute("""
+                SELECT count(*) FROM auto_stock_lot_count_approval
+                WHERE count_id=%s
+            """,(pending,)).fetchone()==(0,)
+        m={"locationId":str(loc),"sourceSkuId":source,"targetSkuId":target}
+        refused=post(http,d,d["intake"],url(org)+"/merges",m)
+        assert refused.status_code==409,refused.text
+        with psycopg.connect(DSN) as db:
+            grant(db,d["manager"],org,loc,"MANAGER")
+            approval=approve_stock_lot_count(
+                db,d["tokens"][d["manager"]],org,loc,pending,uuid4(),
+            )
+            assert approval is not None
+            assert balance(db,UUID(source))==(1,0)
         assert post(http,d,d["intake"],url(org)+"/merges",m).status_code==409
