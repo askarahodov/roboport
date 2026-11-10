@@ -229,9 +229,34 @@ def upgrade():
     op.execute("""CREATE INDEX ix_auto_catalog_preview_expiry ON
       auto_catalog_import_preview(organization_id,location_id,expires_at)""")
 
+    # A logical merge is safe only if the source can NEVER receive new
+    # physical events or lots afterward. This guard acquires the same SKU
+    # row lock as the merge, serializing the race on either side of commit.
+    op.execute("""
+      CREATE FUNCTION guard_auto_catalog_merged_stock() RETURNS trigger
+      LANGUAGE plpgsql AS $fn$
+      BEGIN
+        PERFORM 1 FROM auto_stock_sku WHERE id=NEW.sku_id FOR UPDATE;
+        IF EXISTS(SELECT 1 FROM auto_catalog_merge
+                  WHERE source_sku_id=NEW.sku_id)
+        THEN RAISE EXCEPTION 'merged catalog SKU cannot receive new stock'; END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""CREATE TRIGGER aaa_catalog_merged_stock_event
+      BEFORE INSERT ON auto_stock_event FOR EACH ROW
+      EXECUTE FUNCTION guard_auto_catalog_merged_stock()""")
+    op.execute("""CREATE TRIGGER aaa_catalog_merged_lot
+      BEFORE INSERT ON auto_stock_lot FOR EACH ROW
+      EXECUTE FUNCTION guard_auto_catalog_merged_stock()""")
+
+
 
 def downgrade():
     # Disposable synthetic DB only: never erase imported catalog or history in production.
+    op.execute("DROP TRIGGER aaa_catalog_merged_stock_event ON auto_stock_event")
+    op.execute("DROP TRIGGER aaa_catalog_merged_lot ON auto_stock_lot")
+    op.execute("DROP FUNCTION guard_auto_catalog_merged_stock()")
     for table in ("auto_catalog_import_commit","auto_catalog_import_preview",
                   "auto_catalog_merge","auto_catalog_analog",
                   "auto_catalog_price_event","auto_catalog_price_batch",
