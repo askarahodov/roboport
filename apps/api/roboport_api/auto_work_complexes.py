@@ -123,9 +123,11 @@ def list_complexes(conn,token,org,loc):
 def create_complex(conn,token,org,loc,*,request_key,code,title,services,materials):
     _validate_catalog(request_key,code,title,services,materials)
     with conn.transaction():
+        # Policy first (organization SHARE), then branch UPDATE; ADMIN policy
+        # publisher locks in this order and concurrent edits cannot deadlock.
+        _priced_scope(conn,token,org,loc,"CREATE")
         _branch_lock(conn,org,loc)
         actor=_scope(conn,token,org,loc)
-        _priced_scope(conn,token,org,loc,"CREATE")
         prior=conn.execute("""
           SELECT id,organization_id,location_id FROM auto_work_complex
           WHERE request_key=%s
