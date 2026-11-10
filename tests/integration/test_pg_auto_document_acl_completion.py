@@ -161,8 +161,8 @@ def test_estimate_extra_price_discount_and_execution_totals_are_guarded(monkeypa
     manager=token(http,d,d["intake"])
     assert http.post(extras,headers=manager,
                      json=extra_quote(additional,base,discount=1000)).status_code==403
-    published=http.post(extras,headers=manager,
-                        json=extra_quote(additional,base,discount=0))
+    allowed_payload=extra_quote(additional,base,discount=0)
+    published=http.post(extras,headers=manager,json=allowed_payload)
     assert published.status_code==201,published.text
     assert http.get(extras).json()["items"][0]["totalMinor"]>0
     customer=token(http,d,d["client_a"])
@@ -173,6 +173,11 @@ def test_estimate_extra_price_discount_and_execution_totals_are_guarded(monkeypa
                     not_before="2099-01-01T00:00:00Z").status_code==201
     manager=token(http,d,d["intake"])
     assert http.get(extras).status_code==403
+    # Even an exact idempotent replay may not return the priced old revision.
+    assert http.post(extras,headers=manager,json=allowed_payload).status_code==403
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT COUNT(*) FROM auto_work_order_extra_revision
+          WHERE work_order_id=%s""",(order,)).fetchone()==(1,)
 
 
 def test_execution_response_redacts_prices_for_mechanic_and_denied_manager(monkeypatch):
