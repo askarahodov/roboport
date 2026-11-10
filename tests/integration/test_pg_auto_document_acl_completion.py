@@ -308,3 +308,84 @@ def test_tariff_and_complex_catalog_price_policy_blocks_alternate_urls(monkeypat
         "requestKey":str(uuid4()),
         "complexId":created.json()["complex"]["id"],
     }).status_code==403
+
+
+def test_finance_history_cutoff_blocks_unfiltered_branch_aggregates(monkeypatch):
+    """Never expose pre-cutoff accounts/treasury ledger through aggregated routes."""
+    d,org,loc,order,service,http,base,_=treasury_prepare(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    manager=token(http,d,d["intake"])
+    assert treasury_create(http,base,manager).status_code==201
+    day={"fromDay":"2030-01-01","toDay":"2030-01-01"}
+    report=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/demo-finance-report"
+    assert http.get(base+"/accounts").status_code==200
+    assert http.get(report,params=day).status_code==200
+
+    owner=token(http,d,d["other"])
+    policy=policy_url(org)
+    assert set_rule(http,policy,owner,role="MANAGER",loc=loc,
+                    user=d["intake"],document="FINANCE",cap="READ",
+                    allowed=True,not_before="2099-01-01T00:00:00Z").status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(base+"/accounts").status_code==403
+    assert http.get(base+"/report",params=day).status_code==403
+    assert http.get(report,params=day).status_code==403
+    assert http.get(base+f"/orders/{order}").status_code==403
+    assert http.get(f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+                    f"/orders/{order}/financial-balance").status_code==403
+
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policy,owner,role="MANAGER",loc=loc,
+                    user=d["intake"],document="FINANCE",cap="READ",
+                    allowed=True,not_before=None).status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(base+"/accounts").status_code==200
+    assert http.get(base+"/report",params=day).status_code==200
+    assert http.get(report,params=day).status_code==200
+
+
+def test_dual_role_cashier_deny_cannot_be_bypassed_using_manager_finance_routes(monkeypatch):
+    """Require both live roles' restrictive policies while retaining MANAGER."""
+    d,org,loc,order,service,http,base,_=treasury_prepare(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        grant(db,d["intake"],org,loc,"CASHIER")
+    root=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+    balance=root+f"/orders/{order}/financial-balance"
+    history=root+f"/orders/{order}/financial-history"
+    post=root+f"/orders/{order}/financial-events"
+    report=root+"/demo-finance-report"
+    day={"fromDay":"2030-01-01","toDay":"2030-01-01"}
+    manager=token(http,d,d["intake"])
+    assert http.get(balance).status_code==200
+    assert http.get(history).status_code==200
+    assert http.get(report,params=day).status_code==200
+    owner=token(http,d,d["other"])
+    policy=policy_url(org)
+    assert set_rule(http,policy,owner,role="CASHIER",loc=loc,
+                    user=d["intake"],document="FINANCE",
+                    cap="PRICE_SALES").status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(balance).status_code==403
+    assert http.get(history).status_code==403
+    assert http.get(report,params=day).status_code==403
+    assert http.post(post,headers={**manager,"Idempotency-Key":str(uuid4())},
+                     json={"action":"CHARGE","amountMinor":27,
+                           "reason":"Синтетическая корректировка"}).status_code==403
+
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policy,owner,role="CASHIER",loc=loc,
+                    user=d["intake"],document="FINANCE",
+                    cap="PRICE_SALES",allowed=True).status_code==201
+    assert set_rule(http,policy,owner,role="CASHIER",loc=loc,
+                    user=d["intake"],document="FINANCE",
+                    cap="EDIT").status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(balance).status_code==200
+    assert http.post(post,headers={**manager,"Idempotency-Key":str(uuid4())},
+                     json={"action":"CHARGE","amountMinor":27,
+                           "reason":"Синтетическая корректировка"}).status_code==403
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT COUNT(*) FROM auto_work_order_financial_event
+          WHERE work_order_id=%s""",(order,)).fetchone()==(0,)
