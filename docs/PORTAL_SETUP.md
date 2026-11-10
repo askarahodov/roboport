@@ -2,6 +2,12 @@
 
 **Статус:** dev-only. [Задача #132](https://github.com/askarahodov/roboport/issues/132). Стек: **Docsify 5.0.0**, CSS core + search plugin с точной версией через jsDelivr. Markdown-содержимое остаётся в существующих файлах `docs/**/*.md`, дублирования в HTML нет.
 
+## Переход из клиентского кабинета (тот же dev origin)
+
+В режиме `cd apps/web && npm run dev` локальный Vite теперь отдаёт **только читаемые assets Docsify** по `/docs/` через отдельный middleware. Ссылки из кабинета (`/account`, `/account/vehicles`, `/account/auto-booking`, `/account/auto-orders`, `/account/settings`, `/account/login`) ведут на **`/docs/#/guides/client`** или **`/docs/#/guides/FAQ`** без передачи cookie, UUID, VIN и секретов в URL. Порт, схема и loopback origin совпадают с frontend: 5173 при обычном тестовом режиме, 8444 при явном локальном HTTPS. Это **не production-публикация**: статическая сборка не содержит Docsify; публичный хостинг запрещён до #119. Запросы к отсутствующим файлам `/docs/` возвращают 404, выдача разрешена только для безопасных файлов из реального каталога `docs/`, без выхода через симлинк или `..`.
+
+Отдельный документный сервер ниже сохранён для воспроизводимых browser/Windows CI и прямой проверки базы знаний. В production ссылку help необходимо направить на будущий санкционированный Docsify origin только после #119; в dev она работает на том же origin.
+
 ## Linux / macOS / Windows CMD
 
 В корне репозитория (не внутри `docs`) запустите:
