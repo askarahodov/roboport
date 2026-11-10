@@ -218,6 +218,14 @@ def upgrade():
                                WHEN wo.action='RETURN' THEN -wo.quantity
                                ELSE 0 END) > 0
              )
+             OR EXISTS(
+               SELECT 1 FROM auto_stock_receipt_document doc
+               WHERE doc.sku_id=NEW.source_sku_id
+                 AND NOT EXISTS(
+                   SELECT 1 FROM auto_stock_receipt_acceptance accepted
+                   WHERE accepted.document_id=doc.id
+                 )
+             )
              OR EXISTS(SELECT 1 FROM auto_stock_lot src
                  JOIN auto_stock_lot dst ON dst.sku_id=NEW.target_sku_id
                  WHERE src.sku_id=NEW.source_sku_id AND
