@@ -61,8 +61,10 @@ export function AutoStaffAdmin() {
   React.useEffect(() => {
     setConfirmId(null);setAudit([]);setAuditState('idle');setMessage('');
     setPolicyEvents([]);setPolicyState('idle');setPolicyPending(null);setPolicyMessage('');
+  }, [organization]);
+  React.useEffect(()=>{
     setEffective(null);setEffectiveState('idle');
-  }, [organization,policyDoc,policyLocation,policyUser]);
+  },[organization,policyDoc,policyLocation,policyUser]);
 
   React.useEffect(() => {
     if (!validOrg) { setItems([]); setState('idle'); return; }
@@ -236,7 +238,7 @@ export function AutoStaffAdmin() {
   }
 
   const base = '/api/v1/dev/auto/organizations/' + encodeURIComponent(organization.trim()) + '/staff';
-  return <section aria-label="Сотрудники организации (dev)" style={{maxWidth:'76rem',margin:'2rem auto'}}>
+  return <section aria-label="Сотрудники организации (dev)" style={{maxWidth:'76rem',margin:'2rem auto',overflowWrap:'anywhere'}}>
     <h1>Сотрудники организации</h1>
     <p>Только локальный синтетический стенд. Права проверяет сервер, а не этот экран. Реальных сотрудников не добавляйте.</p>
     <label>UUID организации <input value={organization} onChange={e => { setOrganization(e.target.value); setMessage(''); }}
