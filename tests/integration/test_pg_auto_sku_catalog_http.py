@@ -13,6 +13,7 @@ from test_pg_auto_stock_bin_lot import add_bin,add_lot
 from test_pg_baseline import DSN
 from test_pg_auto_work_order_stock import work_order
 from roboport_api.auto_work_order_return import return_work_order_stock
+from roboport_api.auto_stock_service import AutoStockConflict
 from roboport_api.auto_stock_receipt_document import (
     create_receipt_document, accept_receipt_document,
 )
@@ -176,14 +177,13 @@ def test_analog_merge_history_and_active_stock_denied(monkeypatch):
             bay=db.execute("SELECT id FROM auto_work_bay WHERE organization_id=%s AND location_id=%s",
                            (org,loc)).fetchone()[0]
             order,_=work_order(db,d,org,loc,bay)
-            with pytest.raises(Exception) as blocked_purchase:
+            with pytest.raises(AutoStockConflict):
                 place_supplier_order(
                     db,d["tokens"][d["intake"]],org,loc,order,source_lot,
                     uuid4(),1,quotes(db,UUID(source)),
                     "SYNTH-SUP-1","OFFLINE-1",
                 )
-            assert "CONFLICT" in str(blocked_purchase.value)
-        assert next(r for r in listed(http,d,org,loc).json()["items"]
+         assert next(r for r in listed(http,d,org,loc).json()["items"]
                     if r["skuId"]==source)["mergedInto"]==target
         # Two independent historical batches with different identifiers
         # must not be silently conflated, even with zero on-hand stock.
