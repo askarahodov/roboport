@@ -84,6 +84,14 @@ def test_shortage_order_two_partial_receipts_and_real_stock_posting():
         approval=accept_receipt_document(db,d["tokens"][d["manager"]],
                                          org,loc,first,uuid4())
         assert approval
+        # Quote/price lineage is guarded by PostgreSQL, not a browser warning.
+        with pytest.raises(AutoStockConflict):
+            record_receipt_valuation(
+                db,d["tokens"][d["manager"]],org,loc,first,uuid4(),
+                "RUB",1300,240,offers[0]["source_revision"],
+                datetime.fromisoformat(offers[0]["quoted_at"]))
+        assert db.execute("SELECT count(*) FROM auto_stock_receipt_valuation WHERE document_id=%s",
+                          (first,)).fetchone()[0]==0
         value_id=record_receipt_valuation(
             db,d["tokens"][d["manager"]],org,loc,first,uuid4(),
             "RUB",offers[0]["unit_purchase_minor"],240,
