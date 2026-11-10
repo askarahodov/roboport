@@ -6,6 +6,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .auto_order_customer_read import get_order_customer_summary
 from .auto_stock_service import AutoStockDenied
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 
 
 def get_work_order_balance(conn: psycopg.Connection, token: str,
@@ -22,6 +23,12 @@ def get_work_order_balance(conn: psycopg.Connection, token: str,
             raise AutoStockDenied("FORBIDDEN")
         # Live customer/vehicle proof is mandatory, even for a manager.
         get_order_customer_summary(conn, token, organization_id, location_id, order_id)
+        try:
+            for cap in ("READ", "PRICE_SALES"):
+                require_document_access(conn, token, organization_id, location_id,
+                                        ("MANAGER",), "FINANCE", cap, order=order_id)
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         row = conn.execute(
             """SELECT balance_minor FROM auto_work_order_financial_balance
                WHERE work_order_id=%s AND organization_id=%s AND location_id=%s""",
