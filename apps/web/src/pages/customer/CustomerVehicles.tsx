@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Alert, EmptyState, Skeleton } from '../../ui';
 import { CustomerAutoClaim } from './CustomerAutoClaim';
 
-import { getAutoDevVehicles, AutoDevHttpError } from '../../shared/api/autoDevClient';
+import { getAutoDevVehicles, getAutoDevVehicleDetails, AutoDevHttpError } from '../../shared/api/autoDevClient';
 import type { AutoDevVehicle } from '../../shared/api/autoDevClient';
 
 type LoadState = 'loading' | 'ready' | 'denied' | 'error';
@@ -18,10 +18,52 @@ export function CustomerVehicles() {
   const [pageLoading, setPageLoading] = React.useState(false);
   const [pageError, setPageError] = React.useState(false);
   const [reload, setReload] = React.useState(0);
+  const [selected, setSelected] = React.useState<AutoDevVehicle | null>(null);
+  const [detailStatus, setDetailStatus] = React.useState<'idle' | 'loading' | 'error'>('idle');
+  const detailAbort = React.useRef<AbortController | null>(null);
+  React.useEffect(() => () => detailAbort.current?.abort(), []);
+
+  function clearDetails() {
+    detailAbort.current?.abort();
+    detailAbort.current = null;
+    setSelected(null);
+    setDetailStatus('idle');
+  }
+
+  async function showDetails(vehicleId: string) {
+    clearDetails();
+    const controller = new AbortController();
+    detailAbort.current = controller;
+    setDetailStatus('loading');
+    try {
+      const detail = await getAutoDevVehicleDetails(vehicleId, controller.signal);
+      if (!controller.signal.aborted) {
+        setSelected(detail);
+        setDetailStatus('idle');
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setSelected(null);
+      setDetailStatus('error');
+      if (error instanceof AutoDevHttpError) {
+        if (error.status === 401 || error.status === 403) {
+          setItems([]);
+          setNextOffset(null);
+          setStatus('denied');
+        } else if (error.status === 404) {
+          // A formerly verified link can be revoked at any time. Remove the stale
+          // card immediately, then re-check every visible page with a fresh request.
+          setItems(previous => previous.filter(vehicle => vehicle.id !== vehicleId));
+          refresh();
+        }
+      }
+    }
+  }
 
   React.useEffect(() => {
     const controller = new AbortController();
     if (offset === 0) {
+      clearDetails();
       setStatus('loading');
       setItems([]);
       setNextOffset(null);
@@ -45,6 +87,7 @@ export function CustomerVehicles() {
                 && [401, 403, 404].includes(error.status)) {
               // Отозванную сессию нельзя оставлять в состоянии кэшированного списка.
               if (!controller.signal.aborted) {
+                clearDetails();
                 setItems([]);
                 setNextOffset(null);
                 setStatus('denied');
@@ -64,6 +107,7 @@ export function CustomerVehicles() {
           if (data.items.length < PAGE_SIZE) break;
         }
         if (controller.signal.aborted) return;
+        if (selected && !fresh.some(vehicle => vehicle.id === selected.id)) clearDetails();
         setItems(fresh);
         setNextOffset(following);
         setStatus('ready');
@@ -80,6 +124,7 @@ export function CustomerVehicles() {
   }, [offset, reload]);
 
   function refresh() {
+    clearDetails();
     // Запрос с нуля пересчитывает права и не оставляет устаревший кэш.
     setOffset(0);
     setReload(value => value + 1);
@@ -136,7 +181,25 @@ export function CustomerVehicles() {
             {vehicle.variant && <span>Комплектация: {vehicle.variant}</span>}
             {vehicle.modelYear !== null && <span>Год выпуска: {vehicle.modelYear}</span>}
             <span>{vehicle.vinLast4 === null ? 'VIN не указан' : 'VIN ••••' + vehicle.vinLast4}</span>
+            <button type="button" disabled={detailStatus === 'loading'}
+              onClick={() => void showDetails(vehicle.id)}
+              aria-label={'Подробнее об автомобиле ' + vehicle.make + ' ' + vehicle.model}>
+              Подробнее об автомобиле
+            </button>
           </li>)}</ul>
+        {detailStatus === 'loading' && <p role="status">Проверка доступа к автомобилю…</p>}
+        {detailStatus === 'error' && <p role="alert">Карточка автомобиля недоступна:
+          доступ мог быть отозван либо сеть временно недоступна. Обновите автомобили.</p>}
+        {selected && <section aria-label="Карточка подтверждённого автомобиля"
+          className="account-record" data-testid="vehicle-details">
+          <h3>Карточка автомобиля</h3>
+          <p><strong>{selected.make} {selected.model}</strong></p>
+          {selected.variant && <p>Комплектация: {selected.variant}</p>}
+          {selected.modelYear !== null && <p>Год выпуска: {selected.modelYear}</p>}
+          <p>{selected.vinLast4 === null ? 'VIN не указан' : 'VIN ••••' + selected.vinLast4}</p>
+          <p>Только подтверждённая действующая связь. История прежних владельцев недоступна.</p>
+          <button type="button" onClick={clearDetails}>Закрыть карточку автомобиля</button>
+        </section>}
         {pageLoading && <p role="status">Загружается следующая страница…</p>}
         {pageError && <p role="alert">Не удалось загрузить следующую страницу.
           Уже полученные автомобили сохранены до обновления списка.</p>}

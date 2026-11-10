@@ -231,3 +231,87 @@ test('клиентская справка объясняет пустой спи
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }
 });
+
+test('карточка подтверждённой машины открывается отдельно и не раскрывает полный VIN', async ({page}) => {
+  await authorized(page);
+  const id='11111111-1111-4111-8111-111111111111';
+  const car={id,make:'SyntheticMake',model:'TestCar',variant:'Demo',modelYear:2026,vinLast4:'1234'};
+  await page.route(vehiclesUrl, route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify({items:[car]}),
+  }));
+  let calls=0;
+  await page.route('**/api/v1/dev/auto/vehicles/'+id, route=>{
+    calls++;
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(car)});
+  });
+  for(const width of [390,1280,1440]){
+    await page.setViewportSize({width,height:844});
+    await page.goto('/account/vehicles');
+    await page.getByRole('button',{name:'Подробнее об автомобиле SyntheticMake TestCar'}).click();
+    const card=page.getByTestId('vehicle-details');
+    await expect(card).toContainText('VIN ••••1234');
+    await expect(card).toContainText('История прежних владельцев недоступна');
+    await card.getByRole('button',{name:'Закрыть карточку автомобиля'}).click();
+    await expect(card).toHaveCount(0);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+  expect(calls).toBe(3);
+});
+
+test('отзыв привязки при открытии карточки скрывает старые данные и повторно проверяет список',async({page})=>{
+  await authorized(page);
+  const id='11111111-1111-4111-8111-111111111111';
+  let revoked=false;
+  await page.route(vehiclesUrl,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:revoked?[]:[{
+      id,make:'SyntheticMake',model:'TestCar',variant:null,modelYear:2026,vinLast4:'1234',
+    }]}),
+  }));
+  await page.route('**/api/v1/dev/auto/vehicles/'+id,route=>{
+    revoked=true;
+    return route.fulfill({status:404,contentType:'application/json',body:'{"code":"NOT_FOUND"}'});
+  });
+  await page.goto('/account/vehicles');
+  await expect(page.getByText('SyntheticMake TestCar')).toBeVisible();
+  await page.getByRole('button',{name:'Подробнее об автомобиле SyntheticMake TestCar'}).click();
+  await expect(page.getByText('Подтверждённых автомобилей пока нет.')).toBeVisible();
+  await expect(page.getByTestId('vehicle-details')).toHaveCount(0);
+  await expect(page.getByText('SyntheticMake TestCar')).toHaveCount(0);
+});
+
+test('полный VIN и чужой UUID в аномальном detail ответе не попадают в UI',async({page})=>{
+  await authorized(page);
+  const id='11111111-1111-4111-8111-111111111111';
+  await page.route(vehiclesUrl,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[{id,make:'Synthetic',model:'Car',variant:null,modelYear:2026,vinLast4:'1234'}]}),
+  }));
+  await page.route('**/api/v1/dev/auto/vehicles/'+id,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({id:'22222222-2222-4222-8222-222222222222',
+      make:'Other',model:'Car',variant:null,modelYear:2026,vinLast4:'9999',vin:'TEST0000000000001'}),
+  }));
+  await page.goto('/account/vehicles');
+  await page.getByRole('button',{name:'Подробнее об автомобиле Synthetic Car'}).click();
+  await expect(page.getByRole('alert')).toContainText('Карточка автомобиля недоступна');
+  await expect(page.getByTestId('vehicle-details')).toHaveCount(0);
+  await expect(page.getByText('TEST0000000000001')).toHaveCount(0);
+});
+
+test('401 при запросе карточки немедленно скрывает весь список',async({page})=>{
+  await authorized(page);
+  const id='11111111-1111-4111-8111-111111111111';
+  await page.route(vehiclesUrl,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({items:[{id,make:'Synthetic',model:'Car',variant:null,modelYear:2026,vinLast4:'1234'}]}),
+  }));
+  await page.route('**/api/v1/dev/auto/vehicles/'+id,route=>route.fulfill({
+    status:401,contentType:'application/json',body:'{"code":"UNAUTHENTICATED"}',
+  }));
+  await page.goto('/account/vehicles');
+  await page.getByRole('button',{name:'Подробнее об автомобиле Synthetic Car'}).click();
+  await expect(page.getByText('Доступ к автомобилям не предоставлен',{exact:false})).toBeVisible();
+  await expect(page.locator('.account-record')).toHaveCount(0);
+  await expect(page.getByTestId('vehicle-details')).toHaveCount(0);
+});
