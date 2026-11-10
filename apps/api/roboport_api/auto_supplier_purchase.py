@@ -51,9 +51,16 @@ def _source(offers: object, supplier: str, offer_id: str):
 
 
 def _conflict_errors(operation):
+    conn, actor, write = operation
     try:
-        with operation[0].transaction():
-            return operation[1]()
+        # The nested transaction is a PG savepoint. A failed constraint must
+        # roll back before the outer connection can execute any more SQL.
+        with conn.transaction():
+            conn.execute("SELECT set_config('roboport.purchase_actor',%s,true)",
+                         (str(actor),))
+            result = write()
+            conn.execute("SELECT set_config('roboport.purchase_actor','',true)")
+            return result
     except (psycopg.errors.RaiseException, psycopg.errors.UniqueViolation,
             psycopg.errors.CheckViolation, psycopg.errors.ForeignKeyViolation,
             psycopg.errors.NumericValueOutOfRange, psycopg.errors.InvalidTextRepresentation):
@@ -114,24 +121,20 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
         if shortage <= 0 or selected.available_quantity < shortage:
             raise AutoStockConflict("NO_SHORTAGE_OR_QUOTE")
         def insert():
-            conn.execute("SELECT set_config('roboport.purchase_actor',%s,true)",(str(actor),))
-            try:
-                ident=uuid4()
-                conn.execute("""INSERT INTO auto_supplier_purchase_order(
-                  id,request_id,organization_id,location_id,work_order_id,sku_id,lot_id,
-                  desired_quantity,available_at_order,ordered_quantity,offers,
-                  selected_supplier,selected_offer,quote_revision,quoted_at,expires_at,
-                  currency,purchase_unit_minor,created_by)
-                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,(ident,request_id,org,loc,work_order,sku_id,lot,
-                      desired_quantity,available,shortage,Jsonb(json.loads(snapshot)),
-                      selected.supplier_id,selected.offer_id,selected.source_revision,
-                      selected.quoted_at,selected.expires_at,selected.currency,
-                      selected.unit_purchase_minor,actor))
-                return ident,shortage
-            finally:
-                conn.execute("SELECT set_config('roboport.purchase_actor','',true)")
-        return _conflict_errors((conn,insert))
+            ident=uuid4()
+            conn.execute("""INSERT INTO auto_supplier_purchase_order(
+              id,request_id,organization_id,location_id,work_order_id,sku_id,lot_id,
+              desired_quantity,available_at_order,ordered_quantity,offers,
+              selected_supplier,selected_offer,quote_revision,quoted_at,expires_at,
+              currency,purchase_unit_minor,created_by)
+              VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """,(ident,request_id,org,loc,work_order,sku_id,lot,
+                  desired_quantity,available,shortage,Jsonb(json.loads(snapshot)),
+                  selected.supplier_id,selected.offer_id,selected.source_revision,
+                  selected.quoted_at,selected.expires_at,selected.currency,
+                  selected.unit_purchase_minor,actor))
+            return ident,shortage
+        return _conflict_errors((conn,actor,insert))
 
 
 def record_supplier_delivery(conn: psycopg.Connection, token: str, org: UUID,
@@ -171,18 +174,14 @@ def record_supplier_delivery(conn: psycopg.Connection, token: str, org: UUID,
         # registers its draft *and* the supplier-order provenance link.
         def insert():
             document_id=create_receipt_document(
-                conn,token,org,loc,row[1],request_id,quantity,supplier_reference)
-            conn.execute("SELECT set_config('roboport.purchase_actor',%s,true)",(str(actor),))
-            try:
-                event_id=uuid4()
-                conn.execute("""INSERT INTO auto_supplier_purchase_receipt(
-                    id,request_id,purchase_id,document_id,quantity,created_by)
-                  VALUES(%s,%s,%s,%s,%s,%s)""",
-                  (event_id,request_id,purchase,document_id,quantity,actor))
-                return event_id,document_id
-            finally:
-                conn.execute("SELECT set_config('roboport.purchase_actor','',true)")
-        return _conflict_errors((conn,insert))
+            conn,token,org,loc,row[1],request_id,quantity,supplier_reference)
+            event_id=uuid4()
+            conn.execute("""INSERT INTO auto_supplier_purchase_receipt(
+                id,request_id,purchase_id,document_id,quantity,created_by)
+              VALUES(%s,%s,%s,%s,%s,%s)""",
+              (event_id,request_id,purchase,document_id,quantity,actor))
+            return event_id,document_id
+        return _conflict_errors((conn,actor,insert))
 
 
 def cancel_supplier_remainder(conn: psycopg.Connection, token: str, org: UUID,
@@ -210,16 +209,12 @@ def cancel_supplier_remainder(conn: psycopg.Connection, token: str, org: UUID,
         if remaining<=0:
             raise AutoStockConflict("NOTHING_LEFT")
         def insert():
-            conn.execute("SELECT set_config('roboport.purchase_actor',%s,true)",(str(actor),))
-            try:
-                ident=uuid4()
-                conn.execute("""INSERT INTO auto_supplier_purchase_cancel(
-                  id,request_id,purchase_id,canceled_remainder,created_by)
-                  VALUES(%s,%s,%s,%s,%s)""",(ident,request_id,purchase,remaining,actor))
-                return ident,remaining
-            finally:
-                conn.execute("SELECT set_config('roboport.purchase_actor','',true)")
-        return _conflict_errors((conn,insert))
+            ident=uuid4()
+            conn.execute("""INSERT INTO auto_supplier_purchase_cancel(
+              id,request_id,purchase_id,canceled_remainder,created_by)
+              VALUES(%s,%s,%s,%s,%s)""",(ident,request_id,purchase,remaining,actor))
+            return ident,remaining
+        return _conflict_errors((conn,actor,insert))
 
 
 def list_supplier_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
