@@ -18,14 +18,18 @@ type Inventory={itemCode:typeof inventoryCodes[number];
 type Photo={areaCode:Area;imageBase64:string};
 type PhotoMeta={areaCode:Area;sha256:string;mime:'image/png';
   width:number;height:number;index:number;path:string};
+type ActReview={decision:'ACKNOWLEDGED'|'DISPUTED';
+  reasonCode:'NONE'|'DAMAGE_MISMATCH'|'INVENTORY_MISMATCH'|'OTHER';
+  actorId:string;fingerprint:string;createdAt:string};
 type Act={id:string;version:number;vehicleKind:typeof kinds[number];damages:Damage[];
-  inventory:Inventory[];photos:PhotoMeta[];sha256:string;createdAt:string;actorId:string};
+  inventory:Inventory[];photos:PhotoMeta[];sha256:string;createdAt:string;actorId:string;
+  review?:ActReview|null};
 type Previous={orderId:string;version:number;damages:Damage[];inventory:Inventory[];
   createdAt:string};
 type State={syntheticOnly:true;releaseAllowed:false;legalSignatureStatus:'NOT_IMPLEMENTED';
   inspection:null|{id:string;odometerKm:number;fuelPercent:number;exteriorCode:string};
   locked:boolean;latestVersion:number;items:Act[];previousVisit:Previous|null};
-type Pending={body:string;scope:string};
+type Pending={body:string;scope:string;endpoint:string;role:'staff'|'client'};
 type Status='idle'|'loading'|'ready'|'error'|'denied';
 
 const areaLabels:Record<Area,string>={
@@ -77,7 +81,16 @@ function validState(raw:unknown):State{
       Array.isArray(item.photos)&&item.photos.length<=3&&
       item.photos.every(p=>p&&areas.includes(p.areaCode)&&p.mime==='image/png'&&
         sha.test(p.sha256)&&Number.isInteger(p.width)&&Number.isInteger(p.height)&&
-        Number.isInteger(p.index)&&p.index>=1&&p.index<=3)))throw Error('bad act state');
+        Number.isInteger(p.index)&&p.index>=1&&p.index<=3)&&
+       (item.review===undefined||item.review===null||
+        (item.review&&
+         ['ACKNOWLEDGED','DISPUTED'].includes(item.review.decision)&&
+         ['NONE','DAMAGE_MISMATCH','INVENTORY_MISMATCH','OTHER'].includes(item.review.reasonCode)&&
+         (item.review.decision==='ACKNOWLEDGED'?
+           item.review.reasonCode==='NONE':item.review.reasonCode!=='NONE')&&
+         uuid.test(item.review.actorId)&&
+         item.review.fingerprint===item.sha256&&
+         Number.isFinite(Date.parse(item.review.createdAt))))))throw Error('bad act state');
   return v;
 }
 
@@ -124,6 +137,8 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
   const [photoArea,setPhotoArea]=React.useState<Area>('FRONT');
   const [photos,setPhotos]=React.useState<Photo[]>([]);
   const [printActId,setPrintActId]=React.useState('');
+  const [disputeReason,setDisputeReason]=React.useState<
+    'DAMAGE_MISMATCH'|'INVENTORY_MISMATCH'|'OTHER'>('DAMAGE_MISMATCH');
   const valid=[org,loc,order].every(x=>uuid.test(x.trim()));
   const scope=[org.trim(),loc.trim(),order.trim()].join(':');
   const root='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
@@ -149,7 +164,7 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
   },[scope,revision,valid]);
 
   async function submit(request:Pending){
-    if(!ready||busy||role!=='staff'||request.scope!==scope)return;
+    if(!ready||busy||request.role!==role||request.scope!==scope)return;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',
@@ -158,16 +173,20 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
       const value:unknown=await csrf.json();
       if(!value||typeof value!=='object'||!('csrfToken' in value)||
         typeof value.csrfToken!=='string')throw Error('csrf');
-      const response=await fetch(path,{method:'POST',credentials:'include',cache:'no-store',
+      const response=await fetch(request.endpoint,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':value.csrfToken},
         body:request.body});
       if([401,403,404].includes(response.status)){
         setData(null);setStatus('denied');setPending(null);return;
       }
       if(response.status===409||response.status===422){
-        setPending(null);setMessage(response.status===409?
-          'Конфликт версии, осмотра либо закрытия этапа. Обновите журнал.':
-          'Проверьте повреждения, комплектность и допустимость фотографий.');
+        setPending(null);setMessage(request.role==='client'?
+          (response.status===409?
+            'Версия акта изменилась или решение уже записано. Перечитайте журнал.':
+            'Неверная техническая отметка. Проверьте выбранный вариант.') :
+          (response.status===409?
+            'Конфликт версии, осмотра либо закрытия этапа. Обновите журнал.':
+            'Проверьте повреждения, комплектность и допустимость фотографий.'));
         setRevision(v=>v+1);return;
       }
       if(!response.ok)throw Error('unknown');
@@ -182,6 +201,17 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
     (!damages.length||photos.length>0);
   const last=data?.items.at(-1);
   const printAct=data?.items.find(item=>item.id===(printActId||last?.id));
+  function sendReview(decision:'ACKNOWLEDGED'|'DISPUTED'){
+    if(role!=='client'||!ready||busy||pending||!last||last.review)return;
+    const body=JSON.stringify({requestKey:crypto.randomUUID(),
+      fingerprint:last.sha256,decision,
+      reasonCode:decision==='ACKNOWLEDGED'?'NONE':disputeReason});
+    void submit({body,scope,role:'client',
+      endpoint:path+'/'+encodeURIComponent(last.id)+'/review'});
+  }
+  const reviewLabel=(review:ActReview)=>
+    review.decision==='ACKNOWLEDGED'?'Ознакомлен с актом (техническая отметка)':
+    'Сообщено о расхождении ('+review.reasonCode+')';
   // Печатаем только один выбранный immutable-снимок, без остального журнала.
   const printDocument=ready&&data&&printAct ? (
         <article className="intake-act-print-document"
@@ -217,7 +247,10 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
                 <small> SHA-256: {photo.sha256}</small></figcaption>
             </figure>)}
           </div>
-          <p>Статус подписи: НЕ РЕАЛИЗОВАНО. Выдача не разрешена.</p>
+          {printAct.review&&<p>Отметка клиента: {reviewLabel(printAct.review)}.
+            Дата: {new Date(printAct.review.createdAt).toLocaleString('ru-RU')}.
+            SHA-256 проверенной версии: <code>{printAct.review.fingerprint}</code>.</p>}
+          <p>Статус юридической подписи: НЕ РЕАЛИЗОВАНО. Выдача не разрешена.</p>
         </article>
   ) : null;
   return <>
@@ -271,8 +304,8 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
         топливо {data.inspection.fuelPercent}%, кузов {data.inspection.exteriorCode}.
         Показания исходного осмотра не переписываются.</p>:
         <p role="status">Для первой версии требуется приёмочный осмотр (INTAKE).</p>}
-      {data.locked&&<p role="status">Смета или QC уже зафиксированы.
-        Новая версия акта недоступна; история остаётся доступной.</p>}
+      {data.locked&&<p role="status">Смета, QC либо ознакомление клиента
+        уже зафиксированы. Новая версия акта недоступна; история остаётся доступной.</p>}
       {data.previousVisit&&<section aria-label="Сравнение с предыдущим визитом">
         <h3>Предыдущий визит того же заказчика</h3>
         <p>Акт №{data.previousVisit.version},
@@ -288,6 +321,10 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
             <h3>Акт №{item.version} · {item.vehicleKind}</h3>
             <p>Создан {new Date(item.createdAt).toLocaleString('ru-RU')}.
               SHA-256: <code>{item.sha256}</code></p>
+            {item.review?<p role="status">Отметка клиента: {reviewLabel(item.review)}.
+              Дата {new Date(item.review.createdAt).toLocaleString('ru-RU')}.
+              Версия и SHA-256 закреплены неизменно.</p>:
+              <p>Техническая отметка клиента отсутствует.</p>}
             <h4>Повреждения</h4>
             {item.damages.length===0?<p>Повреждения не отмечены.</p>:
               <ul>{item.damages.map(d=><li key={d.areaCode+d.damageCode}>
@@ -309,6 +346,26 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
             </div>
           </section>
         </li>)}</ol>}
+      {role==='client'&&last&&!last.review&&
+        <section aria-label="Техническая отметка клиента по последнему акту">
+          <h2>Ознакомление с версией №{last.version} (не подпись)</h2>
+          <p>Сверьте повреждения, комплектность и фотографии выше.
+            Техническая отметка фиксирует только SHA-256
+            <code>{last.sha256}</code> и не является юридической подписью,
+            оплатой либо согласием на выдачу.</p>
+          <button type="button" disabled={busy||!!pending}
+            onClick={()=>sendReview('ACKNOWLEDGED')}>
+            Отметить ознакомление (без подписи)</button>
+          <label>Причина расхождения <select
+            aria-label="Причина расхождения" value={disputeReason}
+            onChange={e=>setDisputeReason(e.target.value as typeof disputeReason)}>
+            <option value="DAMAGE_MISMATCH">Повреждения</option>
+            <option value="INVENTORY_MISMATCH">Комплектность</option>
+            <option value="OTHER">Иная причина (без свободного текста)</option>
+          </select></label>
+          <button type="button" disabled={busy||!!pending}
+            onClick={()=>sendReview('DISPUTED')}>Сообщить о расхождении</button>
+        </section>}
       {last&&role==='staff'&&<p>Для следующей версии можно зафиксировать изменения.
         Старый акт №{last.version} останется неизменным.</p>}
       {printAct&&<section className="intake-act-print-preview"
@@ -406,7 +463,7 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
             const body=JSON.stringify({expectedVersion:data.latestVersion,
               requestKey:crypto.randomUUID(),
               act:{vehicleKind:kind,damages,inventory,photos}});
-            void submit({body,scope});
+            void submit({body,scope,endpoint:path,role:'staff'});
           }}>Зафиксировать версию акта</button>
         </section>}
       {role==='staff'&&<p>Приёмочный осмотр и QC:

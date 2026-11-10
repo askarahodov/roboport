@@ -8,7 +8,7 @@ from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auto_intake_act import (
     IntakeActDenied,IntakeActInvalid,IntakeActConflict,read_intake_acts,
-    write_intake_act,read_act_photo,
+    write_intake_act,read_act_photo,review_intake_act,
 )
 
 router=APIRouter(include_in_schema=False)
@@ -47,6 +47,14 @@ class Save(BaseModel):
     requestKey:UUID
     expectedVersion:int=Field(ge=0,le=19,strict=True)
     act:Act
+
+
+class ClientReview(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    requestKey:UUID
+    fingerprint:str=Field(pattern="^[0-9a-f]{64}$")
+    decision:str=Field(pattern="^(ACKNOWLEDGED|DISPUTED)$")
+    reasonCode:str=Field(pattern="^(NONE|DAMAGE_MISMATCH|INVENTORY_MISMATCH|OTHER)$")
 
 
 def _scope(request,org_id,loc_id,order_id):
@@ -132,3 +140,28 @@ def photo(org_id:str,loc_id:str,order_id:str,act_id:str,index:str,request:Reques
         "Content-Security-Policy":"sandbox",
         "Cross-Origin-Resource-Policy":"same-origin",
     })
+
+
+@router.post(PATH+"/{act_id}/review")
+async def review_act(org_id:str,loc_id:str,order_id:str,act_id:str,request:Request):
+    scoped=_scope(request,org_id,loc_id,order_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,org,loc,order=scoped
+    try:
+        ident=UUID(act_id)
+        body=ClientReview.model_validate(await request.json())
+    except (TypeError,ValueError,ValidationError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as conn:
+        if not _mutation_ok(request,conn):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            result=review_intake_act(
+                conn,request.cookies.get("rp_session",""),org,loc,order,ident,
+                request_key=body.requestKey,fingerprint=body.fingerprint,
+                decision=body.decision,reason_code=body.reasonCode)
+        except (IntakeActDenied,IntakeActInvalid,IntakeActConflict) as exc:
+            return _err(request,exc)
+    return JSONResponse(status_code=200 if result["replayed"] else 201,
+                        content=result,headers={"Cache-Control":"no-store"})
