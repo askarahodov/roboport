@@ -103,3 +103,13 @@
 [контракт/матрица ACL](../auto/DOCUMENT_ACCESS.md) ·
 [PG17](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_document_access_http.py) ·
 [Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-document-access.spec.ts).
+
+
+## Кассы и авансы (synthetic dev, #445)
+
+Финансовое рабочее место: `/staff/auto-treasury` —
+MANAGER создаёт счёт и сверяет отчёты; CASHIER с отдельным
+организационным грантом добавляет аванс/частичную оплату,
+зачёт, возврат и закрывает день. Маршрут dev, без денег, ККТ,
+банковских callback или юридически действительных документов.
+[Ролевой walkthrough](finance.md) · [полная модель](../auto/FINANCE.md).

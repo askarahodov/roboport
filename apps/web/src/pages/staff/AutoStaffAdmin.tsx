@@ -3,6 +3,7 @@ import React from 'react';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Grant = { grantId: string; userId: string; role: string; locationId: string | null };
 type AuditEvent = { eventId: string; grantId: string; actorId: string; userId: string; action: 'GRANTED' | 'REVOKED'; role: string; locationId: string | null; createdAt: string };
+const staffRoles = ['MANAGER', 'INTAKE', 'MECHANIC', 'WAREHOUSE', 'CASHIER'] as const;
 const roles = ['MANAGER', 'INTAKE', 'MECHANIC', 'WAREHOUSE'] as const;
 const documents = ['INTAKE_ACT','ESTIMATE','HANDOVER','SUPPLIER_ORDER'] as const;
 const capabilities = ['READ','CREATE','EDIT','CLOSE','WRITE','PRICE_SALES','PRICE_PURCHASE','DISCOUNT'] as const;
@@ -31,7 +32,7 @@ export function AutoStaffAdmin() {
   const [organization, setOrganization] = React.useState('');
   const [user, setUser] = React.useState('');
   const [location, setLocation] = React.useState('');
-  const [role, setRole] = React.useState<typeof roles[number]>('INTAKE');
+  const [role, setRole] = React.useState<typeof staffRoles[number]>('INTAKE');
   const [items, setItems] = React.useState<Grant[]>([]);
   const [audit, setAudit] = React.useState<AuditEvent[]>([]);
   const [auditState, setAuditState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
@@ -82,7 +83,7 @@ export function AutoStaffAdmin() {
           || !data.items.every((item: unknown) => item && typeof item === 'object'
             && 'grantId' in item && typeof item.grantId === 'string' && uuid.test(item.grantId)
             && 'userId' in item && typeof item.userId === 'string' && uuid.test(item.userId)
-            && 'role' in item && typeof item.role === 'string' && roles.some(r => r === item.role)
+            && 'role' in item && typeof item.role === 'string' && staffRoles.some(r => r === item.role)
             && 'locationId' in item && (item.locationId === null || typeof item.locationId === 'string' && uuid.test(item.locationId)))) throw new Error();
         if (!controller.signal.aborted) { setItems(data.items as Grant[]); setState('ready'); }
       } catch { if (!controller.signal.aborted) setState('error'); }
@@ -267,8 +268,8 @@ export function AutoStaffAdmin() {
       }}>
         <h2>Назначить сотрудника</h2>
         <label>UUID пользователя <input required value={user} onChange={e => setUser(e.target.value)} /></label>
-        <label>Роль <select value={role} onChange={e => setRole(e.target.value as typeof roles[number])}>
-          {roles.map(r => <option key={r} value={r}>{r}</option>)}</select></label>
+        <label>Роль <select value={role} onChange={e => setRole(e.target.value as typeof staffRoles[number])}>
+          {staffRoles.map(r => <option key={r} value={r}>{r}</option>)}</select></label>
         <label>UUID филиала (необязательно) <input value={location} onChange={e => setLocation(e.target.value)} /></label>
         <button disabled={busy || !uuid.test(user.trim()) || !!location.trim() && !uuid.test(location.trim())} type="submit">
           Назначить</button>

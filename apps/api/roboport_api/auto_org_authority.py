@@ -6,7 +6,7 @@ from uuid import UUID
 import psycopg
 from .session_lookup import session_subject
 
-ROLE_CODES = frozenset({"MANAGER", "INTAKE", "MECHANIC", "WAREHOUSE"})
+ROLE_CODES = frozenset({"MANAGER", "INTAKE", "MECHANIC", "WAREHOUSE", "CASHIER"})
 
 
 def organization_role_allows(conn: psycopg.Connection, token: str,
