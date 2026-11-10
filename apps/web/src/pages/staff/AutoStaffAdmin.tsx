@@ -12,6 +12,9 @@ type PolicyEvent = { eventId:string; role:typeof roles[number];userId:string|nul
   locationId:string|null;documentKind:DocumentKind;capability:Capability;
   allowed:boolean;notBefore:string|null;actorId:string;createdAt:string };
 type PendingPolicy = {org:string;body:string};
+type EffectivePolicy = {syntheticOnly:true;subjectToObjectACL:true;
+  documentKind:DocumentKind;userId:string;locationId:string;roles:string[];
+  capabilities:Record<Capability,{allowed:boolean;notBefore:string|null}>};
 
 async function mutate(url: string, payload: unknown) {
   const csrf = await fetch('/api/v1/auth/csrf', { method: 'POST', credentials: 'include', cache: 'no-store' });
@@ -50,13 +53,16 @@ export function AutoStaffAdmin() {
   const [policyBusy,setPolicyBusy] = React.useState(false);
   const [policyMessage,setPolicyMessage] = React.useState('');
   const [policyPending,setPolicyPending] = React.useState<PendingPolicy|null>(null);
+  const [effective,setEffective] = React.useState<EffectivePolicy|null>(null);
+  const [effectiveState,setEffectiveState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const validOrg = uuid.test(organization.trim());
   const organizationRef = React.useRef(organization.trim());
   organizationRef.current = organization.trim();
   React.useEffect(() => {
     setConfirmId(null);setAudit([]);setAuditState('idle');setMessage('');
     setPolicyEvents([]);setPolicyState('idle');setPolicyPending(null);setPolicyMessage('');
-  }, [organization]);
+    setEffective(null);setEffectiveState('idle');
+  }, [organization,policyDoc,policyLocation,policyUser]);
 
   React.useEffect(() => {
     if (!validOrg) { setItems([]); setState('idle'); return; }
@@ -162,6 +168,35 @@ export function AutoStaffAdmin() {
       if(organizationRef.current===org)setPolicyState('error');
     }
   }
+  async function loadEffective(){
+    if(!validOrg||!uuid.test(policyUser.trim())||
+       !uuid.test(policyLocation.trim()))return;
+    const org=organization.trim(),loc=policyLocation.trim(),user=policyUser.trim();
+    const doc=policyDoc;
+    setEffective(null);setEffectiveState('loading');
+    try{
+      const q=new URLSearchParams({userId:user,locationId:loc,documentKind:doc});
+      const response=await fetch('/api/v1/dev/auto/organizations/'+
+        encodeURIComponent(org)+'/access-policies/effective?'+q.toString(),{
+          credentials:'include',cache:'no-store',
+        });
+      if(org!==organizationRef.current)return;
+      if([401,403,404].includes(response.status)){setEffectiveState('denied');return;}
+      if(!response.ok)throw Error('http');
+      const value:unknown=await response.json();
+      if(!value||typeof value!=='object'||!('syntheticOnly' in value)||
+        value.syntheticOnly!==true||!('subjectToObjectACL' in value)||
+        value.subjectToObjectACL!==true||!('capabilities' in value)||
+        !value.capabilities||typeof value.capabilities!=='object'||
+        !capabilities.every(cap=>cap in (value.capabilities as object) &&
+          typeof (value.capabilities as EffectivePolicy['capabilities'])[cap]?.allowed==='boolean')
+      )throw Error('effective');
+      setEffective(value as EffectivePolicy);setEffectiveState('ready');
+    }catch{
+      if(org===organizationRef.current)setEffectiveState('error');
+    }
+  }
+
   async function executePolicy(pending:PendingPolicy){
     if(policyBusy||pending.org!==organizationRef.current||!validOrg)return;
     setPolicyBusy(true);setPolicyMessage('');
@@ -318,6 +353,26 @@ export function AutoStaffAdmin() {
           !!policyLocation.trim()&&!uuid.test(policyLocation.trim())}>
           Сохранить правило</button>
       </form>
+      <section aria-label="Эффективные права сотрудника (предпросмотр)">
+        <h3>Проверить эффективные права сотрудника</h3>
+        <p>Нужны действующий ADMIN и UUID филиала/сотрудника выше.
+          Предпросмотр показывает только права по роли и ограничениям,
+          но не отменяет проверки конкретного заказ-наряда, VIN и сессии сотрудника.</p>
+        <button type="button" disabled={!uuid.test(policyUser.trim())||
+          !uuid.test(policyLocation.trim())||effectiveState==='loading'}
+          onClick={()=>void loadEffective()}>Проверить эффективные права</button>
+        {effectiveState==='loading'&&<p role="status">Проверка полномочий…</p>}
+        {effectiveState==='denied'&&<p role="alert">403 — сотрудник не имеет действующего назначения либо организация чужая.</p>}
+        {effectiveState==='error'&&<p role="alert">Не удалось вычислить полномочия.</p>}
+        {effectiveState==='ready'&&effective&&<section aria-label="Результат эффективных прав">
+          <p>Роли: {effective.roles.join(', ')}. Документ: {effective.documentKind}.</p>
+          <ul>{capabilities.map(cap=><li key={cap}>
+            {cap}: {effective.capabilities[cap].allowed?'Разрешено в пределах объекта':'Запрещено'}
+            {effective.capabilities[cap].notBefore&&
+              ' · История с '+new Date(effective.capabilities[cap].notBefore!).toLocaleDateString('ru-RU')}
+          </li>)}</ul>
+        </section>}
+      </section>
       {policyPending&&<div role="group" aria-label="Повтор сохранения ограничения">
         <button type="button" disabled={policyBusy}
           onClick={()=>void executePolicy(policyPending)}>Повторить исходное правило</button>
