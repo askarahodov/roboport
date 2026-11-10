@@ -113,10 +113,10 @@ def get_staff_audit(org_id: str, request: Request, limit: int = 100):
 class PolicyBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     requestKey:UUID
-    role:str=Field(pattern="^(MANAGER|INTAKE|MECHANIC|WAREHOUSE)$")
+    role:str=Field(pattern="^(MANAGER|INTAKE|MECHANIC|WAREHOUSE|CASHIER)$")
     locationId:UUID|None=None
     userId:UUID|None=None
-    documentKind:str=Field(pattern="^(INTAKE_ACT|ESTIMATE|HANDOVER|SUPPLIER_ORDER)$")
+    documentKind:str=Field(pattern="^(INTAKE_ACT|ESTIMATE|HANDOVER|SUPPLIER_ORDER|FINANCE)$")
     capability:str=Field(pattern="^(READ|CREATE|EDIT|WRITE|CLOSE|PRICE_SALES|PRICE_PURCHASE|DISCOUNT)$")
     allowed:StrictBool
     notBefore:datetime|None=None
