@@ -14,7 +14,7 @@ from .session_lookup import session_subject
 
 ROLES=("MANAGER","INTAKE","MECHANIC","WAREHOUSE")
 DOCUMENTS=("INTAKE_ACT","ESTIMATE","HANDOVER","SUPPLIER_ORDER")
-CAPABILITIES=("READ","WRITE","CLOSE","PRICE_SALES","PRICE_PURCHASE","DISCOUNT")
+CAPABILITIES=("READ","CREATE","EDIT","WRITE","CLOSE","PRICE_SALES","PRICE_PURCHASE","DISCOUNT")
 
 
 class DocumentPolicyDenied(ValueError):
@@ -140,22 +140,23 @@ def require_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
     if row is None:
         raise DocumentPolicyDenied("FORBIDDEN")
     cutoffs=[]
+    checked_caps=(cap,"WRITE") if cap in ("CREATE","EDIT","CLOSE") else (cap,)
     for role in active:
         rules=conn.execute("""
-          SELECT location_id,user_id,allowed,not_before
+          SELECT capability,location_id,user_id,allowed,not_before
           FROM auto_document_access_policy
           WHERE organization_id=%s AND role_code=%s AND document_kind=%s
-            AND capability=%s
+            AND capability=ANY(%s)
             AND (location_id IS NULL OR location_id=%s)
             AND (user_id IS NULL OR user_id=%s)
           ORDER BY created_at DESC,id DESC LIMIT 201
           FOR SHARE
-        """,(org,role,document,cap,loc,actor)).fetchall()
+        """,(org,role,document,list(checked_caps),loc,actor)).fetchall()
         if len(rules)>200:
             raise DocumentPolicyDenied("ACL_LIMIT")
         latest={}
-        for location,user,allowed,not_before in rules:
-            scope=(location,user)
+        for capability,location,user,allowed,not_before in rules:
+            scope=(capability,location,user)
             if scope not in latest:
                 latest[scope]=(allowed,not_before)
         if any(not allowed for allowed,_ in latest.values()):
