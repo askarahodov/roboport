@@ -27,3 +27,19 @@
 PG17/HTTP tests: `tests/integration/test_pg_auto_booking_materials_atomic.py` — 2 вида позиций, 1 Appointment/WorkOrder/outbox и ровно 2 резерва, повтор/изменение ключа, лишнее количество, чужой филиал, отсутствие WAREHOUSE, запрет клиента, rollback без phantom reservations, неизменяемость и отказ старого receipt после RELEASE. Browser E2E: `apps/web/e2e/auto-calendar.spec.ts` — 390px/1280px, выбор типа и количества, запрет превышения остатка и payload в одном POST.
 
 Для возврата и выдачи используйте штатный scoped `WAREHOUSE` ledger — прямые изменения SQL запрещены. Для production нужны полноценные номенклатура/единицы измерения/прайс, комплексы, подтверждение применяемости, складские документы, независимое согласование стоимости, supply и consent. **#113 не закрывать только на основании этого current-dev сценария.**
+
+
+## Материалы публичной заявки #442 — current-dev
+
+MANAGER и WAREHOUSE совместно публикуют точные
+`skuId,kind:PART|CONSUMABLE,quantity` на конкретный пост/услугу
+через `/staff/auto-public-booking`. Эти требования immutable;
+анонимному гостю виден только предварительный `materialsReady`,
+но ни SKU, ни остатки. После клиентской verified-связи INTAKE с
+действующим WAREHOUSE отправляет staff fulfill; вызывается **тот же**
+`create_appointment(material_items=...)`, который атомарно держит
+SKU FOR UPDATE, проверяет доступный запас, создаёт
+`auto_work_order_stock_event RESERVE` и
+`auto_appointment_material_selection`. Недостаток товара
+откатывает **весь** WorkOrder, CRM и booking, не создаёт
+ложной гарантии слота. [Полная цепочка](PUBLIC_BOOKING.md).
