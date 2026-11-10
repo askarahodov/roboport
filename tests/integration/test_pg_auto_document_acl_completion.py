@@ -4,6 +4,8 @@ All requests use real seeded sessions, branch grants, immutable DB policies and
 actual services. No monkeypatched permission functions, no real financial data.
 """
 from uuid import UUID, uuid4
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -424,3 +426,53 @@ def test_crm_sim_money_aggregate_obeys_finance_price_deny(monkeypatch):
                     document="FINANCE",cap="PRICE_SALES",allowed=True).status_code==201
     manager=token(http,d,d["intake"])
     assert http.get(endpoint,params=period).status_code==200
+
+
+def test_cashier_finance_cutoff_concurrent_read_and_payment_no_lock_upgrade(monkeypatch):
+    """Under a non-empty historical cutoff, two requests must serialize.
+
+    Both reads and writes request WorkOrder UPDATE before any history
+    WorkOrder SHARE. The loser never sees an unhandled DeadlockDetected.
+    """
+    from roboport_api.auto_treasury import read_order
+    d,org,loc,order,service,http,base,_=treasury_prepare(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    manager=token(http,d,d["intake"])
+    opened=treasury_create(http,base,manager)
+    assert opened.status_code==201,opened.text
+    account=UUID(opened.json()["accountId"])
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policy_url(org),owner,role="CASHIER",loc=loc,
+                    user=d["manager"],document="FINANCE",cap="READ",
+                    allowed=True,not_before="2020-01-01T00:00:00Z").status_code==201
+
+    start=Barrier(2)
+    def read(_):
+        with psycopg.connect(DSN) as db:
+            db.execute("SET lock_timeout='5000ms'")
+            start.wait(timeout=15)
+            result=read_order(db,d["tokens"][d["manager"]],org,loc,order)
+            return result["realMoney"],result["syntheticOnly"],result["orderId"]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(read,range(2)))==[
+            (False,True,str(order)),(False,True,str(order))
+        ]
+
+    start=Barrier(2)
+    def advance(amount):
+        with psycopg.connect(DSN) as db:
+            db.execute("SET lock_timeout='5000ms'")
+            start.wait(timeout=15)
+            result=record_event(db,d["tokens"][d["manager"]],org,loc,order,
+                account_id=account,request_key=uuid4(),kind="ADVANCE",
+                amount_minor=amount,reason="Проверка гонки кассира")
+            return result["replayed"],result["syntheticOnly"]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(advance,(100,200)))==[
+            (False,True),(False,True)
+        ]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT COUNT(*),SUM(amount_minor)
+            FROM auto_treasury_event WHERE work_order_id=%s
+              AND kind='ADVANCE'""",(order,)).fetchone()==(2,300)
