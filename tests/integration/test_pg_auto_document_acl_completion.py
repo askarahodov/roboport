@@ -243,3 +243,68 @@ def test_receipt_queue_and_valuation_cannot_bypass_purchase_price_policy(monkeyp
 
 def url(org):
     return policy_url(org)
+
+
+def test_tariff_and_complex_catalog_price_policy_blocks_alternate_urls(monkeypatch):
+    d,org,loc,order,service,foreign,http=tariff_setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    policies=policy_url(org)
+    tariffs=tariff_url(org,loc)
+    manager=token(http,d,d["intake"])
+    assert http.get(tariffs).status_code==200
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policies,owner,loc=loc,user=d["intake"],
+                    document="ESTIMATE",cap="PRICE_SALES").status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(tariffs).status_code==403
+    assert http.post(tariffs,headers=manager,
+                     json=proposal()).status_code==403
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policies,owner,loc=loc,user=d["intake"],
+                    document="ESTIMATE",cap="PRICE_SALES",allowed=True).status_code==201
+    assert set_rule(http,policies,owner,loc=loc,user=d["intake"],
+                    document="ESTIMATE",cap="DISCOUNT").status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.post(tariffs,headers=manager,
+                     json=proposal(discount=1000)).status_code==403
+    created=http.post(tariffs,headers=manager,json=proposal(discount=0))
+    assert created.status_code==201,created.text
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policies,owner,loc=loc,user=d["intake"],
+                    document="ESTIMATE",cap="READ",allowed=True,
+                    not_before="2099-01-01T00:00:00Z").status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(tariffs).status_code==403
+
+    from test_pg_auto_work_complexes_http import (
+        setup as complex_setup, paths as complex_paths,
+        complex_body,
+    )
+    dd,oo,ll,wo,base,extra,part,consumable,web=complex_setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,oo,dd["other"])
+    catalog,selected=complex_paths(oo,ll,wo)
+    owner=token(web,dd,dd["other"])
+    assert set_rule(web,policy_url(oo),owner,loc=ll,user=dd["intake"],
+                    document="ESTIMATE",cap="PRICE_SALES").status_code==201
+    manager=token(web,dd,dd["intake"])
+    assert web.get(catalog).status_code==403
+    assert web.post(catalog,headers=manager,
+                    json=complex_body(extra,part,consumable)).status_code==403
+    owner=token(web,dd,dd["other"])
+    assert set_rule(web,policy_url(oo),owner,loc=ll,user=dd["intake"],
+                    document="ESTIMATE",cap="PRICE_SALES",allowed=True).status_code==201
+    manager=token(web,dd,dd["intake"])
+    created=web.post(catalog,headers=manager,
+                     json=complex_body(extra,part,consumable))
+    assert created.status_code==201,created.text
+    assert created.json()["complex"]["materials"][0]["unitPriceMinor"]>=0
+    owner=token(web,dd,dd["other"])
+    assert set_rule(web,policy_url(oo),owner,loc=ll,user=dd["intake"],
+                    document="ESTIMATE",cap="CREATE").status_code==201
+    manager=token(web,dd,dd["intake"])
+    assert web.post(selected,headers=manager,json={
+        "requestKey":str(uuid4()),
+        "complexId":created.json()["complex"]["id"],
+    }).status_code==403
