@@ -129,6 +129,10 @@ export function WarehouseCatalog(){
         setPending(null);setMessage(reason(res.status));return;
       }
       const data:unknown=await res.json();
+      // The response headers may belong to the former branch even if its
+      // JSON body arrives after the user switches tenant/location. Do not
+      // leak the old preview, receipt or identifiers into the new scope.
+      if(snap.org!==context.current.org||snap.loc!==context.current.loc)return;
       if(!data||typeof data!=='object'||
          !('syntheticOnly' in data)||data.syntheticOnly!==true)
         throw Error('unknown');
