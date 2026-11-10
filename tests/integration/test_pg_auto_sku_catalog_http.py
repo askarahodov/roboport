@@ -107,3 +107,104 @@ def test_create_price_xlsx_preview_commit_and_export(monkeypatch):
                               (org,)).fetchone()==(1,)
             assert db.execute("SELECT count(*) FROM auto_catalog_price_event WHERE sku_id=%s",
                               (UUID(item),)).fetchone()==(3,)
+
+
+def test_analog_merge_history_and_active_stock_denied(monkeypatch):
+    d,org,loc,other,other_loc,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        source=create(http,d,org,loc,"SYNTH-447-SOURCE")
+        target=create(http,d,org,loc,"SYNTH-447-TARGET")
+        stocked=create(http,d,org,loc,"SYNTH-447-STOCKED")
+        ak=uuid4()
+        link={"locationId":str(loc),"leftSkuId":source,
+              "rightSkuId":target,"evidenceNote":"Offline manual suggestion"}
+        original=post(http,d,d["intake"],url(org)+"/analogs",link,ak)
+        assert original.status_code==201,original.text
+        assert post(http,d,d["intake"],url(org)+"/analogs",link,ak).json()["replayed"] is True
+        with psycopg.connect(DSN) as db:
+            source_lot=add_lot(db,org,loc,UUID(source),add_bin(db,org,loc))
+            db.execute("SELECT record_auto_stock(%s,%s,'RECEIPT',3)",
+                       (UUID(stocked),uuid4()))
+        assert post(http,d,d["intake"],url(org)+"/merges",{
+            "locationId":str(loc),"sourceSkuId":stocked,
+            "targetSkuId":target}).status_code==409
+        m={"locationId":str(loc),"sourceSkuId":source,"targetSkuId":target}
+        key=uuid4()
+        merged=post(http,d,d["intake"],url(org)+"/merges",m,key)
+        assert merged.status_code==201,merged.text
+        assert merged.json()["historicalFksRewritten"] is False
+        assert post(http,d,d["intake"],url(org)+"/merges",m,key).json()["replayed"] is True
+        assert post(http,d,d["intake"],url(org)+"/merges",m).status_code==409
+        assert post(http,d,d["intake"],url(org)+"/prices",{
+            "locationId":str(loc),"entries":[{
+               "skuId":source,"expectedVersion":1,
+               "purchaseMinor":1500,"saleMinor":3000}]}).status_code in (403,409)
+        with psycopg.connect(DSN) as db:
+            assert db.execute("SELECT sku_id FROM auto_stock_lot WHERE id=%s",
+                (source_lot,)).fetchone()==(UUID(source),)
+            assert db.execute("SELECT sku_id FROM auto_catalog_price_event WHERE sku_id=%s",
+                (UUID(source),)).fetchone()==(UUID(source),)
+        assert next(r for r in listed(http,d,org,loc).json()["items"]
+                    if r["skuId"]==source)["mergedInto"]==target
+
+
+def test_denied_scope_bad_input_stale_preview_and_role_revoke(monkeypatch):
+    d,org,loc,foreign,foreign_loc,_,manager_grant=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        body={"locationId":str(loc),**{
+          k:v for k,v in row("SYNTH-447-SEC").items() if k!="analogArticle"}}
+        assert post(http,d,d["client_a"],url(org)+"/skus",body).status_code==403
+        assert post(http,d,d["intake"],url(foreign)+"/skus",
+             {**body,"locationId":str(foreign_loc)}).status_code==403
+        assert post(http,d,d["intake"],url(org)+"/skus",
+             {**body,"purchaseMinor":True}).status_code==422
+        assert post(http,d,d["intake"],url(org)+"/skus",
+             {**body,"article":"BAD INVALID"}).status_code==422
+        item=create(http,d,org,loc,"SYNTH-447-SEC")
+        assert post(http,d,d["intake"],
+            url(org)+"/imports/preview?locationId="+str(loc),
+            b"not-a-workbook",xlsx=True).status_code==422
+        xlsx=export_catalog_xlsx([row("SYNTH-447-SEC",1500,2500)])
+        preview=post(http,d,d["intake"],
+            url(org)+"/imports/preview?locationId="+str(loc),xlsx,xlsx=True)
+        assert preview.status_code==201,preview.text
+        info=preview.json()
+        assert post(http,d,d["intake"],url(org)+"/prices",{
+            "locationId":str(loc),"entries":[{
+                "skuId":item,"expectedVersion":1,
+                "purchaseMinor":1510,"saleMinor":2510}]}).status_code==201
+        commit={"locationId":str(loc),"previewId":info["previewId"],
+                "sha256":info["sha256"]}
+        assert post(http,d,d["intake"],url(org)+"/imports/commit",
+                    commit).status_code==409
+        with psycopg.connect(DSN) as db:
+            db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
+                       (manager_grant,))
+        assert listed(http,d,org,loc).status_code==200
+        assert post(http,d,d["intake"],url(org)+"/prices",{
+            "locationId":str(loc),"entries":[{
+                "skuId":item,"expectedVersion":2,
+                "purchaseMinor":1600,"saleMinor":2600}]}).status_code==403
+        assert post(http,d,d["intake"],url(org)+"/imports/commit",commit).status_code==403
+        assert listed(http,d,org,foreign_loc).status_code==403
+
+
+def test_price_batch_lock_serialize_competing_versions(monkeypatch):
+    d,org,loc,foreign,foreign_loc,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        item=create(http,d,org,loc,"SYNTH-447-RACE")
+    line={"skuId":UUID(item),"expectedVersion":1,
+          "purchaseMinor":1800,"saleMinor":2800}
+    with psycopg.connect(DSN) as first,psycopg.connect(DSN) as second:
+        with first.transaction():
+            out=bulk_prices(first,d["tokens"][d["intake"]],org,loc,uuid4(),[line])
+            assert out["items"][0]["version"]==2
+            second.execute("SET lock_timeout='200ms'")
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                with second.transaction():
+                    bulk_prices(second,d["tokens"][d["intake"]],org,loc,
+                                uuid4(),[line])
+        with pytest.raises(CatalogConflict):
+            bulk_prices(second,d["tokens"][d["intake"]],org,loc,uuid4(),[line])
+        assert second.execute("SELECT max(version) FROM auto_catalog_price_event WHERE sku_id=%s",
+                              (UUID(item),)).fetchone()==(2,)
