@@ -237,7 +237,7 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
         requestKey:newKey(),bayId,serviceId,policyVersion:policy,materials},true);
     }catch(e){setError(String(e));}
   }
-  return <section aria-label={mode==='public'?'Публичная онлайн-запись (только DEV)':
+  return <section className="auto-public-booking" aria-label={mode==='public'?'Публичная онлайн-запись (только DEV)':
     mode==='client'?'Подтверждение публичной заявки клиентом (DEV)':
       'Публикации и публичные заявки СТО (DEV)'}>
     <h1>{mode==='public'?'Запись на СТО':
