@@ -47,8 +47,14 @@ def daily_demo_finance(conn: psycopg.Connection, token: str, *,
             raise FinanceReportDenied("FORBIDDEN")
         try:
             for cap in ("READ", "PRICE_SALES"):
-                require_document_access(conn,token,organization_id,location_id,
-                                        ("MANAGER",),"FINANCE",cap)
+                cutoff=require_document_access(
+                    conn,token,organization_id,location_id,
+                    ("MANAGER","CASHIER"),"FINANCE",cap)
+                # This branch-wide report combines ledger entries without
+                # individual WorkOrder cutoff filtering. Deny the entire
+                # report when an active historical restriction is present.
+                if cutoff is not None:
+                    raise FinanceReportDenied("HISTORY_DENIED")
         except DocumentPolicyDenied:
             raise FinanceReportDenied("FORBIDDEN") from None
         location=conn.execute(
