@@ -88,7 +88,9 @@ def pending_receipt_reviews(conn: psycopg.Connection,token: str,
             raise AutoStockDenied("FORBIDDEN")
         rows=conn.execute("""
             SELECT d.id,l.id,s.article,l.batch_code,b.code,
-                   d.quantity,d.source_reference
+                   d.quantity,d.source_reference,
+                   po.id,po.selected_supplier,po.selected_offer,
+                   po.currency,po.purchase_unit_minor,po.quote_revision,po.quoted_at
             FROM auto_stock_receipt_document d
             JOIN auto_stock_lot l ON l.id=d.lot_id
               AND l.organization_id=d.organization_id
@@ -104,6 +106,11 @@ def pending_receipt_reviews(conn: psycopg.Connection,token: str,
               ON a.document_id=d.id
             LEFT JOIN auto_stock_receipt_valuation v
               ON v.document_id=d.id
+            LEFT JOIN auto_supplier_purchase_receipt pr
+              ON pr.document_id=d.id
+            LEFT JOIN auto_supplier_purchase_order po
+              ON po.id=pr.purchase_id AND po.organization_id=d.organization_id
+                AND po.location_id=d.location_id
             WHERE d.organization_id=%s AND d.location_id=%s
               AND o.disabled_at IS NULL AND loc.disabled_at IS NULL
               AND ((%s='accept' AND a.id IS NULL)
@@ -113,8 +120,20 @@ def pending_receipt_reviews(conn: psycopg.Connection,token: str,
         """,(organization_id,location_id,stage,stage,
              after_document_id,after_document_id,limit+1)).fetchall()
         next_id=rows[limit-1][0] if len(rows)>limit else None
-        return ([{"documentId":str(document_id),"lotId":str(lot_id),
+        result=[]
+        for (document_id,lot_id,article,batch,bin_code,quantity,reference,
+             purchase_id,supplier,offer,currency,price_minor,revision,quoted_at) in rows[:limit]:
+            item={"documentId":str(document_id),"lotId":str(lot_id),
                   "article":article,"batchCode":batch,"binCode":bin_code,
                   "quantity":quantity,"sourceReference":reference}
-                 for document_id,lot_id,article,batch,bin_code,quantity,reference
-                 in rows[:limit]],next_id)
+            # Standalone receipt shape is unchanged; only purchase-backed
+            # receipts carry immutable quote details for manager valuation.
+            if purchase_id is not None:
+                item["purchaseQuote"]={
+                    "orderId":str(purchase_id),"supplierId":supplier,"offerId":offer,
+                    "currency":currency,"unitNetMinor":price_minor,
+                    "supplierPriceRevision":revision,
+                    "supplierQuotedAt":quoted_at.isoformat(),
+                }
+            result.append(item)
+        return result,next_id
