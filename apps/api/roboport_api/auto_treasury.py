@@ -62,8 +62,9 @@ def _staff(conn,token,org,loc,roles,*,cap="READ"):
 def _order(conn,token,org,loc,order,roles,*,cap="READ"):
     _valid_uuids(org,loc,order)
     try:
-        actor=_actor_and_order(conn,token,org,loc,order,roles)
+        # Lock the ACL organization before locking the WorkOrder identity.
         _finance_scope(conn,token,org,loc,cap,order=order)
+        actor=_actor_and_order(conn,token,org,loc,order,roles)
         return actor
     except InspectionDenied:
         raise TreasuryDenied("FORBIDDEN") from None
