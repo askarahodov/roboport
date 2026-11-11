@@ -243,6 +243,14 @@ def upgrade():
                  )
              )
              OR EXISTS(
+               SELECT 1 FROM auto_stock_supplier_return_document pending
+               WHERE pending.sku_id=NEW.source_sku_id
+                 AND NOT EXISTS(
+                   SELECT 1 FROM auto_stock_supplier_return_acceptance approved
+                   WHERE approved.document_id=pending.id
+                 )
+             )
+             OR EXISTS(
                SELECT 1 FROM auto_stock_reclassification_document pending
                WHERE NEW.source_sku_id IN (
                    pending.source_sku_id,pending.destination_sku_id)
@@ -314,6 +322,13 @@ def upgrade():
     op.execute("""CREATE TRIGGER aaa_catalog_merged_supplier_order
       BEFORE INSERT ON auto_supplier_purchase_order FOR EACH ROW
       EXECUTE FUNCTION guard_auto_catalog_merged_stock()""")
+    # Supplier return drafts refer to immutable valued receipts. A merge
+    # before MANAGER approval (or a fresh draft after merge) would strand
+    # the document behind an impossible SUPPLIER_RETURN stock posting.
+    # Both directions share the SKU lock with record_* return SQL.
+    op.execute("""CREATE TRIGGER aaa_catalog_merged_supplier_return
+      BEFORE INSERT ON auto_stock_supplier_return_document FOR EACH ROW
+      EXECUTE FUNCTION guard_auto_catalog_merged_stock()""")
     # A pending lot count can later produce COUNT_GAIN/COUNT_LOSS; once
     # merged, fresh counts on retained old lots would be unapprovable.
     op.execute("""CREATE TRIGGER aaa_catalog_merged_lot_count
@@ -349,6 +364,7 @@ def upgrade():
 
 def downgrade():
     # Disposable synthetic DB only: never erase imported catalog or history in production.
+    op.execute("DROP TRIGGER aaa_catalog_merged_supplier_return ON auto_stock_supplier_return_document")
     op.execute("DROP TRIGGER aaa_catalog_merged_reclass ON auto_stock_reclassification_document")
     op.execute("DROP FUNCTION guard_auto_catalog_merged_reclass()")
     op.execute("DROP TRIGGER aaa_catalog_merged_receipt_document ON auto_stock_receipt_document")
