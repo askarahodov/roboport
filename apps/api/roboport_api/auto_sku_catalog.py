@@ -61,10 +61,10 @@ def _read_scope(conn,token,org,loc):
     sale=False
     sale_cutoff=None
     if has_document_access(conn,token,org,loc,
-                           ("MANAGER",),"ESTIMATE","PRICE_SALES"):
+                           ("MANAGER","WAREHOUSE"),"ESTIMATE","PRICE_SALES"):
         try:
             sale_cutoff=require_document_access(conn,token,org,loc,
-                ("MANAGER",),"ESTIMATE","READ")
+                ("MANAGER","WAREHOUSE"),"ESTIMATE","READ")
             sale=True
         except DocumentPolicyDenied:
             sale=False
@@ -81,13 +81,13 @@ def _write_scope(conn,token,org,loc,cap):
         WHERE id=%s AND disabled_at IS NULL FOR UPDATE""",(org,)).fetchone() is None:
         raise CatalogDenied("FORBIDDEN")
     try:
-        require_document_access(conn,token,org,loc,("WAREHOUSE",),
+        require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
                                 "SUPPLIER_ORDER",cap)
-        require_document_access(conn,token,org,loc,("WAREHOUSE",),
+        require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
                                 "SUPPLIER_ORDER","PRICE_PURCHASE")
-        require_document_access(conn,token,org,loc,("MANAGER",),
+        require_document_access(conn,token,org,loc,("MANAGER","WAREHOUSE"),
                                 "ESTIMATE","EDIT")
-        require_document_access(conn,token,org,loc,("MANAGER",),
+        require_document_access(conn,token,org,loc,("MANAGER","WAREHOUSE"),
                                 "ESTIMATE","PRICE_SALES")
     except DocumentPolicyDenied:
         raise CatalogDenied("FORBIDDEN") from None
@@ -102,7 +102,7 @@ def _require_catalog_edit(conn,token,org,loc):
     # Import CREATE authority cannot bypass explicit EDIT deny when an
     # existing SKU receives a new price version. Recheck before replays too.
     try:
-        require_document_access(conn,token,org,loc,("WAREHOUSE",),
+        require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
                                 "SUPPLIER_ORDER","EDIT")
     except DocumentPolicyDenied:
         raise CatalogDenied("FORBIDDEN") from None
