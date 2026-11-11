@@ -694,7 +694,7 @@ def test_merge_supplier_return_pending_or_new_is_rejected_without_orphan(monkeyp
         retired=create(http,d,org,loc,"SYNTH-447-RETURN-RETIRED")
         successor=create(http,d,org,loc,"SYNTH-447-RETURN-SUCCESSOR")
         with psycopg.connect(DSN) as db:
-            retired_lot=add_lot(db,org,loc,UUID(retired),add_bin(db,org,loc))
+            retired_lot=add_lot(db,org,loc,UUID(retired),bin_id)
             r=create_receipt_document(
                 db,d["tokens"][d["intake"]],org,loc,retired_lot,uuid4(),
                 1,"SYNTH-447-RECEIPT-RETIRE",
