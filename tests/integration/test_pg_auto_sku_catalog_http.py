@@ -23,6 +23,12 @@ from roboport_api.auto_supplier_purchase import (
     place_supplier_order, record_supplier_delivery,
 )
 from test_pg_auto_supplier_purchase import quotes
+from roboport_api.auto_stock_supplier_return_document import (
+    draft_supplier_return,approve_supplier_return,
+)
+from roboport_api.auto_stock_disposition import dispose_stock_lot
+from test_pg_auto_stock_receipt_valuation import value as value_receipt
+
 from test_pg_auto_stock_lot_allocation import act as lot_allocation
 from roboport_api.auto_stock_reclassification import (
     propose_reclassification,approve_reclassification,
@@ -634,3 +640,85 @@ def test_merge_pending_reclass_protects_manager_posting_and_new_drafts(monkeypat
                 SELECT count(*) FROM auto_stock_reclassification_document
                 WHERE destination_sku_id=%s
             """,(UUID(empty),)).fetchone()==(0,)
+
+
+def test_merge_supplier_return_pending_or_new_is_rejected_without_orphan(monkeypatch):
+    """PG17/HTTPS: valued receipt→full write-off→pending return↔merge."""
+    d,org,loc,_,_,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        source=create(http,d,org,loc,"SYNTH-447-RETURN-PENDING")
+        canonical=create(http,d,org,loc,"SYNTH-447-RETURN-TARGET")
+        with psycopg.connect(DSN) as db:
+            grant(db,d["manager"],org,loc,"MANAGER")
+            lot=add_lot(db,org,loc,UUID(source),add_bin(db,org,loc))
+            receipt=create_receipt_document(
+                db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),1,
+                "SYNTH-447-RECEIPT-ORIGINAL",
+            )
+            accept_receipt_document(
+                db,d["tokens"][d["manager"]],org,loc,receipt,uuid4())
+            value_receipt(db,d,org,loc,receipt)
+            pending=draft_supplier_return(
+                db,d["tokens"][d["intake"]],org,loc,receipt,uuid4(),
+                1,"Синтетический возврат поставщику","SYNTH-RMA-PENDING",
+            )
+            dispose_stock_lot(
+                db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),
+                "WRITE_OFF",1,"Синтетическое списание",
+            )
+            assert balance(db,UUID(source))==(0,0)
+            assert db.execute("""
+                SELECT count(*) FROM auto_stock_supplier_return_acceptance
+                WHERE document_id=%s
+            """,(pending,)).fetchone()==(0,)
+        merge={"locationId":str(loc),"sourceSkuId":source,
+               "targetSkuId":canonical}
+        refused=post(http,d,d["intake"],url(org)+"/merges",merge)
+        assert refused.status_code==409,refused.text
+        with psycopg.connect(DSN) as db:
+            # Restocking the original lot after merge denial restores the
+            # original maker/checker flow for the pending immutable RMA.
+            receipt2=create_receipt_document(
+                db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),1,
+                "SYNTH-447-RECEIPT-RESTOCK",
+            )
+            accept_receipt_document(
+                db,d["tokens"][d["manager"]],org,loc,receipt2,uuid4())
+            assert balance(db,UUID(source))==(1,0)
+            confirmed=approve_supplier_return(
+                db,d["tokens"][d["manager"]],org,loc,pending,uuid4())
+            assert confirmed is not None
+            assert balance(db,UUID(source))==(0,0)
+        assert post(http,d,d["intake"],url(org)+"/merges",merge).status_code==201
+
+        retired=create(http,d,org,loc,"SYNTH-447-RETURN-RETIRED")
+        successor=create(http,d,org,loc,"SYNTH-447-RETURN-SUCCESSOR")
+        with psycopg.connect(DSN) as db:
+            retired_lot=add_lot(db,org,loc,UUID(retired),add_bin(db,org,loc))
+            r=create_receipt_document(
+                db,d["tokens"][d["intake"]],org,loc,retired_lot,uuid4(),
+                1,"SYNTH-447-RECEIPT-RETIRE",
+            )
+            accept_receipt_document(
+                db,d["tokens"][d["manager"]],org,loc,r,uuid4())
+            value_receipt(db,d,org,loc,r)
+            dispose_stock_lot(
+                db,d["tokens"][d["intake"]],org,loc,retired_lot,uuid4(),
+                "WRITE_OFF",1,"Синтетическое списание",
+            )
+            assert balance(db,UUID(retired))==(0,0)
+        accepted=post(http,d,d["intake"],url(org)+"/merges",{
+            "locationId":str(loc),"sourceSkuId":retired,
+            "targetSkuId":successor})
+        assert accepted.status_code==201,accepted.text
+        with psycopg.connect(DSN) as db:
+            with pytest.raises(AutoStockConflict):
+                draft_supplier_return(
+                    db,d["tokens"][d["intake"]],org,loc,r,uuid4(),
+                    1,"Синтетический возврат поставщику",
+                    "SYNTH-RMA-AFTER-MERGE",
+                )
+            assert db.execute("""
+                SELECT count(*) FROM auto_stock_supplier_return_document
+                WHERE sku_id=%s
+            """,(UUID(retired),)).fetchone()==(0,)
