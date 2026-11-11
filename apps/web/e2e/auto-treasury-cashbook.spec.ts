@@ -72,7 +72,7 @@ test('кассовая книга: сверка входящего, расход
   const table=report.getByRole('table',{name:'Сверка тестовых движений по дням'});
   await expect(table.locator('tbody tr')).toHaveCount(1);
   await expect(table).toContainText('Закрыто');
-  await report.locator('summary').getByText('Событий: 3',{exact:true}).click();
+  await report.locator('summary').filter({hasText:'Событий: 3'}).click();
   await expect(report).toContainText('Зачёт аванса без движения');
   await expect(report).toContainText(event3);
   expect(requests).toHaveLength(1);
