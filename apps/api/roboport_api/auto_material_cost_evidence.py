@@ -144,7 +144,7 @@ def material_cost_evidence(conn: psycopg.Connection, token: str, org: UUID, loc:
                    count(v.id)::bigint AS valued_count,
                    min(v.currency)::text AS quote_currency,
                    min(v.purchase_unit_net_minor)::bigint AS quote_unit_net_minor,
-                   min(v.id) AS quote_valuation_id
+                   min(v.id::text)::uuid AS quote_valuation_id
             FROM auto_stock_receipt_document d
             LEFT JOIN auto_stock_receipt_acceptance a
               ON a.document_id=d.id
