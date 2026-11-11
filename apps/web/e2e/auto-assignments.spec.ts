@@ -54,8 +54,11 @@ test('руководитель предлагает сменное назнач�
   await expect(submit).toBeDisabled();
   await page.getByLabel('UUID заказ-наряда').fill(order);
   await page.getByLabel('UUID механика',{exact:true}).fill(mechanic);
-  await page.getByLabel('Начало назначения (ISO с поясом)').fill(start);
+  await page.getByLabel('Начало назначения (ISO с поясом)').fill(start.slice(0,-1));
   await page.getByLabel('Конец назначения (ISO с поясом)').fill(end);
+  await expect(submit).toBeDisabled();
+  // toISOString() includes fractional seconds. They remain legal only with Z/offset.
+  await page.getByLabel('Начало назначения (ISO с поясом)').fill(start);
   await expect(submit).toBeEnabled();
   await submit.focus();
   await page.keyboard.press('Enter');
