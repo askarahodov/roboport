@@ -66,7 +66,7 @@ def mechanic_productivity(conn: psycopg.Connection, token: str, org: UUID,
             raise ProductivityDenied("FORBIDDEN")
         try:
             cutoff = require_document_access(
-                conn, token, org, loc, ("MANAGER",), "HANDOVER", "READ")
+                conn, token, org, loc, ("MANAGER", "WAREHOUSE"), "HANDOVER", "READ")
         except DocumentPolicyDenied:
             raise ProductivityDenied("FORBIDDEN") from None
         location = conn.execute("""
