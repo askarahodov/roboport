@@ -139,6 +139,7 @@ def test_sku_catalog_purchase_and_sales_intersections_and_warehouse_only(monkeyp
     d, org, loc, _, _, _, _ = catalog_fixture(monkeypatch)
     with psycopg.connect(DSN) as db:
         admin(db, org, d["other"])
+        grant(db, d["manager"], org, loc, "MANAGER")
     http = TestClient(app, base_url="https://127.0.0.1")
     policy = policy_url(org)
     endpoint = catalog_url(org) + "/skus"
@@ -146,6 +147,8 @@ def test_sku_catalog_purchase_and_sales_intersections_and_warehouse_only(monkeyp
         k: v for k,v in catalog_row("SEC-ACL-498-A").items()
         if k != "analogArticle"
     }}
+    # MANAGER-only must not create SKU despite having no restrictive policy.
+    assert catalog_post(http, d, d["manager"], endpoint, payload).status_code == 403
     _rule(http, policy, d, org, loc, "MANAGER", "PRICE_PURCHASE", False)
     assert catalog_post(http, d, d["intake"], endpoint, payload).status_code == 403
     _rule(http, policy, d, org, loc, "MANAGER", "PRICE_PURCHASE", True)
