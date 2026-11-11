@@ -217,17 +217,53 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
 
 
 def _require_assigned_mechanic(conn,order,actor):
-    """An accepted offer owns execution handoff/finish, not just labor."""
-    row=conn.execute("""
-      SELECT mechanic_id,status FROM auto_work_order_assignment
-      WHERE work_order_id=%s ORDER BY created_at DESC,id DESC LIMIT 1
-    """,(order,)).fetchone()
-    if row is not None:
-        if row[1]!="ACCEPTED":
-            raise ExecutionConflict("ASSIGNMENT_NOT_ACCEPTED")
-        if row[0]!=actor:
-            raise ExecutionDenied("FORBIDDEN")
+    """Accepted is historical evidence, never a perpetual work permit.
 
+    A canceled shift, revoked grant, inactive mechanic or elapsed interval
+    removes authority for *new* labor, handoff and finish. Old unassigned
+    synthetic orders retain their pre-assignment compatibility.
+    Caller holds the scoped WorkOrder transaction lock.
+    """
+    row=conn.execute("""
+      SELECT id,mechanic_id,status,organization_id,location_id,starts_at,ends_at
+      FROM auto_work_order_assignment
+      WHERE work_order_id=%s ORDER BY created_at DESC,id DESC LIMIT 1
+      FOR SHARE
+    """,(order,)).fetchone()
+    if row is None:
+        return
+    ident,mechanic,status,org,loc,starts,ends=row
+    if status!="ACCEPTED":
+        raise ExecutionConflict("ASSIGNMENT_NOT_ACCEPTED")
+    if mechanic!=actor:
+        raise ExecutionDenied("FORBIDDEN")
+    # Lock the source authorization rows until commit so a concurrent
+    # cancellation/revocation cannot pass between check and mutation.
+    active=conn.execute("""
+      SELECT shift.id FROM auto_staff_shift shift
+      JOIN auto_organization_role_grant grant_row
+        ON grant_row.organization_id=shift.organization_id
+       AND grant_row.user_id=shift.user_id
+       AND grant_row.role_code='MECHANIC'
+       AND grant_row.revoked_at IS NULL
+       AND (grant_row.location_id=shift.location_id
+            OR grant_row.location_id IS NULL)
+      JOIN app_user staff ON staff.id=shift.user_id AND staff.status='ACTIVE'
+      JOIN auto_organization organization
+        ON organization.id=shift.organization_id
+       AND organization.disabled_at IS NULL
+      JOIN auto_service_location location
+        ON location.id=shift.location_id
+       AND location.organization_id=organization.id
+       AND location.disabled_at IS NULL
+      WHERE shift.organization_id=%s AND shift.location_id=%s
+        AND shift.user_id=%s AND shift.canceled_at IS NULL
+        AND shift.starts_at<=%s AND shift.ends_at>=%s
+        AND %s>clock_timestamp()
+      LIMIT 1 FOR SHARE OF shift,grant_row,staff,organization,location
+    """,(org,loc,actor,starts,ends,ends)).fetchone()
+    if active is None:
+        raise ExecutionDenied("ASSIGNMENT_AUTHORITY_REVOKED")
 
 def receive_material(conn,token,org,loc,order,issue_id,request_key):
     if type(issue_id) is not UUID or type(request_key) is not UUID:
