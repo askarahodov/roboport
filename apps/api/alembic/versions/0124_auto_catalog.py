@@ -243,6 +243,15 @@ def upgrade():
                  )
              )
              OR EXISTS(
+               SELECT 1 FROM auto_stock_reclassification_document pending
+               WHERE NEW.source_sku_id IN (
+                   pending.source_sku_id,pending.destination_sku_id)
+                 AND NOT EXISTS(
+                   SELECT 1 FROM auto_stock_reclassification_acceptance approved
+                   WHERE approved.document_id=pending.id
+                 )
+             )
+             OR EXISTS(
                SELECT 1 FROM auto_stock_lot_count counted
                WHERE counted.sku_id=NEW.source_sku_id
                  AND NOT EXISTS(
@@ -311,10 +320,37 @@ def upgrade():
       BEFORE INSERT ON auto_stock_lot_count FOR EACH ROW
       EXECUTE FUNCTION guard_auto_catalog_merged_stock()""")
 
+    # An immutable reclassification draft can post RECLASS_IN/OUT only to
+    # the original SKU IDs. Prevent either order of the race: merge while
+    # pending, or a new draft on already-merged source or destination.
+    # The existing record_* SQL function locks both SKUs before INSERT.
+    op.execute("""
+      CREATE FUNCTION guard_auto_catalog_merged_reclass() RETURNS trigger
+      LANGUAGE plpgsql AS $fn$
+      BEGIN
+        PERFORM 1 FROM auto_stock_sku
+          WHERE id IN (NEW.source_sku_id,NEW.destination_sku_id)
+          ORDER BY id FOR UPDATE;
+        IF EXISTS(
+          SELECT 1 FROM auto_catalog_merge m
+          WHERE m.source_sku_id IN (NEW.source_sku_id,NEW.destination_sku_id)
+        ) THEN
+          RAISE EXCEPTION 'merged catalog SKU cannot be reclassified';
+        END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""CREATE TRIGGER aaa_catalog_merged_reclass
+      BEFORE INSERT ON auto_stock_reclassification_document FOR EACH ROW
+      EXECUTE FUNCTION guard_auto_catalog_merged_reclass()""")
+
+
 
 
 def downgrade():
     # Disposable synthetic DB only: never erase imported catalog or history in production.
+    op.execute("DROP TRIGGER aaa_catalog_merged_reclass ON auto_stock_reclassification_document")
+    op.execute("DROP FUNCTION guard_auto_catalog_merged_reclass()")
     op.execute("DROP TRIGGER aaa_catalog_merged_receipt_document ON auto_stock_receipt_document")
     op.execute("DROP TRIGGER aaa_catalog_merged_supplier_order ON auto_supplier_purchase_order")
     op.execute("DROP TRIGGER aaa_catalog_merged_lot_count ON auto_stock_lot_count")
