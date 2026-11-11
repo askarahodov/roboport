@@ -650,7 +650,8 @@ def test_merge_supplier_return_pending_or_new_is_rejected_without_orphan(monkeyp
         canonical=create(http,d,org,loc,"SYNTH-447-RETURN-TARGET")
         with psycopg.connect(DSN) as db:
             grant(db,d["manager"],org,loc,"MANAGER")
-            lot=add_lot(db,org,loc,UUID(source),add_bin(db,org,loc))
+            bin_id=add_bin(db,org,loc)
+            lot=add_lot(db,org,loc,UUID(source),bin_id)
             receipt=create_receipt_document(
                 db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),1,
                 "SYNTH-447-RECEIPT-ORIGINAL",
