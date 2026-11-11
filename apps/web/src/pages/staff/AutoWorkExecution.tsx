@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 type Service={serviceId:string;code:string;title:string;durationMinutes:number};
 type Labor={serviceId:string;actualMinutes:number;createdAt:string};
@@ -8,7 +8,7 @@ type Snapshot={status:'NOT_APPROVED'|'APPROVED'|'IN_PROGRESS'|'READY_FOR_QC'|'QC
   approvedVersion:number|null;approvedTotalMinor:number|null;requiredServices:Service[];
   labor:Labor[];materials:Material[];qcStatus:string;executionId:string|null;
   syntheticOnly:true;releaseAllowed:false};
-type Assignment={assignmentId:string;workOrderId:string;mechanicId:string;startsAt:string;endsAt:string;status:'OFFERED'|'ACCEPTED'};
+type Assignment={assignmentId:string;workOrderId:string;mechanicId:string;startsAt:string;endsAt:string;status:'OFFERED'|'ACCEPTED';canRespond?:boolean};
 type Pending={path:string;body:string};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,7 +24,8 @@ function parse(raw:unknown):Snapshot{
 }
 
 export function AutoWorkExecution(){
-  const [org,setOrg]=React.useState(''),[loc,setLoc]=React.useState(''),[order,setOrder]=React.useState('');
+  const [query]=useSearchParams();
+  const [org,setOrg]=React.useState(query.get('org')??''),[loc,setLoc]=React.useState(query.get('loc')??''),[order,setOrder]=React.useState(query.get('order')??'');
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [loaded,setLoaded]=React.useState(''),[snapshot,setSnapshot]=React.useState<Snapshot|null>(null);
   const [revision,setRevision]=React.useState(0),[busy,setBusy]=React.useState(false);
@@ -136,6 +137,7 @@ export function AutoWorkExecution(){
       {snapshot.status==='APPROVED'&&<button type="button" disabled={!active}
         onClick={()=>send('start',{})}>Начать работы (MANAGER)</button>}
       <h3>Назначение исполнителя (MANAGER → MECHANIC)</h3>
+      <p><Link to="/staff/auto-assignments">Открыть общую очередь: предложение, принятие и отклонение</Link></p>
       <p>Назначение возможно только в пределах действующей смены. Один механик не может принять пересекающиеся задания.</p>
       <label>UUID механика <input aria-label="UUID механика для назначения" value={mechanicId}
         onChange={e=>setMechanicId(e.target.value)}/></label>
@@ -151,7 +153,7 @@ export function AutoWorkExecution(){
         }))}>Предложить назначение</button>
       {assignments.filter(a=>a.workOrderId===order.trim()).map(a=><p key={a.assignmentId}>
         Назначение {a.status}; механик {a.mechanicId}; {new Date(a.startsAt).toLocaleString()} — {new Date(a.endsAt).toLocaleString()}
-        {a.status==='OFFERED'&&<button type="button" disabled={!active}
+        {a.status==='OFFERED'&&a.canRespond&&<button type="button" disabled={!active}
           onClick={()=>void act('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
             '/locations/'+encodeURIComponent(loc.trim())+'/assignments/'+a.assignmentId+'/accept',
             JSON.stringify({requestKey:crypto.randomUUID()}))}>Принять назначение</button>}

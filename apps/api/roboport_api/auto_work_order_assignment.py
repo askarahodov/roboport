@@ -143,13 +143,61 @@ def respond_assignment(conn, token: str, organization_id: UUID, location_id: UUI
                 raise AssignmentDenied("FORBIDDEN")
             return {"ok":True,"replayed":True,"status":row[0]}
         row=conn.execute("""
-          SELECT mechanic_id,status FROM auto_work_order_assignment
+          SELECT mechanic_id,status,work_order_id,starts_at,ends_at
+          FROM auto_work_order_assignment
           WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE
         """,(assignment_id,organization_id,location_id)).fetchone()
         if row is None or row[0]!=actor:
             raise AssignmentDenied("FORBIDDEN")
         if row[1]!="OFFERED":
             raise AssignmentConflict("ASSIGNMENT_NOT_OFFERED")
+        if accept:
+            # A prior OFFERED event is never permission to accept a canceled,
+            # rescheduled or unverified vehicle job, or a canceled shift.
+            # Decline remains possible so the mechanic can clear an old offer.
+            live=conn.execute("""
+              SELECT 1 FROM auto_work_order w
+              JOIN auto_appointment ap ON ap.id=w.appointment_id
+                AND ap.organization_id=w.organization_id
+                AND ap.location_id=w.location_id
+              JOIN LATERAL (
+                SELECT COALESCE((SELECT r.new_booking_id
+                  FROM auto_appointment_reschedule r
+                  WHERE r.appointment_id=ap.id
+                  ORDER BY r.created_at DESC,r.id DESC LIMIT 1),
+                  ap.booking_id) AS booking_id
+              ) current_booking ON TRUE
+              JOIN auto_bay_booking b ON b.id=current_booking.booking_id
+                AND b.organization_id=w.organization_id
+                AND b.location_id=w.location_id AND b.canceled_at IS NULL
+              JOIN auto_vehicle_customer_link proof
+                ON proof.id=ap.customer_link_id
+                AND proof.vehicle_id=ap.vehicle_id
+                AND proof.verified_at IS NOT NULL
+                AND proof.verified_by IS NOT NULL
+                AND proof.revoked_at IS NULL
+              JOIN auto_vehicle_location_binding binding
+                ON binding.vehicle_id=ap.vehicle_id
+                AND binding.location_id=w.location_id
+              JOIN auto_organization organization
+                ON organization.id=w.organization_id
+                AND organization.disabled_at IS NULL
+              JOIN auto_service_location location
+                ON location.id=w.location_id
+                AND location.organization_id=w.organization_id
+                AND location.disabled_at IS NULL
+              JOIN auto_staff_shift shift
+                ON shift.organization_id=w.organization_id
+                AND shift.location_id=w.location_id
+                AND shift.user_id=%s AND shift.canceled_at IS NULL
+                AND shift.starts_at<=%s AND shift.ends_at>=%s
+              WHERE w.id=%s AND w.organization_id=%s AND w.location_id=%s
+                AND %s>now()
+              FOR SHARE OF w,ap,b,proof,binding,organization,location,shift
+            """,(actor,row[3],row[4],row[2],organization_id,
+                 location_id,row[4])).fetchone()
+            if live is None:
+                raise AssignmentDenied("ASSIGNMENT_NO_LONGER_AVAILABLE")
         accepted= datetime.now(timezone.utc) if accept else None
         try:
             with conn.transaction():
@@ -169,7 +217,16 @@ def respond_assignment(conn, token: str, organization_id: UUID, location_id: UUI
 
 def list_assignments(conn, token: str, organization_id: UUID,
                      location_id: UUID) -> list[dict]:
-    if type(token) is not str or not token:
+    """Only current offers/acceptances with live proof, bay, shift and grants.
+
+    Manager gets the branch queue; mechanic sees *only* own assignments.
+    The business reference is an opaque WorkOrder UUID: no owner, VIN,
+    supplier price or customer fields leave PostgreSQL. Active queue is
+    advisory; POST /accept independently rechecks the live context.
+    """
+    if (type(token) is not str or not token or
+            type(organization_id) is not UUID or
+            type(location_id) is not UUID):
         raise AssignmentDenied("FORBIDDEN")
     with conn.transaction():
         actor=session_subject(conn,token)
@@ -180,17 +237,72 @@ def list_assignments(conn, token: str, organization_id: UUID,
         if not manager and not mechanic:
             raise AssignmentDenied("FORBIDDEN")
         rows=conn.execute("""
-          SELECT a.id,a.work_order_id,a.mechanic_id,a.starts_at,a.ends_at,
-                 a.status,a.accepted_at
-          FROM auto_work_order_assignment a
-          WHERE a.organization_id=%s AND a.location_id=%s
-            AND a.status IN ('OFFERED','ACCEPTED')
-            AND (%s OR a.mechanic_id=%s)
-          ORDER BY a.starts_at,a.id LIMIT 101
+          SELECT assignment.id,assignment.work_order_id,
+                 assignment.mechanic_id,assignment.starts_at,
+                 assignment.ends_at,assignment.status,assignment.accepted_at
+          FROM auto_work_order_assignment assignment
+          JOIN auto_work_order w ON w.id=assignment.work_order_id
+            AND w.organization_id=assignment.organization_id
+            AND w.location_id=assignment.location_id
+          JOIN auto_appointment ap ON ap.id=w.appointment_id
+            AND ap.organization_id=w.organization_id
+            AND ap.location_id=w.location_id
+          JOIN LATERAL (
+            SELECT COALESCE((SELECT r.new_booking_id
+              FROM auto_appointment_reschedule r WHERE r.appointment_id=ap.id
+              ORDER BY r.created_at DESC,r.id DESC LIMIT 1),
+              ap.booking_id) AS booking_id
+          ) current_booking ON TRUE
+          JOIN auto_bay_booking booking ON booking.id=current_booking.booking_id
+            AND booking.organization_id=w.organization_id
+            AND booking.location_id=w.location_id
+            AND booking.canceled_at IS NULL
+          JOIN auto_vehicle_customer_link proof ON proof.id=ap.customer_link_id
+            AND proof.vehicle_id=ap.vehicle_id
+            AND proof.verified_at IS NOT NULL
+            AND proof.verified_by IS NOT NULL
+            AND proof.revoked_at IS NULL
+          JOIN auto_vehicle_location_binding binding
+            ON binding.vehicle_id=ap.vehicle_id
+            AND binding.location_id=w.location_id
+          JOIN auto_organization organization
+            ON organization.id=w.organization_id
+            AND organization.disabled_at IS NULL
+          JOIN auto_service_location location
+            ON location.id=w.location_id
+            AND location.organization_id=w.organization_id
+            AND location.disabled_at IS NULL
+          JOIN app_user staff ON staff.id=assignment.mechanic_id
+            AND staff.status='ACTIVE'
+          WHERE assignment.organization_id=%s
+            AND assignment.location_id=%s
+            AND assignment.status IN ('OFFERED','ACCEPTED')
+            AND assignment.ends_at>now()
+            AND (%s OR assignment.mechanic_id=%s)
+            AND EXISTS (
+              SELECT 1 FROM auto_organization_role_grant g
+              WHERE g.organization_id=assignment.organization_id
+                AND g.user_id=assignment.mechanic_id
+                AND g.role_code='MECHANIC' AND g.revoked_at IS NULL
+                AND (g.location_id=assignment.location_id
+                     OR g.location_id IS NULL)
+            )
+            AND EXISTS (
+              SELECT 1 FROM auto_staff_shift shift
+              WHERE shift.organization_id=assignment.organization_id
+                AND shift.location_id=assignment.location_id
+                AND shift.user_id=assignment.mechanic_id
+                AND shift.canceled_at IS NULL
+                AND shift.starts_at<=assignment.starts_at
+                AND shift.ends_at>=assignment.ends_at
+            )
+          ORDER BY assignment.starts_at,assignment.id LIMIT 101
         """,(organization_id,location_id,manager,actor)).fetchall()
         if len(rows)>100:
             raise AssignmentConflict("LIMIT")
-        return [{"assignmentId":str(i),"workOrderId":str(o),
-                 "mechanicId":str(m),"startsAt":s.isoformat(),"endsAt":e.isoformat(),
-                 "status":st,"acceptedAt":a.isoformat() if a else None}
-                for i,o,m,s,e,st,a in rows]
+        return [{"assignmentId":str(ident),"workOrderId":str(order),
+                 "mechanicId":str(staff),"startsAt":start.isoformat(),
+                 "endsAt":end.isoformat(),"status":status,
+                 "acceptedAt":accepted.isoformat() if accepted else None,
+                 "canRespond":bool(mechanic and staff==actor and status=="OFFERED")}
+                for ident,order,staff,start,end,status,accepted in rows]

@@ -193,3 +193,16 @@ candidate, не approved golden baseline и не независимой прие
 ## Визуальные доказательства закупочной первички (#448)
 
 Playwright apps/web/e2e/auto-material-cost-evidence.spec.ts собирает material-cost-evidence-390-dark.png и material-cost-evidence-1280-dark.png на синтетической базе и проверяет клавиатуру, 403/409, повреждённый summary и отзыв права перед CSV. Только candidate evidence, не утверждённые golden baseline или независимая приёмка #92/#76.
+
+
+## Candidate-скриншоты очереди механиков (#500)
+
+`apps/web/e2e/auto-assignments.spec.ts` сохраняет на синтетических UUID
+`auto-assignments-390-light.png` и
+`auto-assignments-1280-dark.png`; тестирует клавиатуру,
+смену филиала, 403, повреждённый JSON и воспроизводимый POST
+после потери ответа без второго `requestKey`. Эти файлы являются
+**candidate browser evidence**, а не независимой визуальной приёмкой,
+утверждёнными goldens или WCAG sign-off #92. Скриншоты не содержат
+реальных VIN/ФИО/платежей.
+
