@@ -6,6 +6,7 @@ from fastapi import APIRouter,Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel,ConfigDict,ValidationError
 from .auth_http import _mutation_ok
+from .auto_org_authority import organization_role_allows
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auto_work_order_assignment import (
     AssignmentDenied,AssignmentConflict,assign_mechanic,respond_assignment,list_assignments,
@@ -54,10 +55,17 @@ def queue(org_id:str,loc_id:str,request:Request):
     dsn,(org,loc)=scoped
     with psycopg.connect(dsn) as db:
         try:
-            items=list_assignments(db,request.cookies.get("rp_session",""),org,loc)
+            # The same live tenant/branch role is rechecked on every GET.
+            # canOffer is presentation-only; POST still verifies MANAGER.
+            with db.transaction():
+                token=request.cookies.get("rp_session","")
+                items=list_assignments(db,token,org,loc)
+                can_offer=organization_role_allows(
+                    db,token,org,"MANAGER",loc,for_mutation=True)
         except (AssignmentDenied,AssignmentConflict) as exc:
             return _error(request,exc)
-    return JSONResponse(content={"items":items,"syntheticOnly":True},
+    return JSONResponse(content={"items":items,"syntheticOnly":True,
+                                 "canOffer":bool(can_offer),"releaseAllowed":False},
                         headers={"Cache-Control":"no-store"})
 
 
