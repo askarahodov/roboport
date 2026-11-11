@@ -60,8 +60,9 @@ def _read_scope(conn,token,org,loc):
     # A boolean price grant alone does not authorize older sale prices.
     sale=False
     sale_cutoff=None
-    if has_document_access(conn,token,org,loc,
-                           ("MANAGER","WAREHOUSE"),"ESTIMATE","PRICE_SALES"):
+    if (organization_role_allows(conn,token,org,"MANAGER",loc,for_mutation=True)
+            and has_document_access(conn,token,org,loc,
+                ("MANAGER","WAREHOUSE"),"ESTIMATE","PRICE_SALES")):
         try:
             sale_cutoff=require_document_access(conn,token,org,loc,
                 ("MANAGER","WAREHOUSE"),"ESTIMATE","READ")
