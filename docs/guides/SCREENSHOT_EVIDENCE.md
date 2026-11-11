@@ -98,8 +98,18 @@ keyboard/dialog/disabled/status в `/dev/ui-gallery`.
 утверждает, что есть законный доступ к чужому аккаунту или реальная операция.
 Действительные ACL/tenant/QC проверяются отдельно в PG17/HTTP тестах.
 
-Каждый прогон пишет PNG и `manifest.json` с `syntheticOnly=true` и
-`approvedBaseline=false` в `apps/web/test-results`, которые уже публикуются
+Каждый прогон пытается снять **все 21 состояния**, даже если один из
+маршрутов не загрузился, не показал обязательный заголовок или не прошёл
+проверку overflow. Скрипт сохраняет PNG и `manifest.json` с
+`syntheticOnly=true`, `approvedBaseline=false` и отдельными полями
+`captured`, `checks` (`PASS/FAIL`), `failureKinds` для каждого состояния.
+При ошибках проверки или JavaScript итоговый тест возвращает FAIL **после**
+сбора доступных снимков; `captured=true` означает только наличие PNG, а не
+успешную проверку. В манифест не записываются response bodies, токены или
+персональные данные. Любой `FAIL` требует просмотра trace и исправления
+корневой причины; не принимать такой набор за утверждённый baseline.
+
+PNG и `manifest.json` сохраняются в `apps/web/test-results`, которые уже публикуются
 GitHub Actions как `roboport-browser-evidence` (14 дней). Это **candidate
 screenshots для независимого просмотра**, не утверждённые golden baselines
 и не автоматическая pixel-diff регрессия. Не объявлять завершённый дизайн-DoD
