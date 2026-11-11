@@ -158,4 +158,17 @@ VIN, произвольных заметок или юридических фи�
 
 ## Происхождение закупочной первички (current-dev, #448)
 
-MANAGER открывает `/staff/auto-material-cost-evidence` → указывает UUID своей организации/филиала и даты до 31 дня → «Проверить документы материалов» → видит неизменяемые issue/return партии и качество приходных документов → «Скачать аудит CSV» (проверка ролей повторяется). Нет расчёта COGS, прибыли, НДС или ПДн. 403 — отсутствуют MANAGER/SUPPLIER_ORDER/HANDOVER права, 409 — больше 500 событий, 422 — ошибочные даты. Источники: docs/auto/REPORTING.md, docs/guides/manager.md, tests/integration/test_pg_auto_material_cost_evidence_http.py и apps/web/e2e/auto-material-cost-evidence.spec.ts.
+**MANAGER** своего филиала открывает
+`/staff/auto-material-cost-evidence`, задаёт организацию, филиал и даты
+до 31 дня, нажимает **«Проверить документы материалов»**. Результат —
+проверяемые выдачи и возвраты партий и статус приходной первички.
+**«Скачать аудит CSV»** повторно проверяет полномочия.
+
+Это не COGS, прибыль, НДС или реальные данные клиентов. При 403
+проверьте MANAGER и права на закупочные цены/выдачу; при 409
+сократите период (не более 500 движений); при 422 исправьте даты.
+
+[Методика](../auto/REPORTING.md) ·
+[Руководитель](manager.md) ·
+[Интеграционный PG17-тест](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_material_cost_evidence_http.py) ·
+[Playwright-проверки](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-material-cost-evidence.spec.ts).
