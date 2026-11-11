@@ -19,7 +19,8 @@ const row=(id:string,canRespond:boolean):Row=>({
   endsAt:end,status:'OFFERED',acceptedAt:null,canRespond,
 });
 function result(rows:Row[],canOffer:boolean){
-  return {syntheticOnly:true,releaseAllowed:false,canOffer,items:rows};
+  return {syntheticOnly:true,releaseAllowed:false,canOffer,
+    organizationId:org,locationId:loc,items:rows};
 }
 async function visit(page:Page){
   await page.goto('/staff/auto-assignments');
