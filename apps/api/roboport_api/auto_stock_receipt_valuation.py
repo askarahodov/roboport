@@ -41,7 +41,7 @@ def record_receipt_valuation(conn: psycopg.Connection,token: str,
             raise AutoStockDenied("FORBIDDEN")
         try:
             require_document_access(conn,token,organization_id,location_id,
-                                    ("MANAGER",),"SUPPLIER_ORDER","PRICE_PURCHASE")
+                                    ("MANAGER","WAREHOUSE"),"SUPPLIER_ORDER","PRICE_PURCHASE")
         except DocumentPolicyDenied:
             raise AutoStockDenied("FORBIDDEN") from None
         actor=session_subject(conn,token,for_mutation=True)

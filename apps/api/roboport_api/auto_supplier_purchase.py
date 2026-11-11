@@ -35,7 +35,7 @@ def _role(conn, token: str, org: UUID, loc: UUID, role: str = "WAREHOUSE",
     if actor is None:
         raise AutoStockDenied("FORBIDDEN")
     try:
-        require_document_access(conn,token,org,loc,(role,),"SUPPLIER_ORDER",cap)
+        require_document_access(conn,token,org,loc,("MANAGER","WAREHOUSE"),"SUPPLIER_ORDER",cap)
     except DocumentPolicyDenied:
         raise AutoStockDenied("FORBIDDEN") from None
     return actor
@@ -86,7 +86,7 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
     with conn.transaction():
         actor = _role(conn, token, org, loc)
         try:
-            require_document_access(conn,token,org,loc,("WAREHOUSE",),
+            require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
                                     "SUPPLIER_ORDER","PRICE_PURCHASE")
         except DocumentPolicyDenied:
             raise AutoStockDenied("FORBIDDEN") from None

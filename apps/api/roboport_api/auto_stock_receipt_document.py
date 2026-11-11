@@ -92,7 +92,7 @@ def pending_receipt_reviews(conn: psycopg.Connection,token: str,
         try:
             for cap in ("READ","PRICE_PURCHASE"):
                 cutoff=require_document_access(
-                    conn,token,organization_id,location_id,("MANAGER",),
+                    conn,token,organization_id,location_id,("MANAGER","WAREHOUSE"),
                     "SUPPLIER_ORDER",cap)
                 if cutoff is not None:
                     # This list mixes old and new supplier documents.

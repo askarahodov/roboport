@@ -60,11 +60,12 @@ def _read_scope(conn,token,org,loc):
     # A boolean price grant alone does not authorize older sale prices.
     sale=False
     sale_cutoff=None
-    if has_document_access(conn,token,org,loc,
-                           ("MANAGER",),"ESTIMATE","PRICE_SALES"):
+    if (organization_role_allows(conn,token,org,"MANAGER",loc,for_mutation=True)
+            and has_document_access(conn,token,org,loc,
+                ("MANAGER","WAREHOUSE"),"ESTIMATE","PRICE_SALES")):
         try:
             sale_cutoff=require_document_access(conn,token,org,loc,
-                ("MANAGER",),"ESTIMATE","READ")
+                ("MANAGER","WAREHOUSE"),"ESTIMATE","READ")
             sale=True
         except DocumentPolicyDenied:
             sale=False
@@ -80,14 +81,21 @@ def _write_scope(conn,token,org,loc,cap):
     if conn.execute("""SELECT 1 FROM auto_organization
         WHERE id=%s AND disabled_at IS NULL FOR UPDATE""",(org,)).fetchone() is None:
         raise CatalogDenied("FORBIDDEN")
+    # Two independent base grants are mandatory for priced SKU mutations.
+    # Restrictive policies then intersect across both active roles; the
+    # combined ACL check alone would require only *one* role.
+    if not all(organization_role_allows(
+            conn,token,org,role,loc,for_mutation=True)
+            for role in ("WAREHOUSE","MANAGER")):
+        raise CatalogDenied("FORBIDDEN")
     try:
-        require_document_access(conn,token,org,loc,("WAREHOUSE",),
+        require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
                                 "SUPPLIER_ORDER",cap)
-        require_document_access(conn,token,org,loc,("WAREHOUSE",),
+        require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
                                 "SUPPLIER_ORDER","PRICE_PURCHASE")
-        require_document_access(conn,token,org,loc,("MANAGER",),
+        require_document_access(conn,token,org,loc,("MANAGER","WAREHOUSE"),
                                 "ESTIMATE","EDIT")
-        require_document_access(conn,token,org,loc,("MANAGER",),
+        require_document_access(conn,token,org,loc,("MANAGER","WAREHOUSE"),
                                 "ESTIMATE","PRICE_SALES")
     except DocumentPolicyDenied:
         raise CatalogDenied("FORBIDDEN") from None
@@ -102,7 +110,7 @@ def _require_catalog_edit(conn,token,org,loc):
     # Import CREATE authority cannot bypass explicit EDIT deny when an
     # existing SKU receives a new price version. Recheck before replays too.
     try:
-        require_document_access(conn,token,org,loc,("WAREHOUSE",),
+        require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
                                 "SUPPLIER_ORDER","EDIT")
     except DocumentPolicyDenied:
         raise CatalogDenied("FORBIDDEN") from None
