@@ -109,7 +109,7 @@ export function AutoMechanicProductivity(){
     const controller=new AbortController();download.current=controller;
     setExportError('');setExporting(true);
     try{
-      const response=await fetch(url().replace('/productivity?','/productivity/export?'),{
+      const response=await fetch(url().replace('/reports/mechanic-productivity?','/reports/mechanic-productivity/export?'),{
         credentials:'include',cache:'no-store',signal:controller.signal,
       });
       if(controller.signal.aborted)return;
