@@ -127,6 +127,24 @@ for(const size of sizes){
     test('auto visual evidence '+size.name+'/'+theme,async({page},testInfo)=>{
       // 21 screens with bounded per-screen failures still need a whole-matrix budget.
       test.setTimeout(720_000);
+      await page.setViewportSize({width:size.width,height:size.height});
+      await page.emulateMedia({colorScheme:theme==='light'?'light':'dark',
+        reducedMotion:'reduce'});
+      let current:Screen=screens[0];
+      await page.route('**/api/v1/auth/me',route=>route.fulfill(
+        current.access==='authorized'
+          ?json({subjectId:'11111111-1111-4111-8111-111111111111'})
+          :json({code:current.access==='forbidden'?'FORBIDDEN':'UNAUTHENTICATED'},
+            current.access==='forbidden'?403:401)));
+      await page.route('**/api/v1/dev/staff/access',route=>route.fulfill(
+        current.staffDenied?json({code:'FORBIDDEN'},403)
+          :json({roles:['INTAKE','ENGINEER','STOCK','MANAGER','FINANCE']})));
+      await page.route('**/api/v1/dev/auto/**',route=>{
+        if(current.emptyVehicles &&
+          new URL(route.request().url()).pathname==='/api/v1/dev/auto/vehicles')
+          return route.fulfill(json({items:[]}));
+        return route.fulfill(json({code:'FORBIDDEN'},403));
+      });
       const {report,failures,pageErrorCount}=await collectVisualEvidence(
         page,testInfo,screens,size.name,size.width,theme,screen=>{current=screen;});
       expect(report).toHaveLength(screens.length);
