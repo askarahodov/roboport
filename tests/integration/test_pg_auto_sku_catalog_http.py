@@ -18,11 +18,15 @@ from roboport_api.auto_stock_lot_stocktake import count_stock_lot,approve_stock_
 from roboport_api.auto_stock_receipt_document import (
     create_receipt_document, accept_receipt_document,
 )
-from test_pg_auto_stock_ledger import balance
+from test_pg_auto_stock_ledger import balance,record
 from roboport_api.auto_supplier_purchase import (
     place_supplier_order, record_supplier_delivery,
 )
 from test_pg_auto_supplier_purchase import quotes
+from test_pg_auto_stock_lot_allocation import act as lot_allocation
+from roboport_api.auto_stock_reclassification import (
+    propose_reclassification,approve_reclassification,
+)
 
 
 def fixture(monkeypatch):
@@ -570,3 +574,63 @@ def test_merge_denies_unapproved_stocktake_but_manager_can_post(monkeypatch):
             assert approval is not None
             assert balance(db,UUID(source))==(1,0)
         assert post(http,d,d["intake"],url(org)+"/merges",m).status_code==409
+
+
+def test_merge_pending_reclass_protects_manager_posting_and_new_drafts(monkeypatch):
+    """Full HTTPS + PG17 maker/checker for both directions of reclass/merge race."""
+    d,org,loc,_,_,_,_=fixture(monkeypatch)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        stocked=create(http,d,org,loc,"SYNTH-447-RC-STOCKED")
+        destination=create(http,d,org,loc,"SYNTH-447-RC-PENDING")
+        target=create(http,d,org,loc,"SYNTH-447-RC-ALIAS")
+        with psycopg.connect(DSN) as db:
+            bin_id=add_bin(db,org,loc)
+            source_lot=add_lot(db,org,loc,UUID(stocked),bin_id)
+            pending_lot=add_lot(db,org,loc,UUID(destination),bin_id)
+            record(db,UUID(stocked),"RECEIPT",2)
+            lot_allocation(db,d,org,loc,source_lot,"ALLOCATE",2)
+            draft=propose_reclassification(
+                db,d["tokens"][d["intake"]],org,loc,
+                source_lot,pending_lot,uuid4(),1,
+                "Синтетический перенос между SKU",
+            )
+            assert draft is not None
+            assert balance(db,UUID(destination))==(0,0)
+            assert db.execute("""
+                SELECT count(*) FROM auto_stock_reclassification_acceptance
+                WHERE document_id=%s
+            """,(draft,)).fetchone()==(0,)
+        merge={"locationId":str(loc),"sourceSkuId":destination,
+               "targetSkuId":target}
+        blocked=post(http,d,d["intake"],url(org)+"/merges",merge)
+        assert blocked.status_code==409,blocked.text
+        with psycopg.connect(DSN) as db:
+            grant(db,d["manager"],org,loc,"MANAGER")
+            approved=approve_reclassification(
+                db,d["tokens"][d["manager"]],org,loc,draft,uuid4())
+            assert approved is not None
+            assert balance(db,UUID(stocked))==(1,0)
+            assert balance(db,UUID(destination))==(1,0)
+        # Once approved, the destination is physically stocked: still unsafe.
+        assert post(http,d,d["intake"],url(org)+"/merges",merge).status_code==409
+
+        empty=create(http,d,org,loc,"SYNTH-447-RC-EMPTY-SOURCE")
+        canonical=create(http,d,org,loc,"SYNTH-447-RC-CANONICAL")
+        with psycopg.connect(DSN) as db:
+            merged_lot=add_lot(db,org,loc,UUID(empty),bin_id)
+        accepted=post(http,d,d["intake"],url(org)+"/merges",{
+            "locationId":str(loc),"sourceSkuId":empty,"targetSkuId":canonical})
+        assert accepted.status_code==201,accepted.text
+        # Even with a retained old empty lot, no new immutable draft may
+        # target merged source: subsequent MANAGER acceptance would be stuck.
+        with psycopg.connect(DSN) as db:
+            with pytest.raises(AutoStockConflict):
+                propose_reclassification(
+                    db,d["tokens"][d["intake"]],org,loc,
+                    source_lot,merged_lot,uuid4(),1,
+                    "Синтетический перенос в объединенный SKU",
+                )
+            assert db.execute("""
+                SELECT count(*) FROM auto_stock_reclassification_document
+                WHERE destination_sku_id=%s
+            """,(UUID(empty),)).fetchone()==(0,)
