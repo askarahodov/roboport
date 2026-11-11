@@ -81,6 +81,13 @@ def _write_scope(conn,token,org,loc,cap):
     if conn.execute("""SELECT 1 FROM auto_organization
         WHERE id=%s AND disabled_at IS NULL FOR UPDATE""",(org,)).fetchone() is None:
         raise CatalogDenied("FORBIDDEN")
+    # Two independent base grants are mandatory for priced SKU mutations.
+    # Restrictive policies then intersect across both active roles; the
+    # combined ACL check alone would require only *one* role.
+    if not all(organization_role_allows(
+            conn,token,org,role,loc,for_mutation=True)
+            for role in ("WAREHOUSE","MANAGER")):
+        raise CatalogDenied("FORBIDDEN")
     try:
         require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
                                 "SUPPLIER_ORDER",cap)
