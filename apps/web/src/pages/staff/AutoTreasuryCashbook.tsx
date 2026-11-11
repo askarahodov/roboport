@@ -122,6 +122,7 @@ export function AutoTreasuryCashbook(){
   async function load(){
     if(!valid)return;
     request.current?.abort();download.current?.abort();
+    setExporting(false);
     const pending=new AbortController();request.current=pending;
     setBook(null);setStatus('loading');setExportError('');
     try{
