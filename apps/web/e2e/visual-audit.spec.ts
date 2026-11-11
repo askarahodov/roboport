@@ -44,7 +44,8 @@ const json=(data:unknown,status=200)=>({status,contentType:'application/json',
 for(const size of sizes){
   for(const theme of themes){
     test('auto visual evidence '+size.name+'/'+theme,async({page},testInfo)=>{
-      test.setTimeout(240_000);
+      // 21 screens with bounded per-screen failures still need a whole-matrix budget.
+      test.setTimeout(720_000);
       let pageErrorCount=0;
       page.on('pageerror',()=>{pageErrorCount++;});
       await page.setViewportSize({width:size.width,height:size.height});
@@ -81,22 +82,22 @@ for(const size of sizes){
         let check='navigation';
         const filename=screen.name+'-'+size.name+'-'+theme+'.png';
         try{
-          await page.goto(screen.path,{waitUntil:'domcontentloaded'});
+          await page.goto(screen.path,{waitUntil:'domcontentloaded',timeout:6000});
           check='theme';
-          await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme);
+          await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme,{timeout:2500});
           check='main';
-          await expect(page.locator('main')).toHaveCount(1);
+          await expect(page.locator('main')).toHaveCount(1,{timeout:3000});
           check='heading';
-          await expect(page.locator('main h1').first()).toBeVisible();
+          await expect(page.locator('main h1').first()).toBeVisible({timeout:3000});
           check='expected-state';
           if(screen.expected)
-            await expect(page.getByText(screen.expected,{exact:false}).first()).toBeVisible();
+            await expect(page.getByText(screen.expected,{exact:false}).first()).toBeVisible({timeout:3000});
           check='access-alert';
           if(screen.staffDenied)
-            await expect(page.getByRole('alert').first()).toBeVisible();
+            await expect(page.getByRole('alert').first()).toBeVisible({timeout:3000});
           check='overflow';
           await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth),
-            {message:'root overflow at '+screen.name+'/'+size.width})
+            {message:'root overflow at '+screen.name+'/'+size.width,timeout:3000})
             .toBeLessThanOrEqual(size.width+1);
           check='path';
           if(new URL(page.url()).pathname!==screen.path)
@@ -109,7 +110,7 @@ for(const size of sizes){
         try{
           // Even when a render assertion fails, its screenshot is useful for review.
           await page.screenshot({path:testInfo.outputPath('visual',filename),
-            fullPage:true,animations:'disabled',caret:'hide',timeout:15000});
+            fullPage:true,animations:'disabled',caret:'hide',timeout:10000});
           captured=true;
         }catch(error){
           failureKinds.push('CAPTURE_'+(error instanceof Error?error.name:'UnknownError'));
