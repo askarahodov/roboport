@@ -24,6 +24,7 @@ from .auto_crm_contact_choices_http import router as auto_crm_contact_choices_ro
 from .auto_crm_funnel import router as auto_crm_funnel_router
 from .auto_crm_outcomes import router as auto_crm_outcomes_router
 from .auto_mechanic_productivity import router as auto_mechanic_productivity_router
+from .auto_material_cost_evidence import router as auto_material_cost_evidence_router
 from .auto_stock_abc_xyz import router as auto_stock_abc_xyz_router
 from .auto_sku_catalog_http import router as auto_sku_catalog_router
 from .auto_opening_hours_http import router as auto_opening_hours_router
@@ -79,6 +80,7 @@ app.include_router(auto_crm_contact_choices_router)
 app.include_router(auto_crm_funnel_router)
 app.include_router(auto_crm_outcomes_router)
 app.include_router(auto_mechanic_productivity_router)
+app.include_router(auto_material_cost_evidence_router)
 app.include_router(auto_stock_abc_xyz_router)
 app.include_router(auto_sku_catalog_router)
 app.include_router(auto_opening_hours_router)
