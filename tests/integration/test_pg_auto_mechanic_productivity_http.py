@@ -50,7 +50,12 @@ def test_verified_labor_report_export_revocation_and_cross_branch(monkeypatch):
     d, org, loc, order = _close(monkeypatch)
     http = TestClient(app, base_url="https://127.0.0.1")
     path = report_path(org, loc)
-    day = datetime.now(ZoneInfo("Europe/Berlin")).date().isoformat()
+    with psycopg.connect(DSN) as db:
+        time_zone = db.execute(
+            "SELECT timezone_name FROM auto_service_location "
+            "WHERE id=%s AND organization_id=%s", (loc, org),
+        ).fetchone()[0]
+    day = datetime.now(ZoneInfo(time_zone)).date().isoformat()
     query = {"fromDay": day, "toDay": day}
     assert http.get(path, params=query).status_code == 403
     http.cookies.set("rp_session", d["tokens"][d["client_a"]])
@@ -67,7 +72,7 @@ def test_verified_labor_report_export_revocation_and_cross_branch(monkeypatch):
         "payrollAvailable": False, "releaseAllowed": False,
     }
     assert data["basis"] == "CLOSED_TECHNICAL_QC_PASSED_ACTIVE_MECHANIC_LABOR"
-    assert data["timeZone"] == "Europe/Berlin"
+    assert data["timeZone"] == time_zone
     assert data["summary"] == {
         "mechanicCount": 1, "workOrderCount": 1,
         "serviceCount": 1, "actualMinutes": 45,
