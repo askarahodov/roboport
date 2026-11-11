@@ -65,6 +65,7 @@ def queue(org_id:str,loc_id:str,request:Request):
         except (AssignmentDenied,AssignmentConflict) as exc:
             return _error(request,exc)
     return JSONResponse(content={"items":items,"syntheticOnly":True,
+                                 "organizationId":str(org),"locationId":str(loc),
                                  "canOffer":bool(can_offer),"releaseAllowed":False},
                         headers={"Cache-Control":"no-store"})
 
