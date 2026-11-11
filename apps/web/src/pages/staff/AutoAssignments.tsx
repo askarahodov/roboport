@@ -12,14 +12,19 @@ type Assignment = {
   acceptedAt:string|null;canRespond:boolean;
 };
 type Queue = {
-  syntheticOnly:true;releaseAllowed:false;canOffer:boolean;items:Assignment[];
+  syntheticOnly:true;releaseAllowed:false;canOffer:boolean;
+  organizationId:string;locationId:string;items:Assignment[];
 };
 type Pending = {path:string;body:string;label:string};
 
-function parseQueue(raw:unknown):Queue {
+function parseQueue(raw:unknown,expectedOrg:string,expectedLoc:string):Queue {
   if(!raw||typeof raw!=='object')throw Error('contract');
   const r=raw as Record<string,unknown>;
   if(r.syntheticOnly!==true||r.releaseAllowed!==false||
+    typeof r.organizationId!=='string'||
+    r.organizationId.toLowerCase()!==expectedOrg.toLowerCase()||
+    typeof r.locationId!=='string'||
+    r.locationId.toLowerCase()!==expectedLoc.toLowerCase()||
     typeof r.canOffer!=='boolean'||!Array.isArray(r.items)||r.items.length>100)
     throw Error('contract');
   const ids=new Set<string>();
@@ -100,7 +105,7 @@ export function AutoAssignments(){
         if([401,403,404].includes(response.status)){setStatus('denied');return;}
         if(response.status===409){setStatus('limit');return;}
         if(!response.ok)throw Error('http');
-        const data=parseQueue(await response.json());
+        const data=parseQueue(await response.json(),org.trim(),loc.trim());
         if(!controller.signal.aborted){
           setQueue(data);setLoadedScope(scope);setStatus('ready');
         }
