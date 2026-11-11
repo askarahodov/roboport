@@ -44,11 +44,12 @@ const json=(data:unknown,status=200)=>({status,contentType:'application/json',
 for(const size of sizes){
   for(const theme of themes){
     test('auto visual evidence '+size.name+'/'+theme,async({page},testInfo)=>{
-      test.setTimeout(240_000);
-      const pageErrors:string[]=[];
-      page.on('pageerror',error=>pageErrors.push(error.message));
+      // 21 screens with bounded per-screen failures still need a whole-matrix budget.
+      test.setTimeout(720_000);
+      let pageErrorCount=0;
+      page.on('pageerror',()=>{pageErrorCount++;});
       await page.setViewportSize({width:size.width,height:size.height});
-      await page.emulateMedia({colorScheme:theme==='auto'?'dark':'light',
+      await page.emulateMedia({colorScheme:theme==='light'?'light':'dark',
         reducedMotion:'reduce'});
       let current:Screen=screens[0];
       await page.route('**/api/v1/auth/me',route=>route.fulfill(
@@ -67,31 +68,69 @@ for(const size of sizes){
       });
       const folder=testInfo.outputPath('visual');
       await mkdir(folder,{recursive:true});
-      const report:{screen:string;path:string;state:string;png:string}[]=[];
+      // Fail after the complete matrix, not at the first broken route.
+      // This keeps review evidence for subsequent screens and error states.
+      const report:{
+        screen:string;path:string;state:string;png:string;
+        captured:boolean;checks:'PASS'|'FAIL';failureKinds:string[];
+      }[]=[];
+      const failures:string[]=[];
       for(const screen of screens){
         current=screen;
-        await page.goto(screen.path,{waitUntil:'domcontentloaded'});
-        await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme);
-        await expect(page.locator('main')).toHaveCount(1);
-        await expect(page.locator('main h1').first()).toBeVisible();
-        if(screen.expected)
-          await expect(page.getByText(screen.expected,{exact:false}).first()).toBeVisible();
-        if(screen.staffDenied)
-          await expect(page.getByRole('alert').first()).toBeVisible();
-        await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth),
-          {message:'root overflow at '+screen.name+'/'+size.width})
-          .toBeLessThanOrEqual(size.width+1);
+        const failureKinds:string[]=[];
+        const errorOffset=pageErrorCount;
+        let check='navigation';
         const filename=screen.name+'-'+size.name+'-'+theme+'.png';
-        await page.screenshot({path:testInfo.outputPath('visual',filename),
-          fullPage:true,animations:'disabled',caret:'hide'});
+        try{
+          await page.goto(screen.path,{waitUntil:'domcontentloaded',timeout:6000});
+          check='theme';
+          await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme,{timeout:2500});
+          check='main';
+          await expect(page.locator('main')).toHaveCount(1,{timeout:3000});
+          check='heading';
+          await expect(page.locator('main h1').first()).toBeVisible({timeout:3000});
+          check='expected-state';
+          if(screen.expected)
+            await expect(page.getByText(screen.expected,{exact:false}).first()).toBeVisible({timeout:3000});
+          check='access-alert';
+          if(screen.staffDenied)
+            await expect(page.getByRole('alert').first()).toBeVisible({timeout:3000});
+          check='overflow';
+          await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth),
+            {message:'root overflow at '+screen.name+'/'+size.width,timeout:3000})
+            .toBeLessThanOrEqual(size.width+1);
+          check='path';
+          if(new URL(page.url()).pathname!==screen.path)
+            failureKinds.push('NAVIGATION_MISMATCH');
+        }catch{
+          // Only the stage is persisted, not assertion text, URLs or response bodies.
+          failureKinds.push('RENDER_'+check.toUpperCase());
+        }
+        let captured=false;
+        try{
+          // Even when a render assertion fails, its screenshot is useful for review.
+          await page.screenshot({path:testInfo.outputPath('visual',filename),
+            fullPage:true,animations:'disabled',caret:'hide',timeout:10000});
+          captured=true;
+        }catch(error){
+          failureKinds.push('CAPTURE_'+(error instanceof Error?error.name:'UnknownError'));
+        }
+        if(pageErrorCount>errorOffset)
+          failureKinds.push('BROWSER_PAGEERROR');
         report.push({screen:screen.name,path:screen.path,
           state:screen.emptyVehicles?'empty':screen.staffDenied?'403':screen.access,
-          png:filename});
+          png:filename,captured,
+          checks:failureKinds.length?'FAIL':'PASS',failureKinds});
+        if(failureKinds.length)
+          failures.push(screen.name+': '+failureKinds.join(', '));
       }
       await writeFile(testInfo.outputPath('visual','manifest.json'),
         JSON.stringify({syntheticOnly:true,approvedBaseline:false,
           viewport:size.width,theme,scenarios:report},null,2));
-      expect(pageErrors,'Browser JS errors in visual matrix').toEqual([]);
+      expect(report).toHaveLength(screens.length);
+      expect(pageErrorCount,'Unexpected browser page errors').toBe(0);
+      expect(failures,'Visual failures (all route evidence was attempted)').toEqual([]);
+
     });
   }
 }
