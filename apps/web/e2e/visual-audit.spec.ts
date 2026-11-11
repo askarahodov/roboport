@@ -45,8 +45,8 @@ for(const size of sizes){
   for(const theme of themes){
     test('auto visual evidence '+size.name+'/'+theme,async({page},testInfo)=>{
       test.setTimeout(240_000);
-      const pageErrors:string[]=[];
-      page.on('pageerror',error=>pageErrors.push(error.message));
+      let pageErrorCount=0;
+      page.on('pageerror',()=>{pageErrorCount++;});
       await page.setViewportSize({width:size.width,height:size.height});
       await page.emulateMedia({colorScheme:theme==='light'?'light':'dark',
         reducedMotion:'reduce'});
@@ -77,25 +77,33 @@ for(const size of sizes){
       for(const screen of screens){
         current=screen;
         const failureKinds:string[]=[];
-        const errorOffset=pageErrors.length;
+        const errorOffset=pageErrorCount;
+        let check='navigation';
         const filename=screen.name+'-'+size.name+'-'+theme+'.png';
         try{
           await page.goto(screen.path,{waitUntil:'domcontentloaded'});
+          check='theme';
           await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme);
+          check='main';
           await expect(page.locator('main')).toHaveCount(1);
+          check='heading';
           await expect(page.locator('main h1').first()).toBeVisible();
+          check='expected-state';
           if(screen.expected)
             await expect(page.getByText(screen.expected,{exact:false}).first()).toBeVisible();
+          check='access-alert';
           if(screen.staffDenied)
             await expect(page.getByRole('alert').first()).toBeVisible();
+          check='overflow';
           await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth),
             {message:'root overflow at '+screen.name+'/'+size.width})
             .toBeLessThanOrEqual(size.width+1);
+          check='path';
           if(new URL(page.url()).pathname!==screen.path)
             failureKinds.push('NAVIGATION_MISMATCH');
-        }catch(error){
-          // Preserve only the error class in CI evidence, never response bodies or tokens.
-          failureKinds.push('RENDER_'+(error instanceof Error?error.name:'UnknownError'));
+        }catch{
+          // Only the stage is persisted, not assertion text, URLs or response bodies.
+          failureKinds.push('RENDER_'+check.toUpperCase());
         }
         let captured=false;
         try{
@@ -106,7 +114,7 @@ for(const size of sizes){
         }catch(error){
           failureKinds.push('CAPTURE_'+(error instanceof Error?error.name:'UnknownError'));
         }
-        if(pageErrors.length>errorOffset)
+        if(pageErrorCount>errorOffset)
           failureKinds.push('BROWSER_PAGEERROR');
         report.push({screen:screen.name,path:screen.path,
           state:screen.emptyVehicles?'empty':screen.staffDenied?'403':screen.access,
@@ -119,6 +127,7 @@ for(const size of sizes){
         JSON.stringify({syntheticOnly:true,approvedBaseline:false,
           viewport:size.width,theme,scenarios:report},null,2));
       expect(report).toHaveLength(screens.length);
+      expect(pageErrorCount,'Unexpected browser page errors').toBe(0);
       expect(failures,'Visual failures (all route evidence was attempted)').toEqual([]);
 
     });
