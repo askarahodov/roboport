@@ -59,6 +59,8 @@ def test_manager_offer_mechanic_accept_decline_and_branch_restrictions(monkeypat
     assert manager_queue.headers["cache-control"]=="no-store"
     assert manager_queue.json()["syntheticOnly"] is True
     assert manager_queue.json()["releaseAllowed"] is False
+    assert manager_queue.json()["organizationId"] == str(org)
+    assert manager_queue.json()["locationId"] == str(loc)
     assert manager_queue.json()["canOffer"] is True
     assert manager_queue.json()["items"][0]["workOrderId"]==str(order)
     assert manager_queue.json()["items"][0]["canRespond"] is False
