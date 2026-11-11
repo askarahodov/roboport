@@ -139,3 +139,19 @@ MANAGER/HANDOVER:READ (сами ссылки не дают прав); при 409
 [Методика](../auto/REPORTING.md) ·
 [PG17/HTTPS тест](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_mechanic_productivity_http.py) ·
 [Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-mechanic-productivity.spec.ts).
+
+
+## Синтетическая кассовая книга и контроль закрытых дней (#445)
+
+**Роли: MANAGER / CASHIER**, но не клиент, приёмщик без роли кассира
+или чужой филиал. Адрес `/staff/auto-treasury-cashbook`; укажите
+UUID организации, филиала, условного счёта, даты 1–31 день →
+**«Сверить кассовую книгу»**. Раскройте «Событий: N» для просмотра
+первичных immutable UUID, проверьте приход/возврат и «Закрыто»,
+скачайте CSV только с повторной авторизацией. `403` при revoked
+сессии/роли/финансовой политике, `409` если больше 1000 событий
+или нарушена сверка, `422` при неверных датах. Нет имён клиентов,
+VIN, произвольных заметок или юридических финансовых записей.
+[Бухгалтер/кассир](finance.md) · [Финансовый контур](../auto/FINANCE.md) ·
+[PG17 HTTPS](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_treasury_cashbook_http.py) ·
+[Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-treasury-cashbook.spec.ts).

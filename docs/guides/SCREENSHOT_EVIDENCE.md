@@ -180,3 +180,12 @@ synthetic UUID, no PII/payment data. Визуальные baseline и
 повреждённую сумму и отзыв прав перед CSV. Evidence является
 candidate, не approved golden baseline и не независимой приемкой #92.
 
+
+## Кандидаты скриншотов кассовой книги (synthetic #445)
+
+`apps/web/e2e/auto-treasury-cashbook.spec.ts` сохраняет
+`treasury-cashbook-390-light.png` и
+`treasury-cashbook-1280-dark.png` по синтетическим событиям, плюс
+проверяет клавиатуру, 403, 409, повреждённый JSON и отзыв доступа
+перед CSV. Это candidate evidence, **не** утверждённый golden baseline,
+не реальные платёжные доказательства и не независимая приёмка #92/#76.
