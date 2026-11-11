@@ -123,3 +123,19 @@ MANAGER создаёт счёт и сверяет отчёты; CASHIER с от�
 ## Справочник SKU и прайс-категорий (current-dev #447)
 
 **WAREHOUSE+MANAGER с двумя живыми grants** → `/staff/warehouse-catalog`: создание immutable SKU-profile, версии тестовых закупочных/продажных цен, ручной offline-аналог, **логическое** объединение только при безопасных нулевых остатках, XLSX dry-run/preview → atomic commit и export. Каждая мутация проходит CSRF+ACL+tenant/branch+SQL guard, после 409 нужна сверка версий, после 503 прежний idempotency key. Без real provider/платежей/OEM. [Пошаговая инструкция](warehouse.md) · [SQL/API/тесты](../auto/SKU_CATALOG.md).
+
+## Проверяемая выработка механиков (current-dev, #448)
+
+**MANAGER** своей организации и филиала открывает
+`/staff/auto-mechanic-productivity` → вводит UUID организации/филиала и
+период 1–31 день → нажимает **«Рассчитать выработку»** → получает
+фактические минуты завершённых технических заказ-нарядов с QC PASS,
+детализацию по UUID механиков и нарядов и CSV. В случае 403 проверить
+MANAGER/HANDOVER:READ (сами ссылки не дают прав); при 409 сократить
+период (более 500 записей), при 422 исправить даты. Отозванные
+механики/подтверждения и старые документы за cutoff не отображаются.
+**Не** зарплата, прибыль, реальная касса или бухгалтерский документ.
+[Роль руководителя](manager.md) ·
+[Методика](../auto/REPORTING.md) ·
+[PG17/HTTPS тест](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_mechanic_productivity_http.py) ·
+[Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-mechanic-productivity.spec.ts).
