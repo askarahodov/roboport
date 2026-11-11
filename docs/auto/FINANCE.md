@@ -150,66 +150,66 @@ approval #119 и полноценная первичка #445/#170. Текущи
 
 ## Кассовая книга с расшифровкой событий (current-dev, #445)
 
-**Новая законченная техническая функция:** \`/staff/auto-treasury-cashbook\`
-показывает один условный счёт \`CASH_SIM/BANK_SIM\` своего филиала:
+**Новая законченная техническая функция:** `/staff/auto-treasury-cashbook`
+показывает один условный счёт `CASH_SIM/BANK_SIM` своего филиала:
 остаток на начало, приход, расход, внутренний зачёт аванса без движения
 денег, остаток на конец и проверку закрытия каждого локального
-\`business_day\`. События имеют неизменяемый UUID из
-\`auto_treasury_event\`; в интерфейсе и CSV **нет** комментария,
+`business_day`. События имеют неизменяемый UUID из
+`auto_treasury_event`; в интерфейсе и CSV **нет** комментария,
 WorkOrder UUID, имени кассира, клиента, VIN, номера телефона или реальных
 платёжных реквизитов. UUID события позволяет обслуживающему специалисту
 с соответствующим внутренним доступом проверить первичную строку, но
 ссылка не обходит объектные права на заказ-наряд.
 
-**Пошагово:** \`MANAGER\` или \`CASHIER\` открывает кассовую книгу,
+**Пошагово:** `MANAGER` или `CASHIER` открывает кассовую книгу,
 указывает UUID организации, филиала, уже созданного условного счёта
 и даты (от 1 до 31 дня), затем нажимает «Сверить кассовую книгу».
 В таблице раскрывает «Событий: N» и видит каждое исходное движение.
 Статус «Закрыто» подтверждён отдельной неизменяемой записью
-\`auto_treasury_day_close\`. Кнопка «Скачать полную кассовую книгу CSV»
+`auto_treasury_day_close`. Кнопка «Скачать полную кассовую книгу CSV»
 повторно проверяет текущие FINANCE-права и заново читает PostgreSQL
 (это новый срез, а не frozen export старого JSON).
 
 **Сверка:** opening на первый день = сумма всех
-\`ADVANCE+PAYMENT-REFUND_ADVANCE-REFUND_PAYMENT\` до него;
-каждый день \`closing = opening + incoming - outgoing\`.
-\`APPLY_ADVANCE\` показывается как \`internalAppliedMinor\`, но не
+`ADVANCE+PAYMENT-REFUND_ADVANCE-REFUND_PAYMENT` до него;
+каждый день `closing = opening + incoming - outgoing`.
+`APPLY_ADVANCE` показывается как `internalAppliedMinor`, но не
 влияет на баланс. Если есть подписанная запись закрытия,
 сервер сверяет все **четыре** поля: opening, incoming, outgoing, closing.
-При расхождении выдаёт \`409\` **без** частичных результатов. События,
+При расхождении выдаёт `409` **без** частичных результатов. События,
 по которым строится отчёт, ограничены 1000 за весь период; при превышении
-\`409\`. Инициированные через API записи берут \`FOR UPDATE\` счёта,
-а читатель книги держит \`FOR SHARE\` до конца многошаговой сверки,
+`409`. Инициированные через API записи берут `FOR UPDATE` счёта,
+а читатель книги держит `FOR SHARE` до конца многошаговой сверки,
 чтобы конкурентное начисление не дало смешанный snapshot. Период — по
-неизменяемому \`business_day\` филиала, не UTC-времени события.
+неизменяемому `business_day` филиала, не UTC-времени события.
 Это **техническая кассовая книга синтетического журнала**, не
 бухгалтерский ДДС, не финансовые остатки компании и не реальные деньги.
 
 **Контракт (private loopback HTTPS, без production OpenAPI):**
-\`GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/treasury/accounts/{account}/cashbook?fromDay=YYYY-MM-DD&toDay=YYYY-MM-DD\`,
-тот же путь с \`/export\`. JSON: \`syntheticOnly:true\`,
-\`realMoney:false\`, \`releaseAllowed:false\`,
-\`basis:IMMUTABLE_TREASURY_ACCOUNT_CASHBOOK_DAYS\`, \`accountId\`,
-\`summary\`, \`items[]\`, где у дня есть \`closeId\` и \`events[]\`.
+`GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/treasury/accounts/{account}/cashbook?fromDay=YYYY-MM-DD&toDay=YYYY-MM-DD`,
+тот же путь с `/export`. JSON: `syntheticOnly:true`,
+`realMoney:false`, `releaseAllowed:false`,
+`basis:IMMUTABLE_TREASURY_ACCOUNT_CASHBOOK_DAYS`, `accountId`,
+`summary`, `items[]`, где у дня есть `closeId` и `events[]`.
 Суммы строками в копейках (без потери точности JS), UI сверяет
-каждый день и итог через BigInt; CSV UTF-8 BOM, \`;\`, русские
+каждый день и итог через BigInt; CSV UTF-8 BOM, `;`, русские
 заголовки, только предсказуемые UUID, enum, суммы и статус SIM.
-\`403\` — отсутствует MANAGER/CASHIER или FINANCE READ/PRICE_SALES,
+`403` — отсутствует MANAGER/CASHIER или FINANCE READ/PRICE_SALES,
 чужой счёт/филиал, отзыв сессии/роли, запрет старой истории.
-\`422\` — UUID/дата/диапазон неверны. \`409\` — превышен предел,
+`422` — UUID/дата/диапазон неверны. `409` — превышен предел,
 денежный инвариант или подписанная сверка не совпадает. Везде
-\`Cache-Control: no-store\`; CSV и JSON не раскрывают примечания,
+`Cache-Control: no-store`; CSV и JSON не раскрывают примечания,
 платёжные реквизиты или ссылки на заказы.
 
-**Проверки:** \`tests/integration/test_pg_auto_treasury_cashbook_http.py\` —
+**Проверки:** `tests/integration/test_pg_auto_treasury_cashbook_http.py` —
 реальные PG17/HTTPS аванс→возврат→зачёт→оплата→возврат→закрытие,
 проверка каждой исходной суммы, CSV и отсутствия PII, 403/409/422,
-SQL-lock concurrency, снятие роли; \`apps/web/e2e/auto-treasury-cashbook.spec.ts\` —
+SQL-lock concurrency, снятие роли; `apps/web/e2e/auto-treasury-cashbook.spec.ts` —
 390/1280, light/dark, клавиатура, повреждённый summary, 403/409,
 реальное скачивание и revoke перед CSV. Без миграций. Откат — revert
 нового GET/API/UI/docs, без изменения уже записанного кассового журнала.
 
 **Границы:** лицензированное/реальное кассовое оборудование, банковские
 выписки, фискализация, юридически значимая первичка, интеграция
-эквайринга/СБП и согласование #119 остаются \`planned\`. Issue #445
+эквайринга/СБП и согласование #119 остаются `planned`. Issue #445
 нельзя закрывать этим synthetic checkpoint.
