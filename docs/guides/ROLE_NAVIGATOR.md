@@ -155,3 +155,7 @@ VIN, произвольных заметок или юридических фи�
 [Бухгалтер/кассир](finance.md) · [Финансовый контур](../auto/FINANCE.md) ·
 [PG17 HTTPS](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_treasury_cashbook_http.py) ·
 [Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-treasury-cashbook.spec.ts).
+
+## Происхождение закупочной первички (current-dev, #448)
+
+MANAGER открывает /staff/auto-material-cost-evidence → указывает UUID своей организации/филиала и даты до 31 дня → «Проверить документы материалов» → видит неизменяемые issue/return партии и качество приходных документов → «Скачать аудит CSV» (проверка ролей повторяется). Нет расчёта COGS, прибыли, НДС или ПДн. 403 — отсутствуют MANAGER/SUPPLIER_ORDER/HANDOVER права, 409 — больше 500 событий, 422 — ошибочные даты. Источники: docs/auto/REPORTING.md, docs/guides/manager.md, tests/integration/test_pg_auto_material_cost_evidence_http.py и apps/web/e2e/auto-material-cost-evidence.spec.ts.
