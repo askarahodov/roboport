@@ -21,6 +21,7 @@ const sectionGuide: Record<string,string> = {
   '/staff/auto-crm-leads':'intake', '/staff/auto-crm-funnel':'manager',
   '/staff/auto-crm-outcomes':'manager',
   '/staff/auto-mechanic-productivity':'manager',
+  '/staff/auto-material-cost-evidence':'manager',
   '/staff/auto-intake-act':'intake', '/staff/auto-diagnostics':'mechanic',
   '/staff/auto-estimates':'manager', '/staff/auto-execution':'mechanic',
   '/staff/auto-workshop-qc':'mechanic', '/staff/auto-demo-close':'manager',
@@ -42,6 +43,7 @@ const sections: { to: string; label: string; roles: Role[] }[] = [
   { to: '/staff/auto-crm-funnel', label: 'Воронка CRM (dev)', roles: ['MANAGER'] },
   { to: '/staff/auto-crm-outcomes', label: 'CRM → техзакрытие (dev)', roles: ['MANAGER'] },
   { to: '/staff/auto-mechanic-productivity', label: 'Выработка механиков (dev)', roles: ['MANAGER'] },
+  { to: '/staff/auto-material-cost-evidence', label: 'Первичка материалов (dev)', roles: ['MANAGER'] }
   { to: '/staff/auto-intake-act', label: 'Акт приёмки (dev)', roles: ['INTAKE','MANAGER'] },
   { to: '/staff/auto-diagnostics', label: 'Диагностика автомобиля (dev)', roles: ['ENGINEER','MANAGER'] },
   { to: '/staff/auto-estimates', label: 'Сметы СТО (dev)', roles: ['INTAKE','MANAGER'] },
