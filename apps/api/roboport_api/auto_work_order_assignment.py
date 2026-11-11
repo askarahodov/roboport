@@ -280,12 +280,12 @@ def list_assignments(conn, token: str, organization_id: UUID,
             AND assignment.ends_at>now()
             AND (%s OR assignment.mechanic_id=%s)
             AND EXISTS (
-              SELECT 1 FROM auto_organization_role_grant grant
-              WHERE grant.organization_id=assignment.organization_id
-                AND grant.user_id=assignment.mechanic_id
-                AND grant.role_code='MECHANIC' AND grant.revoked_at IS NULL
-                AND (grant.location_id=assignment.location_id
-                     OR grant.location_id IS NULL)
+              SELECT 1 FROM auto_organization_role_grant g
+              WHERE g.organization_id=assignment.organization_id
+                AND g.user_id=assignment.mechanic_id
+                AND g.role_code='MECHANIC' AND g.revoked_at IS NULL
+                AND (g.location_id=assignment.location_id
+                     OR g.location_id IS NULL)
             )
             AND EXISTS (
               SELECT 1 FROM auto_staff_shift shift
