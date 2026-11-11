@@ -384,3 +384,17 @@ CSV: UTF-8 BOM, разделитель `;`, только UUID и числовы�
 Payroll/ставки/удержания, реальные финансовые отчёты и выпуск до
 юридического #119 остаются `planned`.
 
+## Аудит первички материалов на заказ-наряды (current-dev, #448)
+
+**Завершённый технический сценарий synthetic dev; не COGS, маржа, прибыль, НДС или бухгалтерский документ.** Руководитель с действующим MANAGER и правами SUPPLIER_ORDER READ/PRICE_PURCHASE, HANDOVER READ открывает /staff/auto-material-cost-evidence, выбирает UUID своей организации/филиала и период от 1 до 31 локального дня, нажимает «Проверить документы материалов». Отчёт показывает неизменяемые выдачи/возвраты партий на WorkOrder, статус наличия документов и UUID первички. «Скачать аудит CSV» повторно проверяет доступ и формирует новый SQL-срез.
+
+**Источник:** auto_stock_lot_work_order_issue / auto_stock_lot_work_order_return → auto_stock_receipt_document → auto_stock_receipt_acceptance → auto_stock_receipt_valuation. Состояния:
+- NO_RECEIPT — документа прихода на эту партию нет.
+- REVIEW_REQUIRED — есть неакцептованные/неоценённые или несколько приходов; стоимость выдачи не определяется.
+- SINGLE_VALUED_RECEIPT — есть единственная принятая и оценённая приёмка; показывается только справочная цена единицы из её документа, НЕ стоимость конкретной выдачи. В партии может быть и иной запас, в том числе более ранний.
+
+Группировка по WorkOrder и партии. grossIssued, grossReturned и netPeriod=grossIssued−grossReturned отражают **события выбранного периода**, не балансы/себестоимость; разница может быть отрицательной. Суммы разных SKU как штуки не сопоставимы; деньги из разных журналов не объединяются. Ответ всегда syntheticOnly:true, realMoney:false, marginAvailable:false, priceIsOnlyReceiptQuote:true, releaseAllowed:false.
+
+**Security:** действующая MANAGER-роль своего филиала; все активные роли совместно проверяются на запрет SUPPLIER_ORDER READ/PRICE_PURCHASE и HANDOVER READ. Historical cutoff для branch-wide отчёта запрещает весь запрос, не позволяет раскрыть старые цены. Каждое движение обязано относиться к WorkOrder своего tenant/филиала и иметь сейчас verified, не отозванную связь автомобиля с владельцем. Не выводятся имена, VIN, телефоны, поставщик, личные примечания, коммерческая цена продажи. События и их provenance читаются одним PostgreSQL snapshot SELECT; на следующем запросе данные могут измениться после нового принятого прихода. От 1 до 31 дня по IANA зоне филиала; DST 23/25 часа. Свыше 500 событий — 409 без частичного JSON/CSV, неверный период — 422, отзыв или чужой филиал — 403.
+
+**Private HTTPS API:** GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/material-cost-evidence?fromDay=YYYY-MM-DD&toDay=YYYY-MM-DD и /export. CSV UTF-8 BOM, разделитель ;, предсказуемые UUID/enums/числа, маркер QUOTE_ONLY_NOT_COGS, no-store. PG17/HTTPS tests/integration/test_pg_auto_material_cost_evidence_http.py доказывает настоящий issue/return, принятие/оценку, неоднозначные приходы, CSV, отзыв и 403/409/422, DST. Playwright apps/web/e2e/auto-material-cost-evidence.spec.ts проверяет 390/1280, dark, клавиатуру, 403/409, повреждённые суммы и отзыв перед скачиванием. Без миграций, rollback — revert read-only API/UI/docs. Расчёт настоящей себестоимости/маржи/payroll требует дополнительных связей партий с источником единицы, бухгалтерской первички и gate #119. #448/#171 остаются OPEN.

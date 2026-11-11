@@ -189,3 +189,7 @@ candidate, не approved golden baseline и не независимой прие
 проверяет клавиатуру, 403, 409, повреждённый JSON и отзыв доступа
 перед CSV. Это candidate evidence, **не** утверждённый golden baseline,
 не реальные платёжные доказательства и не независимая приёмка #92/#76.
+
+## Визуальные доказательства закупочной первички (#448)
+
+Playwright apps/web/e2e/auto-material-cost-evidence.spec.ts собирает material-cost-evidence-390-dark.png и material-cost-evidence-1280-dark.png на синтетической базе и проверяет клавиатуру, 403/409, повреждённый summary и отзыв права перед CSV. Только candidate evidence, не утверждённые golden baseline или независимая приёмка #92/#76.

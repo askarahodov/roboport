@@ -155,3 +155,20 @@ VIN, произвольных заметок или юридических фи�
 [Бухгалтер/кассир](finance.md) · [Финансовый контур](../auto/FINANCE.md) ·
 [PG17 HTTPS](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_treasury_cashbook_http.py) ·
 [Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-treasury-cashbook.spec.ts).
+
+## Происхождение закупочной первички (current-dev, #448)
+
+**MANAGER** своего филиала открывает
+`/staff/auto-material-cost-evidence`, задаёт организацию, филиал и даты
+до 31 дня, нажимает **«Проверить документы материалов»**. Результат —
+проверяемые выдачи и возвраты партий и статус приходной первички.
+**«Скачать аудит CSV»** повторно проверяет полномочия.
+
+Это не COGS, прибыль, НДС или реальные данные клиентов. При 403
+проверьте MANAGER и права на закупочные цены/выдачу; при 409
+сократите период (не более 500 движений); при 422 исправьте даты.
+
+[Методика](../auto/REPORTING.md) ·
+[Руководитель](manager.md) ·
+[Интеграционный PG17-тест](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_material_cost_evidence_http.py) ·
+[Playwright-проверки](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-material-cost-evidence.spec.ts).
