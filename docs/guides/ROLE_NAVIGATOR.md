@@ -172,3 +172,17 @@ VIN, произвольных заметок или юридических фи�
 [Руководитель](manager.md) ·
 [Интеграционный PG17-тест](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_material_cost_evidence_http.py) ·
 [Playwright-проверки](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-material-cost-evidence.spec.ts).
+
+
+## Диспетчеризация механиков: весь цикл OFFERED → ACCEPTED/DECLINED (#500)
+
+| Кто | Экран | Действие | Отказы и доказательства |
+| --- | --- | --- | --- |
+| MANAGER филиала | `/staff/auto-assignments` | «Предложить назначение» в активной смене механика, видеть очередь своего филиала, перейти к работам | 403 при отмене брони/отзыве proof/роли; 409 при конфликте; [PG17/HTTPS](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_assignment_console_http.py) |
+| MECHANIC филиала | `/staff/auto-assignments` | «Принять назначение» или «Отклонить назначение» **только своего** задания, повторить исходный ключ после сетевого сбоя | Живая проверка GRANT/смены/броней перед POST; [Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-assignments.spec.ts) |
+
+[Руководство руководителя](manager.md) · [Руководство механика](mechanic.md) ·
+[инварианты и rollback](../auto/WORKSHOP_OPERATIONS.md).
+Только synthetic dev: менеджерское предложение не заменяет согласие
+клиента, QC или юридическую выдачу.
+
