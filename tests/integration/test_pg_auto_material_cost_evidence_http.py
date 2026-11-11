@@ -34,6 +34,7 @@ def fixture(monkeypatch):
     with psycopg.connect(DSN) as db:
         org,loc,order,item,lot,warehouse_grant=setup(db,d,5)
         manager_grant=grant(db,d["intake"],org,loc,"MANAGER")
+        grant(db,d["manager"],org,loc,"MANAGER")
         db.execute(
             "INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id) VALUES(%s,%s)",
             (d["vehicle"],loc),
@@ -86,9 +87,9 @@ def test_real_lot_issue_return_receipt_quote_and_multi_source_not_cogs(monkeypat
         document=create_receipt_document(
             db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),2,"DOC-AUDIT-1")
         accept_receipt_document(
-            db,d["tokens"][d["intake"]],org,loc,document,uuid4())
+            db,d["tokens"][d["manager"]],org,loc,document,uuid4())
         valuation=record_receipt_valuation(
-            db,d["tokens"][d["intake"]],org,loc,document,uuid4(),
+            db,d["tokens"][d["manager"]],org,loc,document,uuid4(),
             "RUB",700,140,"QUOTE-AUDIT-1",datetime(2026,10,28,tzinfo=timezone.utc))
     second=_get(http,org,loc,day)
     assert second.status_code==200,second.text
