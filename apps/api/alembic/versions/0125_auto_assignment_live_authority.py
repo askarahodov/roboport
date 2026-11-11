@@ -1,6 +1,6 @@
 """Live accepted assignment authorization for execution and direct SQL.
 
-Revision ID: 0125_auto_assignment_live_authority
+Revision ID: 0125_auto_assignment_guard
 Revises: 0124_auto_catalog
 
 No data deletion, existing event history immutable. Downgrade restores the
@@ -8,7 +8,7 @@ legacy trigger, so never downgrade a deployed instance without approval.
 """
 from alembic import op
 
-revision = "0125_auto_assignment_live_authority"
+revision = "0125_auto_assignment_guard"
 down_revision = "0124_auto_catalog"
 branch_labels = None
 depends_on = None
