@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from roboport_api.main import app
 from roboport_api.auto_mechanic_productivity import _period, _csv_export
+from roboport_api import auto_mechanic_productivity as productivity
 from roboport_api.auto_document_lifecycle import record_document_event
 from test_pg_auto_document_lifecycle_http import ready
 from test_pg_baseline import DSN
@@ -89,6 +90,14 @@ def test_verified_labor_report_export_revocation_and_cross_branch(monkeypatch):
     assert lines[1][:2] == [str(d["manager"]), str(order)]
     assert lines[1][2:4] == ["1", "45"]
     assert all("RUB" not in field for row in lines for field in row)
+
+    # Exercise the real PostgreSQL capacity branch deterministically:
+    # with one qualifying labor entry, a temporary zero cap must produce
+    # a full 409 for both JSON and CSV, not a silently truncated report.
+    monkeypatch.setattr(productivity, "MAX_LABOR_ENTRIES", 0)
+    assert http.get(path, params=query).status_code == 409
+    assert http.get(path + "/export", params=query).status_code == 409
+    monkeypatch.setattr(productivity, "MAX_LABOR_ENTRIES", 500)
 
     assert http.get(report_path(org, uuid4()), params=query).status_code == 403
     assert http.get(path, params={"fromDay": "2026-02-31", "toDay": day}).status_code == 422
