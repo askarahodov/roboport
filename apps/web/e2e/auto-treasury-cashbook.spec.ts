@@ -139,3 +139,30 @@ test('кассовая книга: CSV скачивание и повторна�
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(result).toHaveCount(0);
 });
+
+
+test('кассовая книга: новая сверка отменяет незавершённый CSV и восстанавливает кнопку',async({page})=>{
+  await page.route(prefix,route=>{
+    const u=new URL(route.request().url());
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify(payload(u.searchParams.get('fromDay')||'',
+                                  u.searchParams.get('toDay')||''))});
+  });
+  await page.route(exportUrl,async route=>{
+    await new Promise(resolve=>setTimeout(resolve,1100));
+    try{await route.fulfill({status:200,contentType:'text/csv',
+      body:'\ufeffДень;Сумма\r\n'});}catch{/* Original fetch was aborted by a new report. */}
+  });
+  await page.goto('/staff/auto-treasury-cashbook');
+  await fill(page);
+  const button=page.getByRole('button',{name:'Сверить кассовую книгу'});
+  await button.click();
+  const section=page.getByLabel('Результаты кассовой книги');
+  const exportButton=section.getByRole('button',{name:'Скачать полную кассовую книгу CSV'});
+  await exportButton.click();
+  await expect(section.getByRole('button',{name:'Готовим CSV…'})).toBeDisabled();
+  await button.click();
+  await expect(page.getByLabel('Результаты кассовой книги')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Скачать полную кассовую книгу CSV'}))
+    .toBeEnabled();
+});
