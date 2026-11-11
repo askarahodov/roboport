@@ -56,7 +56,12 @@ body { background: var(--kb-bg); color: var(--kb-ink); font-family: Manrope, sys
   color: #e5f6fa !important;
   background-color: transparent !important;
 }
-.markdown-section code:not(pre code) { background: #eaf1f3; color: #123c49; border-radius: 4px; }
+.markdown-section code:not(pre code) {
+  background: #eaf1f3; color: #123c49; border-radius: 4px;
+  /* Dev route names and UUIDs must not widen the Docsify root on 390px. */
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 .markdown-section table { width: 100%; display: block; overflow-x: auto; }
 .markdown-section th { background: #eaf1f2; }
 .markdown-section th, .markdown-section td { border: 1px solid var(--kb-border); padding: 9px 13px; }
