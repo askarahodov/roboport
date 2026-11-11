@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const offsetTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/;
+const offsetTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/;
 const inputStyle:React.CSSProperties = {width:'min(100%, 28rem)',maxWidth:'100%',boxSizing:'border-box'};
 const isStamp = (v:unknown):v is string => typeof v==='string' &&
   Number.isFinite(Date.parse(v)) && /^\d{4}-\d\d-\d\dT/.test(v);
