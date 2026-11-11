@@ -58,7 +58,7 @@ async function collectVisualEvidence(
   const trackError=()=>{pageErrorCount++;};
   page.on('pageerror',trackError);
   try{
-        const folder=testInfo.outputPath('visual');
+    const folder=testInfo.outputPath('visual');
         await mkdir(folder,{recursive:true});
         // Fail after the complete matrix, not at the first broken route.
         // This keeps review evidence for subsequent screens and error states.
@@ -87,7 +87,7 @@ async function collectVisualEvidence(
             check='overflow';
             await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth),
               {message:'root overflow at '+screen.name+'/'+width,timeout:3000})
-              .toBeLessThanOrEqual(size.width+1);
+              .toBeLessThanOrEqual(width+1);
             check='path';
             if(new URL(page.url()).pathname!==screen.path)
               failureKinds.push('NAVIGATION_MISMATCH');
@@ -115,8 +115,7 @@ async function collectVisualEvidence(
         }
         await writeFile(testInfo.outputPath('visual','manifest.json'),
           JSON.stringify({syntheticOnly:true,approvedBaseline:false,
-            viewport:size.width,theme,scenarios:report},null,2));
-  
+            viewport:width,theme,scenarios:report},null,2));
     return {report,failures,pageErrorCount};
   }finally{
     page.off('pageerror',trackError);
