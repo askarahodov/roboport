@@ -170,3 +170,13 @@ synthetic UUID, no PII/payment data. Визуальные baseline и
 ## Public booking #442 — DEV screenshots
 
 `apps/web/e2e/auto-public-booking.spec.ts` фиксирует 390px страницу публичной заявки и 1280px staff-консоль, тестирует повтор потерянного POST и 403-clearing. CI browser evidence после успешного прогона.
+
+## Скриншоты проверки выработки (#448)
+
+`apps/web/e2e/auto-mechanic-productivity.spec.ts` сохраняет
+`mechanic-productivity-390-dark.png` и
+`mechanic-productivity-1280-dark.png` по искусственным данным,
+проверяет отсутствие переполнения, клавиатуру, отказ 403/409,
+повреждённую сумму и отзыв прав перед CSV. Evidence является
+candidate, не approved golden baseline и не независимой приемкой #92.
+
