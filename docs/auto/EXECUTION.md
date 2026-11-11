@@ -198,7 +198,7 @@ PG17: реальный immutable аудит/движения материало�
 Два уровня контроля: Python
 `auto_work_order_execution._require_assigned_mechanic` в транзакции
 повторно проверяет действующие полномочия, а Alembic
-`0125_auto_assignment_live_authority` обновляет
+`0125_auto_assignment_guard` обновляет
 `guard_auto_assignment_execution()`, проверяющий это независимо при
 вставках в `auto_work_order_labor_entry`,
 `auto_stock_mechanic_handoff` и `auto_work_order_execution_finish`.
