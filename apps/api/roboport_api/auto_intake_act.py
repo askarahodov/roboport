@@ -155,6 +155,7 @@ def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[byte
         raise IntakeActInvalid("PHOTO_REQUIRED")
     manifest=[]
     blobs=[]
+    pixel_digests=set()
     for photo in photos:
         if (type(photo) is not dict or set(photo)!={"areaCode","imageBase64"} or
                 photo["areaCode"] not in AREAS or
@@ -169,10 +170,15 @@ def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[byte
             raise IntakeActInvalid("INVALID_PHOTO")
         clean,width,height=sanitize_png(data)
         digest=hashlib.sha256(clean).hexdigest()
-        # Один снимок под разными зонами искажает происхождение фотодоказательств.
-        # Между версиями повтор допустим, но внутри версии каждый снимок уникален.
-        if any(m["sha256"]==digest for m in manifest):
+        # SHA сохранённых байтов подтверждает целостность, но не уникальность:
+        # повторные PNG с иным zlib-сжатием содержат те же scanlines.
+        # sanitize_png уже ограничил размер распаковки и собрал один IDAT.
+        pixel_digest=hashlib.sha256(
+            clean[16:29]+zlib.decompress(clean[41:-16])
+        ).digest()
+        if pixel_digest in pixel_digests:
             raise IntakeActInvalid("DUPLICATE_PHOTO")
+        pixel_digests.add(pixel_digest)
         blobs.append(clean)
         manifest.append({"areaCode":photo["areaCode"],"mime":"image/png",
                          "sha256":digest,
