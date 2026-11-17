@@ -340,6 +340,43 @@ def test_intake_duplicate_png_pixels_across_all_filter_types():
     assert len(_validate(distinct)[3])==2
 
 
+def test_historical_exact_replay_survives_new_pixel_duplicate_guard(monkeypatch):
+    # Emulate a pre-upgrade admission rule: exact PNG bytes used to be the
+    # uniqueness boundary, so two different filters could be stored together.
+    import roboport_api.auto_intake_act as intake_module
+
+    d,org,loc,_,order,*_=scenario()
+    http=client_setup(monkeypatch)
+    staff=token_as(http,d,d["intake"])
+    _,inspect,_=target(org,loc,order)
+    assert http.post(inspect,headers=staff,json=inspection()).status_code==201
+
+    old=custody(synthetic_png(filter_type=0))
+    old["photos"].append({
+        "areaCode":"REAR",
+        "imageBase64":base64.b64encode(synthetic_png(filter_type=4)).decode("ascii"),
+    })
+    path=url(org,loc,order)
+    key=uuid4()
+    original=intake_module._pixel_fingerprint
+    monkeypatch.setattr(
+        intake_module,"_pixel_fingerprint",
+        lambda clean,width,height: hashlib.sha256(clean).digest(),
+    )
+    accepted=publish(http,staff,path,old,key=key)
+    assert accepted.status_code==201,accepted.text
+    monkeypatch.setattr(intake_module,"_pixel_fingerprint",original)
+    replay=publish(http,staff,path,old,key=key)
+    assert replay.status_code==200,replay.text
+    assert replay.json()["replayed"] is True
+    assert replay.json()["items"]==accepted.json()["items"]
+    # Same image bundle must not be accepted as a NEW immutable version.
+    forbidden=publish(http,staff,path,old,key=uuid4(),version=1)
+    assert forbidden.status_code==422
+    assert forbidden.json()["detail"] if "detail" in forbidden.json() else True
+    assert http.get(path).json()["latestVersion"]==1
+
+
 def test_png_sanitizer_rejects_exif_text_crc_bombs_and_unknown_chunks():
     valid=synthetic_png()
     clean,w,h=sanitize_png(valid)
