@@ -15,16 +15,22 @@ type Withdrawable = {
   assignmentId:string;workOrderId:string;mechanicId:string;
   startsAt:string;endsAt:string;status:'OFFERED';
 };
+type Releasable = {
+  assignmentId:string;workOrderId:string;mechanicId:string;
+  startsAt:string;endsAt:string;status:'ACCEPTED';acceptedAt:string;
+};
 type Queue = {
   syntheticOnly:true;releaseAllowed:false;canOffer:boolean;
   organizationId:string;locationId:string;items:Assignment[];
   withdrawable?:Withdrawable[];
   withdrawPage?:number;withdrawHasMore?:boolean;
+  releasable?:Releasable[];
+  releasePage?:number;releaseHasMore?:boolean;
 };
 type Pending = {path:string;body:string;label:string};
 
 function parseQueue(raw:unknown,expectedOrg:string,expectedLoc:string,
-  expectedPage=0):Queue {
+  expectedPage=0,expectedReleasePage=0):Queue {
   if(!raw||typeof raw!=='object')throw Error('contract');
   const r=raw as Record<string,unknown>;
   if(r.syntheticOnly!==true||r.releaseAllowed!==false||
@@ -70,6 +76,26 @@ function parseQueue(raw:unknown,expectedOrg:string,expectedLoc:string,
       pendingIds.add(String(a.assignmentId));
     }
   }
+  if(r.releasePage!==undefined&&
+     (!Number.isSafeInteger(r.releasePage)||r.releasePage!==expectedReleasePage))
+    throw Error('contract');
+  if(r.releaseHasMore!==undefined&&typeof r.releaseHasMore!=='boolean')
+    throw Error('contract');
+  if(r.releasable!==undefined){
+    if(!Array.isArray(r.releasable)||r.releasable.length>50||
+       (!r.canOffer&&r.releasable.length>0))throw Error('contract');
+    const pending=new Set<string>();
+    for(const item of r.releasable){
+      if(!item||typeof item!=='object')throw Error('contract');
+      const a=item as Record<string,unknown>;
+      if(![a.assignmentId,a.workOrderId,a.mechanicId].every(v=>
+         typeof v==='string'&&uuid.test(v))||
+         !isStamp(a.startsAt)||!isStamp(a.endsAt)||
+         !isStamp(a.acceptedAt)||a.status!=='ACCEPTED'||
+         pending.has(String(a.assignmentId)))throw Error('contract');
+      pending.add(String(a.assignmentId));
+    }
+  }
   return raw as Queue;
 }
 function parseOfferWindow(a:string,b:string){
@@ -92,6 +118,7 @@ export function AutoAssignments(){
   const [ends,setEnds]=React.useState('');
   const [revision,setRevision]=React.useState(0);
   const [withdrawPage,setWithdrawPage]=React.useState(0);
+  const [releasePage,setReleasePage]=React.useState(0);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'|'limit'>('idle');
   const [loadedScope,setLoadedScope]=React.useState('');
   const [queue,setQueue]=React.useState<Queue|null>(null);
@@ -116,7 +143,8 @@ export function AutoAssignments(){
 
   function scopeChanged(setter:(v:string)=>void,v:string){
     active.current?.abort();mutation.current?.abort();
-    setter(v);setWithdrawPage(0);setQueue(null);setLoadedScope('');
+    setter(v);setWithdrawPage(0);setReleasePage(0);
+    setQueue(null);setLoadedScope('');
     setStatus('idle');setMessage('');setPending(null);setBusy(false);
   }
 
@@ -128,14 +156,16 @@ export function AutoAssignments(){
     setStatus('loading');
     (async()=>{
       try{
-        const response=await fetch(root+'/assignments?withdrawPage='+withdrawPage,{
+        const response=await fetch(root+'/assignments?withdrawPage='+withdrawPage+
+          '&releasePage='+releasePage,{
           credentials:'include',cache:'no-store',signal:controller.signal,
         });
         if(controller.signal.aborted)return;
         if([401,403,404].includes(response.status)){setStatus('denied');return;}
         if(response.status===409){setStatus('limit');return;}
         if(!response.ok)throw Error('http');
-        const data=parseQueue(await response.json(),org.trim(),loc.trim(),withdrawPage);
+        const data=parseQueue(await response.json(),org.trim(),loc.trim(),
+          withdrawPage,releasePage);
         if(!controller.signal.aborted){
           setQueue(data);setLoadedScope(scope);setStatus('ready');
         }
@@ -143,7 +173,7 @@ export function AutoAssignments(){
     })();
     return ()=>controller.abort();
   // The base URL is recomputed from the same two scope fields as these dependencies.
-  },[org,loc,revision,valid,withdrawPage]);
+  },[org,loc,revision,valid,withdrawPage,releasePage]);
 
   function offer(){
     if(!canOffer||!offerWindow)return;
@@ -169,6 +199,14 @@ export function AutoAssignments(){
       path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/withdraw',
       body:JSON.stringify({requestKey:crypto.randomUUID()}),
       label:'Отзыв предложения',
+    });
+  }
+  function releaseAccepted(a:Releasable){
+    if(!canMutate||!queue?.canOffer||a.status!=='ACCEPTED')return;
+    void send({
+      path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/release',
+      body:JSON.stringify({requestKey:crypto.randomUUID()}),
+      label:'Освобождение не начатого назначения',
     });
   }
   async function send(task:Pending){
@@ -211,6 +249,9 @@ export function AutoAssignments(){
       if(!controller.signal.aborted){
         setPending(null);setMessage(task.label+' зафиксировано. Очередь обновлена.');
         if(task.label==='Отзыв предложения')setWithdrawPage(0);
+        if(task.label==='Освобождение не начатого назначения'){
+          setWithdrawPage(0);setReleasePage(0);
+        }
         setRevision(value=>value+1);
       }
     }catch{
@@ -231,8 +272,10 @@ export function AutoAssignments(){
       в рамках действующей смены, механик принимает или отклоняет
       <strong> только своё</strong> предложение. Текущие записи фильтруются
       сервером по роли, филиалу, проверенному автомобилю, текущей брони
-      и активной смене. Менеджер отдельно видит все незавершённые предложения,
-      даже если исполнитель потерял смену/права, и может их безопасно отозвать.
+      и активной смене. Менеджер отдельно видит незавершённые предложения
+      и принятые, но <strong>ещё не начатые</strong> назначения, даже
+      если исполнитель потерял смену/права, и может безопасно снять их.
+      Начатые работы и материалы переносить этим действием запрещено.
       Не является разрешением на ремонт, QC или выдачу.</p>
     <div style={{display:'flex',flexWrap:'wrap',gap:'1rem',alignItems:'end'}}>
       <label>UUID организации <input aria-label="UUID организации" style={inputStyle}
@@ -319,6 +362,44 @@ export function AutoAssignments(){
       </div>
       <p>Страница отзыва: {withdrawPage+1}. После снятия предложения
         список безопасно перечитывается с первой страницы.</p>
+    </section>}
+    {ready&&queue.canOffer&&<section
+      aria-label="Освобождение принятых до начала работ">
+      <h2>Освободить принятое назначение до начала исполнения (MANAGER)</h2>
+      <p><strong>Только до начала работ.</strong> Принятую работу можно
+        освободить для переназначения, если в заказе нет записи о
+        техническом старте, фактических работах, выдаче материалов или
+        QC. Исходное принятие и его время останутся в истории.
+        Снятие после начала работ запрещено.</p>
+      {(queue.releasable??[]).length===0?
+        <p>Принятых назначений без начала работ на этой странице нет.</p>:
+        <div style={{maxWidth:'100%',overflowX:'auto'}}>
+          <table>
+            <caption>Принятые назначения без начала работ</caption>
+            <thead><tr><th scope="col">Заказ-наряд</th>
+              <th scope="col">Механик</th><th scope="col">Интервал</th>
+              <th scope="col">Принято</th><th scope="col">Действие</th></tr></thead>
+            <tbody>{(queue.releasable??[]).map(a=><tr key={a.assignmentId}>
+              <th scope="row">{a.workOrderId}</th>
+              <td>{a.mechanicId}</td>
+              <td>{formatDate(a.startsAt)} — {formatDate(a.endsAt)}</td>
+              <td>{formatDate(a.acceptedAt)}</td>
+              <td><button type="button" disabled={!canMutate}
+                aria-label={'Освободить принятое назначение '+a.assignmentId}
+                onClick={()=>releaseAccepted(a)}>Освободить назначение</button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+      <div style={{display:'flex',flexWrap:'wrap',gap:'1rem'}}>
+        {releasePage>0&&<button type="button" disabled={!canMutate}
+          onClick={()=>{setQueue(null);setStatus('loading');
+            setReleasePage(n=>n-1);}}>Предыдущая страница освобождения</button>}
+        {queue.releaseHasMore===true&&<button type="button" disabled={!canMutate}
+          onClick={()=>{setQueue(null);setStatus('loading');
+            setReleasePage(n=>n+1);}}>Следующие принятые назначения</button>}
+      </div>
+      <p>Страница принятых назначений: {releasePage+1}.
+        После освобождения перечитывается первая страница.</p>
     </section>}
     {ready&&<section aria-label="Текущая очередь назначений">
       <h2>Действующие предложения и принятые задания</h2>
