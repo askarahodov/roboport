@@ -217,3 +217,90 @@ test('manager withdraws publication: offer vanishes, exact CSRF key and no false
   await expect.poll(()=>mutations.length,{timeout:15000}).toBe(1);
   await expect(ui.getByRole('button',{name:'Отозвать публикацию'})).toHaveCount(0);
 });
+
+
+test('public receipt and staff queue display current moved/canceled slot, never stale BOOKED',
+  async({page},info)=>{
+    const moved={startsAt:'2030-01-02T13:00:00Z',endsAt:'2030-01-02T13:30:00Z'};
+    let state:'RESCHEDULED'|'CANCELED'='RESCHEDULED';
+    let denied=false;
+    await page.route('**/api/v1/dev/auto/**',route=>{
+      const req=route.request(),path=new URL(req.url()).pathname;
+      if(path===pub+'/requests/'+reqId+'/status'&&req.method()==='POST'){
+        expect(req.postDataJSON()).toEqual({receiptKey:link});
+        return route.fulfill({status:denied?403:200,contentType:'application/json',
+          body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({
+            syntheticOnly:true,realDelivery:false,requestId:reqId,
+            noSlotHold:state==='CANCELED',status:state,
+            marketingEnabled:false,appointmentId:appointment,
+            workOrderId:offer,
+            currentStartsAt:moved.startsAt,currentEndsAt:moved.endsAt,
+            currentBayCode:'BAY-2',timeZone:'Europe/Berlin',
+          })});
+      }
+      if(path===staff+'/queue'&&req.method()==='GET'){
+        return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+          syntheticOnly:true,page:0,hasMore:false,items:[{
+            requestId:reqId,offerId:offer,startsAt:slot.startsAt,endsAt:slot.endsAt,
+            createdAt:'2030-01-01T10:00:00Z',status:state,
+            appointmentId:appointment,currentStartsAt:moved.startsAt,
+            currentEndsAt:moved.endsAt,currentBayCode:'BAY-2',timeZone:'Europe/Berlin',
+            materials:[],
+          }],
+        })});
+      }
+      throw Error('Unexpected '+req.method()+' '+path);
+    });
+    await page.setViewportSize({width:390,height:844});
+    await page.goto('/account/auto-public-booking');
+    const client=page.getByRole('region',{
+      name:'Подтверждение публичной заявки клиентом (DEV)',
+    });
+    await client.getByRole('textbox',{name:'ID заявки'}).fill(reqId);
+    await client.getByRole('textbox',{name:'Секретный ключ квитанции'}).fill(link);
+    await client.getByRole('button',{name:'Обновить состояние заявки'}).click();
+    await expect(client.getByText('Заявка: RESCHEDULED.',{exact:false})).toBeVisible();
+    await expect(client.getByText('BAY-2',{exact:false})).toBeVisible();
+    await expect(client.getByText('Исходное время заявки устарело.',{exact:false}))
+      .toBeVisible();
+    await expect(client.getByRole('link',{name:'Мои записи'})).toBeVisible();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(390);
+    await page.screenshot({path:info.outputPath('public-moved-390.png'),fullPage:true});
+
+    state='CANCELED';
+    await client.getByRole('button',{name:'Обновить состояние заявки'}).click();
+    await expect(client.getByText('Заявка: CANCELED.',{exact:false})).toBeVisible();
+    await expect(client.getByText('Интервал освобождён.',{exact:false})).toBeVisible();
+    await expect(client.getByRole('link',{name:'Мои записи'})).toHaveCount(0);
+
+    await page.setViewportSize({width:1280,height:900});
+    await page.goto('/staff/auto-public-booking');
+    const staffUI=page.getByRole('region',{
+      name:'Публикации и публичные заявки СТО (DEV)',
+    });
+    await staffUI.getByRole('textbox',{name:'UUID организации'}).fill(org);
+    await staffUI.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+    await staffUI.getByRole('button',{name:'Обновить очередь'}).click();
+    await expect(staffUI.getByText('CANCELED',{exact:false})).toBeVisible();
+    await expect(staffUI.getByText('BAY-2',{exact:false})).toBeVisible();
+    await expect(staffUI.getByText(slot.startsAt,{exact:false})).toBeVisible();
+    await expect(staffUI.getByRole('button',{
+      name:'Создать запись, CRM-лид и резерв атомарно',
+    })).toHaveCount(0);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(1280);
+    await page.screenshot({path:info.outputPath('public-canceled-1280.png'),fullPage:true});
+
+    // A denied receipt must not retain the previous moved/canceled details.
+    denied=true;
+    await page.goto('/account/auto-public-booking');
+    const refreshed=page.getByRole('region',{
+      name:'Подтверждение публичной заявки клиентом (DEV)',
+    });
+    await refreshed.getByRole('textbox',{name:'ID заявки'}).fill(reqId);
+    await refreshed.getByRole('textbox',{name:'Секретный ключ квитанции'}).fill(link);
+    await refreshed.getByRole('button',{name:'Обновить состояние заявки'}).click();
+    await expect(refreshed.getByRole('alert')).toContainText('Доступ запрещён');
+    await expect(refreshed.getByText('BAY-2',{exact:false})).toHaveCount(0);
+  });
