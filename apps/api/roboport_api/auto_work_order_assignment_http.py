@@ -54,6 +54,16 @@ def queue(org_id:str,loc_id:str,request:Request):
     scoped=_scope(request,org_id,loc_id)
     if isinstance(scoped,JSONResponse): return scoped
     dsn,(org,loc)=scoped
+    # Отдельная страница позволяет очистить любое число старых OFFERED,
+    # не блокируя работу филиала ограничением суммарного списка.
+    params=request.query_params.getlist("withdrawPage")
+    if len(params)>1 or (params and (
+        not params[0].isascii() or not params[0].isdecimal() or
+        len(params[0])>4 or str(int(params[0]))!=params[0] or
+        not 0<=int(params[0])<=1000
+    )):
+        return _response(request,422,"INVALID_INPUT")
+    withdraw_page=int(params[0]) if params else 0
     with psycopg.connect(dsn) as db:
         try:
             # The same live tenant/branch role is rechecked on every GET.
@@ -63,11 +73,16 @@ def queue(org_id:str,loc_id:str,request:Request):
                 items=list_assignments(db,token,org,loc)
                 can_offer=organization_role_allows(
                     db,token,org,"MANAGER",loc,for_mutation=True)
-                withdrawable=list_withdrawable_offers(
-                    db,token,org,loc) if can_offer else []
+                withdrawal=list_withdrawable_offers(
+                    db,token,org,loc,page=withdraw_page) if can_offer else {
+                        "items":[],"page":withdraw_page,"hasMore":False,
+                    }
         except (AssignmentDenied,AssignmentConflict) as exc:
             return _error(request,exc)
-    return JSONResponse(content={"items":items,"withdrawable":withdrawable,
+    return JSONResponse(content={"items":items,
+                                 "withdrawable":withdrawal["items"],
+                                 "withdrawPage":withdrawal["page"],
+                                 "withdrawHasMore":withdrawal["hasMore"],
                                  "syntheticOnly":True,
                                  "organizationId":str(org),"locationId":str(loc),
                                  "canOffer":bool(can_offer),"releaseAllowed":False},
