@@ -12,6 +12,21 @@
 | Контракт | `contracts/openapi.yaml` и `contracts/operation_ids.json` — исторический draft | Отдельно архивировать; заменить публичным автомобильным контрактом после review |
 | SQL / файлы | Legacy таблицы, ACL, вложения и миграции сохранены | Инвентаризация всех FK/object keys, backup, restore, сверка, согласованное удаление |
 
+## Read-only dependency inventory перед decommission (#165, current-dev)
+
+После миграций на **одноразовом синтетическом PostgreSQL 17** можно получить JSON со списком объектов схемы `public`: таблицы/представления/последовательности, внешние ключи между таблицами и пользовательские триггеры. Инструмент не читает строки таблиц, владельцев клиентов, VIN, object keys или содержимое вложений:
+
+```bash
+ROBOport_SYNTHETIC_AUTO_API=1 ROBOport_DATABASE_URL='postgresql+psycopg://roboport:roboport@127.0.0.1:5432/roboport' \
+  python scripts/inspect_legacy_db_surface.py > /tmp/legacy-db-schema.json
+PYTHONPATH=apps/api python -m pytest -q tests/bootstrap/test_legacy_db_surface_policy.py
+PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_legacy_db_surface.py
+```
+
+Утилита требует явный loopback PostgreSQL, включённый synthetic flag и выполняет чтение внутри транзакции `REPEATABLE READ READ ONLY`. Она не следует удалённым PostgreSQL hosts/service/hostaddr и при ошибке возвращает `BLOCKED` без печати DSN. В JSON `legacy-or-unclassified` **не значит «можно удалить»**: это консервативный список для ручного анализа; `shared-review` отмечает только явно перечисленные инфраструктурные сущности, а `auto_*` — автомобильные объекты. `crossBoundary` выделяет FK через эти группы. Внутренние системные триггеры/FK-реализация не перечисляются; пользовательские триггеры показываются по имени. Это снимок **только** схемы `public`, без внешних схем, функций без привязки к триггерам, row counts, ACL, данных, MinIO и runtime API; для полного cutover необходимы отдельные инвентаризация файлов/владельцев, доказанное сопоставление истории, восстановление, RPO/RTO и approvals.
+
+Отчёт всегда содержит `releaseAllowed: false`, `dropAllowed: false`. Он никогда не является командой DROP, доказательством полного переноса или разрешением production. Перед финальной миграцией требуется независимая классификация каждой строки, точный backup/restore и legal/security/ops gate #119.
+
 ## Гейты для полного закрытия
 
 1. **HTTP:** у всех robot URL всегда 404, даже с тестовыми переключателями и поддельными заголовками; нет robot пути в runtime OpenAPI; автомобильные CRUD/ACL и вход работают.
