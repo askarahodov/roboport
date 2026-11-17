@@ -17,7 +17,8 @@ from test_pg_auto_work_order_estimate_http import scenario,api,token,path as est
 from test_pg_baseline import DSN
 
 
-def seed_many_versions(db,org,loc,actor,subject,count=520):
+def seed_many_versions(db,org,loc,actor,subject,count=520,
+                       document="ESTIMATE",capability="READ"):
     """Строгий синтетический порядок без зависящих от clock_timestamp() ties."""
     with db.transaction():
         db.execute("SELECT set_config('roboport.policy_actor',%s,true)",
@@ -27,10 +28,10 @@ def seed_many_versions(db,org,loc,actor,subject,count=520):
             id,request_key,organization_id,location_id,role_code,user_id,
             document_kind,capability,allowed,not_before,actor_id,created_at)
           SELECT gen_random_uuid(),gen_random_uuid(),%s,%s,'MANAGER',%s,
-                 'ESTIMATE','READ',(n % 2 = 0),NULL,%s,
+                 %s,%s,(n % 2 = 0),NULL,%s,
                  '2020-01-01T00:00:00+00'::timestamptz + n*interval '1 second'
           FROM generate_series(1,%s) AS n
-        """,(org,loc,subject,actor,count))
+        """,(org,loc,subject,document,capability,actor,count))
         db.execute("SELECT set_config('roboport.policy_actor','',true)")
 
 
@@ -195,3 +196,38 @@ def test_policy_reader_lock_serializes_admin_over_500_history(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT count(*) FROM auto_document_access_policy
           WHERE organization_id=%s""",(org,)).fetchone()[0]==510
+
+
+def test_finance_prices_are_enforced_after_520_policy_versions(monkeypatch):
+    from test_pg_auto_treasury_http import prepare as treasury_prepare
+
+    d,org,loc,order,service,http,base,_=treasury_prepare(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        seed_many_versions(db,org,loc,d["other"],d["intake"],
+                           count=520,document="FINANCE",capability="PRICE_SALES")
+    manager=token(http,d,d["intake"])
+    assert http.get(base+"/accounts").status_code==200
+    owner=token(http,d,d["other"])
+    preview=http.get(url(org)+"/effective",params={
+        "locationId":str(loc),"userId":str(d["intake"]),
+        "documentKind":"FINANCE"})
+    assert preview.status_code==200,preview.text
+    assert preview.json()["capabilities"]["PRICE_SALES"]["allowed"] is True
+
+    denied=set_rule(http,url(org),owner,loc=loc,user=d["intake"],
+                    role="MANAGER",document="FINANCE",
+                    cap="PRICE_SALES",allowed=False)
+    assert denied.status_code==201,denied.text
+    manager=token(http,d,d["intake"])
+    assert http.get(base+"/accounts").status_code==403
+    owner=token(http,d,d["other"])
+    assert set_rule(http,url(org),owner,loc=loc,user=d["intake"],
+                    role="MANAGER",document="FINANCE",
+                    cap="PRICE_SALES",allowed=True).status_code==201
+    manager=token(http,d,d["intake"])
+    assert http.get(base+"/accounts").status_code==200
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT count(*) FROM auto_document_access_policy
+          WHERE organization_id=%s AND document_kind='FINANCE'""",
+          (org,)).fetchone()[0]==522
