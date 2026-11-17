@@ -236,8 +236,10 @@ jobs:
           done
   browser-e2e:
     runs-on: ubuntu-latest
-    # The hosted runner provides OpenSSL compatible with setup-python 3.13.
-    # Playwright installs its Chromium + OS dependencies for the pinned npm version.
+    # Official Noble image pins Chromium and OS libs. Python 3.12 uses
+    # OpenSSL 3.0 available in Noble; toolcache Python 3.13.18 now needs 3.3.
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -247,16 +249,13 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
       - name: Verify Python TLS before installing dependencies
         run: python -c "import ssl; print(ssl.OPENSSL_VERSION)"
       - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
       - run: python scripts/check_python_pins.py
       - working-directory: apps/web
         run: npm ci --no-audit --no-fund
-      - name: Install pinned Playwright Chromium and OS dependencies
-        working-directory: apps/web
-        run: npx playwright install --with-deps chromium
       # Проверка реального запуска защищает от расхождения версий/библиотек.
       - name: Verify pinned Chromium and operating system dependencies
         working-directory: apps/web
