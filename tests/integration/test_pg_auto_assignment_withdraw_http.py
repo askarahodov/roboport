@@ -59,7 +59,18 @@ def test_manager_withdraw_reassign_immutable_audit_bola_and_idempotency(monkeypa
     queue=http.get(root+"/assignments")
     assert queue.status_code==200,queue.text
     assert len(queue.json()["withdrawable"])==1
+    assert queue.json()["withdrawPage"]==0
+    assert queue.json()["withdrawHasMore"] is False
     assert queue.json()["withdrawable"][0]["assignmentId"]==first_id
+    next_page=http.get(root+"/assignments",params={"withdrawPage":"1"})
+    assert next_page.status_code==200
+    assert next_page.json()["withdrawable"]==[]
+    assert next_page.json()["withdrawPage"]==1
+    for invalid in ("-1","01","1001","abc"):
+        wrong=http.get(root+"/assignments",params={"withdrawPage":invalid})
+        assert wrong.status_code==422 and wrong.json()["code"]=="INVALID_INPUT"
+    duplicate=http.get(root+"/assignments?withdrawPage=0&withdrawPage=1")
+    assert duplicate.status_code==422
     assert len(queue.json()["items"])==1
     endpoint=root+f"/assignments/{first_id}/withdraw"
     assert http.post(endpoint,json={"requestKey":str(uuid4())}).status_code==403
