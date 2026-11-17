@@ -196,6 +196,33 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
       setMessage('Результат неизвестен. Повторите тот же запрос с исходным ключом.');
     }finally{setBusy(false);}
   }
+  async function downloadEvidence(item:Act){
+    if(!ready||busy||!uuid.test(item.id))return;
+    setBusy(true);setMessage('');
+    try{
+      const response=await fetch(path+'/'+encodeURIComponent(item.id)+'/evidence.zip',
+        {credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(response.status)){
+        setData(null);setStatus('denied');setPending(null);return;
+      }
+      if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/zip')
+        throw Error('archive unavailable');
+      const archive=await response.blob();
+      if(archive.size===0||archive.size>1024*1024)
+        throw Error('archive size');
+      const url=URL.createObjectURL(archive);
+      try{
+        const link=document.createElement('a');
+        link.href=url;
+        link.download='intake-act-'+item.id+'.zip';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }finally{URL.revokeObjectURL(url);}
+    }catch{
+      setMessage('Не удалось выгрузить архив. Повторите загрузку журнала.');
+    }finally{setBusy(false);}
+  }
   const canWrite=role==='staff'&&ready&&data!==null&&!busy&&!pending&&
     data.inspection!==null&&!data.locked&&data.latestVersion<20&&
     (!damages.length||photos.length>0);
@@ -334,6 +361,12 @@ export function AutoIntakeAct({role}:{role:'staff'|'client'}){
             <ul>{item.inventory.map(i=><li key={i.itemCode}>
               {inventoryLabels[i.itemCode]}: {inventoryStateLabels[i.condition]}
             </li>)}</ul>
+            <button type="button" disabled={busy}
+              onClick={()=>void downloadEvidence(item)}>
+              Скачать проверяемый архив версии №{item.version} (ZIP)
+            </button>
+            <p>Архив содержит JSON-манифест и исходные очищенные PNG.
+              Это не электронная подпись и не разрешение на выдачу.</p>
             <h4>Фотографии ({item.photos.length})</h4>
             <div style={{display:'flex',flexWrap:'wrap',gap:12}}>
             {item.photos.map(p=><figure key={p.index} style={{margin:0,maxWidth:240}}>
