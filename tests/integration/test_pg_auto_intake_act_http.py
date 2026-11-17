@@ -28,7 +28,7 @@ def _chunk(kind, data):
             struct.pack(">I",binascii.crc32(kind+data)&0xffffffff))
 
 
-def synthetic_png(with_srgb=True,with_exif=False,width=2,height=2):
+def synthetic_png(with_srgb=True,with_exif=False,width=2,height=2,compression_level=6):
     header=struct.pack(">IIBBBBB",width,height,8,2,0,0,0)
     rows=b"".join(b"\x00"+bytes([41,82,122]) * width for _ in range(height))
     parts=[_chunk(b"IHDR",header)]
@@ -36,7 +36,7 @@ def synthetic_png(with_srgb=True,with_exif=False,width=2,height=2):
         parts.append(_chunk(b"sRGB",b"\x00"))
     if with_exif:
         parts.append(_chunk(b"eXIf",b"secret EXIF GPS"))
-    parts.extend([_chunk(b"IDAT",zlib.compress(rows)),
+    parts.extend([_chunk(b"IDAT",zlib.compress(rows,compression_level)),
                   _chunk(b"IEND",b"")])
     return PNG_SIGNATURE+b"".join(parts)
 
@@ -123,6 +123,12 @@ def test_private_intake_photos_versions_client_scope_replay_and_qc_lock(monkeypa
     repeated=custody(raw)
     repeated["photos"].append({"areaCode":"REAR",
                                "imageBase64":base64.b64encode(raw).decode()})
+    assert publish(http,staff,path,repeated,version=1).status_code==422
+    # Одни и те же распакованные PNG-строки нельзя выдать за разные
+    # фото, даже если encoder использовал другой уровень сжатия.
+    recompressed=synthetic_png(compression_level=1)
+    assert recompressed!=raw
+    repeated["photos"][1]["imageBase64"]=base64.b64encode(recompressed).decode()
     assert publish(http,staff,path,repeated,version=1).status_code==422
     with psycopg.connect(DSN) as db:
         with pytest.raises(psycopg.errors.RaiseException):
@@ -260,6 +266,22 @@ def test_intake_act_concurrent_revisions_and_same_owner_previous_visit(monkeypat
     _,new_inspection,_=target(org,loc,new_owner_order)
     assert http.post(new_inspection,headers=staff,json=inspection()).status_code==201
     assert http.get(url(org,loc,new_owner_order)).json()["previousVisit"] is None
+
+
+def test_intake_rejects_same_png_scanlines_with_different_compression():
+    from roboport_api.auto_intake_act import _validate
+
+    original=synthetic_png(compression_level=6)
+    alternate=synthetic_png(compression_level=1)
+    assert original!=alternate
+    assert sanitize_png(original)[0]!=sanitize_png(alternate)[0]
+    act=custody(original)
+    act["photos"].append({
+        "areaCode":"REAR",
+        "imageBase64":base64.b64encode(alternate).decode("ascii"),
+    })
+    with pytest.raises(IntakeActInvalid,match="DUPLICATE_PHOTO"):
+        _validate(act)
 
 
 def test_png_sanitizer_rejects_exif_text_crc_bombs_and_unknown_chunks():

@@ -435,3 +435,22 @@ rollback — revert UI/API guard (только disposable test; откат
 (390/1280 Light/Dark, keyboard, 403/невалидный ответ, точный replay
 после потери ответа). Скриншоты синтетические, только visual candidates #92.
 
+
+
+## Уникальность фотодоказательств акта приёмки (current-dev, #439)
+
+В одном неизменяемом акте нельзя приложить один PNG повторно как разные
+зоны даже при изменении уровня zlib-сжатия: сервер сравнивает отпечаток
+ограниченных распакованных scanlines вместе с IHDR, а не только SHA-256
+сохранённых PNG-байтов. Ответ — `422 DUPLICATE_PHOTO`; запись в PostgreSQL
+не создаётся. SHA-256 сохраняемых очищенных байтов и `requestKey` не
+меняются: корректные точные повторы ранее созданных версий совместимы.
+Проверка не является распознаванием содержания фотографии и не доказывает,
+что два визуально похожих изображения сделаны в разных местах: иные
+PNG-фильтры или пиксельные изменения могут иметь разные отпечатки.
+
+**Проверка:** `test_intake_rejects_same_png_scanlines_with_different_compression`
+и `test_private_intake_photos_versions_client_scope_replay_and_qc_lock`
+в `tests/integration/test_pg_auto_intake_act_http.py` (negative HTTP +
+версия не меняется). Изменений API/DDL нет, rollback — revert PR;
+production и реальная юридическая подпись остаются blocked по #119.
