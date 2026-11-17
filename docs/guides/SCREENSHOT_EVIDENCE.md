@@ -275,3 +275,22 @@ keyboard Enter, отсутствие overflow, очистку после 403,
 вместо персональных данных. Только candidate evidence —
 не утверждённый golden baseline, независимая QA #76
 или WCAG AA sign-off #92.
+
+
+## Кандидаты экрана освобождения принятой работы (#513)
+
+Новые снимки Playwright
+`apps/web/e2e/auto-assignments.spec.ts`:
+`accepted-release-390-light.png` — исходное
+`ACCEPTED` без исполнения с явным предупреждением
+и менеджерской кнопкой, `accepted-release-1280-dark.png`
+— состояние после `RELEASED` и безопасного точного
+replay, `accepted-release-390-page3.png` — третья
+страница из 101 принятых, ещё не начатых назначений.
+Проверяются keyboard Enter, отзыв 403 с очисткой данных,
+отсутствие горизонтального overflow и невидимость служебного
+блока для MECHANIC. PostgreSQL/HTTPS независимо проверяет
+реальные переходы, исходный timestamp и запреты после
+начатого исполнения. Только синтетические UUID, без
+ФИО/телефонов/VIN/денег. Снимки — **candidate evidence**,
+не golden baseline и не независимый WCAG/legal sign-off #92/#76/#119.
