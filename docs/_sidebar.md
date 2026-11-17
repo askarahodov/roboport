@@ -3,6 +3,7 @@
   - [Карта всей документации](/INDEX.md)
   - [Быстрый старт сотрудников и клиентов](/guides/QUICK_START.md)
   - [Навигатор: задача → роль → экран → тест](/guides/ROLE_NAVIGATOR.md)
+  - [Сквозной маршрут одного заказа по шести ролям](/guides/END_TO_END_WORKSHOP.md)
   - [Матрица ролей и тестов](/guides/ACCESS_AND_TEST_MATRIX.md)
   - [Частые вопросы и безопасные ошибки](/guides/FAQ.md)
   - [Скриншоты и ручная приёмка](/guides/SCREENSHOT_EVIDENCE.md)
