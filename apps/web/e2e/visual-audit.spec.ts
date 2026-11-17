@@ -265,7 +265,7 @@ test('accessibility evidence rejects unnamed button, select and textarea separat
       {name:'unnamed-textarea',control:'<textarea>Начальный текст</textarea>'},
     ] as const;
     await page.route('**/__visual-unnamed-*',route=>{
-      const key=new URL(route.request().url()).pathname.split('/').at(-1);
+      const key=new URL(route.request().url()).pathname.replace('/__visual-','');
       const item=variants.find(v=>v.name===key);
       if(!item)throw Error('unexpected synthetic test route');
       return route.fulfill({
