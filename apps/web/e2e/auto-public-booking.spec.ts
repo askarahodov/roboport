@@ -261,7 +261,7 @@ test('public receipt and staff queue display current moved/canceled slot, never 
     await client.getByRole('button',{name:'Обновить состояние заявки'}).click();
     await expect(client.getByText('Заявка: RESCHEDULED.',{exact:false})).toBeVisible();
     await expect(client.getByText('BAY-2',{exact:false})).toBeVisible();
-    await expect(client.getByText('Исходное время заявки устарело.',{exact:false}))
+    await expect(client.getByText('исходное время заявки устарело.',{exact:false}))
       .toBeVisible();
     await expect(client.getByRole('link',{name:'Мои записи'})).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth))
