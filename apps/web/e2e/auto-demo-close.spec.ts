@@ -179,3 +179,98 @@ test('additional CLIENT consent increases synthetic balance and never authorizes
   }
   expect(events).toEqual([13751]);
 });
+
+
+test('390/1280: ZIP закрытого документа доступен MANAGER/CLIENT и скрывается после 403',
+  async({page},testInfo)=>{
+    const previewId='66666666-6666-4666-8666-666666666666';
+    const intakeId='88888888-8888-4888-8888-888888888888';
+    let state:'CLIENT_ACKNOWLEDGED'|'CLOSED_TECHNICAL'='CLIENT_ACKNOWLEDGED';
+    let revoke=false;
+    let downloads=0;
+    const dossierName='auto-technical-dossier-'+order+'.zip';
+    await page.route(root,route=>{
+      const request=route.request(),path=new URL(request.url()).pathname;
+      if(path.endsWith('/technical-dossier.zip')){
+        expect(request.method()).toBe('GET');
+        downloads++;
+        return route.fulfill(revoke?{
+          status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}',
+        }:{
+          status:200,contentType:'application/zip',
+          headers:{
+            'Content-Disposition':'attachment; filename="'+dossierName+'"',
+            'Cache-Control':'no-store, private',
+          },
+          body:Buffer.from([0x50,0x4b,0x03,0x04,0,0,0,0]),
+        });
+      }
+      const flow={
+        syntheticOnly:true,releaseAllowed:false,
+        legalSignatureStatus:'NOT_IMPLEMENTED',status:state,
+        canReview:false,canClose:state==='CLIENT_ACKNOWLEDGED',
+        intakeAct:{id:intakeId,version:1,digest:'a'.repeat(64),
+          clientDecision:'ACKNOWLEDGED'},
+        events:[
+          {id:'00000000-0000-4000-8000-000000000001',action:'POSTED',
+            actorId:org,previewId,previewDigest:'b'.repeat(64),
+            intakeActId:intakeId,intakeDigest:'a'.repeat(64),createdAt:'2030-01-01T10:00:00Z'},
+        ],
+      };
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,releaseAllowed:false,legalGatePassed:false,
+        currency:'RUB',approvedVersion:1,approvedBaseMinor:2500,
+        approvedExtraMinor:0,approvedExtraVersion:null,approvedExtraRevisionId:null,
+        approvedTotalMinor:2500,simulatedPaidMinor:2500,simulatedRefundedMinor:0,
+        simulatedDueMinor:0,events:[],outstandingReserves:[],
+        unreceivedMaterialCount:0,executionStatus:'QC_ACCEPTED',blockers:[],
+        canSealPreview:false,
+        preview:{id:previewId,revisionId:sku,digest:'b'.repeat(64),
+          createdAt:'2030-01-01T10:00:00Z',
+          snapshot:{kind:'SYNTHETIC_PRE_HANDOVER_PREVIEW',releaseAllowed:false}},
+        documentWorkflow:flow,
+      })});
+    });
+    await page.setViewportSize({width:390,height:844});
+    await page.goto('/staff/auto-demo-close');
+    await fillScope(page);
+    const button=page.getByRole('button',{
+      name:'Скачать технический архив заказ-наряда (ZIP)',
+    });
+    await expect(page.getByText('Статус документа: CLIENT_ACKNOWLEDGED.',{
+      exact:false,
+    })).toBeVisible();
+    await expect(button).toHaveCount(0);
+    state='CLOSED_TECHNICAL';
+    await page.getByRole('button',{name:'Обновить сверку'}).click();
+    await expect(button).toBeVisible();
+    await page.screenshot({path:testInfo.outputPath('dossier-390-staff.png'),
+      fullPage:true,animations:'disabled'});
+    const first=page.waitForEvent('download');
+    await button.click();
+    expect((await first).suggestedFilename()).toBe(dossierName);
+    expect(downloads).toBe(1);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(390);
+
+    await page.setViewportSize({width:1280,height:860});
+    await page.goto('/account/auto-demo-close');
+    await fillScope(page);
+    await expect(button).toBeVisible();
+    const second=page.waitForEvent('download');
+    await button.click();
+    expect((await second).suggestedFilename()).toBe(dossierName);
+    expect(downloads).toBe(2);
+    await page.screenshot({path:testInfo.outputPath('dossier-1280-client.png'),
+      fullPage:true,animations:'disabled'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(1280);
+
+    // Отзыв доступа очищает не только кнопку, но и старое содержимое пакета.
+    revoke=true;
+    await button.click();
+    await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+    await expect(button).toHaveCount(0);
+    await expect(page.getByText('Технический пакет зафиксирован')).toHaveCount(0);
+    expect(downloads).toBe(3);
+  });
