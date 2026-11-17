@@ -27,6 +27,22 @@ PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_legacy_db_surf
 
 Отчёт всегда содержит `releaseAllowed: false`, `dropAllowed: false`. Он никогда не является командой DROP, доказательством полного переноса или разрешением production. Перед финальной миграцией требуется независимая классификация каждой строки, точный backup/restore и legal/security/ops gate #119.
 
+## PostgreSQL 17 legacy-вложения: полный metadata restore-check (#165, current-dev)
+
+В `.github/workflows/ci.yml` встроен отдельный тест реального `pg_dump -Fc` → `pg_restore` **того же самого** синтетического стенда: перед dump создаются `customer` → `service_ticket` → две записи `attachment` (`READY/CLEAR` и `FAILED/QUARANTINED`) и одна `attachment_upload_dedupe`. Внешний JSON manifest с UUID и SHA-256 полного графа остаётся вне dump. После restore на обеих базах отдельно сверяются идентичность исходного клиента/заявки/автора, ключ и SHA metadata, размеры, MIME, upload/quarantine состояния, даты и idempotency replay lineage. Пустые/неполные графы или несовпадающий SHA дают `BLOCKED`; попытки перепривязать вложение к чужой заявке и снять карантин отвергаются PostgreSQL-триггером в интеграционном тесте.
+
+```bash
+PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_legacy_attachment_restore_probe.py
+PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_legacy_attachment_restore_probe.py
+# Только в одноразовом CI PG17, с точным ROBOport_DATABASE_URL и PG env без переопределений:
+PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_legacy_attachment_restore_probe seed --manifest /tmp/roboport-legacy-attachment-restore.json
+# Между seed и verify выполнить pg_dump / pg_restore (см. .github/workflows/ci.yml).
+PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_legacy_attachment_restore_probe verify-source --manifest /tmp/roboport-legacy-attachment-restore.json
+PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_legacy_attachment_restore_probe verify-clone --manifest /tmp/roboport-legacy-attachment-restore.json
+```
+
+**Граница доказательства:** у записей `attachment` только синтетические метаданные, их ключи **не соответствуют загруженным объектам MinIO**. Проверка **не** доказывает существование файла, совпадение его реальных байтов и SHA, восстановление/карантин MinIO, сроки хранения и право на реальную историю. Не объявлять этот CI-тест «полным backup вложений». Для закрытия #165 нужен отдельно санкционированный private-object inventory, byte/hash reconciliation и восстановление object storage, плюс независимые approvals #119. Утилита не исполняет `DROP`/`DELETE` и не предоставляет клиентский API.
+
 ## Гейты для полного закрытия
 
 1. **HTTP:** у всех robot URL всегда 404, даже с тестовыми переключателями и поддельными заголовками; нет robot пути в runtime OpenAPI; автомобильные CRUD/ACL и вход работают.
