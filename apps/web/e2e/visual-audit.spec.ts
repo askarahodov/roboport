@@ -84,6 +84,35 @@ async function collectVisualEvidence(
             check='access-alert';
             if(screen.staffDenied)
               await expect(page.getByRole('alert').first()).toBeVisible({timeout:3000});
+            check='controls';
+            // Native and ARIA controls require a visible label or an explicit
+            // accessible name. Placeholder alone is not a label. The report
+            // records only a failure category, never form content or PII.
+            const unnamed=await page.evaluate(()=>{
+              const controls=Array.from(document.querySelectorAll<HTMLElement>(
+                'main button,main a[href],main input:not([type=hidden]),'+
+                'main select,main textarea,main [role=button],main [role=link]'));
+              return controls.filter(el=>{
+                if(!el.getClientRects().length)return false;
+                const st=getComputedStyle(el);
+                if(st.visibility==='hidden'||st.display==='none')return false;
+                if(el.getAttribute('aria-label')?.trim()||
+                   el.getAttribute('aria-labelledby')?.trim()||
+                   el.getAttribute('title')?.trim())return false;
+                if(el.closest('label')?.textContent?.trim())return false;
+                if(el instanceof HTMLInputElement && el.labels?.length &&
+                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
+                if(el instanceof HTMLSelectElement && el.labels?.length &&
+                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
+                if(el instanceof HTMLTextAreaElement && el.labels?.length &&
+                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
+                if(el.textContent?.trim())return false;
+                // SVG-only icon actions need their own accessible name,
+                // otherwise keyboard/screen-reader users get an empty control.
+                return true;
+              }).length;
+            });
+            if(unnamed>0)failureKinds.push('A11Y_UNNAMED_CONTROLS');
             check='overflow';
             await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth),
               {message:'root overflow at '+screen.name+'/'+width,timeout:3000})
@@ -154,6 +183,23 @@ for(const size of sizes){
     });
   }
 }
+
+test('synthetic UI gallery: keyboard focus indicator is visible',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/dev/ui-gallery');
+  const open=page.getByRole('button',{name:'Открыть диалог'});
+  // Starting from an actual keyboard event triggers :focus-visible semantics.
+  await page.keyboard.press('Tab');
+  await open.focus();
+  const indicator=await open.evaluate(el=>{
+    const css=getComputedStyle(el);
+    return {width:parseFloat(css.outlineWidth),style:css.outlineStyle,
+      offset:parseFloat(css.outlineOffset)};
+  });
+  expect(indicator.style).not.toBe('none');
+  expect(indicator.width).toBeGreaterThanOrEqual(2);
+  expect(indicator.offset).toBeGreaterThanOrEqual(0);
+});
 
 test('synthetic UI gallery: keyboard, dialog, disabled and textual status',async({page})=>{
   await page.setViewportSize({width:390,height:844});
