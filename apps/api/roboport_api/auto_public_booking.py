@@ -378,11 +378,11 @@ def _request(conn,ident,receipt,*,lock=False):
 
 
 def _current_public_booking(conn,request_id,appointment_id):
-    """Read the actual latest booking for an immutable public request.
+    """Читает фактическое последнее бронирование для неизменяемой заявки.
 
-    A fulfillment is historical, not proof that its original bay/time
-    is still reserved. Do not guess BOOKED when the booking lineage is
-    missing or mismatches the original tenant and location.
+    Исторический fulfillment не означает, что исходный пост/интервал
+    ещё занят. При разрыве связи с исходным филиалом или документом
+    нельзя возвращать ложный статус BOOKED.
     """
     row=conn.execute("""
       SELECT a.booking_id,latest.booking_id,b.starts_at,b.ends_at,b.canceled_at,
@@ -414,8 +414,8 @@ def _current_public_booking(conn,request_id,appointment_id):
     if row is None:
         raise PublicBookingConflict("BOOKING_INTEGRITY")
     original,latest,start,end,canceled,bay_code,zone=row
-    # CANCELED has priority over a past reschedule. The original
-    # request and fulfillment remain immutable and audit-accessible.
+    # Отмена имеет приоритет над предыдущим переносом. Исходная заявка
+    # и fulfillment остаются неизменяемыми для технического аудита.
     return {
       "status":"CANCELED" if canceled is not None else
                "RESCHEDULED" if latest!=original else "BOOKED",
@@ -614,8 +614,8 @@ def fulfill_request(conn,token,org,loc,ident,key):
         if prior:
             if prior[2:]!=(actor,key):
                 raise PublicBookingConflict("ALREADY_FULFILLED")
-            # Replaying a historical booking receipt must never imply that
-            # its original slot is still active after a move or cancellation.
+            # Повтор исторического ключа не означает, что исходное время
+            # ещё зарезервировано после переноса или отмены.
             if _current_public_booking(conn,ident,prior[0])["status"]!="BOOKED":
                 raise PublicBookingConflict("BOOKING_SUPERSEDED")
             return {"replayed":True,"syntheticOnly":True,
