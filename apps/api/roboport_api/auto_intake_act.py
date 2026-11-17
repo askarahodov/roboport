@@ -8,6 +8,8 @@ import base64
 import binascii
 import hashlib
 import json
+import io
+from zipfile import ZipFile,ZIP_STORED,ZipInfo
 import struct
 import zlib
 from uuid import UUID,uuid4
@@ -401,6 +403,71 @@ def read_act_photo(conn,token,org,loc,order,act_id,index):
         if hashlib.sha256(payload).hexdigest()!=meta["sha256"]:
             raise IntakeActConflict("PHOTO_INTEGRITY")
         return payload
+
+
+
+
+def export_intake_act_evidence(conn,token,org,loc,order,act_id):
+    """Build a bounded, integrity-checked, private archive of ONE immutable act.
+
+    This is an unsigned synthetic evidence snapshot, not a legal signature.
+    The order ACL and the full archive are evaluated in one DB transaction.
+    """
+    if any(type(x) is not UUID for x in (org,loc,order,act_id)):
+        raise IntakeActInvalid("INVALID_INPUT")
+    with conn.transaction():
+        _authorize(conn,token,org,loc,order,allow_client=True)
+        snapshot=_read(conn,order,org,loc)
+        act=next((item for item in snapshot["items"] if item["id"]==str(act_id)),None)
+        if act is None:
+            raise IntakeActDenied("FORBIDDEN")
+        row=conn.execute("""
+           SELECT photo_bytes,photo_meta FROM auto_work_order_intake_act
+           WHERE id=%s AND work_order_id=%s
+        """,(act_id,order)).fetchone()
+        if row is None:
+            raise IntakeActDenied("FORBIDDEN")
+        blobs,metadata=row
+        if (type(blobs) not in (list,tuple) or type(metadata) is not list or
+                len(blobs)!=len(act["photos"]) or len(metadata)!=len(blobs) or
+                len(blobs)>3):
+            raise IntakeActConflict("PHOTO_INTEGRITY")
+        output=io.BytesIO()
+        manifest={
+            "schemaVersion":1,
+            "syntheticOnly":True,
+            "releaseAllowed":False,
+            "legalSignatureStatus":"NOT_IMPLEMENTED",
+            "organizationId":str(org),
+            "locationId":str(loc),
+            "orderId":str(order),
+            "inspection":snapshot["inspection"],
+            "act":act,
+            "files":[],
+        }
+        for index,(payload,meta,public_meta) in enumerate(
+                zip(blobs,metadata,act["photos"],strict=True),1):
+            if (type(meta) is not dict or not isinstance(payload,(bytes,bytearray,memoryview)) or
+                    len(payload)>MAX_PNG_BYTES or
+                    hashlib.sha256(payload).hexdigest()!=meta.get("sha256") or
+                    meta.get("sha256")!=public_meta["sha256"]):
+                raise IntakeActConflict("PHOTO_INTEGRITY")
+            manifest["files"].append({
+                "path":f"photos/{index}.png","sha256":public_meta["sha256"],
+                "areaCode":public_meta["areaCode"],
+                "width":public_meta["width"],"height":public_meta["height"],
+            })
+        with ZipFile(output,"w",compression=ZIP_STORED,allowZip64=False) as archive:
+            entries=[("manifest.json",json.dumps(manifest,ensure_ascii=False,
+                sort_keys=True,separators=(",",":")).encode("utf-8"))]
+            entries.extend((entry["path"],bytes(payload))
+                for entry,payload in zip(manifest["files"],blobs,strict=True))
+            for filename,payload in entries:
+                info=ZipInfo(filename,date_time=(1980,1,1,0,0,0))
+                info.compress_type=ZIP_STORED
+                info.external_attr=0o600<<16
+                archive.writestr(info,payload)
+        return output.getvalue()
 
 
 def review_intake_act(conn,token,org,loc,order,act_id,*,request_key,
