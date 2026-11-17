@@ -251,3 +251,28 @@ test('visual evidence continues after a deliberately broken screen',async({page}
   expect(manifest.scenarios).toEqual(report);
   expect(JSON.stringify(manifest)).not.toMatch(/password|token|cookie/i);
 });
+
+test('accessibility evidence rejects unnamed action but still saves screenshot',async({page},testInfo)=>{
+  test.setTimeout(45_000);
+  await page.setViewportSize({width:390,height:844});
+  await page.route('**/__visual-unnamed-control',route=>route.fulfill({
+    status:200,contentType:'text/html',
+    body:'<!doctype html><html lang="ru"><body>'+
+      '<label>Тема оформления <select aria-label="Тема оформления">'+
+      '<option value="light">light</option><option value="dark">dark</option>'+
+      '<option value="auto">auto</option></select></label>'+
+      '<main><h1>Тестовое состояние</h1><button type="button"></button></main>'+
+      '</body></html>',
+  }));
+  const screen:Screen={name:'unnamed-action',path:'/__visual-unnamed-control',
+    access:'anonymous'};
+  const {report,failures}=await collectVisualEvidence(
+    page,testInfo,[screen],'mobile',390,'light',()=>{});
+  expect(report).toHaveLength(1);
+  expect(report[0]).toMatchObject({
+    checks:'FAIL',captured:true,failureKinds:['A11Y_UNNAMED_CONTROLS'],
+  });
+  expect(failures).toEqual(['unnamed-action: A11Y_UNNAMED_CONTROLS']);
+  expect((await stat(testInfo.outputPath('visual',report[0].png))).size)
+    .toBeGreaterThan(0);
+});
