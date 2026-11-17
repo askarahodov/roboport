@@ -614,6 +614,10 @@ def fulfill_request(conn,token,org,loc,ident,key):
         if prior:
             if prior[2:]!=(actor,key):
                 raise PublicBookingConflict("ALREADY_FULFILLED")
+            # Replaying a historical booking receipt must never imply that
+            # its original slot is still active after a move or cancellation.
+            if _current_public_booking(conn,ident,prior[0])["status"]!="BOOKED":
+                raise PublicBookingConflict("BOOKING_SUPERSEDED")
             return {"replayed":True,"syntheticOnly":True,
                     "appointmentId":str(prior[0]),"workOrderId":str(prior[1]),
                     "releaseAllowed":False}
