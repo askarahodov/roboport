@@ -127,7 +127,48 @@ def sanitize_png(data: bytes) -> tuple[bytes,int,int]:
     return clean,width,height
 
 
-def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[bytes]]:
+
+def _pixel_fingerprint(clean: bytes, width: int, height: int) -> bytes:
+    """Hash decoded RGB(A) pixels, ignoring PNG filter and zlib encoding.
+
+    Only call after sanitize_png verified bounds, CRC, IDAT and filter types.
+    The PNG scanline filters are reversed with byte arithmetic as specified
+    by PNG; source bytes remain unchanged for storage/integrity SHA256.
+    """
+    bpp=4 if clean[25]==6 else 3
+    stride=width*bpp
+    scanlines=zlib.decompress(clean[41:-16])
+    digest=hashlib.sha256(clean[16:29])
+    previous=bytearray(stride)
+    offset=0
+    for _ in range(height):
+        filtering=scanlines[offset]
+        current=bytearray(scanlines[offset+1:offset+1+stride])
+        offset+=stride+1
+        for i in range(stride):
+            left=current[i-bpp] if i>=bpp else 0
+            above=previous[i]
+            upper_left=previous[i-bpp] if i>=bpp else 0
+            if filtering==1:
+                predictor=left
+            elif filtering==2:
+                predictor=above
+            elif filtering==3:
+                predictor=(left+above)//2
+            elif filtering==4:
+                p=left+above-upper_left
+                da,db,dc=abs(p-left),abs(p-above),abs(p-upper_left)
+                predictor=(left if da<=db and da<=dc else
+                           above if db<=dc else upper_left)
+            else:
+                predictor=0
+            current[i]=(current[i]+predictor)&255
+        digest.update(current)
+        previous=current
+    return digest.digest()
+
+
+def _validate(act: dict, *, enforce_unique_pixels: bool = True) -> tuple[str,list[dict],list[dict],list[dict],list[bytes]]:
     if type(act) is not dict or set(act)!={"vehicleKind","damages","inventory","photos"}:
         raise IntakeActInvalid("INVALID_INPUT")
     kind=act["vehicleKind"]
@@ -171,12 +212,10 @@ def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[byte
         clean,width,height=sanitize_png(data)
         digest=hashlib.sha256(clean).hexdigest()
         # SHA сохранённых байтов подтверждает целостность, но не уникальность:
-        # повторные PNG с иным zlib-сжатием содержат те же scanlines.
-        # sanitize_png уже ограничил размер распаковки и собрал один IDAT.
-        pixel_digest=hashlib.sha256(
-            clean[16:29]+zlib.decompress(clean[41:-16])
-        ).digest()
-        if pixel_digest in pixel_digests:
+        # PNG с иным сжатием или фильтрацией может содержать те же пиксели.
+        # sanitize_png ограничивает распаковку и проверяет фильтры.
+        pixel_digest=_pixel_fingerprint(clean,width,height)
+        if enforce_unique_pixels and pixel_digest in pixel_digests:
             raise IntakeActInvalid("DUPLICATE_PHOTO")
         pixel_digests.add(pixel_digest)
         blobs.append(clean)
@@ -296,7 +335,10 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
     if (type(request_key) is not UUID or type(expected_version) is not int
             or not 0<=expected_version<20):
         raise IntakeActInvalid("INVALID_INPUT")
-    kind,damages,inventory,meta,blobs=_validate(act)
+    # Compute the historic request fingerprint without the newer pixel
+    # uniqueness rule. A previously accepted byte-for-byte request must still
+    # replay after re-authorization, while a NEW act must pass stricter checks.
+    kind,damages,inventory,meta,blobs=_validate(act,enforce_unique_pixels=False)
     canonical={"orderId":str(order),"expectedVersion":expected_version,
                "vehicleKind":kind,"damages":damages,"inventory":inventory,
                "photos":meta}
@@ -317,6 +359,7 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
             if existing[1:]!=(order,actor,digest,expected_version+1):
                 raise IntakeActConflict("KEY_REUSED")
             return {"ok":True,"replayed":True,**_read(conn,order,org,loc)}
+        _validate(act)  # Enforce new pixel uniqueness only for new versions.
         snapshot=_read(conn,order,org,loc)
         if snapshot["inspection"] is None:
             raise IntakeActConflict("INSPECTION_REQUIRED")
