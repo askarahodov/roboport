@@ -88,13 +88,7 @@ def publish_policy(conn,token,org,*,request_key,role,loc,user,
         return {"ok":True,"replayed":False,"items":_audit(conn,org)}
 
 
-def _audit(conn,org,limit=100):
-    rows=conn.execute("""
-       SELECT id,role_code,user_id,location_id,document_kind,capability,
-              allowed,not_before,actor_id,created_at
-       FROM auto_document_access_policy WHERE organization_id=%s
-       ORDER BY created_at DESC,id DESC LIMIT %s
-    """,(org,limit)).fetchall()
+def _event_dict(rows):
     return [{"eventId":str(i),"role":role,"userId":str(user) if user else None,
              "locationId":str(loc) if loc else None,"documentKind":doc,
              "capability":cap,"allowed":allow,
@@ -103,15 +97,55 @@ def _audit(conn,org,limit=100):
             for i,role,user,loc,doc,cap,allow,cutoff,actor,created in rows]
 
 
-def list_policies(conn,token,org,*,limit=100):
-    if type(org) is not UUID or type(limit) is not int or not 1<=limit<=100:
+def _audit(conn,org,limit=100):
+    rows=conn.execute("""
+       SELECT id,role_code,user_id,location_id,document_kind,capability,
+              allowed,not_before,actor_id,created_at
+       FROM auto_document_access_policy WHERE organization_id=%s
+       ORDER BY created_at DESC,id DESC LIMIT %s
+    """,(org,limit)).fetchall()
+    return _event_dict(rows)
+
+
+def list_policies(conn,token,org,*,limit=100,before=None):
+    if (type(org) is not UUID or type(limit) is not int or
+            not 1<=limit<=100 or
+            (before is not None and type(before) is not UUID)):
         raise DocumentPolicyInvalid("INVALID_INPUT")
     with conn.transaction():
         try:
             _admin(conn,token,org)
         except OrgStaffDenied:
             raise DocumentPolicyDenied("FORBIDDEN") from None
-        return {"syntheticOnly":True,"items":_audit(conn,org,limit)}
+        if before is not None:
+            # Курсор обязан принадлежать этому tenant; чужой UUID не
+            # раскрывает ни время, ни содержимое события.
+            cursor=conn.execute("""
+                SELECT created_at,id FROM auto_document_access_policy
+                WHERE organization_id=%s AND id=%s
+            """,(org,before)).fetchone()
+            if cursor is None:
+                raise DocumentPolicyInvalid("INVALID_INPUT")
+            rows=conn.execute("""
+                SELECT id,role_code,user_id,location_id,document_kind,capability,
+                       allowed,not_before,actor_id,created_at
+                FROM auto_document_access_policy
+                WHERE organization_id=%s AND (created_at,id)<(%s,%s)
+                ORDER BY created_at DESC,id DESC LIMIT %s
+            """,(org,*cursor,limit+1)).fetchall()
+        else:
+            rows=conn.execute("""
+                SELECT id,role_code,user_id,location_id,document_kind,capability,
+                       allowed,not_before,actor_id,created_at
+                FROM auto_document_access_policy WHERE organization_id=%s
+                ORDER BY created_at DESC,id DESC LIMIT %s
+            """,(org,limit+1)).fetchall()
+        has_more=len(rows)>limit
+        page=_event_dict(rows[:limit])
+        result={"syntheticOnly":True,"items":page}
+        if has_more:
+            result["nextBefore"]=page[-1]["eventId"]
+        return result
 
 
 def require_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
@@ -146,23 +180,23 @@ def require_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
     cutoffs=[]
     checked_caps=(cap,"WRITE") if cap in ("CREATE","EDIT","CLOSE") else (cap,)
     for role in active:
+        # У org уже FOR SHARE: ADMIN начинает публикацию с FOR UPDATE
+        # той же строки. Исторические события immutable, поэтому
+        # DISTINCT ON безопасен без FOR SHARE, запрещённого в DISTINCT.
+        # Не сканировать последние 201 аудиторских версий как будто
+        # это 201 действующее правило: каждому scope соответствует 1.
         rules=conn.execute("""
-          SELECT capability,location_id,user_id,allowed,not_before
+          SELECT DISTINCT ON (capability,location_id,user_id)
+            capability,location_id,user_id,allowed,not_before
           FROM auto_document_access_policy
           WHERE organization_id=%s AND role_code=%s AND document_kind=%s
             AND capability=ANY(%s)
             AND (location_id IS NULL OR location_id=%s)
             AND (user_id IS NULL OR user_id=%s)
-          ORDER BY created_at DESC,id DESC LIMIT 201
-          FOR SHARE
+          ORDER BY capability,location_id,user_id,created_at DESC,id DESC
         """,(org,role,document,list(checked_caps),loc,actor)).fetchall()
-        if len(rules)>200:
-            raise DocumentPolicyDenied("ACL_LIMIT")
-        latest={}
-        for capability,location,user,allowed,not_before in rules:
-            scope=(capability,location,user)
-            if scope not in latest:
-                latest[scope]=(allowed,not_before)
+        latest={(capability,location,user):(allowed,not_before)
+                for capability,location,user,allowed,not_before in rules}
         if any(not allowed for allowed,_ in latest.values()):
             raise DocumentPolicyDenied("POLICY_DENIED")
         cutoffs.extend(cutoff for allowed,cutoff in latest.values()
@@ -245,23 +279,22 @@ def preview_employee_document_access(conn,token,org,loc,user,document):
         if not grants:
             raise DocumentPolicyDenied("FORBIDDEN")
         active=set(role for (role,) in grants)
+        # Тот же org FOR SHARE сериализует со всеми ADMIN публикациями.
+        # Предпросмотр отражает до 5*8*2*2 действующих scope независимо
+        # от длины append-only журнала (>500 версий также допустимы).
         rules=conn.execute("""
-          SELECT role_code,location_id,user_id,capability,allowed,not_before
+          SELECT DISTINCT ON (role_code,location_id,user_id,capability)
+            role_code,location_id,user_id,capability,allowed,not_before
           FROM auto_document_access_policy
           WHERE organization_id=%s AND document_kind=%s
             AND role_code=ANY(%s)
             AND (location_id IS NULL OR location_id=%s)
             AND (user_id IS NULL OR user_id=%s)
-          ORDER BY created_at DESC,id DESC LIMIT 501
-          FOR SHARE
+          ORDER BY role_code,location_id,user_id,capability,
+                   created_at DESC,id DESC
         """,(org,document,list(active),loc,user)).fetchall()
-        if len(rules)>500:
-            raise DocumentPolicyDenied("ACL_LIMIT")
-        latest={}
-        for role,location,target,cap,allowed,not_before in rules:
-            key=(role,location,target,cap)
-            if key not in latest:
-                latest[key]=(allowed,not_before)
+        latest={(role,location,target,cap):(allowed,not_before)
+                for role,location,target,cap,allowed,not_before in rules}
         rights={}
         for cap in CAPABILITIES:
             applicable=active & ROLE_BASE[document].get(cap,active if cap=="WRITE" else set())
