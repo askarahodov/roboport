@@ -214,12 +214,29 @@ def test_release_prevents_execution_start_until_next_accepted(monkeypatch):
                           (order,)).fetchone()==(0,)
         assert db.execute("SELECT status FROM auto_work_order_assignment WHERE id=%s",
                           (UUID(ident),)).fetchone()==("RELEASED",)
-    # После подтверждения нового исполнителя старт больше не запрещён.
-    posted=offer(http,root,order,manager,d["other"],
-         datetime.now(timezone.utc)+timedelta(hours=3),
-         datetime.now(timezone.utc)+timedelta(hours=4))
-    # У второго механика нет смены в этом fixture: штатное правило не обойдено.
-    assert posted.status_code==403
+    # После реальной смены и ACCEPTED нового исполнителя старт снова законен.
+    starts=datetime.now(timezone.utc)+timedelta(hours=3)
+    ends=starts+timedelta(hours=1)
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO auto_staff_shift
+          (id,organization_id,location_id,user_id,starts_at,ends_at)
+          VALUES(%s,%s,%s,%s,%s,%s)""",(uuid4(),org,loc,d["other"],
+              starts-timedelta(minutes=2),ends+timedelta(minutes=2)))
+    posted=offer(http,root,order,manager,d["other"],starts,ends)
+    assert posted.status_code==201,posted.text
+    new_id=posted.json()["assignmentId"]
+    other=auth(http,d,d["other"])
+    assert http.post(root+f"/assignments/{new_id}/accept",
+       headers=other,json={"requestKey":str(uuid4())}).status_code==201
+    manager=auth(http,d,d["intake"])
+    started=http.post(exec_url(org,loc,order)+"/start",headers=manager,
+      json={"requestKey":str(uuid4())})
+    assert started.status_code==201,started.text
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT status FROM auto_work_order_assignment
+          WHERE id=%s""",(UUID(new_id),)).fetchone()==("ACCEPTED",)
+        assert db.execute("""SELECT count(*) FROM auto_work_order_execution
+          WHERE work_order_id=%s""",(order,)).fetchone()==(1,)
 
 
 def test_release_races_with_execution_start_one_result_only(monkeypatch):
