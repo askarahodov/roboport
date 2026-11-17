@@ -329,6 +329,8 @@ test('сквозное руководство доступно из Docsify, в�
   test.setTimeout(90000);
   await page.setViewportSize({width:390,height:844});
   await page.goto('/docs/');
+  await expect(page.locator('.markdown-section h1')).toContainText('База знаний',{timeout:25000});
+  await page.locator('.sidebar-toggle').click();
   const navigation=page.locator('.sidebar-nav');
   const route=navigation.getByRole('link',{name:'Сквозной маршрут одного заказа по шести ролям'});
   await expect(route).toHaveAttribute('href','/docs/#/guides/END_TO_END_WORKSHOP');
