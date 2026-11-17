@@ -50,6 +50,10 @@ export function AutoStaffAdmin() {
   const [policyUser,setPolicyUser] = React.useState('');
   const [policyDate,setPolicyDate] = React.useState('');
   const [policyEvents,setPolicyEvents] = React.useState<PolicyEvent[]>([]);
+  const [policyCursor,setPolicyCursor] = React.useState<string|null>(null);
+  const [policyTrail,setPolicyTrail] = React.useState<string[]>([]);
+  const [policyNextBefore,setPolicyNextBefore] = React.useState<string|null>(null);
+  const policyRequest = React.useRef(0);
   const [policyState,setPolicyState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [policyBusy,setPolicyBusy] = React.useState(false);
   const [policyMessage,setPolicyMessage] = React.useState('');
@@ -61,7 +65,10 @@ export function AutoStaffAdmin() {
   organizationRef.current = organization.trim();
   React.useEffect(() => {
     setConfirmId(null);setAudit([]);setAuditState('idle');setMessage('');
-    setPolicyEvents([]);setPolicyState('idle');setPolicyPending(null);setPolicyMessage('');
+    policyRequest.current++;
+    setPolicyEvents([]);setPolicyCursor(null);setPolicyTrail([]);
+    setPolicyNextBefore(null);setPolicyState('idle');
+    setPolicyPending(null);setPolicyMessage('');
   }, [organization]);
   React.useEffect(()=>{
     setEffective(null);setEffectiveState('idle');
@@ -138,22 +145,31 @@ export function AutoStaffAdmin() {
   }
 
 
-  async function loadPolicies(){
+  async function loadPolicies(cursor:string|null=null,trail:string[]=[]){
     if(!validOrg)return;
-    const org=organization.trim();
-    setPolicyEvents([]);setPolicyState('loading');setPolicyMessage('');
+    const org=organization.trim(),sequence=++policyRequest.current;
+    setPolicyEvents([]);setPolicyNextBefore(null);
+    setPolicyState('loading');setPolicyMessage('');
     try{
+      const q=new URLSearchParams({limit:'50'});
+      if(cursor)q.set('before',cursor);
       const res=await fetch('/api/v1/dev/auto/organizations/'+
-        encodeURIComponent(org)+'/access-policies',{
+        encodeURIComponent(org)+'/access-policies?'+q.toString(),{
           credentials:'include',cache:'no-store',
         });
-      if(organizationRef.current!==org)return;
-      if([401,403,404].includes(res.status)){setPolicyState('denied');return;}
+      if(organizationRef.current!==org||sequence!==policyRequest.current)return;
+      if([401,403,404].includes(res.status)){
+        setPolicyState('denied');setEffective(null);setEffectiveState('denied');
+        setPolicyPending(null);setPolicyTrail([]);setPolicyCursor(null);
+        return;
+      }
       if(!res.ok)throw Error('HTTP');
       const value:unknown=await res.json();
       if(!value||typeof value!=='object'||!('syntheticOnly' in value)||
         value.syntheticOnly!==true||!('items' in value)||
-        !Array.isArray(value.items)||value.items.length>100||
+        !Array.isArray(value.items)||value.items.length>50||
+        ('nextBefore' in value&&(typeof value.nextBefore!=='string'||
+          !uuid.test(value.nextBefore)||value.items.length!==50))||
         !value.items.every((item:unknown)=>{
           if(!item||typeof item!=='object')return false;
           const p=item as PolicyEvent;
@@ -166,9 +182,12 @@ export function AutoStaffAdmin() {
             (p.notBefore===null||typeof p.notBefore==='string'&&
               Number.isFinite(Date.parse(p.notBefore)));
         }))throw Error('INVALID_POLICY');
-      setPolicyEvents(value.items as PolicyEvent[]);setPolicyState('ready');
+      setPolicyEvents(value.items as PolicyEvent[]);
+      setPolicyNextBefore('nextBefore' in value ? value.nextBefore as string : null);
+      setPolicyTrail(trail);setPolicyCursor(cursor);setPolicyState('ready');
     }catch{
-      if(organizationRef.current===org)setPolicyState('error');
+      if(organizationRef.current===org&&sequence===policyRequest.current)
+        setPolicyState('error');
     }
   }
   async function loadEffective(){
@@ -208,6 +227,11 @@ export function AutoStaffAdmin() {
         encodeURIComponent(pending.org)+'/access-policies',JSON.parse(pending.body));
       if(pending.org!==organizationRef.current)return;
       if(res.status===409||res.status===422||[401,403,404].includes(res.status)){
+        if([401,403,404].includes(res.status)){
+          policyRequest.current++;setPolicyEvents([]);setPolicyNextBefore(null);
+          setPolicyTrail([]);setPolicyCursor(null);
+          setPolicyState('denied');setEffective(null);setEffectiveState('denied');
+        }
         setPolicyPending(null);
         setPolicyMessage(res.status===409?
           '409 — ключ уже использован для другого правила или неверен scope. Перечитайте журнал.':
@@ -301,6 +325,8 @@ export function AutoStaffAdmin() {
       {policyState==='loading'&&<p role="status">Загрузка правил…</p>}
       {policyState==='denied'&&<p role="alert">403 — журнал ограничений недоступен.</p>}
       {policyState==='error'&&<p role="alert">Ошибка загрузки ограничений. Повторите запрос.</p>}
+      {policyState==='ready'&&<p>Страница журнала ограничений: {policyTrail.length+1}.
+        Записи хранятся неизменно; можно просмотреть старые версии.</p>}
       {policyState==='ready'&&(policyEvents.length?<ol>{policyEvents.map(p=>
         <li key={p.eventId}>
           <strong>{p.allowed?'ALLOW':'DENY'}</strong> · {p.role} · {p.documentKind} /
@@ -309,7 +335,15 @@ export function AutoStaffAdmin() {
           {' '}{p.notBefore?'с '+new Date(p.notBefore).toLocaleDateString('ru-RU'):'без ограничения истории'} ·
           {' '}{new Date(p.createdAt).toLocaleString('ru-RU')} · автор {p.actorId}
         </li>)}</ol>:<p>Для этой организации нет специальных ограничений.</p>)}
-      <form onSubmit={e=>{e.preventDefault();savePolicy();}}>
+      {policyState==='ready'&&<div style={{display:'flex',flexWrap:'wrap',gap:'0.75rem'}}>
+        {policyTrail.length>0&&<button type="button" disabled={policyBusy}
+          onClick={()=>void loadPolicies(policyTrail[policyTrail.length-1]||null,
+            policyTrail.slice(0,-1))}>Предыдущая страница правил</button>}
+        {policyNextBefore&&<button type="button" disabled={policyBusy}
+          onClick={()=>void loadPolicies(policyNextBefore,
+            [...policyTrail,policyCursor??''])}>Более ранние правила</button>}
+      </div>}
+      {policyState!=='denied'&&<form onSubmit={e=>{e.preventDefault();savePolicy();}}>
         <h3>Новая версия правила</h3>
         <div className="auto-claim-forms">
           <label>Роль политики
@@ -355,8 +389,8 @@ export function AutoStaffAdmin() {
           !!policyUser.trim()&&!uuid.test(policyUser.trim())||
           !!policyLocation.trim()&&!uuid.test(policyLocation.trim())}>
           Сохранить правило</button>
-      </form>
-      <section aria-label="Эффективные права сотрудника (предпросмотр)">
+      </form>}
+      {policyState!=='denied'&&<section aria-label="Эффективные права сотрудника (предпросмотр)">
         <h3>Проверить эффективные права сотрудника</h3>
         <p>Нужны действующий ADMIN и UUID филиала/сотрудника выше.
           Предпросмотр показывает только права по роли и ограничениям,
@@ -375,7 +409,7 @@ export function AutoStaffAdmin() {
               ' · История с '+new Date(effective.capabilities[cap].notBefore!).toLocaleDateString('ru-RU')}
           </li>)}</ul>
         </section>}
-      </section>
+      </section>}
       {policyPending&&<div role="group" aria-label="Повтор сохранения ограничения">
         <button type="button" disabled={policyBusy}
           onClick={()=>void executePolicy(policyPending)}>Повторить исходное правило</button>

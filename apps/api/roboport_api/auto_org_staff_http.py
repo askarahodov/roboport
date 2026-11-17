@@ -129,12 +129,19 @@ def get_document_policies(org_id:str,request:Request,limit:int=100):
         return dsn
     try:
         org=UUID(org_id)
+        # Не доверять дублированным/невалидным курсорам: ошибки без
+        # времени/содержимого чужого policy event.
+        cursors=request.query_params.getlist("before")
+        limits=request.query_params.getlist("limit")
+        if len(cursors)>1 or len(limits)>1 or (cursors and not cursors[0]):
+            return _response(request,422,"INVALID_INPUT")
+        before=UUID(cursors[0]) if cursors else None
     except (TypeError,ValueError):
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
             result=list_policies(db,request.cookies.get("rp_session",""),
-                                 org,limit=limit)
+                                 org,limit=limit,before=before)
         except DocumentPolicyInvalid:
             return _response(request,422,"INVALID_INPUT")
         except DocumentPolicyDenied:

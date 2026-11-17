@@ -195,3 +195,137 @@ test('FINANCE CASHIER restrictive policy and effective preview never grant by UI
   await expect(page.getByRole('alert')).toContainText('403');
   await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
 });
+
+
+test('ADMIN просматривает 120 immutable событий через три страницы, обновление сбрасывает курсор',
+  async({page},info)=>{
+    const history=Array.from({length:120},(_,i)=>({
+      eventId:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+      role:'MANAGER',userId:user,locationId:loc,documentKind:'ESTIMATE',
+      capability:'READ',allowed:i%2===0,notBefore:null,
+      actorId:user,
+      createdAt:new Date(Date.UTC(2030,0,1,0,0,0)-i*1000).toISOString(),
+    }));
+    const cursors:(string|null)[]=[];
+    let saved=0;
+    await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+      status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
+    }));
+    await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+      const req=route.request(),url=new URL(req.url());
+      if(url.pathname.endsWith('/staff')&&req.method()==='GET')
+        return route.fulfill({status:200,contentType:'application/json',
+          body:'{"items":[]}'});
+      if(url.pathname===base&&req.method()==='POST'){
+        saved++;
+        expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+        return route.fulfill({status:201,contentType:'application/json',
+          body:'{"syntheticOnly":true,"ok":true,"replayed":false,"items":[]}'});
+      }
+      if(url.pathname!==base||req.method()!=='GET')
+        throw Error('Unexpected '+url.pathname);
+      expect(url.searchParams.get('limit')).toBe('50');
+      const before=url.searchParams.get('before');
+      cursors.push(before);
+      const index=before?history.findIndex(e=>e.eventId===before)+1:0;
+      expect(index).toBeGreaterThanOrEqual(0);
+      const rows=history.slice(index,index+50);
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({
+          syntheticOnly:true,items:rows,
+          ...(index+50<history.length?{nextBefore:rows.at(-1)?.eventId}:{}),
+        })});
+    });
+    await page.setViewportSize({width:390,height:844});
+    await page.goto('/staff/auto-admin');
+    await page.getByLabel('UUID организации').fill(org);
+    await page.getByRole('button',{name:'Показать ограничения документов'}).click();
+    const section=page.getByRole('region',{name:'Гранулярные ограничения на документы'});
+    await expect(section.getByText('Страница журнала ограничений: 1.')).toBeVisible();
+    await expect(section.locator('ol li')).toHaveCount(50);
+    const forward=section.getByRole('button',{name:'Более ранние правила'});
+    await forward.focus();await page.keyboard.press('Enter');
+    await expect(section.getByText('Страница журнала ограничений: 2.')).toBeVisible();
+    await expect(section.locator('ol li')).toHaveCount(50);
+    await forward.click();
+    await expect(section.getByText('Страница журнала ограничений: 3.')).toBeVisible();
+    await expect(section.locator('ol li')).toHaveCount(20);
+    await expect(forward).toHaveCount(0);
+    await expect(section.getByRole('button',{name:'Предыдущая страница правил'})).toBeVisible();
+    await page.screenshot({path:info.outputPath('policy-audit-390-page3.png'),
+      fullPage:true,animations:'disabled'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(390);
+    await section.getByRole('button',{name:'Предыдущая страница правил'}).click();
+    await expect(section.getByText('Страница журнала ограничений: 2.')).toBeVisible();
+    expect(cursors).toContain(history[49].eventId);
+    expect(cursors).toContain(history[99].eventId);
+    await page.setViewportSize({width:1280,height:900});
+    await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
+    await page.screenshot({path:info.outputPath('policy-audit-1280-dark-page2.png'),
+      fullPage:true,animations:'disabled'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(1280);
+    await section.getByRole('button',{name:'Сохранить правило'}).click();
+    await expect.poll(()=>saved).toBe(1);
+    await expect(section.getByText('Страница журнала ограничений: 1.')).toBeVisible();
+    expect(cursors.at(-1)).toBeNull();
+  });
+
+test('ADMIN теряет права на следующей странице: история и действия очищаются',
+  async({page})=>{
+    let revoked=false;
+    const records=Array.from({length:51},(_,i)=>({
+      eventId:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+      role:'MANAGER',userId:user,locationId:loc,documentKind:'ESTIMATE',
+      capability:'READ',allowed:false,notBefore:null,
+      actorId:user,createdAt:new Date(Date.UTC(2030,0,1)-i*1000).toISOString(),
+    }));
+    await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+      const req=route.request(),url=new URL(req.url());
+      if(url.pathname.endsWith('/staff'))return route.fulfill({
+        status:200,contentType:'application/json',body:'{"items":[]}'});
+      if(revoked)return route.fulfill({
+        status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+      if(url.pathname===base)return route.fulfill({
+        status:200,contentType:'application/json',body:JSON.stringify({
+          syntheticOnly:true,items:records.slice(0,50),
+          nextBefore:records[49].eventId,
+        })});
+      throw Error('Unexpected '+url.pathname);
+    });
+    await page.goto('/staff/auto-admin');
+    await page.getByLabel('UUID организации').fill(org);
+    await page.getByRole('button',{name:'Показать ограничения документов'}).click();
+    await expect(page.getByText('DENY',{exact:true})).toHaveCount(50);
+    revoked=true;
+    await page.getByRole('button',{name:'Более ранние правила'}).click();
+    await expect(page.getByRole('alert')).toContainText('403');
+    await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Сохранить правило'})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Более ранние правила'})).toHaveCount(0);
+  });
+
+test('повреждённый nextBefore без полной страницы не отображает исторические правила',
+  async({page})=>{
+    await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+      const path=new URL(route.request().url()).pathname;
+      if(path.endsWith('/staff'))return route.fulfill({
+        status:200,contentType:'application/json',body:'{"items":[]}'});
+      if(path===base)return route.fulfill({
+        status:200,contentType:'application/json',body:JSON.stringify({
+          syntheticOnly:true,items:[{
+            eventId:'00000000-0000-4000-8000-000000000001',
+            role:'MANAGER',userId:user,locationId:loc,documentKind:'ESTIMATE',
+            capability:'READ',allowed:false,notBefore:null,
+            actorId:user,createdAt:'2030-01-01T10:00:00Z',
+          }],nextBefore:'00000000-0000-4000-8000-000000000001',
+        })});
+      throw Error('Unexpected '+path);
+    });
+    await page.goto('/staff/auto-admin');
+    await page.getByLabel('UUID организации').fill(org);
+    await page.getByRole('button',{name:'Показать ограничения документов'}).click();
+    await expect(page.getByRole('alert')).toContainText('Ошибка загрузки');
+    await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
+  });
