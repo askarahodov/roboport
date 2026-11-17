@@ -2,7 +2,7 @@
 from uuid import UUID
 import psycopg
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel,ConfigDict,Field,ValidationError
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auth_http import _mutation_ok
@@ -14,6 +14,9 @@ from .auto_demo_close import (
 from .auto_document_lifecycle import (
     record_document_event,DocumentLifecycleDenied,
     DocumentLifecycleInvalid,DocumentLifecycleConflict,
+)
+from .auto_technical_dossier import (
+    export_closed_technical_dossier,TechnicalDossierDenied,TechnicalDossierConflict,
 )
 
 router=APIRouter(include_in_schema=False)
@@ -73,6 +76,30 @@ def read(org_id:str,loc_id:str,order_id:str,request:Request):
         except (DemoCloseDenied,DemoCloseConflict) as exc:
             return _error(request,exc)
     return JSONResponse(content=state,headers={"Cache-Control":"no-store"})
+
+
+
+@router.get(prefix+"/technical-dossier.zip")
+def download_technical_dossier(org_id:str,loc_id:str,order_id:str,request:Request):
+    scoped=_scope(request,org_id,loc_id,order_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,org,loc,order=scoped
+    with psycopg.connect(dsn) as db:
+        try:
+            data=export_closed_technical_dossier(
+                db,request.cookies.get("rp_session",""),org,loc,order)
+        except TechnicalDossierDenied:
+            return _response(request,403,"FORBIDDEN")
+        except TechnicalDossierConflict as exc:
+            return _response(request,409,str(exc))
+    return Response(content=data,media_type="application/zip",headers={
+        "Content-Disposition":f'attachment; filename="auto-technical-dossier-{order}.zip"',
+        "Cache-Control":"no-store, private",
+        "X-Content-Type-Options":"nosniff",
+        "Cross-Origin-Resource-Policy":"same-origin",
+        "Content-Security-Policy":"sandbox",
+    })
 
 
 async def _write(request,org_id,loc_id,order_id,action):
