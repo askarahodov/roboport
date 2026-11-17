@@ -28,9 +28,35 @@ def _chunk(kind, data):
             struct.pack(">I",binascii.crc32(kind+data)&0xffffffff))
 
 
-def synthetic_png(with_srgb=True,with_exif=False,width=2,height=2,compression_level=6):
+def synthetic_png(with_srgb=True,with_exif=False,width=2,height=2,
+                  compression_level=6,filter_type=0,pixel_value=(41,82,122)):
     header=struct.pack(">IIBBBBB",width,height,8,2,0,0,0)
-    rows=b"".join(b"\x00"+bytes([41,82,122]) * width for _ in range(height))
+    row=bytes(pixel_value)*width
+    previous=bytes(len(row))
+    encoded=[]
+    for _ in range(height):
+        filtered=bytearray()
+        for i,value in enumerate(row):
+            left=row[i-3] if i>=3 else 0
+            above=previous[i]
+            upper_left=previous[i-3] if i>=3 else 0
+            if filter_type==1:
+                predictor=left
+            elif filter_type==2:
+                predictor=above
+            elif filter_type==3:
+                predictor=(left+above)//2
+            elif filter_type==4:
+                p=left+above-upper_left
+                da,db,dc=abs(p-left),abs(p-above),abs(p-upper_left)
+                predictor=(left if da<=db and da<=dc else
+                           above if db<=dc else upper_left)
+            else:
+                predictor=0
+            filtered.append((value-predictor)&255)
+        encoded.append(bytes([filter_type])+filtered)
+        previous=row
+    rows=b"".join(encoded)
     parts=[_chunk(b"IHDR",header)]
     if with_srgb:
         parts.append(_chunk(b"sRGB",b"\x00"))
@@ -129,6 +155,10 @@ def test_private_intake_photos_versions_client_scope_replay_and_qc_lock(monkeypa
     recompressed=synthetic_png(compression_level=1)
     assert recompressed!=raw
     repeated["photos"][1]["imageBase64"]=base64.b64encode(recompressed).decode()
+    assert publish(http,staff,path,repeated,version=1).status_code==422
+    repeated["photos"][1]["imageBase64"]=base64.b64encode(
+        synthetic_png(filter_type=4,compression_level=1)
+    ).decode("ascii")
     assert publish(http,staff,path,repeated,version=1).status_code==422
     with psycopg.connect(DSN) as db:
         with pytest.raises(psycopg.errors.RaiseException):
@@ -282,6 +312,32 @@ def test_intake_rejects_same_png_scanlines_with_different_compression():
     })
     with pytest.raises(IntakeActInvalid,match="DUPLICATE_PHOTO"):
         _validate(act)
+
+
+def test_intake_duplicate_png_pixels_across_all_filter_types():
+    from roboport_api.auto_intake_act import _validate
+
+    original=synthetic_png(filter_type=0)
+    for filter_type in (1,2,3,4):
+        alternative=synthetic_png(filter_type=filter_type,compression_level=1)
+        assert alternative!=original
+        assert sanitize_png(alternative)[0]!=sanitize_png(original)[0]
+        act=custody(original)
+        act["photos"].append({
+            "areaCode":"REAR",
+            "imageBase64":base64.b64encode(alternative).decode("ascii"),
+        })
+        with pytest.raises(IntakeActInvalid,match="DUPLICATE_PHOTO"):
+            _validate(act)
+
+    distinct=custody(original)
+    distinct["photos"].append({
+        "areaCode":"REAR",
+        "imageBase64":base64.b64encode(
+            synthetic_png(filter_type=4,pixel_value=(41,82,123))
+        ).decode("ascii"),
+    })
+    assert len(_validate(distinct)[3])==2
 
 
 def test_png_sanitizer_rejects_exif_text_crc_bombs_and_unknown_chunks():
