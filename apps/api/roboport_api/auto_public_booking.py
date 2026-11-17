@@ -393,6 +393,8 @@ def _current_public_booking(conn,request_id,appointment_id):
       JOIN auto_appointment a ON a.id=f.appointment_id
         AND a.id=%s AND a.organization_id=offer.organization_id
         AND a.location_id=offer.location_id
+      JOIN auto_public_booking_claim claim ON claim.request_id=req.id
+        AND claim.customer_link_id=a.customer_link_id
       JOIN LATERAL (
         SELECT COALESCE((
           SELECT reschedule.new_booking_id
