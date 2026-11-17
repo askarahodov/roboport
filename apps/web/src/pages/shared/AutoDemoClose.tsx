@@ -144,6 +144,37 @@ export function AutoDemoClose({role}:{role:'staff'|'client'}){
     }finally{setBusy(false);}
   }
 
+  async function downloadTechnicalDossier(){
+    if(!ready||busy||workflow?.status!=='CLOSED_TECHNICAL')return;
+    setBusy(true);setMessage('');
+    try{
+      const response=await fetch(base+'/technical-dossier.zip',{
+        credentials:'include',cache:'no-store',
+      });
+      if([401,403,404].includes(response.status)){
+        setData(null);setStatus('denied');setPending(null);return;
+      }
+      if(response.status===409){
+        setData(null);setStatus('error');
+        setMessage('Сервер отклонил целостность закрытого пакета. Обратитесь к администратору.');
+        return;
+      }
+      if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/zip')
+        throw new Error('invalid archive');
+      const payload=await response.blob();
+      if(payload.size===0||payload.size>1024*1024)throw new Error('archive size');
+      const url=URL.createObjectURL(payload);
+      try{
+        const link=document.createElement('a');
+        link.href=url;
+        link.download='auto-technical-dossier-'+order.trim()+'.zip';
+        document.body.appendChild(link);link.click();link.remove();
+      }finally{URL.revokeObjectURL(url);}
+    }catch{
+      setMessage('Не удалось скачать технический архив. Перечитайте статус и повторите.');
+    }finally{setBusy(false);}
+  }
+
   function submit(path:string,payload:Record<string,unknown>){
     void execute(base+'/'+path,JSON.stringify({...payload,requestKey:crypto.randomUUID()}));
   }
@@ -276,6 +307,16 @@ export function AutoDemoClose({role}:{role:'staff'|'client'}){
           <button type="button" disabled={!active}
             onClick={()=>documentAction('CLOSED_TECHNICAL')}>
             Технически закрыть журнал (НЕ выдавать автомобиль)</button>}
+        {workflow.status==='CLOSED_TECHNICAL'&&<section aria-label="Архив технически закрытого заказ-наряда">
+          <h3>Архив закрытого технического журнала</h3>
+          <p>ZIP с проверяемыми SHA-256: смета, условная сверка,
+            журнал переходов и версия акта приёмки с фотографиями.
+            Архив не подписан, не заменяет фискальные документы и не разрешает выдачу.</p>
+          <button type="button" disabled={!active}
+            onClick={()=>void downloadTechnicalDossier()}>
+            Скачать технический архив заказ-наряда (ZIP)
+          </button>
+        </section>}
       </section>}
       <p role="note">Разрешение на выдачу: НЕТ. Юридический и security gate: НЕ ПРОЙДЕН.</p>
       <button type="button" disabled={busy}
