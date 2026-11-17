@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime,timedelta,timezone
 from threading import Barrier
 from uuid import UUID,uuid4
+from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
@@ -212,6 +213,131 @@ def test_full_anonymous_safe_published_booking_and_crm_stock_outbox(monkeypatch)
     assert http.post(path,headers=client,json={
         "receiptKey":receipt,"withdrawKey":str(withdraw_key)}).status_code==403
     assert http.get(staff+"/queue").status_code==403  # live browser cookie is client
+
+
+
+
+def test_public_receipt_tracks_actual_move_cancel_and_never_rebooks(monkeypatch):
+    """Реальный PG17 цикл от заявки гостя до переноса и отмены клиентом."""
+    d,org,loc,bay,http,part,consumable,service,staff,offer=setup(monkeypatch)
+    manager=_auth(http,d,d["intake"])
+    # Заявку без резерва клиент может отменить напрямую. При наличии
+    # складских резервов требуется отдельная сверка и освобождение.
+    clean=http.post(staff+"/offers",headers=manager,json={
+        "requestKey":str(uuid4()),"bayId":str(bay),"serviceId":str(service),
+        "policyVersion":"DEV-CONSENT-2026","materials":[],
+    })
+    assert clean.status_code==201,clean.text
+    clean_offer=clean.json()["id"]
+    original=published_slot(http,org,loc,clean_offer)
+    submitted,_=submit(http,clean_offer,original)
+    assert submitted.status_code==201,submitted.text
+    request_id=submitted.json()["requestId"]
+    receipt=submitted.json()["receiptKey"]
+    endpoint=PUB+f"/requests/{request_id}/status"
+    assert http.post(endpoint,headers=ANON,json={
+        "receiptKey":str(uuid4())}).status_code==403
+    attached,_=claim(http,d,request_id,receipt)
+    assert attached.status_code==201,attached.text
+    created,fulfill_key=fulfill(http,d,staff,request_id)
+    assert created.status_code==201,created.text
+    appointment=created.json()["appointmentId"]
+    order=created.json()["workOrderId"]
+    response=http.post(endpoint,headers=ANON,json={"receiptKey":receipt})
+    assert response.status_code==200,response.text
+    state=response.json()
+    assert state["status"]=="BOOKED"
+    assert state["noSlotHold"] is False
+    assert state["currentStartsAt"]==original["startsAt"]
+    assert state["currentEndsAt"]==original["endsAt"]
+    assert state["currentBayCode"]
+    assert state["timeZone"]=="Europe/Berlin"
+    assert state["appointmentId"]==appointment
+    assert state["workOrderId"]==order
+    assert "vin" not in response.text.lower()
+    assert str(d["link"]) not in response.text
+
+    # Сервис слотов исключает уже занятое исходное время.
+    candidates=http.get(PUB+"/slots",params={
+        "offerId":clean_offer,
+        "localDay":datetime.fromisoformat(original["startsAt"])
+           .astimezone(ZoneInfo("Europe/Berlin")).date().isoformat(),
+    })
+    assert candidates.status_code==200,candidates.text
+    next_slot=next((item for item in candidates.json()["items"]
+        if datetime.fromisoformat(item["startsAt"])>
+           datetime.fromisoformat(original["endsAt"])),None)
+    assert next_slot is not None
+
+    client=_auth(http,d,d["client_a"])
+    customer="/api/v1/dev/auto/customer/booking/appointments/"+appointment
+    move_headers={**client,"Idempotency-Key":str(uuid4())}
+    moved=http.post(customer+"/reschedule",headers=move_headers,json={
+        "organizationId":str(org),"bayId":str(bay),
+        "startsAt":next_slot["startsAt"],"endsAt":next_slot["endsAt"],
+    })
+    assert moved.status_code==200,moved.text
+    assert moved.json()["status"]=="RESCHEDULED"
+    after=http.post(endpoint,headers=ANON,json={"receiptKey":receipt})
+    assert after.status_code==200,after.text
+    state=after.json()
+    assert state["status"]=="RESCHEDULED"
+    assert state["noSlotHold"] is False
+    assert state["currentStartsAt"]==next_slot["startsAt"]
+    assert state["currentEndsAt"]==next_slot["endsAt"]
+    assert state["appointmentId"]==appointment
+    assert state["workOrderId"]==order
+
+    # Исходное время неизменяемой публичной заявки не переписывается.
+    _auth(http,d,d["intake"])
+    queue=http.get(staff+"/queue")
+    assert queue.status_code==200,queue.text
+    entry=next(x for x in queue.json()["items"] if x["requestId"]==request_id)
+    assert entry["status"]=="RESCHEDULED"
+    assert entry["startsAt"]==original["startsAt"]
+    assert entry["currentStartsAt"]==next_slot["startsAt"]
+    assert entry["currentEndsAt"]==next_slot["endsAt"]
+    assert entry["appointmentId"]==appointment
+    replay,_=fulfill(http,d,staff,request_id,key=fulfill_key)
+    assert replay.status_code==409
+    assert replay.json()["code"]=="BOOKING_SUPERSEDED"
+
+    client=_auth(http,d,d["client_a"])
+    cancel_headers={**client,"Idempotency-Key":str(uuid4())}
+    canceled=http.post(customer+"/cancel",headers=cancel_headers,
+        json={"organizationId":str(org)})
+    assert canceled.status_code==200,canceled.text
+    assert canceled.json()["status"]=="CANCELED"
+    result=http.post(endpoint,headers=ANON,json={"receiptKey":receipt})
+    assert result.status_code==200,result.text
+    state=result.json()
+    assert state["status"]=="CANCELED"
+    assert state["noSlotHold"] is True
+    assert state["currentStartsAt"]==next_slot["startsAt"]
+    assert state["currentEndsAt"]==next_slot["endsAt"]
+    assert state["appointmentId"]==appointment
+    assert "vin" not in result.text.lower()
+
+    _auth(http,d,d["intake"])
+    queue=http.get(staff+"/queue")
+    assert queue.status_code==200,queue.text
+    entry=next(x for x in queue.json()["items"] if x["requestId"]==request_id)
+    assert entry["status"]=="CANCELED"
+    assert entry["currentStartsAt"]==next_slot["startsAt"]
+    assert entry["appointmentId"]==appointment
+    retry,_=fulfill(http,d,staff,request_id,key=fulfill_key)
+    assert retry.status_code==409
+    assert retry.json()["code"]=="BOOKING_SUPERSEDED"
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT count(*) FROM auto_public_booking_fulfillment
+          WHERE request_id=%s""",(UUID(request_id),)).fetchone()==(1,)
+        assert db.execute("""SELECT count(*) FROM auto_appointment
+          WHERE id=%s""",(UUID(appointment),)).fetchone()==(1,)
+        assert db.execute("""SELECT count(*) FROM auto_appointment_reschedule
+          WHERE appointment_id=%s""",(UUID(appointment),)).fetchone()==(1,)
+        assert db.execute("""SELECT count(*) FROM notification_outbox
+          WHERE aggregate_type='auto_appointment' AND aggregate_id=%s""",
+          (UUID(appointment),)).fetchone()==(3,)
 
 
 def test_public_claim_revoked_staff_no_material_booking_and_race(monkeypatch):

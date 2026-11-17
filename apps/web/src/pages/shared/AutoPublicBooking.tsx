@@ -8,9 +8,33 @@ type Offer={id:string;organizationId:string;locationId:string;bayId:string;
   serviceId:string;policyVersion:string;serviceTitle:string;durationMinutes:number;
   bayCode:string;timeZone:string;materialsReady:boolean};
 type Slot={startsAt:string;endsAt:string};
+type BookingStatus='AWAITING_VERIFICATION'|'WAITING_FOR_STAFF'|'BOOKED'|
+  'RESCHEDULED'|'CANCELED'|'OFFER_WITHDRAWN';
+type CurrentSlot={startsAt:string;endsAt:string;bayCode:string;timeZone:string};
 type Item={requestId:string;offerId:string;startsAt:string;endsAt:string;createdAt:string;
-  status:'AWAITING_VERIFICATION'|'WAITING_FOR_STAFF'|'BOOKED'|'OFFER_WITHDRAWN';
-  appointmentId:string|null;materials:{skuId:string;kind:'PART'|'CONSUMABLE';quantity:number}[]};
+  status:BookingStatus;appointmentId:string|null;
+  currentStartsAt?:string|null;currentEndsAt?:string|null;
+  currentBayCode?:string|null;timeZone?:string|null;
+  materials:{skuId:string;kind:'PART'|'CONSUMABLE';quantity:number}[]};
+const statuses:BookingStatus[]=['AWAITING_VERIFICATION','WAITING_FOR_STAFF',
+  'BOOKED','RESCHEDULED','CANCELED','OFFER_WITHDRAWN'];
+function currentSlot(raw:{currentStartsAt?:unknown;currentEndsAt?:unknown;
+  currentBayCode?:unknown;timeZone?:unknown}):CurrentSlot|null{
+  const {currentStartsAt:start,currentEndsAt:end,currentBayCode:bay,timeZone:zone}=raw;
+  if(start==null&&end==null&&bay==null&&zone==null)return null;
+  if(typeof start!=='string'||!Number.isFinite(Date.parse(start))||
+     typeof end!=='string'||!Number.isFinite(Date.parse(end))||
+     typeof bay!=='string'||!bay||bay.length>64||
+     typeof zone!=='string'||!zone||zone.length>80)
+    throw new Error('Недостоверное текущее время записи');
+  return {startsAt:start,endsAt:end,bayCode:bay,timeZone:zone};
+}
+function statusDescription(state:BookingStatus){
+  if(state==='CANCELED')return 'Запись отменена. Старое время не зарезервировано.';
+  if(state==='RESCHEDULED')return 'Запись перенесена; исходное время заявки устарело.';
+  if(state==='BOOKED')return 'Запись подтверждена сотрудником.';
+  return '';
+}
 type Receipt={requestId:string;receiptKey:string};
 type Pending={url:string;body:string;auth:boolean};
 type Mode='public'|'client'|'staff';
@@ -30,12 +54,15 @@ function parseQueue(data:unknown):Item[]{
   const x=data as {syntheticOnly?:boolean;items?:Item[]};
   if(!x||x.syntheticOnly!==true||!Array.isArray(x.items)||x.items.length>50||
      !x.items.every(i=>i&&uuid.test(i.requestId)&&uuid.test(i.offerId)&&
-      ['AWAITING_VERIFICATION','WAITING_FOR_STAFF','BOOKED','OFFER_WITHDRAWN'].includes(i.status)&&
+      statuses.includes(i.status)&&
+      (i.currentStartsAt==null&&i.currentEndsAt==null&&i.currentBayCode==null&&i.timeZone==null||
+       (i.currentStartsAt!=null&&i.currentEndsAt!=null&&i.currentBayCode!=null&&i.timeZone!=null))&&
       (i.appointmentId===null||uuid.test(i.appointmentId))&&
       Array.isArray(i.materials)&&i.materials.length<=8&&
       i.materials.every(m=>uuid.test(m.skuId)&&
         ['PART','CONSUMABLE'].includes(m.kind)&&Number.isSafeInteger(m.quantity)&&m.quantity>0)))
     throw new Error('Некорректный журнал заявок');
+  for(const item of x.items)currentSlot(item);
   return x.items;
 }
 function parseSlots(data:unknown):Slot[]{
@@ -63,6 +90,8 @@ function codeMessage(c:string){
     ALREADY_CLAIMED:'Заявка уже подтверждена другим ключом. Обновите статус.',
     CLIENT_VERIFICATION_REQUIRED:'Ожидается вход клиента и verified-связь с автомобилем.',
     FULFILL_CONFLICT:'Пост занят, материалы недоступны или изменены права. Выберите новый процесс.',
+    BOOKING_SUPERSEDED:'Запись уже перенесена или отменена. Перечитайте очередь; старый ключ не бронирует слот.',
+    BOOKING_INTEGRITY:'Не удалось проверить актуальное бронирование. Повторите чтение или обратитесь к администратору.',
     OFFER_ALREADY_WITHDRAWN:'Предложение уже отозвано другим ключом.',
     OFFER_REVOKE_CONFLICT:'Не удалось отозвать предложение: повторите или перечитайте данные.',
     INVALID_INPUT:'Проверьте UUID, дату, материалы и обязательные согласия.',
@@ -98,7 +127,8 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
   const [busy,setBusy]=React.useState(false);
   const [error,setError]=React.useState('');
   const [message,setMessage]=React.useState('');
-  const [status,setStatus]=React.useState('');
+  const [status,setStatus]=React.useState<BookingStatus|null>(null);
+  const [liveSlot,setLiveSlot]=React.useState<CurrentSlot|null>(null);
   const activeOffer=offers.find(x=>x.id===selected);
   const staffPath='/api/v1/dev/auto/organizations/'+org+'/locations/'+loc+'/public-booking';
 
@@ -107,7 +137,7 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
     try{
       const r=await fetch(url,{credentials:'include',cache:'no-store'});
       if(r.status===403||r.status===401){
-        setOffers([]);setQueue([]);setSlots([]);setStatus('');
+        setOffers([]);setQueue([]);setSlots([]);setStatus(null);setLiveSlot(null);
         setError('Доступ запрещён: проверьте сессию и полномочия.');
         return null;
       }
@@ -123,6 +153,12 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
   }
   async function send(entry:Pending){
     if(busy)return;
+    // Статус старого ответа больше не считается актуальным во время
+    // проверки квитанции, включая таймаут и некорректный ответ.
+    if(entry.url.endsWith('/status')||entry.url.endsWith('/claim')||
+       entry.url.endsWith('/withdraw')){
+      setStatus(null);setLiveSlot(null);
+    }
     setBusy(true);setError('');setMessage('');
     try{
       let csrf:string|null=null;
@@ -141,7 +177,7 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
         body:entry.body,
       });
       if([401,403].includes(response.status)){
-        setOffers([]);setQueue([]);setSlots([]);
+        setOffers([]);setQueue([]);setSlots([]);setStatus(null);setLiveSlot(null);
       }
       if(!response.ok){
         let code=String(response.status);
@@ -163,13 +199,18 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
           throw new Error('Недостоверный ответ по заявке');
         const owned={requestId:String(shape.requestId),receiptKey:String(shape.receiptKey)};
         setReceipt(owned);setRequestId(owned.requestId);setReceiptKey(owned.receiptKey);
-        setStatus('AWAITING_VERIFICATION');
+        setStatus('AWAITING_VERIFICATION');setLiveSlot(null);
         setMessage('Заявка создана, время НЕ зарезервировано. Скопируйте оба ключа.');
       }else if(entry.url.endsWith('/claim')||entry.url.endsWith('/withdraw')||
                entry.url.endsWith('/status')){
-        if(typeof shape.status!=='string')throw new Error('Недостоверный статус');
-        setStatus(shape.status);
-        setMessage('Текущий статус: '+shape.status+
+        if(typeof shape.status!=='string'||!statuses.includes(shape.status as BookingStatus))
+          throw new Error('Недостоверный статус');
+        const state=shape.status as BookingStatus;
+        const effective=currentSlot(shape);
+        if(['BOOKED','RESCHEDULED','CANCELED'].includes(state)&&!effective)
+          throw new Error('Нет актуального состояния записи');
+        setLiveSlot(effective);setStatus(state);
+        setMessage('Текущий статус: '+state+
           (shape.marketingEnabled===false?' · маркетинг отключён':''));
       }else if(entry.url.endsWith('/fulfill')){
         if(!uuid.test(String(shape.appointmentId)))throw new Error('Недостоверная запись');
@@ -344,9 +385,9 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
       <p>Авторизуйтесь как CLIENT. Нельзя вводить чужие customer ID/VIN;
         нужен только ID уже подтверждённой связи с автомобилем.</p>
       <label>ID заявки <input value={requestId}
-        onChange={e=>setRequestId(e.target.value)} /></label>
+        onChange={e=>{setRequestId(e.target.value);setStatus(null);setLiveSlot(null);}} /></label>
       <label>Секретный ключ квитанции <input value={receiptKey}
-        onChange={e=>setReceiptKey(e.target.value)} /></label>
+        onChange={e=>{setReceiptKey(e.target.value);setStatus(null);setLiveSlot(null);}} /></label>
       <label>UUID моей verified-связи <input value={vehicleLink}
         onChange={e=>setVehicleLink(e.target.value)} /></label>
       <button type="button" disabled={busy} onClick={()=>void loadStatus()}>
@@ -361,12 +402,20 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
         onClick={()=>void mutate(pub+'/requests/'+requestId+'/withdraw',{
           receiptKey,withdrawKey:newKey()},true)}>
         Отозвать тестовый выбор маркетинга</button>
-      {status&&<p role="status">Заявка: {status}.
-        {status==='BOOKED'&&<> Для последующего переноса/отмены
-          своей ещё не начатой записи откройте
-          {' '}<a href="/account/auto-booking">Мои записи</a>.</>}
-        {status==='OFFER_WITHDRAWN'&&' Публикация отозвана. Обратитесь в филиал через официальный канал.'}
-      </p>}
+      {status&&<div role="status">
+        <p>Заявка: {status}. {statusDescription(status)}</p>
+        {liveSlot&&<p>Последнее состояние поста {liveSlot.bayCode}:
+          {' '}{localTime(liveSlot.startsAt,liveSlot.timeZone)}
+          {' '}— {localTime(liveSlot.endsAt,liveSlot.timeZone)}
+          {' '}({liveSlot.timeZone}).
+          {status==='CANCELED'&&' Интервал освобождён.'}</p>}
+        {['BOOKED','RESCHEDULED'].includes(status)&&<p>
+          Для следующего переноса или отмены своей ещё не начатой записи
+          откройте <a href="/account/auto-booking">Мои записи</a>.
+        </p>}
+        {status==='OFFER_WITHDRAWN'&&<p>Публикация отозвана.
+          Обратитесь в филиал через официальный канал.</p>}
+      </div>}
     </>}
 
     {mode==='staff'&&<>
@@ -402,7 +451,14 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
         {queueHasMore&&<button type="button" disabled={busy}
           onClick={()=>void refreshQueue(queuePage+1)}>Следующая страница</button>}
         <ol>{queue.map(item=><li key={item.requestId}>
-          <p>{item.status} · {item.startsAt} · <code>{item.requestId}</code></p>
+          <p>{item.status} · исходный запрос {item.startsAt}
+            {' '}· <code>{item.requestId}</code></p>
+          {item.currentStartsAt&&item.currentEndsAt&&item.currentBayCode&&item.timeZone&&
+            <p>Актуальный пост {item.currentBayCode}: {' '}
+              {localTime(item.currentStartsAt,item.timeZone)}
+              {' '}— {localTime(item.currentEndsAt,item.timeZone)}
+              {item.status==='CANCELED'?' (отменено; интервал освобождён)':''}.
+            </p>}
           <p>Материалы: {item.materials.length?item.materials.map(m=>
              m.kind+' '+m.skuId+' ×'+m.quantity).join(' · '):'не требуются'}.</p>
           {item.status==='WAITING_FOR_STAFF'&&

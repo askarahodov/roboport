@@ -375,6 +375,59 @@ def _request(conn,ident,receipt,*,lock=False):
     return row
 
 
+
+
+def _current_public_booking(conn,request_id,appointment_id):
+    """Читает фактическое последнее бронирование для неизменяемой заявки.
+
+    Исторический fulfillment не означает, что исходный пост/интервал
+    ещё занят. При разрыве связи с исходным филиалом или документом
+    нельзя возвращать ложный статус BOOKED.
+    """
+    row=conn.execute("""
+      SELECT a.booking_id,latest.booking_id,b.starts_at,b.ends_at,b.canceled_at,
+             bay.code,loc.timezone_name
+      FROM auto_public_booking_fulfillment f
+      JOIN auto_public_booking_request req ON req.id=f.request_id
+      JOIN auto_public_booking_offer offer ON offer.id=req.offer_id
+      JOIN auto_appointment a ON a.id=f.appointment_id
+        AND a.id=%s AND a.organization_id=offer.organization_id
+        AND a.location_id=offer.location_id
+      JOIN auto_public_booking_claim claim ON claim.request_id=req.id
+        AND claim.customer_link_id=a.customer_link_id
+      JOIN LATERAL (
+        SELECT COALESCE((
+          SELECT reschedule.new_booking_id
+          FROM auto_appointment_reschedule reschedule
+          WHERE reschedule.appointment_id=a.id
+          ORDER BY reschedule.created_at DESC,reschedule.id DESC LIMIT 1
+        ),a.booking_id) AS booking_id
+      ) latest ON TRUE
+      JOIN auto_bay_booking b ON b.id=latest.booking_id
+        AND b.organization_id=a.organization_id
+        AND b.location_id=a.location_id
+      JOIN auto_work_bay bay ON bay.id=b.bay_id
+        AND bay.organization_id=a.organization_id
+        AND bay.location_id=a.location_id
+      JOIN auto_service_location loc ON loc.id=a.location_id
+        AND loc.organization_id=a.organization_id
+      WHERE f.request_id=%s
+    """,(appointment_id,request_id)).fetchone()
+    if row is None:
+        raise PublicBookingConflict("BOOKING_INTEGRITY")
+    original,latest,start,end,canceled,bay_code,zone=row
+    # Отмена имеет приоритет над предыдущим переносом. Исходная заявка
+    # и fulfillment остаются неизменяемыми для технического аудита.
+    return {
+      "status":"CANCELED" if canceled is not None else
+               "RESCHEDULED" if latest!=original else "BOOKED",
+      "currentStartsAt":start.isoformat(),
+      "currentEndsAt":end.isoformat(),
+      "currentBayCode":bay_code,"timeZone":zone,
+      "noSlotHold":canceled is not None,
+    }
+
+
 def _status(conn,req):
     claim=conn.execute("SELECT 1 FROM auto_public_booking_claim WHERE request_id=%s",(req[0],)).fetchone()
     filled=conn.execute("""SELECT appointment_id,work_order_id FROM auto_public_booking_fulfillment
@@ -383,13 +436,19 @@ def _status(conn,req):
                              WHERE request_id=%s""",(req[0],)).fetchone()
     revoked=conn.execute("""SELECT 1 FROM auto_public_booking_offer_revoke
                             WHERE offer_id=%s""",(req[1],)).fetchone()
-    return {"syntheticOnly":True,"realDelivery":False,"noSlotHold":filled is None,
-            "requestId":str(req[0]),"status":"BOOKED" if filled else
+    booking=_current_public_booking(conn,req[0],filled[0]) if filled else None
+    return {"syntheticOnly":True,"realDelivery":False,
+            "noSlotHold":booking["noSlotHold"] if booking else True,
+            "requestId":str(req[0]),"status":booking["status"] if booking else
                  "OFFER_WITHDRAWN" if revoked else
                  "WAITING_FOR_STAFF" if claim else "AWAITING_VERIFICATION",
             "marketingEnabled":bool(req[4]) and not bool(withdrew),
             "appointmentId":str(filled[0]) if filled else None,
-            "workOrderId":str(filled[1]) if filled else None}
+            "workOrderId":str(filled[1]) if filled else None,
+            "currentStartsAt":booking["currentStartsAt"] if booking else None,
+            "currentEndsAt":booking["currentEndsAt"] if booking else None,
+            "currentBayCode":booking["currentBayCode"] if booking else None,
+            "timeZone":booking["timeZone"] if booking else None}
 
 
 def status(conn,ident,receipt):
@@ -487,15 +546,25 @@ def staff_queue(conn,token,org,loc,*,page=0):
         """,(org,loc,page*50)).fetchall()
         has_more=len(rows)>50
         rows=rows[:50]
-        return {"syntheticOnly":True,"page":page,"hasMore":has_more,"items":[{
-          "requestId":str(req),"offerId":str(offer),"startsAt":start.isoformat(),
-          "endsAt":end.isoformat(),"createdAt":created.isoformat(),
-          "status":"BOOKED" if appointment else "OFFER_WITHDRAWN" if revoked else
-              "WAITING_FOR_STAFF" if claimed else "AWAITING_VERIFICATION",
-          "appointmentId":str(appointment) if appointment else None,
-          "materials":[{"skuId":str(sku),"kind":kind,"quantity":qty}
-              for sku,kind,qty in _materials(conn,offer)]
-        } for req,offer,start,end,created,claimed,appointment,revoked in rows]}
+        items=[]
+        for req,offer,start,end,created,claimed,appointment,revoked in rows:
+            booking=_current_public_booking(conn,req,appointment) if appointment else None
+            items.append({
+              "requestId":str(req),"offerId":str(offer),
+              "startsAt":start.isoformat(),"endsAt":end.isoformat(),
+              "createdAt":created.isoformat(),
+              "status":booking["status"] if booking else
+                "OFFER_WITHDRAWN" if revoked else
+                "WAITING_FOR_STAFF" if claimed else "AWAITING_VERIFICATION",
+              "appointmentId":str(appointment) if appointment else None,
+              "currentStartsAt":booking["currentStartsAt"] if booking else None,
+              "currentEndsAt":booking["currentEndsAt"] if booking else None,
+              "currentBayCode":booking["currentBayCode"] if booking else None,
+              "timeZone":booking["timeZone"] if booking else None,
+              "materials":[{"skuId":str(sku),"kind":kind,"quantity":qty}
+                  for sku,kind,qty in _materials(conn,offer)],
+            })
+        return {"syntheticOnly":True,"page":page,"hasMore":has_more,"items":items}
 
 
 def fulfill_request(conn,token,org,loc,ident,key):
@@ -547,6 +616,10 @@ def fulfill_request(conn,token,org,loc,ident,key):
         if prior:
             if prior[2:]!=(actor,key):
                 raise PublicBookingConflict("ALREADY_FULFILLED")
+            # Повтор исторического ключа не означает, что исходное время
+            # ещё зарезервировано после переноса или отмены.
+            if _current_public_booking(conn,ident,prior[0])["status"]!="BOOKED":
+                raise PublicBookingConflict("BOOKING_SUPERSEDED")
             return {"replayed":True,"syntheticOnly":True,
                     "appointmentId":str(prior[0]),"workOrderId":str(prior[1]),
                     "releaseAllowed":False}
