@@ -236,10 +236,8 @@ jobs:
           done
   browser-e2e:
     runs-on: ubuntu-latest
-    # В официальном образе уже установлены Chromium и системные библиотеки.
-    # Версия обязана совпадать с @playwright/test в apps/web/package.json.
-    container:
-      image: mcr.microsoft.com/playwright:v1.56.1-noble
+    # The hosted runner provides OpenSSL compatible with setup-python 3.13.
+    # Playwright installs its Chromium + OS dependencies for the pinned npm version.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -250,19 +248,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      # The Playwright Noble container may lack the shared OpenSSL runtime
-      # needed by the toolcache CPython _ssl extension; fail explicitly if so.
-      - name: Ensure Python 3.13 SSL runtime in Playwright container
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends libssl3t64
-          python -c "import ssl; print(ssl.OPENSSL_VERSION)"
+      - name: Verify Python TLS before installing dependencies
+        run: python -c "import ssl; print(ssl.OPENSSL_VERSION)"
       - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
       - run: python scripts/check_python_pins.py
       - working-directory: apps/web
         run: npm ci --no-audit --no-fund
+      - name: Install pinned Playwright Chromium and OS dependencies
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
       # Проверка реального запуска защищает от расхождения версий/библиотек.
-      # Не устанавливаем системные пакеты apt заново на каждом cold runner.
       - name: Verify pinned Chromium and operating system dependencies
         working-directory: apps/web
         run: |
