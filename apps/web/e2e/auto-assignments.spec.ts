@@ -296,3 +296,134 @@ test('MANAGER просматривает все 101 зависшее предл�
     expect(await page.evaluate(()=>document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(390);
   });
+
+
+test('MANAGER освобождает принятую не начатую работу, replay, 403 и mobile/desktop',
+  async({page},info)=>{
+    let released=false;
+    let denied=false;
+    let attempts=0;
+    const bodies:string[]=[];
+    const acceptedAt=new Date(Date.now()-3600000).toISOString();
+    await page.route('**/api/v1/auth/csrf',route=>
+      fulfill(route,{csrfToken:'synthetic-csrf'}));
+    await page.route(base,route=>{
+      const request=route.request();
+      if(denied)return fulfill(route,{code:'FORBIDDEN'},403);
+      if(request.method()==='GET'){
+        return fulfill(route,{
+          ...result([],true),withdrawable:[],withdrawPage:0,
+          withdrawHasMore:false,releasePage:0,releaseHasMore:false,
+          releasable:released?[]:[{
+            assignmentId:assignment,workOrderId:order,
+            mechanicId:mechanic,startsAt:start,endsAt:end,
+            acceptedAt,status:'ACCEPTED',
+          }],
+        });
+      }
+      expect(new URL(request.url()).pathname)
+        .toContain('/assignments/'+assignment+'/release');
+      expect(request.headers()['x-csrf-token']).toBe('synthetic-csrf');
+      bodies.push(request.postData()??'');
+      expect(request.postDataJSON().requestKey).toMatch(/^[0-9a-f-]{36}$/);
+      attempts++;
+      if(attempts===1){
+        released=true;
+        return route.abort('failed');
+      }
+      return fulfill(route,{ok:true,replayed:true,status:'RELEASED'});
+    });
+    await page.setViewportSize({width:390,height:844});
+    await visit(page);
+    const block=page.getByRole('region',{
+      name:'Освобождение принятых до начала работ',
+    });
+    await expect(block).toContainText(order);
+    await expect(block).toContainText('Только до начала работ');
+    const button=block.getByRole('button',{
+      name:'Освободить принятое назначение '+assignment,
+    });
+    await expect(button).toBeEnabled();
+    await page.screenshot({path:info.outputPath('accepted-release-390-light.png'),
+      fullPage:true,animations:'disabled'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(390);
+    await button.focus();await page.keyboard.press('Enter');
+    await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toBeVisible();
+    await expect(block).toHaveCount(0);
+    await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
+    await expect(block.getByText('Принятых назначений без начала работ на этой странице нет.'))
+      .toBeVisible();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toBe(bodies[1]);
+
+    await page.setViewportSize({width:1280,height:900});
+    await page.getByRole('combobox',{name:'Тема оформления'})
+      .selectOption('dark');
+    await expect(page.locator('main.app.dark')).toBeVisible();
+    await page.screenshot({path:info.outputPath('accepted-release-1280-dark.png'),
+      fullPage:true,animations:'disabled'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(1280);
+    denied=true;
+    await page.getByRole('button',{name:'Обновить назначения'}).click();
+    await expect(page.getByRole('alert')).toContainText('доступ запрещён');
+    await expect(block).toHaveCount(0);
+    await expect(page.getByRole('button',{
+      name:'Освободить принятое назначение '+assignment,
+    })).toHaveCount(0);
+  });
+
+test('101 не начатое ACCEPTED постранично доступны менеджеру, не механику',
+  async({page},info)=>{
+    const acceptedAt=new Date(Date.now()-3600000).toISOString();
+    const all=Array.from({length:101},(_,i)=>({
+      assignmentId:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+      workOrderId:order,mechanicId:mechanic,
+      startsAt:start,endsAt:end,acceptedAt,status:'ACCEPTED' as const,
+    }));
+    let manager=true;
+    const queried:number[]=[];
+    await page.route(base,route=>{
+      const url=new URL(route.request().url());
+      expect(route.request().method()).toBe('GET');
+      const offset=Number(url.searchParams.get('releasePage')??0);
+      queried.push(offset);
+      return fulfill(route,{
+        ...result([],manager),activeQueueLimited:manager,
+        withdrawable:[],withdrawPage:0,withdrawHasMore:false,
+        releasePage:offset,releaseHasMore:manager&&(offset+1)*50<all.length,
+        releasable:manager?all.slice(offset*50,offset*50+50):[],
+      });
+    });
+    await page.setViewportSize({width:390,height:844});
+    await visit(page);
+    const block=page.getByRole('region',{
+      name:'Освобождение принятых до начала работ',
+    });
+    await expect(block.getByRole('row')).toHaveCount(51);
+    await expect(page.getByRole('alert')).toContainText('Более 100 действующих назначений');
+    await expect(page.getByLabel('Текущая очередь назначений'))
+      .not.toContainText('Для ваших прав действующих назначений нет.');
+    await page.getByRole('button',{name:'Следующие принятые назначения'}).click();
+    await expect(block.getByRole('row')).toHaveCount(51);
+    await expect(block.getByText('Страница принятых назначений: 2.')).toBeVisible();
+    await page.getByRole('button',{name:'Следующие принятые назначения'}).click();
+    await expect(block.getByRole('row')).toHaveCount(2);
+    await expect(block.getByText('Страница принятых назначений: 3.')).toBeVisible();
+    await expect(page.getByRole('button',{name:'Следующие принятые назначения'}))
+      .toHaveCount(0);
+    await page.screenshot({path:info.outputPath('accepted-release-390-page3.png'),
+      fullPage:true,animations:'disabled'});
+    await page.getByRole('button',{name:'Предыдущая страница освобождения'}).click();
+    await expect(block.getByText('Страница принятых назначений: 2.')).toBeVisible();
+    expect(queried).toEqual(expect.arrayContaining([0,1,2]));
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(390);
+
+    manager=false;
+    await page.getByRole('button',{name:'Обновить назначения'}).click();
+    await expect(block).toHaveCount(0);
+    await expect(page.getByRole('button',{name:/Освободить принятое назначение/}))
+      .toHaveCount(0);
+  });

@@ -141,6 +141,10 @@ def respond_assignment(conn, token: str, organization_id: UUID, location_id: UUI
             """,(assignment_id,organization_id,location_id)).fetchone()
             if row is None:
                 raise AssignmentDenied("FORBIDDEN")
+            if row[0]!=action:
+                # После освобождения принятого назначения нельзя вновь
+                # представлять прежний ACCEPTED как актуальную полномочность.
+                raise AssignmentConflict("ASSIGNMENT_STATE_CHANGED")
             return {"ok":True,"replayed":True,"status":row[0]}
         row=conn.execute("""
           SELECT mechanic_id,status,work_order_id,starts_at,ends_at
@@ -402,3 +406,138 @@ def withdraw_assignment(conn, token: str, organization_id: UUID,
                 psycopg.errors.CheckViolation):
             raise AssignmentConflict("ASSIGNMENT_WITHDRAW_CONFLICT") from None
         return {"ok":True,"replayed":False,"status":"WITHDRAWN"}
+
+
+def _unstarted_assignment(conn, work_order_id: UUID) -> bool:
+    """Отсутствует какое-либо техническое исполнение/выдача/QC.
+
+    Блокировка WorkOrder выполняется вызывающим mutation-кодом; прямой
+    SQL-триггер обеспечивает такой же guard независимо от этого кода.
+    """
+    return conn.execute("""
+        SELECT NOT (
+          EXISTS(SELECT 1 FROM auto_work_order_execution
+                 WHERE work_order_id=%s)
+          OR EXISTS(SELECT 1 FROM auto_stock_lot_work_order_issue
+                    WHERE work_order_id=%s)
+          OR EXISTS(SELECT 1 FROM auto_work_order_stock_event
+                    WHERE work_order_id=%s AND action='ISSUE')
+          OR EXISTS(SELECT 1 FROM auto_work_order_qc_event
+                    WHERE work_order_id=%s)
+        )
+    """,(work_order_id,)*4).fetchone()[0]
+
+
+def list_releasable_accepted(conn, token: str, organization_id: UUID,
+                             location_id: UUID, *, page: int=0) -> dict:
+    """Только MANAGER: принятые, но не начатые назначения своего филиала.
+
+    Смена/MECHANIC grant могут быть потеряны — это не должно запирать
+    собственное право менеджера безопасно освободить заказ-наряд.
+    """
+    if (type(token) is not str or not token
+        or type(organization_id) is not UUID or type(location_id) is not UUID):
+        raise AssignmentDenied("FORBIDDEN")
+    if type(page) is not int or not 0<=page<=1000:
+        raise AssignmentDenied("INVALID_INPUT")
+    with conn.transaction():
+        if not organization_role_allows(
+            conn,token,organization_id,"MANAGER",location_id
+        ):
+            raise AssignmentDenied("FORBIDDEN")
+        rows=conn.execute("""
+          SELECT a.id,a.work_order_id,a.mechanic_id,a.starts_at,a.ends_at,
+                 a.accepted_at
+          FROM auto_work_order_assignment a
+          JOIN auto_work_order w ON w.id=a.work_order_id
+            AND w.organization_id=a.organization_id
+            AND w.location_id=a.location_id
+          WHERE a.organization_id=%s AND a.location_id=%s
+            AND a.status='ACCEPTED'
+            AND NOT EXISTS (SELECT 1 FROM auto_work_order_execution e
+                            WHERE e.work_order_id=a.work_order_id)
+            AND NOT EXISTS (SELECT 1 FROM auto_stock_lot_work_order_issue i
+                            WHERE i.work_order_id=a.work_order_id)
+            AND NOT EXISTS (SELECT 1 FROM auto_work_order_stock_event se
+                            WHERE se.work_order_id=a.work_order_id
+                              AND se.action='ISSUE')
+            AND NOT EXISTS (SELECT 1 FROM auto_work_order_qc_event q
+                            WHERE q.work_order_id=a.work_order_id)
+          ORDER BY a.created_at DESC,a.id DESC LIMIT 51 OFFSET %s
+        """,(organization_id,location_id,page*50)).fetchall()
+        return {
+            "page":page,"hasMore":len(rows)>50,
+            "items":[{
+                "assignmentId":str(ident),"workOrderId":str(order),
+                "mechanicId":str(mechanic),"startsAt":start.isoformat(),
+                "endsAt":end.isoformat(),"status":"ACCEPTED",
+                "acceptedAt":accepted.isoformat(),
+            } for ident,order,mechanic,start,end,accepted in rows[:50]],
+        }
+
+
+def release_accepted_assignment(conn, token: str, organization_id: UUID,
+                                location_id: UUID, assignment_id: UUID,
+                                request_key: UUID) -> dict:
+    """Снять только чистое ACCEPTED; действительное исполнение неизменно.
+
+    Live MANAGER + WorkOrder lock сериализуют это действие со стартом
+    исполнения, выдачей материалов и QC. AcceptedAt сохраняется.
+    """
+    if (type(token) is not str or not token or
+        any(type(v) is not UUID for v in
+            (organization_id,location_id,assignment_id,request_key))):
+        raise AssignmentDenied("INVALID_INPUT")
+    with conn.transaction():
+        actor=session_subject(conn,token,for_mutation=True)
+        if actor is None or not organization_role_allows(
+            conn,token,organization_id,"MANAGER",location_id,for_mutation=True
+        ):
+            raise AssignmentDenied("FORBIDDEN")
+        parent=conn.execute("""
+          SELECT a.work_order_id FROM auto_work_order_assignment a
+          JOIN auto_work_order w ON w.id=a.work_order_id
+            AND w.organization_id=a.organization_id
+            AND w.location_id=a.location_id
+          WHERE a.id=%s AND a.organization_id=%s AND a.location_id=%s
+        """,(assignment_id,organization_id,location_id)).fetchone()
+        if parent is None:
+            raise AssignmentDenied("FORBIDDEN")
+        conn.execute("SELECT id FROM auto_work_order WHERE id=%s FOR UPDATE",
+                     (parent[0],)).fetchone()
+        row=conn.execute("""
+          SELECT status,accepted_at FROM auto_work_order_assignment
+          WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE
+        """,(assignment_id,organization_id,location_id)).fetchone()
+        if row is None:
+            raise AssignmentDenied("FORBIDDEN")
+        prior=conn.execute("""
+          SELECT assignment_id,actor_id,action
+          FROM auto_work_order_assignment_event WHERE request_key=%s
+        """,(request_key,)).fetchone()
+        if prior:
+            if prior!=(assignment_id,actor,"RELEASED"):
+                raise AssignmentConflict("KEY_REUSED")
+            if row[0]!="RELEASED":
+                raise AssignmentConflict("ASSIGNMENT_STATE_CHANGED")
+            return {"ok":True,"replayed":True,"status":"RELEASED"}
+        if row[0]!="ACCEPTED":
+            raise AssignmentConflict("ASSIGNMENT_NOT_ACCEPTED")
+        if not _unstarted_assignment(conn,parent[0]):
+            raise AssignmentConflict("WORK_ALREADY_STARTED")
+        try:
+            with conn.transaction():
+                conn.execute("""
+                  UPDATE auto_work_order_assignment SET
+                    status='RELEASED',status_actor_id=%s
+                  WHERE id=%s
+                """,(actor,assignment_id))
+                conn.execute("""
+                  INSERT INTO auto_work_order_assignment_event
+                    (id,assignment_id,actor_id,action,request_key)
+                  VALUES(%s,%s,%s,'RELEASED',%s)
+                """,(uuid4(),assignment_id,actor,request_key))
+        except (psycopg.errors.UniqueViolation,psycopg.errors.RaiseException,
+                psycopg.errors.CheckViolation):
+            raise AssignmentConflict("ASSIGNMENT_RELEASE_CONFLICT") from None
+        return {"ok":True,"replayed":False,"status":"RELEASED"}

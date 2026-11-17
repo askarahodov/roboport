@@ -139,6 +139,18 @@ def start_execution(conn,token,org,loc,order,request_key):
         """,(order,)).fetchone()
         if not revision:
             raise ExecutionConflict("APPROVAL_REQUIRED")
+        # Историческое освобождение ACCEPTED требует нового принятия
+        # перед стартом. Сам WorkOrder уже заблокирован _scope, а SQL
+        # trigger защищает и прямой INSERT без данного API.
+        if conn.execute("""SELECT 1 FROM auto_work_order_assignment
+            WHERE work_order_id=%s AND status='RELEASED' LIMIT 1""",
+            (order,)).fetchone():
+            latest=conn.execute("""SELECT status FROM auto_work_order_assignment
+                WHERE work_order_id=%s
+                ORDER BY created_at DESC,id DESC LIMIT 1""",
+                (order,)).fetchone()
+            if latest is None or latest[0]!="ACCEPTED":
+                raise ExecutionConflict("ASSIGNMENT_NOT_ACCEPTED")
         conn.execute("""
           INSERT INTO auto_work_order_execution
           (id,work_order_id,revision_id,organization_id,location_id,actor_id,request_key)
