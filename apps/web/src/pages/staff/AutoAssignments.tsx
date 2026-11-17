@@ -11,9 +11,14 @@ type Assignment = {
   startsAt:string;endsAt:string;status:'OFFERED'|'ACCEPTED';
   acceptedAt:string|null;canRespond:boolean;
 };
+type Withdrawable = {
+  assignmentId:string;workOrderId:string;mechanicId:string;
+  startsAt:string;endsAt:string;status:'OFFERED';
+};
 type Queue = {
   syntheticOnly:true;releaseAllowed:false;canOffer:boolean;
   organizationId:string;locationId:string;items:Assignment[];
+  withdrawable?:Withdrawable[];
 };
 type Pending = {path:string;body:string;label:string};
 
@@ -40,6 +45,23 @@ function parseQueue(raw:unknown,expectedOrg:string,expectedLoc:string):Queue {
        (a.status==='ACCEPTED'&&a.canRespond)||
        ids.has(String(a.assignmentId)))throw Error('contract');
     ids.add(String(a.assignmentId));
+  }
+  // Старые синтетические UI-фикстуры могли не включать очередь отзыва.
+  // Живой сервер возвращает её отдельно от активной очереди механика.
+  if(r.withdrawable!==undefined){
+    if(!Array.isArray(r.withdrawable)||r.withdrawable.length>100||
+       (!r.canOffer&&r.withdrawable.length>0))throw Error('contract');
+    const pendingIds=new Set<string>();
+    for(const item of r.withdrawable){
+      if(!item||typeof item!=='object')throw Error('contract');
+      const a=item as Record<string,unknown>;
+      if(![a.assignmentId,a.workOrderId,a.mechanicId].every(v=>
+          typeof v==='string'&&uuid.test(v))||
+         !isStamp(a.startsAt)||!isStamp(a.endsAt)||
+         a.status!=='OFFERED'||pendingIds.has(String(a.assignmentId)))
+        throw Error('contract');
+      pendingIds.add(String(a.assignmentId));
+    }
   }
   return raw as Queue;
 }
@@ -133,6 +155,14 @@ export function AutoAssignments(){
       label:action==='accept'?'Принятие назначения':'Отклонение назначения',
     });
   }
+  function withdraw(a:Withdrawable){
+    if(!canMutate||!queue?.canOffer||a.status!=='OFFERED')return;
+    void send({
+      path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/withdraw',
+      body:JSON.stringify({requestKey:crypto.randomUUID()}),
+      label:'Отзыв предложения',
+    });
+  }
   async function send(task:Pending){
     if(!valid||busy||(pending!==null&&pending!==task))return;
     const controller=new AbortController();mutation.current=controller;
@@ -192,7 +222,9 @@ export function AutoAssignments(){
       в рамках действующей смены, механик принимает или отклоняет
       <strong> только своё</strong> предложение. Текущие записи фильтруются
       сервером по роли, филиалу, проверенному автомобилю, текущей брони
-      и активной смене. Не является разрешением на ремонт, QC или выдачу.</p>
+      и активной смене. Менеджер отдельно видит все незавершённые предложения,
+      даже если исполнитель потерял смену/права, и может их безопасно отозвать.
+      Не является разрешением на ремонт, QC или выдачу.</p>
     <div style={{display:'flex',flexWrap:'wrap',gap:'1rem',alignItems:'end'}}>
       <label>UUID организации <input aria-label="UUID организации" style={inputStyle}
         value={org} disabled={busy}
@@ -242,6 +274,31 @@ export function AutoAssignments(){
       {(starts!==''||ends!=='')&&offerWindow===null&&
         <p>Нужны будущие ISO-даты со смещением и интервал не более 24 часов.</p>}
     </fieldset>}
+    {ready&&queue.canOffer&&<section aria-label="Отзыв незавершённых предложений">
+      <h2>Незавершённые предложения для отзыва (MANAGER)</h2>
+      <p>Показаны и предложения, которые исчезли из рабочей очереди после
+        отмены смены, отзыва прав механика или связи автомобиля.
+        Снять можно только статус «Ожидает ответа». Уже принятые
+        назначения не отменяются этой операцией.</p>
+      {(queue.withdrawable??[]).length===0?
+        <p>Непринятых предложений нет.</p>:
+        <div style={{maxWidth:'100%',overflowX:'auto'}}>
+          <table>
+            <caption>Непринятые предложения филиала</caption>
+            <thead><tr><th scope="col">Заказ-наряд</th>
+              <th scope="col">Механик</th><th scope="col">Интервал</th>
+              <th scope="col">Действие</th></tr></thead>
+            <tbody>{(queue.withdrawable??[]).map(a=><tr key={a.assignmentId}>
+              <th scope="row">{a.workOrderId}</th>
+              <td>{a.mechanicId}</td>
+              <td>{formatDate(a.startsAt)} — {formatDate(a.endsAt)}</td>
+              <td><button type="button" disabled={!canMutate}
+                aria-label={'Отозвать предложение '+a.assignmentId}
+                onClick={()=>withdraw(a)}>Отозвать предложение</button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+    </section>}
     {ready&&<section aria-label="Текущая очередь назначений">
       <h2>Действующие предложения и принятые задания</h2>
       <p>В списке нет отменённых, неподтверждённых и потерявших действующую
