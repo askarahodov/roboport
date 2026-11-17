@@ -222,7 +222,7 @@ test('MANAGER отзывает застрявший OFFERED, повторяет 
     await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toBeVisible();
     await expect(block).toHaveCount(0);
     await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
-    await expect(block.getByText('Непринятых предложений нет.')).toBeVisible();
+    await expect(block.getByText('Непринятых предложений на этой странице нет.')).toBeVisible();
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toBe(bodies[1]);
 
@@ -252,3 +252,47 @@ test('MECHANIC не получает список чужих предложен�
   await expect(page.getByRole('button',{name:'Отозвать предложение '+assignment}))
     .toHaveCount(0);
 });
+
+
+test('MANAGER просматривает все 101 зависшее предложение постранично без 409',
+  async({page},testInfo)=>{
+    const all=Array.from({length:101},(_,i)=>({
+      assignmentId:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+      workOrderId:order,mechanicId:mechanic,
+      startsAt:start,endsAt:end,status:'OFFERED' as const,
+    }));
+    const queried:number[]=[];
+    await page.route(base,route=>{
+      const url=new URL(route.request().url());
+      expect(route.request().method()).toBe('GET');
+      const offset=Number(url.searchParams.get('withdrawPage')??0);
+      queried.push(offset);
+      return fulfill(route,{
+        ...result([],true),withdrawPage:offset,
+        withdrawable:all.slice(offset*50,offset*50+50),
+        withdrawHasMore:(offset+1)*50<all.length,
+      });
+    });
+    await page.setViewportSize({width:390,height:844});
+    await visit(page);
+    const block=page.getByRole('region',{name:'Отзыв незавершённых предложений'});
+    await expect(block.getByRole('row')).toHaveCount(51);
+    await expect(block.getByText('Страница отзыва: 1.')).toBeVisible();
+    await page.getByRole('button',{name:'Следующие предложения для отзыва'}).click();
+    await expect(block.getByRole('row')).toHaveCount(51);
+    await expect(block.getByText('Страница отзыва: 2.')).toBeVisible();
+    await page.getByRole('button',{name:'Следующие предложения для отзыва'}).click();
+    await expect(block.getByRole('row')).toHaveCount(2);
+    await expect(block.getByText('Страница отзыва: 3.')).toBeVisible();
+    await expect(page.getByRole('button',{name:'Следующие предложения для отзыва'}))
+      .toHaveCount(0);
+    await page.screenshot({path:testInfo.outputPath('withdraw-390-page3.png'),
+      fullPage:true,animations:'disabled'});
+    await page.getByRole('button',{name:'Предыдущая страница отзыва'}).click();
+    await expect(block.getByText('Страница отзыва: 2.')).toBeVisible();
+    expect(queried).toContain(0);
+    expect(queried).toContain(1);
+    expect(queried).toContain(2);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(390);
+  });
