@@ -272,9 +272,15 @@ test('ADMIN просматривает 120 immutable событий через �
     expect(cursors.at(-1)).toBeNull();
   });
 
-test('ADMIN теряет права на следующей странице: история, действия и preview очищаются',
+test('ADMIN теряет права на следующей странице: история и действия очищаются',
   async({page})=>{
     let revoked=false;
+    const records=Array.from({length:51},(_,i)=>({
+      eventId:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+      role:'MANAGER',userId:user,locationId:loc,documentKind:'ESTIMATE',
+      capability:'READ',allowed:false,notBefore:null,
+      actorId:user,createdAt:new Date(Date.UTC(2030,0,1)-i*1000).toISOString(),
+    }));
     await page.route('**/api/v1/dev/auto/organizations/**',route=>{
       const req=route.request(),url=new URL(req.url());
       if(url.pathname.endsWith('/staff'))return route.fulfill({
@@ -283,6 +289,31 @@ test('ADMIN теряет права на следующей странице: и
         status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
       if(url.pathname===base)return route.fulfill({
         status:200,contentType:'application/json',body:JSON.stringify({
+          syntheticOnly:true,items:records.slice(0,50),
+          nextBefore:records[49].eventId,
+        })});
+      throw Error('Unexpected '+url.pathname);
+    });
+    await page.goto('/staff/auto-admin');
+    await page.getByLabel('UUID организации').fill(org);
+    await page.getByRole('button',{name:'Показать ограничения документов'}).click();
+    await expect(page.getByText('DENY',{exact:true})).toHaveCount(50);
+    revoked=true;
+    await page.getByRole('button',{name:'Более ранние правила'}).click();
+    await expect(page.getByRole('alert')).toContainText('403');
+    await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Сохранить правило'})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Более ранние правила'})).toHaveCount(0);
+  });
+
+test('повреждённый nextBefore без полной страницы не отображает исторические правила',
+  async({page})=>{
+    await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+      const path=new URL(route.request().url()).pathname;
+      if(path.endsWith('/staff'))return route.fulfill({
+        status:200,contentType:'application/json',body:'{"items":[]}'});
+      if(path===base)return route.fulfill({
+        status:200,contentType:'application/json',body:JSON.stringify({
           syntheticOnly:true,items:[{
             eventId:'00000000-0000-4000-8000-000000000001',
             role:'MANAGER',userId:user,locationId:loc,documentKind:'ESTIMATE',
@@ -290,18 +321,11 @@ test('ADMIN теряет права на следующей странице: и
             actorId:user,createdAt:'2030-01-01T10:00:00Z',
           }],nextBefore:'00000000-0000-4000-8000-000000000001',
         })});
-      throw Error('Unexpected '+url.pathname);
+      throw Error('Unexpected '+path);
     });
     await page.goto('/staff/auto-admin');
     await page.getByLabel('UUID организации').fill(org);
     await page.getByRole('button',{name:'Показать ограничения документов'}).click();
-    await expect(page.getByText('DENY',{exact:true})).toBeVisible();
-    // Нарушенный контракт (nextBefore с <50 записей) должен быть
-    // отклонён UI, а не показан как подтверждённая история.
     await expect(page.getByRole('alert')).toContainText('Ошибка загрузки');
-    revoked=true;
-    await page.getByRole('button',{name:'Показать ограничения документов'}).click();
-    await expect(page.getByRole('alert')).toContainText('403');
     await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
-    await expect(page.getByRole('button',{name:'Сохранить правило'})).toHaveCount(0);
   });
