@@ -245,3 +245,17 @@ rollback — revert теста, без затрагивания данных.
 отсутствие кнопки повторного оформления,
 изолированный 403 и отсутствие горизонтального overflow.
 Не являются утверждёнными golden baselines (#92/#76).
+
+
+## Архив закрытого технического заказ-наряда — кандидаты #441
+
+`apps/web/e2e/auto-demo-close.spec.ts` создаёт
+`dossier-390-staff.png` и `dossier-1280-client.png`:
+только синтетический `CLOSED_TECHNICAL`, проверка
+скачивания ZIP, отказ скачивания до закрытия и удаление
+старого пакета по 403. Реальную целостность ZIP проверяет
+отдельный PG17/HTTPS тест
+`tests/integration/test_pg_auto_technical_dossier_http.py`.
+Скриншоты — **candidate evidence**, не подписанные
+golden baselines/независимая visual QA (#92/#76);
+клиентских ФИО, VIN или реальных платежей нет.

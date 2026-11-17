@@ -21,14 +21,14 @@ from roboport_api.auto_demo_close import simulate_cash,seal_handover_preview
 from roboport_api.auto_document_lifecycle import (
     record_document_event,DocumentLifecycleConflict,
 )
-from test_pg_auto_intake_act_http import custody
+from test_pg_auto_intake_act_http import custody,synthetic_png
 from test_pg_auto_work_order_estimate_http import scenario as estimate_scenario
 from test_pg_auto_work_order_execution_http import session,post
 from test_pg_auto_stock_service import grant
 from test_pg_baseline import DSN
 
 
-def ready(monkeypatch):
+def ready(monkeypatch,*,with_photo=False):
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
@@ -44,7 +44,8 @@ def ready(monkeypatch):
         intake=write_intake_act(
             db,d["tokens"][d["intake"]],org,loc,order,
             request_key=uuid4(),expected_version=0,
-            act=custody(None,damaged=False))["items"][-1]
+            act=custody(synthetic_png() if with_photo else None,
+                        damaged=False))["items"][-1]
         reviewed=review_intake_act(
             db,d["tokens"][d["client_a"]],org,loc,order,UUID(intake["id"]),
             request_key=uuid4(),fingerprint=intake["sha256"],
