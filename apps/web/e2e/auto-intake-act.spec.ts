@@ -29,6 +29,12 @@ test('intake → damage + custody + photo → immutable version → client previ
         id:inspectorId,odometerKm:75000,fuelPercent:42,tyresOk:true,
         lightsOk:false,fluidLeak:false,exteriorCode:'DAMAGE',
         createdAt:'2030-01-01T10:00:00Z'},qcEvents:[],reworks:[]})});
+    if(path.endsWith('/evidence.zip')){
+      expect(req.method()).toBe('GET');
+      return route.fulfill({status:200,contentType:'application/zip',
+        body:Buffer.from('PK\\x03\\x04synthetic-archive','binary'),
+        headers:{'Cache-Control':'no-store, private'}});
+    }
     if(path.match(/\/photos\/1$/)){
       return route.fulfill({status:200,contentType:'image/png',body:png??Buffer.alloc(0),
         headers:{'Cache-Control':'no-store'}});
@@ -91,6 +97,13 @@ test('intake → damage + custody + photo → immutable version → client previ
   await expect(page.getByText('Ключи: Есть').first()).toBeVisible();
   await expect(page.getByRole('img',{name:'Фото акта 1: Перед'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Печатать выбранную версию'})).toBeVisible();
+  const exportPending=page.waitForEvent('download');
+  await page.getByRole('button',{
+    name:'Скачать проверяемый архив версии №1 (ZIP)',
+  }).click();
+  const file=await exportPending;
+  expect(file.suggestedFilename()).toBe('intake-act-'+actId+'.zip');
+
   expect(events).toEqual(['act']);
   expect(reads).toBeGreaterThanOrEqual(2);
   await page.setViewportSize({width:1280,height:800});
@@ -102,6 +115,9 @@ test('intake → damage + custody + photo → immutable version → client previ
   await expect(page.getByRole('heading',{name:'Акт №1 · PASSENGER'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Зафиксировать версию акта'})).toHaveCount(0);
   await expect(page.getByRole('img',{name:'Фото акта 1: Перед'})).toBeVisible();
+  await expect(page.getByRole('button',{
+    name:'Скачать проверяемый архив версии №1 (ZIP)',
+  })).toBeVisible();
 });
 
 test('customer hides all act and photo evidence after revoked order scope',async({page})=>{

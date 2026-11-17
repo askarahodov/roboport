@@ -8,7 +8,7 @@ from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auto_intake_act import (
     IntakeActDenied,IntakeActInvalid,IntakeActConflict,read_intake_acts,
-    write_intake_act,read_act_photo,review_intake_act,
+    write_intake_act,read_act_photo,review_intake_act,export_intake_act_evidence,
 )
 
 router=APIRouter(include_in_schema=False)
@@ -139,6 +139,33 @@ def photo(org_id:str,loc_id:str,order_id:str,act_id:str,index:str,request:Reques
         "X-Content-Type-Options":"nosniff",
         "Content-Security-Policy":"sandbox",
         "Cross-Origin-Resource-Policy":"same-origin",
+    })
+
+
+
+
+@router.get(PATH+"/{act_id}/evidence.zip")
+def download_evidence(org_id:str,loc_id:str,order_id:str,act_id:str,request:Request):
+    scope=_scope(request,org_id,loc_id,order_id)
+    if isinstance(scope,JSONResponse):
+        return scope
+    dsn,org,loc,order=scope
+    try:
+        ident=UUID(act_id)
+    except (TypeError,ValueError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as conn:
+        try:
+            archive=export_intake_act_evidence(
+                conn,request.cookies.get("rp_session",""),org,loc,order,ident)
+        except (IntakeActDenied,IntakeActInvalid,IntakeActConflict) as error:
+            return _err(request,error)
+    return Response(content=archive,media_type="application/zip",headers={
+        "Cache-Control":"no-store, private",
+        "X-Content-Type-Options":"nosniff",
+        "Content-Security-Policy":"sandbox",
+        "Cross-Origin-Resource-Policy":"same-origin",
+        "Content-Disposition":f'attachment; filename="intake-act-{ident}.zip"',
     })
 
 

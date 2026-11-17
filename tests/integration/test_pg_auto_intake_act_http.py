@@ -5,6 +5,9 @@ from threading import Barrier
 import base64
 import binascii
 import hashlib
+import io
+import json
+from zipfile import ZipFile
 import struct
 import zlib
 from uuid import UUID,uuid4
@@ -141,6 +144,32 @@ def test_private_intake_photos_versions_client_scope_replay_and_qc_lock(monkeypa
     assert read.headers["x-content-type-options"]=="nosniff"
     assert http.get(photo_url.replace(str(order),str(uuid4()))).status_code==403
     assert http.get(photo_url.rsplit("/",1)[0]+"/4").status_code==422
+
+    archive_url=path+"/"+result["items"][0]["id"]+"/evidence.zip"
+    download=http.get(archive_url)
+    assert download.status_code==200
+    assert download.headers["content-type"]=="application/zip"
+    assert download.headers["cache-control"]=="no-store, private"
+    assert download.headers["x-content-type-options"]=="nosniff"
+    assert 'attachment;' in download.headers["content-disposition"]
+    with ZipFile(io.BytesIO(download.content)) as exported:
+        assert exported.namelist()==["manifest.json","photos/1.png"]
+        manifest=json.loads(exported.read("manifest.json"))
+        assert manifest["syntheticOnly"] is True
+        assert manifest["releaseAllowed"] is False
+        assert manifest["legalSignatureStatus"]=="NOT_IMPLEMENTED"
+        assert manifest["act"]["id"]==result["items"][0]["id"]
+        assert manifest["act"]["sha256"]==result["items"][0]["sha256"]
+        assert manifest["inspection"]["id"]==result["inspection"]["id"]
+        assert manifest["files"][0]["sha256"]==photo["sha256"]
+        assert hashlib.sha256(exported.read("photos/1.png")).hexdigest()==photo["sha256"]
+        assert exported.read("photos/1.png")==clean
+        assert "secret EXIF" not in str(manifest)
+    assert http.get(path+"/"+str(uuid4())+"/evidence.zip").status_code==403
+    assert http.get(archive_url.replace(str(loc),str(foreign_loc))).status_code==403
+    assert http.get(path+"/invalid/evidence.zip").status_code==422
+    assert http.get(archive_url).content==download.content
+
     replay=publish(http,staff,path,act,key)
     assert replay.status_code==200 and replay.json()["replayed"] is True
     assert replay.json()["items"]==result["items"]
@@ -183,10 +212,12 @@ def test_private_intake_photos_versions_client_scope_replay_and_qc_lock(monkeypa
     assert client_read.status_code==200,client_read.text
     assert client_read.json()["items"][0]["damages"]==act["damages"]
     assert http.get(photo_url).content==clean
+    assert http.get(archive_url).status_code==200
     assert publish(http,{},path,act).status_code==403
     token_as(http,d,d["client_b"])
     assert http.get(path).status_code==403
     assert http.get(photo_url).status_code==403
+    assert http.get(archive_url).status_code==403
     with psycopg.connect(DSN) as db:
         db.execute("""UPDATE auto_vehicle_customer_link
             SET verified_at=now(),verified_by=%s WHERE id=%s""",
