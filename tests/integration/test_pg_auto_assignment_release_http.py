@@ -16,6 +16,7 @@ from roboport_api.main import app
 from roboport_api.auto_work_order_assignment import (
     AssignmentConflict,release_accepted_assignment,respond_assignment,
 )
+import roboport_api.auto_work_order_assignment_http as assignment_routes
 from roboport_api.auto_work_order_execution import start_execution,ExecutionConflict
 from test_pg_baseline import DSN
 from test_pg_auto_assignment_withdraw_http import ready,offer,auth
@@ -44,6 +45,26 @@ def test_release_accepted_reassign_preserve_acceptance_bola_replay(monkeypatch):
     assert queue.status_code==200,queue.text
     assert queue.json()["releasable"][0]["assignmentId"]==ident
     assert queue.json()["releasable"][0]["status"]=="ACCEPTED"
+    assert queue.json()["activeQueueLimited"] is False
+    # Реальный route не вправе отдавать первые 100 как полный живой
+    # список при переполнении. Две независимые manager очереди при этом
+    # обязаны оставаться доступными для устранения зависших назначений.
+    original_list=assignment_routes.list_assignments
+    def overflow(*_args,**_kwargs):
+        raise AssignmentConflict("LIMIT")
+    assignment_routes.list_assignments=overflow
+    try:
+        full=http.get(root+"/assignments")
+        assert full.status_code==200,full.text
+        assert full.json()["items"]==[]
+        assert full.json()["activeQueueLimited"] is True
+        assert full.json()["releasable"][0]["assignmentId"]==ident
+        assert full.json()["withdrawable"]==[]
+        mechanic=auth(http,d,d["manager"])
+        assert http.get(root+"/assignments").status_code==409
+    finally:
+        assignment_routes.list_assignments=original_list
+    manager=auth(http,d,d["intake"])
     assert queue.json()["releasePage"]==0
     assert queue.json()["releaseHasMore"] is False
     assert queue.json()["withdrawable"]==[]
