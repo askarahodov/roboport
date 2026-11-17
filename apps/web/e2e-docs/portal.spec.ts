@@ -333,7 +333,7 @@ test('сквозное руководство доступно из Docsify, в�
   await page.locator('.sidebar-toggle').click();
   const navigation=page.locator('.sidebar-nav');
   const route=navigation.getByRole('link',{name:'Сквозной маршрут одного заказа по шести ролям'});
-  await expect(route).toHaveAttribute('href','/docs/#/guides/END_TO_END_WORKSHOP');
+  await expect(route).toHaveAttribute('href','#/guides/END_TO_END_WORKSHOP');
   await route.click();
   const article=page.locator('.markdown-section');
   await expect(article.locator('h1')).toContainText('Сквозной сценарий');
