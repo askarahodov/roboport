@@ -323,3 +323,29 @@ test('документация заказа поставщику описыва�
   await expect(body.getByRole('link',{name:/auto_supplier_purchase.py/}).first()).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+
+test('сквозное руководство доступно из Docsify, все шесть ролей связаны и dev не притворяется релизом',async({page})=>{
+  test.setTimeout(90000);
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/docs/');
+  await expect(page.locator('.markdown-section h1')).toContainText('База знаний',{timeout:25000});
+  await page.locator('.sidebar-toggle').click();
+  const navigation=page.locator('.sidebar-nav');
+  const route=navigation.getByRole('link',{name:'Сквозной маршрут одного заказа по шести ролям'});
+  await expect(route).toHaveAttribute('href','#/guides/END_TO_END_WORKSHOP');
+  await route.click();
+  const article=page.locator('.markdown-section');
+  await expect(article.locator('h1')).toContainText('Сквозной сценарий');
+  await expect(article).toContainText('Статус: current-dev');
+  await expect(article).toContainText('releaseAllowed=false');
+  await expect(article).toContainText('Ручная независимая QA (не пройдена)');
+  for(const role of ['administrator','intake','mechanic','warehouse','manager','finance']){
+    await expect(article.locator('a[href*="/guides/'+role+'"]')).toHaveCount(1);
+    await page.goto('/docs/#/guides/'+role);
+    await expect(page.locator('.markdown-section')).toContainText('Сквозной тестовый маршрут');
+    await expect(page.locator('.markdown-section a[href*="END_TO_END_WORKSHOP"]')).toBeVisible();
+    await page.goto('/docs/#/guides/END_TO_END_WORKSHOP');
+  }
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
