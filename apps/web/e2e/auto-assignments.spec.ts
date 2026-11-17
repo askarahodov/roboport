@@ -390,8 +390,8 @@ test('101 не начатое ACCEPTED постранично доступны �
       const offset=Number(url.searchParams.get('releasePage')??0);
       queried.push(offset);
       return fulfill(route,{
-        ...result([],manager),withdrawable:[],withdrawPage:0,
-        withdrawHasMore:false,
+        ...result([],manager),activeQueueLimited:manager,
+        withdrawable:[],withdrawPage:0,withdrawHasMore:false,
         releasePage:offset,releaseHasMore:manager&&(offset+1)*50<all.length,
         releasable:manager?all.slice(offset*50,offset*50+50):[],
       });
@@ -402,6 +402,9 @@ test('101 не начатое ACCEPTED постранично доступны �
       name:'Освобождение принятых до начала работ',
     });
     await expect(block.getByRole('row')).toHaveCount(51);
+    await expect(page.getByRole('alert')).toContainText('Более 100 действующих назначений');
+    await expect(page.getByLabel('Текущая очередь назначений'))
+      .not.toContainText('Для ваших прав действующих назначений нет.');
     await page.getByRole('button',{name:'Следующие принятые назначения'}).click();
     await expect(block.getByRole('row')).toHaveCount(51);
     await expect(block.getByText('Страница принятых назначений: 2.')).toBeVisible();
