@@ -22,6 +22,7 @@ type Releasable = {
 type Queue = {
   syntheticOnly:true;releaseAllowed:false;canOffer:boolean;
   organizationId:string;locationId:string;items:Assignment[];
+  activeQueueLimited?:boolean;
   withdrawable?:Withdrawable[];
   withdrawPage?:number;withdrawHasMore?:boolean;
   releasable?:Releasable[];
@@ -39,6 +40,10 @@ function parseQueue(raw:unknown,expectedOrg:string,expectedLoc:string,
     typeof r.locationId!=='string'||
     r.locationId.toLowerCase()!==expectedLoc.toLowerCase()||
     typeof r.canOffer!=='boolean'||!Array.isArray(r.items)||r.items.length>100)
+    throw Error('contract');
+  if(r.activeQueueLimited!==undefined&&
+     (typeof r.activeQueueLimited!=='boolean'||
+      (r.activeQueueLimited&&(!r.canOffer||r.items.length!==0))))
     throw Error('contract');
   const ids=new Set<string>();
   for(const x of r.items){
@@ -405,7 +410,11 @@ export function AutoAssignments(){
       <h2>Действующие предложения и принятые задания</h2>
       <p>В списке нет отменённых, неподтверждённых и потерявших действующую
         смену назначений. Список — только подсказка: ответ проверяется заново.</p>
-      {queue.items.length===0
+      {queue.activeQueueLimited===true?
+        <p role="alert">Более 100 действующих назначений: полный живой
+          список недоступен без фильтра. Отзыв и освобождение остаются
+          доступны в отдельных постраничных очередях.</p>:
+      queue.items.length===0
         ? <p>Для ваших прав действующих назначений нет.</p>
         : <div style={{maxWidth:'100%',overflowX:'auto'}}>
           <table>
