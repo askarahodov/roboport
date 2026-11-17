@@ -80,9 +80,19 @@ def queue(org_id:str,loc_id:str,request:Request):
             # canOffer is presentation-only; POST still verifies MANAGER.
             with db.transaction():
                 token=request.cookies.get("rp_session","")
-                items=list_assignments(db,token,org,loc)
                 can_offer=organization_role_allows(
                     db,token,org,"MANAGER",loc,for_mutation=True)
+                active_queue_limited=False
+                try:
+                    items=list_assignments(db,token,org,loc)
+                except AssignmentConflict as exc:
+                    # Защитный лимит активной очереди не должен отрезать
+                    # MANAGER от двух независимых средств очистки/релиза.
+                    # Не выдавать первые 100 строк как полный список.
+                    if str(exc)!="LIMIT" or not can_offer:
+                        raise
+                    items=[]
+                    active_queue_limited=True
                 withdrawal=list_withdrawable_offers(
                     db,token,org,loc,page=withdraw_page) if can_offer else {
                         "items":[],"page":withdraw_page,"hasMore":False,
@@ -94,6 +104,7 @@ def queue(org_id:str,loc_id:str,request:Request):
         except (AssignmentDenied,AssignmentConflict) as exc:
             return _error(request,exc)
     return JSONResponse(content={"items":items,
+                                 "activeQueueLimited":active_queue_limited,
                                  "withdrawable":withdrawal["items"],
                                  "withdrawPage":withdrawal["page"],
                                  "withdrawHasMore":withdrawal["hasMore"],
