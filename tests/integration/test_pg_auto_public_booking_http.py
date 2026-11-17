@@ -218,11 +218,11 @@ def test_full_anonymous_safe_published_booking_and_crm_stock_outbox(monkeypatch)
 
 
 def test_public_receipt_tracks_actual_move_cancel_and_never_rebooks(monkeypatch):
-    """One real PG17 lifecycle, from guest receipt through two customer mutations."""
+    """Реальный PG17 цикл от заявки гостя до переноса и отмены клиентом."""
     d,org,loc,bay,http,part,consumable,service,staff,offer=setup(monkeypatch)
     manager=_auth(http,d,d["intake"])
-    # A stock-free publication supports a customer cancel; material-backed
-    # orders require independent release/reconciliation before cancellation.
+    # Заявку без резерва клиент может отменить напрямую. При наличии
+    # складских резервов требуется отдельная сверка и освобождение.
     clean=http.post(staff+"/offers",headers=manager,json={
         "requestKey":str(uuid4()),"bayId":str(bay),"serviceId":str(service),
         "policyVersion":"DEV-CONSENT-2026","materials":[],
@@ -257,7 +257,7 @@ def test_public_receipt_tracks_actual_move_cancel_and_never_rebooks(monkeypatch)
     assert "vin" not in response.text.lower()
     assert str(d["link"]) not in response.text
 
-    # The service's own slot suggestions exclude the old reservation.
+    # Сервис слотов исключает уже занятое исходное время.
     candidates=http.get(PUB+"/slots",params={
         "offerId":clean_offer,
         "localDay":datetime.fromisoformat(original["startsAt"])
@@ -288,7 +288,7 @@ def test_public_receipt_tracks_actual_move_cancel_and_never_rebooks(monkeypatch)
     assert state["appointmentId"]==appointment
     assert state["workOrderId"]==order
 
-    # The immutable public submission never changes its original time.
+    # Исходное время неизменяемой публичной заявки не переписывается.
     _auth(http,d,d["intake"])
     queue=http.get(staff+"/queue")
     assert queue.status_code==200,queue.text
