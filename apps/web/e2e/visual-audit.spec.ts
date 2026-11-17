@@ -106,7 +106,10 @@ async function collectVisualEvidence(
                    Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
                 if(el instanceof HTMLTextAreaElement && el.labels?.length &&
                    Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
-                if(el.textContent?.trim())return false;
+                // Option text and textarea values are NOT accessible
+                // names. Only actions can use their own text content.
+                if((el.matches('button,a,[role=button],[role=link]'))&&
+                   el.textContent?.trim())return false;
                 // SVG-only icon actions need their own accessible name,
                 // otherwise keyboard/screen-reader users get an empty control.
                 return true;
@@ -261,7 +264,9 @@ test('accessibility evidence rejects unnamed action but still saves screenshot',
       '<label>Тема оформления <select aria-label="Тема оформления">'+
       '<option value="light">light</option><option value="dark">dark</option>'+
       '<option value="auto">auto</option></select></label>'+
-      '<main><h1>Тестовое состояние</h1><button type="button"></button></main>'+
+      '<main><h1>Тестовое состояние</h1><button type="button"></button>'+
+      '<select><option>Ожидание</option></select>'+
+      '<textarea>Начальный текст</textarea></main>'+
       '</body></html>',
   }));
   const screen:Screen={name:'unnamed-action',path:'/__visual-unnamed-control',
