@@ -53,6 +53,7 @@ async function collectVisualEvidence(
   page:Page,testInfo:TestInfo,selectedScreens:readonly Screen[],
   sizeName:string,width:number,theme:typeof themes[number],
   setCurrent:(screen:Screen)=>void,
+  afterNavigation?:(page:Page,screen:Screen)=>Promise<void>,
 ){
   let pageErrorCount=0;
   const trackError=()=>{pageErrorCount++;};
@@ -72,6 +73,7 @@ async function collectVisualEvidence(
           const filename=screen.name+'-'+sizeName+'-'+theme+'.png';
           try{
             await page.goto(screen.path,{waitUntil:'domcontentloaded',timeout:6000});
+            if(afterNavigation)await afterNavigation(page,screen);
             check='theme';
             await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme,{timeout:2500});
             check='main';
@@ -84,6 +86,38 @@ async function collectVisualEvidence(
             check='access-alert';
             if(screen.staffDenied)
               await expect(page.getByRole('alert').first()).toBeVisible({timeout:3000});
+            check='controls';
+            // Native and ARIA controls require a visible label or an explicit
+            // accessible name. Placeholder alone is not a label. The report
+            // records only a failure category, never form content or PII.
+            const unnamed=await page.evaluate(()=>{
+              const controls=Array.from(document.querySelectorAll<HTMLElement>(
+                'main button,main a[href],main input:not([type=hidden]),'+
+                'main select,main textarea,main [role=button],main [role=link]'));
+              return controls.filter(el=>{
+                if(!el.getClientRects().length)return false;
+                const st=getComputedStyle(el);
+                if(st.visibility==='hidden'||st.display==='none')return false;
+                if(el.getAttribute('aria-label')?.trim()||
+                   el.getAttribute('aria-labelledby')?.trim()||
+                   el.getAttribute('title')?.trim())return false;
+                if(el.closest('label')?.textContent?.trim())return false;
+                if(el instanceof HTMLInputElement && el.labels?.length &&
+                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
+                if(el instanceof HTMLSelectElement && el.labels?.length &&
+                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
+                if(el instanceof HTMLTextAreaElement && el.labels?.length &&
+                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
+                // Option text and textarea values are NOT accessible
+                // names. Only actions can use their own text content.
+                if((el.matches('button,a,[role=button],[role=link]'))&&
+                   el.textContent?.trim())return false;
+                // SVG-only icon actions need their own accessible name,
+                // otherwise keyboard/screen-reader users get an empty control.
+                return true;
+              }).length;
+            });
+            if(unnamed>0)failureKinds.push('A11Y_UNNAMED_CONTROLS');
             check='overflow';
             await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth),
               {message:'root overflow at '+screen.name+'/'+width,timeout:3000})
@@ -155,6 +189,23 @@ for(const size of sizes){
   }
 }
 
+test('synthetic UI gallery: keyboard focus indicator is visible',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/dev/ui-gallery');
+  const open=page.getByRole('button',{name:'Открыть диалог'});
+  // Starting from an actual keyboard event triggers :focus-visible semantics.
+  await page.keyboard.press('Tab');
+  await open.focus();
+  const indicator=await open.evaluate(el=>{
+    const css=getComputedStyle(el);
+    return {width:parseFloat(css.outlineWidth),style:css.outlineStyle,
+      offset:parseFloat(css.outlineOffset)};
+  });
+  expect(indicator.style).not.toBe('none');
+  expect(indicator.width).toBeGreaterThanOrEqual(2);
+  expect(indicator.offset).toBeGreaterThanOrEqual(0);
+});
+
 test('synthetic UI gallery: keyboard, dialog, disabled and textual status',async({page})=>{
   await page.setViewportSize({width:390,height:844});
   await page.goto('/dev/ui-gallery');
@@ -205,3 +256,35 @@ test('visual evidence continues after a deliberately broken screen',async({page}
   expect(manifest.scenarios).toEqual(report);
   expect(JSON.stringify(manifest)).not.toMatch(/password|token|cookie/i);
 });
+
+test('accessibility evidence rejects unnamed button, select and textarea separately',
+  async({page},testInfo)=>{
+    test.setTimeout(45_000);
+    await page.setViewportSize({width:390,height:844});
+    const variants=[
+      {name:'unnamed-button',control:'<button type="button"></button>'},
+      {name:'unnamed-select',control:'<select><option>Ожидание</option></select>'},
+      {name:'unnamed-textarea',control:'<textarea>Начальный текст</textarea>'},
+    ] as const;
+    const screens:Screen[]=variants.map(v=>({
+      name:v.name,path:'/dev/ui-gallery',access:'anonymous',
+    }));
+    const {report,failures}=await collectVisualEvidence(
+      page,testInfo,screens,'mobile',390,'light',()=>{},
+      async(p,screen)=>{
+        const fixture=variants.find(v=>v.name===screen.name);
+        if(!fixture)throw Error('unknown synthetic a11y fixture');
+        await p.locator('main').evaluate((main,html)=>{
+          main.insertAdjacentHTML('beforeend',html);
+        },fixture.control);
+      });
+    expect(report).toHaveLength(3);
+    for(const row of report){
+      expect(row).toMatchObject({
+        checks:'FAIL',captured:true,failureKinds:['A11Y_UNNAMED_CONTROLS'],
+      });
+      expect((await stat(testInfo.outputPath('visual',row.png))).size)
+        .toBeGreaterThan(0);
+    }
+    expect(failures).toEqual(variants.map(v=>v.name+': A11Y_UNNAMED_CONTROLS'));
+  });
