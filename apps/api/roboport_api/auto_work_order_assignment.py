@@ -306,3 +306,96 @@ def list_assignments(conn, token: str, organization_id: UUID,
                  "acceptedAt":accepted.isoformat() if accepted else None,
                  "canRespond":bool(mechanic and staff==actor and status=="OFFERED")}
                 for ident,order,staff,start,end,status,accepted in rows]
+
+
+def list_withdrawable_offers(conn, token: str, organization_id: UUID,
+                            location_id: UUID) -> list[dict]:
+    """Очередь всех ещё не принятых офферов филиала для живого MANAGER.
+
+    Не фильтровать потерянную смену/доказательство: это как раз случаи,
+    когда прежнее предложение навсегда блокирует переназначение.
+    """
+    if (type(token) is not str or not token or
+            type(organization_id) is not UUID or
+            type(location_id) is not UUID):
+        raise AssignmentDenied("FORBIDDEN")
+    with conn.transaction():
+        if not organization_role_allows(
+            conn, token, organization_id, "MANAGER", location_id
+        ):
+            raise AssignmentDenied("FORBIDDEN")
+        rows=conn.execute("""
+          SELECT a.id,a.work_order_id,a.mechanic_id,a.starts_at,a.ends_at
+          FROM auto_work_order_assignment a
+          JOIN auto_work_order w ON w.id=a.work_order_id
+            AND w.organization_id=a.organization_id
+            AND w.location_id=a.location_id
+          WHERE a.organization_id=%s AND a.location_id=%s
+            AND a.status='OFFERED'
+          ORDER BY a.created_at DESC,a.id DESC LIMIT 101
+        """,(organization_id,location_id)).fetchall()
+        if len(rows)>100:
+            raise AssignmentConflict("LIMIT")
+        return [{
+            "assignmentId":str(ident),"workOrderId":str(order),
+            "mechanicId":str(mechanic),"startsAt":start.isoformat(),
+            "endsAt":end.isoformat(),"status":"OFFERED",
+        } for ident,order,mechanic,start,end in rows]
+
+
+def withdraw_assignment(conn, token: str, organization_id: UUID,
+                        location_id: UUID, assignment_id: UUID,
+                        request_key: UUID) -> dict:
+    """Отозвать только OFFERED независимо от утраченной смены исполнителя.
+
+    Завершённый или принятый оффер не может быть отозван через эту
+    команду, чтобы не менять уже выполняемые работы задним числом.
+    """
+    if (type(token) is not str or not token or
+            any(type(v) is not UUID for v in
+                (organization_id,location_id,assignment_id,request_key))):
+        raise AssignmentDenied("INVALID_INPUT")
+    with conn.transaction():
+        actor=session_subject(conn,token,for_mutation=True)
+        if actor is None or not organization_role_allows(
+            conn,token,organization_id,"MANAGER",location_id,for_mutation=True
+        ):
+            raise AssignmentDenied("FORBIDDEN")
+        row=conn.execute("""
+          SELECT a.status FROM auto_work_order_assignment a
+          JOIN auto_work_order w ON w.id=a.work_order_id
+            AND w.organization_id=a.organization_id
+            AND w.location_id=a.location_id
+          WHERE a.id=%s AND a.organization_id=%s AND a.location_id=%s
+          FOR UPDATE OF a
+        """,(assignment_id,organization_id,location_id)).fetchone()
+        if row is None:
+            raise AssignmentDenied("FORBIDDEN")
+        prior=conn.execute("""
+          SELECT assignment_id,actor_id,action
+          FROM auto_work_order_assignment_event WHERE request_key=%s
+        """,(request_key,)).fetchone()
+        if prior:
+            if prior!=(assignment_id,actor,"WITHDRAWN"):
+                raise AssignmentConflict("KEY_REUSED")
+            if row[0]!="WITHDRAWN":
+                raise AssignmentConflict("ASSIGNMENT_STATE_CHANGED")
+            return {"ok":True,"replayed":True,"status":"WITHDRAWN"}
+        if row[0]!="OFFERED":
+            raise AssignmentConflict("ASSIGNMENT_NOT_OFFERED")
+        try:
+            with conn.transaction():
+                conn.execute("""
+                  UPDATE auto_work_order_assignment SET
+                    status='WITHDRAWN',status_actor_id=%s,accepted_at=NULL
+                  WHERE id=%s
+                """,(actor,assignment_id))
+                conn.execute("""
+                  INSERT INTO auto_work_order_assignment_event
+                    (id,assignment_id,actor_id,action,request_key)
+                  VALUES(%s,%s,%s,'WITHDRAWN',%s)
+                """,(uuid4(),assignment_id,actor,request_key))
+        except (psycopg.errors.UniqueViolation,psycopg.errors.RaiseException,
+                psycopg.errors.CheckViolation):
+            raise AssignmentConflict("ASSIGNMENT_WITHDRAW_CONFLICT") from None
+        return {"ok":True,"replayed":False,"status":"WITHDRAWN"}
