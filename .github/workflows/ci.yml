@@ -57,6 +57,11 @@ jobs:
           # SERVICE, SKU/STOCK) must also survive the same full archive.
           PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_cutover_restore_probe \
             seed --manifest /tmp/roboport-auto-cutover-restore.json
+          # Legacy attachment metadata lineage, quarantine state and upload
+          # idempotency must also survive the same disposable PG17 dump/restore.
+          # No MinIO bytes are seeded or claimed as restored by this check.
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_legacy_attachment_restore_probe \
+            seed --manifest /tmp/roboport-legacy-attachment-restore.json
       - name: Synthetic PostgreSQL pg_dump / pg_restore roundtrip
         shell: bash
         run: |
@@ -94,6 +99,10 @@ jobs:
           PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_cutover_restore_probe \
             verify-clone --manifest /tmp/roboport-auto-cutover-restore.json \
             --database roboport_restored
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_legacy_attachment_restore_probe \
+            verify-source --manifest /tmp/roboport-legacy-attachment-restore.json
+          PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_legacy_attachment_restore_probe \
+            verify-clone --manifest /tmp/roboport-legacy-attachment-restore.json
           ORIGINAL="$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport -At -c "SELECT count(*) FROM customer WHERE label='restore-probe'")"
           RESTORED="$(docker exec "$PG_CONTAINER" psql -U roboport -d roboport_restored -At -c "SELECT count(*) FROM customer WHERE label='restore-probe'")"
           test "$ORIGINAL" = 1
