@@ -309,7 +309,7 @@ def list_assignments(conn, token: str, organization_id: UUID,
 
 
 def list_withdrawable_offers(conn, token: str, organization_id: UUID,
-                            location_id: UUID) -> list[dict]:
+                            location_id: UUID, *, page: int = 0) -> dict:
     """Очередь всех ещё не принятых офферов филиала для живого MANAGER.
 
     Не фильтровать потерянную смену/доказательство: это как раз случаи,
@@ -319,6 +319,8 @@ def list_withdrawable_offers(conn, token: str, organization_id: UUID,
             type(organization_id) is not UUID or
             type(location_id) is not UUID):
         raise AssignmentDenied("FORBIDDEN")
+    if type(page) is not int or not 0<=page<=1000:
+        raise AssignmentDenied("INVALID_INPUT")
     with conn.transaction():
         if not organization_role_allows(
             conn, token, organization_id, "MANAGER", location_id
@@ -332,15 +334,16 @@ def list_withdrawable_offers(conn, token: str, organization_id: UUID,
             AND w.location_id=a.location_id
           WHERE a.organization_id=%s AND a.location_id=%s
             AND a.status='OFFERED'
-          ORDER BY a.created_at DESC,a.id DESC LIMIT 101
-        """,(organization_id,location_id)).fetchall()
-        if len(rows)>100:
-            raise AssignmentConflict("LIMIT")
-        return [{
-            "assignmentId":str(ident),"workOrderId":str(order),
-            "mechanicId":str(mechanic),"startsAt":start.isoformat(),
-            "endsAt":end.isoformat(),"status":"OFFERED",
-        } for ident,order,mechanic,start,end in rows]
+          ORDER BY a.created_at DESC,a.id DESC LIMIT 51 OFFSET %s
+        """,(organization_id,location_id,page*50)).fetchall()
+        return {
+            "page":page,"hasMore":len(rows)>50,
+            "items":[{
+                "assignmentId":str(ident),"workOrderId":str(order),
+                "mechanicId":str(mechanic),"startsAt":start.isoformat(),
+                "endsAt":end.isoformat(),"status":"OFFERED",
+            } for ident,order,mechanic,start,end in rows[:50]],
+        }
 
 
 def withdraw_assignment(conn, token: str, organization_id: UUID,
