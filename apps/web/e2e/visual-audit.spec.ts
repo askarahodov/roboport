@@ -53,6 +53,7 @@ async function collectVisualEvidence(
   page:Page,testInfo:TestInfo,selectedScreens:readonly Screen[],
   sizeName:string,width:number,theme:typeof themes[number],
   setCurrent:(screen:Screen)=>void,
+  afterNavigation?:(page:Page,screen:Screen)=>Promise<void>,
 ){
   let pageErrorCount=0;
   const trackError=()=>{pageErrorCount++;};
@@ -72,6 +73,7 @@ async function collectVisualEvidence(
           const filename=screen.name+'-'+sizeName+'-'+theme+'.png';
           try{
             await page.goto(screen.path,{waitUntil:'domcontentloaded',timeout:6000});
+            if(afterNavigation)await afterNavigation(page,screen);
             check='theme';
             await page.getByRole('combobox',{name:'Тема оформления'}).selectOption(theme,{timeout:2500});
             check='main';
@@ -264,25 +266,18 @@ test('accessibility evidence rejects unnamed button, select and textarea separat
       {name:'unnamed-select',control:'<select><option>Ожидание</option></select>'},
       {name:'unnamed-textarea',control:'<textarea>Начальный текст</textarea>'},
     ] as const;
-    await page.route('**/__visual-unnamed-*',route=>{
-      const key=new URL(route.request().url()).pathname.replace('/__visual-','');
-      const item=variants.find(v=>v.name===key);
-      if(!item)throw Error('unexpected synthetic test route');
-      return route.fulfill({
-        status:200,contentType:'text/html',
-        body:'<!doctype html><html lang="ru"><body>'+
-          '<label>Тема оформления <select aria-label="Тема оформления">'+
-          '<option value="light">light</option><option value="dark">dark</option>'+
-          '<option value="auto">auto</option></select></label>'+
-          '<main><h1>Тестовое состояние</h1>'+item.control+'</main>'+
-          '</body></html>',
-      });
-    });
     const screens:Screen[]=variants.map(v=>({
-      name:v.name,path:'/__visual-'+v.name,access:'anonymous',
+      name:v.name,path:'/dev/ui-gallery',access:'anonymous',
     }));
     const {report,failures}=await collectVisualEvidence(
-      page,testInfo,screens,'mobile',390,'light',()=>{});
+      page,testInfo,screens,'mobile',390,'light',()=>{},
+      async(p,screen)=>{
+        const fixture=variants.find(v=>v.name===screen.name);
+        if(!fixture)throw Error('unknown synthetic a11y fixture');
+        await p.locator('main').evaluate((main,html)=>{
+          main.insertAdjacentHTML('beforeend',html);
+        },fixture.control);
+      });
     expect(report).toHaveLength(3);
     for(const row of report){
       expect(row).toMatchObject({
