@@ -19,10 +19,12 @@ type Queue = {
   syntheticOnly:true;releaseAllowed:false;canOffer:boolean;
   organizationId:string;locationId:string;items:Assignment[];
   withdrawable?:Withdrawable[];
+  withdrawPage?:number;withdrawHasMore?:boolean;
 };
 type Pending = {path:string;body:string;label:string};
 
-function parseQueue(raw:unknown,expectedOrg:string,expectedLoc:string):Queue {
+function parseQueue(raw:unknown,expectedOrg:string,expectedLoc:string,
+  expectedPage=0):Queue {
   if(!raw||typeof raw!=='object')throw Error('contract');
   const r=raw as Record<string,unknown>;
   if(r.syntheticOnly!==true||r.releaseAllowed!==false||
@@ -48,8 +50,13 @@ function parseQueue(raw:unknown,expectedOrg:string,expectedLoc:string):Queue {
   }
   // Старые синтетические UI-фикстуры могли не включать очередь отзыва.
   // Живой сервер возвращает её отдельно от активной очереди механика.
+  if(r.withdrawPage!==undefined&&
+     (!Number.isSafeInteger(r.withdrawPage)||r.withdrawPage!==expectedPage))
+    throw Error('contract');
+  if(r.withdrawHasMore!==undefined&&typeof r.withdrawHasMore!=='boolean')
+    throw Error('contract');
   if(r.withdrawable!==undefined){
-    if(!Array.isArray(r.withdrawable)||r.withdrawable.length>100||
+    if(!Array.isArray(r.withdrawable)||r.withdrawable.length>50||
        (!r.canOffer&&r.withdrawable.length>0))throw Error('contract');
     const pendingIds=new Set<string>();
     for(const item of r.withdrawable){
@@ -84,6 +91,7 @@ export function AutoAssignments(){
   const [starts,setStarts]=React.useState('');
   const [ends,setEnds]=React.useState('');
   const [revision,setRevision]=React.useState(0);
+  const [withdrawPage,setWithdrawPage]=React.useState(0);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'|'limit'>('idle');
   const [loadedScope,setLoadedScope]=React.useState('');
   const [queue,setQueue]=React.useState<Queue|null>(null);
@@ -108,7 +116,7 @@ export function AutoAssignments(){
 
   function scopeChanged(setter:(v:string)=>void,v:string){
     active.current?.abort();mutation.current?.abort();
-    setter(v);setQueue(null);setLoadedScope('');
+    setter(v);setWithdrawPage(0);setQueue(null);setLoadedScope('');
     setStatus('idle');setMessage('');setPending(null);setBusy(false);
   }
 
@@ -120,14 +128,14 @@ export function AutoAssignments(){
     setStatus('loading');
     (async()=>{
       try{
-        const response=await fetch(root+'/assignments',{
+        const response=await fetch(root+'/assignments?withdrawPage='+withdrawPage,{
           credentials:'include',cache:'no-store',signal:controller.signal,
         });
         if(controller.signal.aborted)return;
         if([401,403,404].includes(response.status)){setStatus('denied');return;}
         if(response.status===409){setStatus('limit');return;}
         if(!response.ok)throw Error('http');
-        const data=parseQueue(await response.json(),org.trim(),loc.trim());
+        const data=parseQueue(await response.json(),org.trim(),loc.trim(),withdrawPage);
         if(!controller.signal.aborted){
           setQueue(data);setLoadedScope(scope);setStatus('ready');
         }
@@ -135,7 +143,7 @@ export function AutoAssignments(){
     })();
     return ()=>controller.abort();
   // The base URL is recomputed from the same two scope fields as these dependencies.
-  },[org,loc,revision,valid]);
+  },[org,loc,revision,valid,withdrawPage]);
 
   function offer(){
     if(!canOffer||!offerWindow)return;
@@ -202,6 +210,7 @@ export function AutoAssignments(){
         typeof payload.replayed!=='boolean')throw Error('contract');
       if(!controller.signal.aborted){
         setPending(null);setMessage(task.label+' зафиксировано. Очередь обновлена.');
+        if(task.label==='Отзыв предложения')setWithdrawPage(0);
         setRevision(value=>value+1);
       }
     }catch{
@@ -281,7 +290,7 @@ export function AutoAssignments(){
         Снять можно только статус «Ожидает ответа». Уже принятые
         назначения не отменяются этой операцией.</p>
       {(queue.withdrawable??[]).length===0?
-        <p>Непринятых предложений нет.</p>:
+        <p>Непринятых предложений на этой странице нет.</p>:
         <div style={{maxWidth:'100%',overflowX:'auto'}}>
           <table>
             <caption>Непринятые предложения филиала</caption>
@@ -298,6 +307,18 @@ export function AutoAssignments(){
             </tr>)}</tbody>
           </table>
         </div>}
+      <div style={{display:'flex',flexWrap:'wrap',gap:'1rem'}}>
+        {withdrawPage>0&&<button type="button" disabled={!canMutate}
+          onClick={()=>{setQueue(null);setStatus('loading');
+            setWithdrawPage(n=>n-1);}}>
+          Предыдущая страница отзыва</button>}
+        {queue.withdrawHasMore===true&&<button type="button" disabled={!canMutate}
+          onClick={()=>{setQueue(null);setStatus('loading');
+            setWithdrawPage(n=>n+1);}}>
+          Следующие предложения для отзыва</button>}
+      </div>
+      <p>Страница отзыва: {withdrawPage+1}. После снятия предложения
+        список безопасно перечитывается с первой страницы.</p>
     </section>}
     {ready&&<section aria-label="Текущая очередь назначений">
       <h2>Действующие предложения и принятые задания</h2>
