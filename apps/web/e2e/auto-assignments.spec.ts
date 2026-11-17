@@ -169,3 +169,130 @@ test('403 и повреждённый ответ немедленно очища
   await page.getByLabel('UUID филиала').fill('77777777-7777-4777-8777-777777777777');
   await expect(page.getByRole('table')).toHaveCount(0);
 });
+
+
+test('MANAGER отзывает застрявший OFFERED, повторяет тот же ключ и скрывает данные при 403',
+  async({page},info)=>{
+    let present=true;
+    let attempt=0;
+    let denied=false;
+    const bodies:string[]=[];
+    await page.route('**/api/v1/auth/csrf',route=>
+      fulfill(route,{csrfToken:'synthetic-csrf'}));
+    await page.route(base,route=>{
+      const request=route.request(),pathname=new URL(request.url()).pathname;
+      if(denied)return fulfill(route,{code:'FORBIDDEN'},403);
+      if(request.method()==='GET'){
+        // Отменённая смена скрывает старый offer из обычной очереди,
+        // но MANAGER сохраняет доступ к отдельному списку на отзыв.
+        return fulfill(route,{
+          ...result([],true),
+          withdrawable:present?[{
+            assignmentId:assignment,workOrderId:order,
+            mechanicId:mechanic,startsAt:start,endsAt:end,status:'OFFERED',
+          }]:[],
+        });
+      }
+      expect(pathname).toContain('/assignments/'+assignment+'/withdraw');
+      expect(request.headers()['x-csrf-token']).toBe('synthetic-csrf');
+      bodies.push(request.postData()??'');
+      expect(request.postDataJSON().requestKey).toMatch(/^[0-9a-f-]{36}$/);
+      attempt++;
+      if(attempt===1){
+        present=false;
+        return route.abort('failed');
+      }
+      return fulfill(route,{ok:true,replayed:true,status:'WITHDRAWN'});
+    });
+    await page.setViewportSize({width:390,height:844});
+    await visit(page);
+    const block=page.getByRole('region',{name:'Отзыв незавершённых предложений'});
+    await expect(block).toContainText(order);
+    await expect(block).toContainText(mechanic);
+    await expect(page.getByLabel('Текущая очередь назначений')).toContainText(
+      'Для ваших прав действующих назначений нет.');
+    const button=block.getByRole('button',{name:'Отозвать предложение '+assignment});
+    await expect(button).toBeEnabled();
+    await page.screenshot({path:info.outputPath('withdraw-390-stale-offer.png'),
+      fullPage:true,animations:'disabled'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(390);
+    await button.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toBeVisible();
+    await expect(block).toHaveCount(0);
+    await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
+    await expect(block.getByText('Непринятых предложений на этой странице нет.')).toBeVisible();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toBe(bodies[1]);
+
+    await page.setViewportSize({width:1280,height:900});
+    await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
+    await expect(page.locator('main.app.dark')).toBeVisible();
+    await page.screenshot({path:info.outputPath('withdraw-1280-after-recall.png'),
+      fullPage:true,animations:'disabled'});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(1280);
+    denied=true;
+    await page.getByRole('button',{name:'Обновить назначения'}).click();
+    await expect(page.getByRole('alert')).toContainText('доступ запрещён');
+    await expect(block).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Отозвать предложение '+assignment}))
+      .toHaveCount(0);
+  });
+
+test('MECHANIC не получает список чужих предложений на отзыв',async({page})=>{
+  await page.route(base,route=>fulfill(route,{
+    ...result([row(assignment,true)],false),withdrawable:[],
+  }));
+  await visit(page);
+  await expect(page.getByLabel('Текущая очередь назначений')).toContainText(order);
+  await expect(page.getByRole('region',{name:'Отзыв незавершённых предложений'}))
+    .toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Отозвать предложение '+assignment}))
+    .toHaveCount(0);
+});
+
+
+test('MANAGER просматривает все 101 зависшее предложение постранично без 409',
+  async({page},testInfo)=>{
+    const all=Array.from({length:101},(_,i)=>({
+      assignmentId:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+      workOrderId:order,mechanicId:mechanic,
+      startsAt:start,endsAt:end,status:'OFFERED' as const,
+    }));
+    const queried:number[]=[];
+    await page.route(base,route=>{
+      const url=new URL(route.request().url());
+      expect(route.request().method()).toBe('GET');
+      const offset=Number(url.searchParams.get('withdrawPage')??0);
+      queried.push(offset);
+      return fulfill(route,{
+        ...result([],true),withdrawPage:offset,
+        withdrawable:all.slice(offset*50,offset*50+50),
+        withdrawHasMore:(offset+1)*50<all.length,
+      });
+    });
+    await page.setViewportSize({width:390,height:844});
+    await visit(page);
+    const block=page.getByRole('region',{name:'Отзыв незавершённых предложений'});
+    await expect(block.getByRole('row')).toHaveCount(51);
+    await expect(block.getByText('Страница отзыва: 1.')).toBeVisible();
+    await page.getByRole('button',{name:'Следующие предложения для отзыва'}).click();
+    await expect(block.getByRole('row')).toHaveCount(51);
+    await expect(block.getByText('Страница отзыва: 2.')).toBeVisible();
+    await page.getByRole('button',{name:'Следующие предложения для отзыва'}).click();
+    await expect(block.getByRole('row')).toHaveCount(2);
+    await expect(block.getByText('Страница отзыва: 3.')).toBeVisible();
+    await expect(page.getByRole('button',{name:'Следующие предложения для отзыва'}))
+      .toHaveCount(0);
+    await page.screenshot({path:testInfo.outputPath('withdraw-390-page3.png'),
+      fullPage:true,animations:'disabled'});
+    await page.getByRole('button',{name:'Предыдущая страница отзыва'}).click();
+    await expect(block.getByText('Страница отзыва: 2.')).toBeVisible();
+    expect(queried).toContain(0);
+    expect(queried).toContain(1);
+    expect(queried).toContain(2);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(390);
+  });

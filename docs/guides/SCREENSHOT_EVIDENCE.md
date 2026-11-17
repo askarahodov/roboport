@@ -259,3 +259,19 @@ rollback — revert теста, без затрагивания данных.
 Скриншоты — **candidate evidence**, не подписанные
 golden baselines/независимая visual QA (#92/#76);
 клиентских ФИО, VIN или реальных платежей нет.
+
+
+## Кандидаты визуальной приёмки отзыва предложения (#511)
+
+Playwright `apps/web/e2e/auto-assignments.spec.ts` сохраняет
+`withdraw-390-stale-offer.png` для потерявшего действующую
+смену OFFERED в отдельной очереди MANAGER и
+`withdraw-1280-after-recall.png` после успешного точного replay
+`WITHDRAWN`. Дополнительно `withdraw-390-page3.png` фиксирует
+третью страницу при 101 отозваемом предложении; без ложного
+409 из-за размера очереди отзыва. Тест проверяет доступное имя кнопки,
+keyboard Enter, отсутствие overflow, очистку после 403,
+отсутствие права MECHANIC на чужую очередь и синтетические UUID
+вместо персональных данных. Только candidate evidence —
+не утверждённый golden baseline, независимая QA #76
+или WCAG AA sign-off #92.
