@@ -43,7 +43,7 @@ def _safe_evidence_url(raw: object) -> bool:
         host_lower = host.lower()
         blocked_suffixes = (
             "localhost", "localhost.localdomain", "local", "internal", "test", "example",
-            "invalid", "onion",
+            "example.com", "example.net", "example.org", "invalid", "onion",
         )
         if host_lower.endswith(".") or any(
             host_lower == suffix or host_lower.endswith("." + suffix)
