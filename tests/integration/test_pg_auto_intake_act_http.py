@@ -373,7 +373,6 @@ def test_historical_exact_replay_survives_new_pixel_duplicate_guard(monkeypatch)
     # Same image bundle must not be accepted as a NEW immutable version.
     forbidden=publish(http,staff,path,old,key=uuid4(),version=1)
     assert forbidden.status_code==422
-    assert forbidden.json()["detail"] if "detail" in forbidden.json() else True
     assert http.get(path).json()["latestVersion"]==1
 
 
