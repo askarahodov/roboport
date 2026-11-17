@@ -273,6 +273,12 @@ test('public receipt and staff queue display current moved/canceled slot, never 
     await expect(client.getByText('Заявка: CANCELED.',{exact:false})).toBeVisible();
     await expect(client.getByText('Интервал освобождён.',{exact:false})).toBeVisible();
     await expect(client.getByRole('link',{name:'Мои записи'})).toHaveCount(0);
+    // Ошибка повторного чтения должна немедленно скрыть последний слот.
+    denied=true;
+    await client.getByRole('button',{name:'Обновить состояние заявки'}).click();
+    await expect(client.getByRole('alert')).toContainText('Доступ запрещён');
+    await expect(client.getByText('BAY-2',{exact:false})).toHaveCount(0);
+    denied=false;
 
     await page.setViewportSize({width:1280,height:900});
     await page.goto('/staff/auto-public-booking');
@@ -292,15 +298,4 @@ test('public receipt and staff queue display current moved/canceled slot, never 
       .toBeLessThanOrEqual(1280);
     await page.screenshot({path:info.outputPath('public-canceled-1280.png'),fullPage:true});
 
-    // A denied receipt must not retain the previous moved/canceled details.
-    denied=true;
-    await page.goto('/account/auto-public-booking');
-    const refreshed=page.getByRole('region',{
-      name:'Подтверждение публичной заявки клиентом (DEV)',
-    });
-    await refreshed.getByRole('textbox',{name:'ID заявки'}).fill(reqId);
-    await refreshed.getByRole('textbox',{name:'Секретный ключ квитанции'}).fill(link);
-    await refreshed.getByRole('button',{name:'Обновить состояние заявки'}).click();
-    await expect(refreshed.getByRole('alert')).toContainText('Доступ запрещён');
-    await expect(refreshed.getByText('BAY-2',{exact:false})).toHaveCount(0);
   });
