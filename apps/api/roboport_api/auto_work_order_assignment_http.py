@@ -11,6 +11,7 @@ from .auto_vehicle_claim_http import _request_dsn,_response
 from .auto_work_order_assignment import (
     AssignmentDenied,AssignmentConflict,assign_mechanic,respond_assignment,
     list_assignments,list_withdrawable_offers,withdraw_assignment,
+    list_releasable_accepted,release_accepted_assignment,
 )
 
 router=APIRouter(include_in_schema=False)
@@ -64,6 +65,15 @@ def queue(org_id:str,loc_id:str,request:Request):
     )):
         return _response(request,422,"INVALID_INPUT")
     withdraw_page=int(params[0]) if params else 0
+    release_params=request.query_params.getlist("releasePage")
+    if len(release_params)>1 or (release_params and (
+        not release_params[0].isascii() or not release_params[0].isdecimal() or
+        len(release_params[0])>4 or
+        str(int(release_params[0]))!=release_params[0] or
+        not 0<=int(release_params[0])<=1000
+    )):
+        return _response(request,422,"INVALID_INPUT")
+    release_page=int(release_params[0]) if release_params else 0
     with psycopg.connect(dsn) as db:
         try:
             # The same live tenant/branch role is rechecked on every GET.
@@ -77,12 +87,19 @@ def queue(org_id:str,loc_id:str,request:Request):
                     db,token,org,loc,page=withdraw_page) if can_offer else {
                         "items":[],"page":withdraw_page,"hasMore":False,
                     }
+                released=list_releasable_accepted(
+                    db,token,org,loc,page=release_page) if can_offer else {
+                        "items":[],"page":release_page,"hasMore":False,
+                    }
         except (AssignmentDenied,AssignmentConflict) as exc:
             return _error(request,exc)
     return JSONResponse(content={"items":items,
                                  "withdrawable":withdrawal["items"],
                                  "withdrawPage":withdrawal["page"],
                                  "withdrawHasMore":withdrawal["hasMore"],
+                                 "releasable":released["items"],
+                                 "releasePage":released["page"],
+                                 "releaseHasMore":released["hasMore"],
                                  "syntheticOnly":True,
                                  "organizationId":str(org),"locationId":str(loc),
                                  "canOffer":bool(can_offer),"releaseAllowed":False},
@@ -152,6 +169,28 @@ async def withdraw(org_id:str,loc_id:str,assignment_id:str,request:Request):
         if not _mutation_ok(request,db): return _response(request,403,"FORBIDDEN")
         try:
             data=withdraw_assignment(
+                db,request.cookies.get("rp_session",""),
+                org,loc,ident,payload.requestKey)
+        except (AssignmentDenied,AssignmentConflict) as exc:
+            return _error(request,exc)
+    return JSONResponse(status_code=200 if data["replayed"] else 201,
+                        content=data,headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/assignments/{assignment_id}/release")
+async def release(org_id:str,loc_id:str,assignment_id:str,request:Request):
+    scoped=_scope(request,org_id,loc_id)
+    if isinstance(scoped,JSONResponse): return scoped
+    dsn,(org,loc)=scoped
+    try:
+        ident=UUID(assignment_id)
+        payload=Response.model_validate(await request.json())
+    except (ValidationError,ValueError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db): return _response(request,403,"FORBIDDEN")
+        try:
+            data=release_accepted_assignment(
                 db,request.cookies.get("rp_session",""),
                 org,loc,ident,payload.requestKey)
         except (AssignmentDenied,AssignmentConflict) as exc:
