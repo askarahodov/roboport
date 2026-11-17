@@ -168,7 +168,7 @@ def _pixel_fingerprint(clean: bytes, width: int, height: int) -> bytes:
     return digest.digest()
 
 
-def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[bytes]]:
+def _validate(act: dict, *, enforce_unique_pixels: bool = True) -> tuple[str,list[dict],list[dict],list[dict],list[bytes]]:
     if type(act) is not dict or set(act)!={"vehicleKind","damages","inventory","photos"}:
         raise IntakeActInvalid("INVALID_INPUT")
     kind=act["vehicleKind"]
@@ -215,7 +215,7 @@ def _validate(act: dict) -> tuple[str,list[dict],list[dict],list[dict],list[byte
         # PNG с иным сжатием или фильтрацией может содержать те же пиксели.
         # sanitize_png ограничивает распаковку и проверяет фильтры.
         pixel_digest=_pixel_fingerprint(clean,width,height)
-        if pixel_digest in pixel_digests:
+        if enforce_unique_pixels and pixel_digest in pixel_digests:
             raise IntakeActInvalid("DUPLICATE_PHOTO")
         pixel_digests.add(pixel_digest)
         blobs.append(clean)
@@ -335,7 +335,10 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
     if (type(request_key) is not UUID or type(expected_version) is not int
             or not 0<=expected_version<20):
         raise IntakeActInvalid("INVALID_INPUT")
-    kind,damages,inventory,meta,blobs=_validate(act)
+    # Compute the historic request fingerprint without the newer pixel
+    # uniqueness rule. A previously accepted byte-for-byte request must still
+    # replay after re-authorization, while a NEW act must pass stricter checks.
+    kind,damages,inventory,meta,blobs=_validate(act,enforce_unique_pixels=False)
     canonical={"orderId":str(order),"expectedVersion":expected_version,
                "vehicleKind":kind,"damages":damages,"inventory":inventory,
                "photos":meta}
@@ -356,6 +359,7 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
             if existing[1:]!=(order,actor,digest,expected_version+1):
                 raise IntakeActConflict("KEY_REUSED")
             return {"ok":True,"replayed":True,**_read(conn,order,org,loc)}
+        _validate(act)  # Enforce new pixel uniqueness only for new versions.
         snapshot=_read(conn,order,org,loc)
         if snapshot["inspection"] is None:
             raise IntakeActConflict("INSPECTION_REQUIRED")
