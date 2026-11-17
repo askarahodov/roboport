@@ -90,6 +90,8 @@ function codeMessage(c:string){
     ALREADY_CLAIMED:'Заявка уже подтверждена другим ключом. Обновите статус.',
     CLIENT_VERIFICATION_REQUIRED:'Ожидается вход клиента и verified-связь с автомобилем.',
     FULFILL_CONFLICT:'Пост занят, материалы недоступны или изменены права. Выберите новый процесс.',
+    BOOKING_SUPERSEDED:'Запись уже перенесена или отменена. Перечитайте очередь; старый ключ не бронирует слот.',
+    BOOKING_INTEGRITY:'Не удалось проверить актуальное бронирование. Повторите чтение или обратитесь к администратору.',
     OFFER_ALREADY_WITHDRAWN:'Предложение уже отозвано другим ключом.',
     OFFER_REVOKE_CONFLICT:'Не удалось отозвать предложение: повторите или перечитайте данные.',
     INVALID_INPUT:'Проверьте UUID, дату, материалы и обязательные согласия.',
@@ -151,6 +153,12 @@ export function AutoPublicBooking({mode}:{mode:Mode}){
   }
   async function send(entry:Pending){
     if(busy)return;
+    // Статус старого ответа больше не считается актуальным во время
+    // проверки квитанции, включая таймаут и некорректный ответ.
+    if(entry.url.endsWith('/status')||entry.url.endsWith('/claim')||
+       entry.url.endsWith('/withdraw')){
+      setStatus(null);setLiveSlot(null);
+    }
     setBusy(true);setError('');setMessage('');
     try{
       let csrf:string|null=null;
