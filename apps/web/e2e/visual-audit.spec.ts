@@ -255,29 +255,41 @@ test('visual evidence continues after a deliberately broken screen',async({page}
   expect(JSON.stringify(manifest)).not.toMatch(/password|token|cookie/i);
 });
 
-test('accessibility evidence rejects unnamed action but still saves screenshot',async({page},testInfo)=>{
-  test.setTimeout(45_000);
-  await page.setViewportSize({width:390,height:844});
-  await page.route('**/__visual-unnamed-control',route=>route.fulfill({
-    status:200,contentType:'text/html',
-    body:'<!doctype html><html lang="ru"><body>'+
-      '<label>Тема оформления <select aria-label="Тема оформления">'+
-      '<option value="light">light</option><option value="dark">dark</option>'+
-      '<option value="auto">auto</option></select></label>'+
-      '<main><h1>Тестовое состояние</h1><button type="button"></button>'+
-      '<select><option>Ожидание</option></select>'+
-      '<textarea>Начальный текст</textarea></main>'+
-      '</body></html>',
-  }));
-  const screen:Screen={name:'unnamed-action',path:'/__visual-unnamed-control',
-    access:'anonymous'};
-  const {report,failures}=await collectVisualEvidence(
-    page,testInfo,[screen],'mobile',390,'light',()=>{});
-  expect(report).toHaveLength(1);
-  expect(report[0]).toMatchObject({
-    checks:'FAIL',captured:true,failureKinds:['A11Y_UNNAMED_CONTROLS'],
+test('accessibility evidence rejects unnamed button, select and textarea separately',
+  async({page},testInfo)=>{
+    test.setTimeout(45_000);
+    await page.setViewportSize({width:390,height:844});
+    const variants=[
+      {name:'unnamed-button',control:'<button type="button"></button>'},
+      {name:'unnamed-select',control:'<select><option>Ожидание</option></select>'},
+      {name:'unnamed-textarea',control:'<textarea>Начальный текст</textarea>'},
+    ] as const;
+    await page.route('**/__visual-unnamed-*',route=>{
+      const key=new URL(route.request().url()).pathname.split('/').at(-1);
+      const item=variants.find(v=>v.name===key);
+      if(!item)throw Error('unexpected synthetic test route');
+      return route.fulfill({
+        status:200,contentType:'text/html',
+        body:'<!doctype html><html lang="ru"><body>'+
+          '<label>Тема оформления <select aria-label="Тема оформления">'+
+          '<option value="light">light</option><option value="dark">dark</option>'+
+          '<option value="auto">auto</option></select></label>'+
+          '<main><h1>Тестовое состояние</h1>'+item.control+'</main>'+
+          '</body></html>',
+      });
+    });
+    const screens:Screen[]=variants.map(v=>({
+      name:v.name,path:'/__visual-'+v.name,access:'anonymous',
+    }));
+    const {report,failures}=await collectVisualEvidence(
+      page,testInfo,screens,'mobile',390,'light',()=>{});
+    expect(report).toHaveLength(3);
+    for(const row of report){
+      expect(row).toMatchObject({
+        checks:'FAIL',captured:true,failureKinds:['A11Y_UNNAMED_CONTROLS'],
+      });
+      expect((await stat(testInfo.outputPath('visual',row.png))).size)
+        .toBeGreaterThan(0);
+    }
+    expect(failures).toEqual(variants.map(v=>v.name+': A11Y_UNNAMED_CONTROLS'));
   });
-  expect(failures).toEqual(['unnamed-action: A11Y_UNNAMED_CONTROLS']);
-  expect((await stat(testInfo.outputPath('visual',report[0].png))).size)
-    .toBeGreaterThan(0);
-});
