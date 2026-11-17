@@ -27,7 +27,7 @@ def seed_many_versions(db,org,loc,actor,subject,count=520):
             id,request_key,organization_id,location_id,role_code,user_id,
             document_kind,capability,allowed,not_before,actor_id,created_at)
           SELECT gen_random_uuid(),gen_random_uuid(),%s,%s,'MANAGER',%s,
-                 'ESTIMATE','READ',(n %% 2 = 0),NULL,%s,
+                 'ESTIMATE','READ',(n % 2 = 0),NULL,%s,
                  '2020-01-01T00:00:00+00'::timestamptz + n*interval '1 second'
           FROM generate_series(1,%s) AS n
         """,(org,loc,subject,actor,count))
