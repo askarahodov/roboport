@@ -296,3 +296,18 @@ replay, `accepted-release-390-page3.png` — третья
 начатого исполнения. Только синтетические UUID, без
 ФИО/телефонов/VIN/денег. Снимки — **candidate evidence**,
 не golden baseline и не независимый WCAG/legal sign-off #92/#76/#119.
+
+
+## Синтетические страницы документационного ACL (#515)
+
+`apps/web/e2e/auto-document-access.spec.ts` сохраняет
+`policy-audit-390-page3.png` (третья страница из 120
+синтетических policy events) и
+`policy-audit-1280-dark-page2.png` (возврат на предыдущую
+страницу, Dark). Browser проверяет Enter на доступной
+кнопке, сброс курсора после POST, 403 с очисткой
+старого audit и формы, недоверенный `nextBefore`,
+390/1280 без overflow. Длинная история >520
+проверяется отдельно в настоящем PG17/HTTPS тесте.
+Это кандидаты visual evidence без ПДн, не
+golden baseline/WCAG AA или release approval #92/#76/#119.
