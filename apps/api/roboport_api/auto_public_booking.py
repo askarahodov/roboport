@@ -385,7 +385,8 @@ def _current_public_booking(conn,request_id,appointment_id):
     missing or mismatches the original tenant and location.
     """
     row=conn.execute("""
-      SELECT a.booking_id,latest.booking_id,b.starts_at,b.ends_at,b.canceled_at
+      SELECT a.booking_id,latest.booking_id,b.starts_at,b.ends_at,b.canceled_at,
+             bay.code,loc.timezone_name
       FROM auto_public_booking_fulfillment f
       JOIN auto_public_booking_request req ON req.id=f.request_id
       JOIN auto_public_booking_offer offer ON offer.id=req.offer_id
@@ -403,11 +404,16 @@ def _current_public_booking(conn,request_id,appointment_id):
       JOIN auto_bay_booking b ON b.id=latest.booking_id
         AND b.organization_id=a.organization_id
         AND b.location_id=a.location_id
+      JOIN auto_work_bay bay ON bay.id=b.bay_id
+        AND bay.organization_id=a.organization_id
+        AND bay.location_id=a.location_id
+      JOIN auto_service_location loc ON loc.id=a.location_id
+        AND loc.organization_id=a.organization_id
       WHERE f.request_id=%s
     """,(appointment_id,request_id)).fetchone()
     if row is None:
         raise PublicBookingConflict("BOOKING_INTEGRITY")
-    original,latest,start,end,canceled=row
+    original,latest,start,end,canceled,bay_code,zone=row
     # CANCELED has priority over a past reschedule. The original
     # request and fulfillment remain immutable and audit-accessible.
     return {
@@ -415,6 +421,7 @@ def _current_public_booking(conn,request_id,appointment_id):
                "RESCHEDULED" if latest!=original else "BOOKED",
       "currentStartsAt":start.isoformat(),
       "currentEndsAt":end.isoformat(),
+      "currentBayCode":bay_code,"timeZone":zone,
       "noSlotHold":canceled is not None,
     }
 
@@ -437,7 +444,9 @@ def _status(conn,req):
             "appointmentId":str(filled[0]) if filled else None,
             "workOrderId":str(filled[1]) if filled else None,
             "currentStartsAt":booking["currentStartsAt"] if booking else None,
-            "currentEndsAt":booking["currentEndsAt"] if booking else None}
+            "currentEndsAt":booking["currentEndsAt"] if booking else None,
+            "currentBayCode":booking["currentBayCode"] if booking else None,
+            "timeZone":booking["timeZone"] if booking else None}
 
 
 def status(conn,ident,receipt):
@@ -548,6 +557,8 @@ def staff_queue(conn,token,org,loc,*,page=0):
               "appointmentId":str(appointment) if appointment else None,
               "currentStartsAt":booking["currentStartsAt"] if booking else None,
               "currentEndsAt":booking["currentEndsAt"] if booking else None,
+              "currentBayCode":booking["currentBayCode"] if booking else None,
+              "timeZone":booking["timeZone"] if booking else None,
               "materials":[{"skuId":str(sku),"kind":kind,"quantity":qty}
                   for sku,kind,qty in _materials(conn,offer)],
             })
