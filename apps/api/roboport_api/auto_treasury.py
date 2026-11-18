@@ -355,17 +355,22 @@ def report(conn,token,org,loc,*,from_day,to_day):
         # queries. All dates before the requested window form ONE opening
         # bucket (NULL), avoiding a historical row per business day.
         totals=conn.execute("""
-            SELECT account_id,
-                   CASE WHEN business_day<%s THEN NULL ELSE business_day END AS day,
+            WITH bucket AS (
+                SELECT account_id,
+                       CASE WHEN business_day<%s THEN NULL::date
+                            ELSE business_day END AS day,
+                       kind,amount_minor
+                FROM auto_treasury_event
+                WHERE account_id=ANY(%s::uuid[]) AND business_day<=%s
+            )
+            SELECT account_id,day,
                    COALESCE(sum(amount_minor) FILTER(
                        WHERE kind IN ('ADVANCE','PAYMENT')),0)::bigint,
                    COALESCE(sum(amount_minor) FILTER(
                        WHERE kind IN ('REFUND_ADVANCE','REFUND_PAYMENT')),0)::bigint
-            FROM auto_treasury_event
-            WHERE account_id=ANY(%s::uuid[]) AND business_day<=%s
-            GROUP BY account_id,
-                     CASE WHEN business_day<%s THEN NULL ELSE business_day END
-        """,(first,account_ids,last,first)).fetchall()
+            FROM bucket
+            GROUP BY account_id,day
+        """,(first,account_ids,last)).fetchall()
         opening={ident:0 for ident in account_ids}
         daily={}
         for ident,day,inc,out in totals:
