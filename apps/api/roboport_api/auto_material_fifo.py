@@ -97,6 +97,7 @@ def replay(rows, *, limit=MAX_SLICES):
 def group_slices(events, movements):
     result=[]
     total=0
+    gross=0
     for event,action,quantity,movement in events:
         if movement not in movements:
             raise Conflict()
@@ -105,7 +106,8 @@ def group_slices(events, movements):
             raise Conflict()
         for p in parts:
             amount=p["quantity"]*p["unitNetMinor"]
-            if amount>MAX_SAFE:
+            gross+=amount
+            if gross>MAX_SAFE:
                 raise Conflict()
             total+=amount if action=="ISSUE" else -amount
             result.append({"stockEventId":str(event),"lotMovementId":str(movement),
