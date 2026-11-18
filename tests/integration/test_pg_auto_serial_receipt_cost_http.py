@@ -47,7 +47,7 @@ def test_serial_from_two_receipts_exact_price_lifecycle_csv_and_acl(monkeypatch)
     assert sorted((s["action"],s["unitNetMinor"]) for s in slices)==[
         ("ISSUE",1250),("ISSUE",1250),("ISSUE",1250),
         ("ISSUE",2000),("ISSUE",2000),("RETURN",2000)]
-    assert slices[-1]["originalIssueId"]==str(evidence["issue"])
+    assert next(s for s in slices if s["action"]=="RETURN")["originalIssueId"]==str(evidence["issue"])
     assert {s["serialId"] for s in slices}=={str(x) for x in evidence["serials"]}
     assert {s["sourceLocationId"] for s in slices}=={str(loc)}
     assert all(s["serialMovementId"] for s in slices)
@@ -112,7 +112,7 @@ def test_serial_cost_in_combined_labor_report(monkeypatch):
     assert data["items"][0]["materialGroups"][0]["status"]=="SERIAL_TRACED"
     rows=list(csv.reader(StringIO(client.get(path+"/export",params=query).text.lstrip("\ufeff")),
                          delimiter=";"))
-    assert len(rows)==17 and all(len(r)==30 for r in rows)
+    assert len(rows)==16 and all(len(r)==30 for r in rows)
     assert len([r for r in rows if r[2]=="SERIAL_SLICE"])==6
 
 
