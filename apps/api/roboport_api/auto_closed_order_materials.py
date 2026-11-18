@@ -68,152 +68,157 @@ def material_report(conn, token, org, loc, from_day, to_day):
         # приёмок и политик. Конкурентный отзыв может вернуть 409.
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         base = closed_report(conn, token, org, loc, from_day, to_day)
-        try:
-            for cap in ("READ", "PRICE_PURCHASE"):
-                if require_document_access(conn, token, org, loc,
-                        ("MANAGER", "WAREHOUSE"), "SUPPLIER_ORDER", cap) is not None:
-                    raise Denied()
-        except DocumentPolicyDenied:
-            raise Denied() from None
-        order_ids = [UUID(row["workOrderId"]) for row in base["items"]]
-        movements = conn.execute("""
-          SELECT m.work_order_id,m.stock_event_id,m.sku_id,m.action,m.quantity,
-                 COALESCE(i.lot_id,r.lot_id) AS lot_id,
-                 COALESCE(i.id,r.id) AS movement_id,
-                 (e.id IS NOT NULL AND e.sku_id=m.sku_id
-                  AND e.action=m.action AND e.quantity=m.quantity
-                  AND e.organization_id=%s AND e.location_id=%s
-                  AND l.organization_id=%s AND l.location_id=%s
-                  AND l.sku_id=m.sku_id
-                  AND ((m.action='ISSUE' AND i.id IS NOT NULL AND r.id IS NULL
-                        AND i.work_order_id=m.work_order_id AND i.sku_id=m.sku_id
-                        AND i.quantity=m.quantity AND a.action='DEALLOCATE')
-                    OR (m.action='RETURN' AND r.id IS NOT NULL AND i.id IS NULL
-                        AND r.work_order_id=m.work_order_id AND r.sku_id=m.sku_id
-                        AND r.quantity=m.quantity AND a.action='ALLOCATE'))
-                  AND a.lot_id=l.id AND a.sku_id=m.sku_id
-                  AND a.quantity=m.quantity) AS paired
-          FROM auto_work_order_stock_event m
-          LEFT JOIN auto_stock_event e ON e.id=m.stock_event_id
-          LEFT JOIN auto_stock_lot_work_order_issue i ON i.stock_event_id=m.stock_event_id
-          LEFT JOIN auto_stock_lot_work_order_return r ON r.stock_event_id=m.stock_event_id
-          LEFT JOIN auto_stock_lot l ON l.id=COALESCE(i.lot_id,r.lot_id)
-          LEFT JOIN auto_stock_lot_allocation a ON a.id=COALESCE(i.lot_debit_id,r.lot_credit_id)
-          WHERE m.work_order_id=ANY(%s::uuid[]) AND m.action IN ('ISSUE','RETURN')
-          ORDER BY m.work_order_id,m.stock_event_id LIMIT %s
-        """, (org, loc, org, loc, order_ids, MAX_MOVEMENTS+1)).fetchall()
-        if len(movements) > MAX_MOVEMENTS:
-            raise Conflict()
-        lots = sorted({row[5] for row in movements if row[7] is True})
-        history = conn.execute("""
-          SELECT a.lot_id,a.id,a.action,a.quantity,d.id,ac.id,v.id,
-                 v.currency,v.purchase_unit_net_minor,v.cost_registration_seq,
+        return _material_report(conn, token, org, loc, from_day, to_day, base)
+
+
+def _material_report(conn, token, org, loc, from_day, to_day, base):
+    # Вызывается только внутри общего REPEATABLE READ snapshot с проверенным base.
+    try:
+        for cap in ("READ", "PRICE_PURCHASE"):
+            if require_document_access(conn, token, org, loc,
+                    ("MANAGER", "WAREHOUSE"), "SUPPLIER_ORDER", cap) is not None:
+                raise Denied()
+    except DocumentPolicyDenied:
+        raise Denied() from None
+    order_ids = [UUID(row["workOrderId"]) for row in base["items"]]
+    movements = conn.execute("""
+      SELECT m.work_order_id,m.stock_event_id,m.sku_id,m.action,m.quantity,
+             COALESCE(i.lot_id,r.lot_id) AS lot_id,
+             COALESCE(i.id,r.id) AS movement_id,
+             (e.id IS NOT NULL AND e.sku_id=m.sku_id
+              AND e.action=m.action AND e.quantity=m.quantity
+              AND e.organization_id=%s AND e.location_id=%s
+              AND l.organization_id=%s AND l.location_id=%s
+              AND l.sku_id=m.sku_id
+              AND ((m.action='ISSUE' AND i.id IS NOT NULL AND r.id IS NULL
+                    AND i.work_order_id=m.work_order_id AND i.sku_id=m.sku_id
+                    AND i.quantity=m.quantity AND a.action='DEALLOCATE')
+                OR (m.action='RETURN' AND r.id IS NOT NULL AND i.id IS NULL
+                    AND r.work_order_id=m.work_order_id AND r.sku_id=m.sku_id
+                    AND r.quantity=m.quantity AND a.action='ALLOCATE'))
+              AND a.lot_id=l.id AND a.sku_id=m.sku_id
+              AND a.quantity=m.quantity) AS paired
+      FROM auto_work_order_stock_event m
+      LEFT JOIN auto_stock_event e ON e.id=m.stock_event_id
+      LEFT JOIN auto_stock_lot_work_order_issue i ON i.stock_event_id=m.stock_event_id
+      LEFT JOIN auto_stock_lot_work_order_return r ON r.stock_event_id=m.stock_event_id
+      LEFT JOIN auto_stock_lot l ON l.id=COALESCE(i.lot_id,r.lot_id)
+      LEFT JOIN auto_stock_lot_allocation a ON a.id=COALESCE(i.lot_debit_id,r.lot_credit_id)
+      WHERE m.work_order_id=ANY(%s::uuid[]) AND m.action IN ('ISSUE','RETURN')
+      ORDER BY m.work_order_id,m.stock_event_id LIMIT %s
+    """, (org, loc, org, loc, order_ids, MAX_MOVEMENTS+1)).fetchall()
+    if len(movements) > MAX_MOVEMENTS:
+        raise Conflict()
+    lots = sorted({row[5] for row in movements if row[7] is True})
+    history = conn.execute("""
+      SELECT a.lot_id,a.id,a.action,a.quantity,d.id,ac.id,v.id,
+             v.currency,v.purchase_unit_net_minor,v.cost_registration_seq,
                  CASE WHEN ac.id IS NOT NULL THEN a.cost_registration_seq END,
-                 i.id,r.id,
-                 (CASE WHEN ac.id IS NULL THEN 0 ELSE 1 END
-                  + CASE WHEN i.id IS NULL THEN 0 ELSE 1 END
-                  + CASE WHEN r.id IS NULL THEN 0 ELSE 1 END) AS legs,
-                 CASE
-                   WHEN ac.id IS NOT NULL THEN
-                     d.lot_id=a.lot_id AND d.sku_id=a.sku_id
-                     AND d.organization_id=l.organization_id AND d.location_id=l.location_id
-                     AND d.quantity=a.quantity AND a.action='ALLOCATE'
-                     AND se.action='RECEIPT' AND se.quantity=a.quantity
-                     AND se.sku_id=a.sku_id AND se.organization_id=l.organization_id
-                     AND se.location_id=l.location_id
-                   WHEN i.id IS NOT NULL THEN
-                     i.lot_id=a.lot_id AND i.sku_id=a.sku_id AND i.quantity=a.quantity
-                     AND a.action='DEALLOCATE' AND wi.organization_id=l.organization_id
-                     AND wi.location_id=l.location_id
-                     AND mi.work_order_id=i.work_order_id AND mi.sku_id=a.sku_id
-                     AND mi.action='ISSUE' AND mi.quantity=a.quantity
-                   WHEN r.id IS NOT NULL THEN
-                     r.lot_id=a.lot_id AND r.sku_id=a.sku_id AND r.quantity=a.quantity
-                     AND a.action='ALLOCATE' AND wr.organization_id=l.organization_id
-                     AND wr.location_id=l.location_id
-                     AND mr.work_order_id=r.work_order_id AND mr.sku_id=a.sku_id
-                     AND mr.action='RETURN' AND mr.quantity=a.quantity
-                   ELSE false END AS valid, a.cost_registration_seq
-          FROM auto_stock_lot_allocation a
-          JOIN auto_stock_lot l ON l.id=a.lot_id AND l.sku_id=a.sku_id
-          LEFT JOIN auto_stock_receipt_acceptance ac ON ac.allocation_event_id=a.id
-          LEFT JOIN auto_stock_receipt_document d ON d.id=ac.document_id
-          LEFT JOIN auto_stock_receipt_valuation v ON v.document_id=d.id
-          LEFT JOIN auto_stock_event se ON se.id=ac.stock_event_id
-          LEFT JOIN auto_stock_lot_work_order_issue i ON i.lot_debit_id=a.id
-          LEFT JOIN auto_work_order wi ON wi.id=i.work_order_id
-          LEFT JOIN auto_work_order_stock_event mi ON mi.stock_event_id=i.stock_event_id
-          LEFT JOIN auto_stock_lot_work_order_return r ON r.lot_credit_id=a.id
-          LEFT JOIN auto_work_order wr ON wr.id=r.work_order_id
-          LEFT JOIN auto_work_order_stock_event mr ON mr.stock_event_id=r.stock_event_id
-          WHERE a.lot_id=ANY(%s::uuid[]) AND l.organization_id=%s AND l.location_id=%s
-          ORDER BY a.lot_id,a.id LIMIT %s
-        """, (lots, org, loc, MAX_ALLOCATIONS+1)).fetchall()
-        if len(history) > MAX_ALLOCATIONS:
+             i.id,r.id,
+             (CASE WHEN ac.id IS NULL THEN 0 ELSE 1 END
+              + CASE WHEN i.id IS NULL THEN 0 ELSE 1 END
+              + CASE WHEN r.id IS NULL THEN 0 ELSE 1 END) AS legs,
+             CASE
+               WHEN ac.id IS NOT NULL THEN
+                 d.lot_id=a.lot_id AND d.sku_id=a.sku_id
+                 AND d.organization_id=l.organization_id AND d.location_id=l.location_id
+                 AND d.quantity=a.quantity AND a.action='ALLOCATE'
+                 AND se.action='RECEIPT' AND se.quantity=a.quantity
+                 AND se.sku_id=a.sku_id AND se.organization_id=l.organization_id
+                 AND se.location_id=l.location_id
+               WHEN i.id IS NOT NULL THEN
+                 i.lot_id=a.lot_id AND i.sku_id=a.sku_id AND i.quantity=a.quantity
+                 AND a.action='DEALLOCATE' AND wi.organization_id=l.organization_id
+                 AND wi.location_id=l.location_id
+                 AND mi.work_order_id=i.work_order_id AND mi.sku_id=a.sku_id
+                 AND mi.action='ISSUE' AND mi.quantity=a.quantity
+               WHEN r.id IS NOT NULL THEN
+                 r.lot_id=a.lot_id AND r.sku_id=a.sku_id AND r.quantity=a.quantity
+                 AND a.action='ALLOCATE' AND wr.organization_id=l.organization_id
+                 AND wr.location_id=l.location_id
+                 AND mr.work_order_id=r.work_order_id AND mr.sku_id=a.sku_id
+                 AND mr.action='RETURN' AND mr.quantity=a.quantity
+               ELSE false END AS valid, a.cost_registration_seq
+      FROM auto_stock_lot_allocation a
+      JOIN auto_stock_lot l ON l.id=a.lot_id AND l.sku_id=a.sku_id
+      LEFT JOIN auto_stock_receipt_acceptance ac ON ac.allocation_event_id=a.id
+      LEFT JOIN auto_stock_receipt_document d ON d.id=ac.document_id
+      LEFT JOIN auto_stock_receipt_valuation v ON v.document_id=d.id
+      LEFT JOIN auto_stock_event se ON se.id=ac.stock_event_id
+      LEFT JOIN auto_stock_lot_work_order_issue i ON i.lot_debit_id=a.id
+      LEFT JOIN auto_work_order wi ON wi.id=i.work_order_id
+      LEFT JOIN auto_work_order_stock_event mi ON mi.stock_event_id=i.stock_event_id
+      LEFT JOIN auto_stock_lot_work_order_return r ON r.lot_credit_id=a.id
+      LEFT JOIN auto_work_order wr ON wr.id=r.work_order_id
+      LEFT JOIN auto_work_order_stock_event mr ON mr.stock_event_id=r.stock_event_id
+      WHERE a.lot_id=ANY(%s::uuid[]) AND l.organization_id=%s AND l.location_id=%s
+      ORDER BY a.lot_id,a.id LIMIT %s
+    """, (lots, org, loc, MAX_ALLOCATIONS+1)).fetchall()
+    if len(history) > MAX_ALLOCATIONS:
+        raise Conflict()
+    by_lot = defaultdict(list)
+    for row in history:
+        by_lot[row[0]].append(row)
+    sources = {lot: _source(by_lot[lot]) for lot in lots}
+    grouped = defaultdict(list)
+    for order, event, sku, action, qty, lot, movement, paired in movements:
+        if type(qty) is not int or not 1 <= qty <= 10**9:
             raise Conflict()
-        by_lot = defaultdict(list)
-        for row in history:
-            by_lot[row[0]].append(row)
-        sources = {lot: _source(by_lot[lot]) for lot in lots}
-        grouped = defaultdict(list)
-        for order, event, sku, action, qty, lot, movement, paired in movements:
-            if type(qty) is not int or not 1 <= qty <= 10**9:
+        # Несопоставленное движение не исчезает из отчёта.
+        # Для него нельзя подтвердить стоимость даже по тому же SKU.
+        grouped[(order, sku, lot if paired is True else None)].append(
+            (event, action, qty, movement if paired is True else None))
+    items = []
+    complete_total = 0
+    complete_count = 0
+    all_groups = defaultdict(list)
+    for (order, sku, lot), events in grouped.items():
+        issued = sum(qty for _, action, qty, _ in events if action == "ISSUE")
+        returned = sum(qty for _, action, qty, _ in events if action == "RETURN")
+        status, source = sources[lot] if lot is not None else ("UNPAIRED", None)
+        net = issued - returned
+        if net < 0:
+            status, source = "UNPROVEN", None
+        cost = net * source["unitNetMinor"] if source else None
+        if cost is not None and cost > MAX_SAFE:
+            raise Conflict()
+        all_groups[order].append({
+            "skuId": str(sku), "lotId": str(lot) if lot else None,
+            "issuedQuantity": issued, "returnedQuantity": returned,
+            "netQuantity": net, "status": status, "source": source,
+            "materialNetMinor": cost,
+            "movements": [
+                {"stockEventId": str(event), "action": action, "quantity": qty,
+                 "lotMovementId": str(movement) if movement else None}
+                for event, action, qty, movement in events
+            ],
+        })
+    for row in base["items"]:
+        groups = sorted(all_groups[UUID(row["workOrderId"])],
+                        key=lambda g: (g["skuId"], g["lotId"] or ""))
+        complete = all(g["status"] == "TRACED" for g in groups)
+        cost = sum(g["materialNetMinor"] for g in groups) if complete else None
+        if cost is not None:
+            complete_count += 1
+            complete_total += cost
+            if complete_total > MAX_SAFE:
                 raise Conflict()
-            # Несопоставленное движение не исчезает из отчёта.
-            # Для него нельзя подтвердить стоимость даже по тому же SKU.
-            grouped[(order, sku, lot if paired is True else None)].append(
-                (event, action, qty, movement if paired is True else None))
-        items = []
-        complete_total = 0
-        complete_count = 0
-        all_groups = defaultdict(list)
-        for (order, sku, lot), events in grouped.items():
-            issued = sum(qty for _, action, qty, _ in events if action == "ISSUE")
-            returned = sum(qty for _, action, qty, _ in events if action == "RETURN")
-            status, source = sources[lot] if lot is not None else ("UNPAIRED", None)
-            net = issued - returned
-            if net < 0:
-                status, source = "UNPROVEN", None
-            cost = net * source["unitNetMinor"] if source else None
-            if cost is not None and cost > MAX_SAFE:
-                raise Conflict()
-            all_groups[order].append({
-                "skuId": str(sku), "lotId": str(lot) if lot else None,
-                "issuedQuantity": issued, "returnedQuantity": returned,
-                "netQuantity": net, "status": status, "source": source,
-                "materialNetMinor": cost,
-                "movements": [
-                    {"stockEventId": str(event), "action": action, "quantity": qty,
-                     "lotMovementId": str(movement) if movement else None}
-                    for event, action, qty, movement in events
-                ],
-            })
-        for row in base["items"]:
-            groups = sorted(all_groups[UUID(row["workOrderId"])],
-                            key=lambda g: (g["skuId"], g["lotId"] or ""))
-            complete = all(g["status"] == "TRACED" for g in groups)
-            cost = sum(g["materialNetMinor"] for g in groups) if complete else None
-            if cost is not None:
-                complete_count += 1
-                complete_total += cost
-                if complete_total > MAX_SAFE:
-                    raise Conflict()
-            items.append({
-                "workOrderId": row["workOrderId"], "closedDay": row["closedDay"],
-                "closedEventId": row["closedEventId"],
-                "status": "COMPLETE" if complete else "INCOMPLETE",
-                "materialNetMinor": cost, "groups": groups,
-            })
-        return {
-            "syntheticOnly": True, "realMoney": False, "releaseAllowed": False,
-            "marginAvailable": False, "payrollAvailable": False, "currency": "RUB",
-            "basis": BASIS, "timeZone": base["timeZone"],
-            "fromDay": from_day, "toDay": to_day,
-            "summary": {"orderCount": len(items), "completeOrderCount": complete_count,
-                        "movementCount": len(movements),
-                        "materialNetMinor": complete_total if complete_count == len(items) else None},
-            "items": items,
-        }
+        items.append({
+            "workOrderId": row["workOrderId"], "closedDay": row["closedDay"],
+            "closedEventId": row["closedEventId"],
+            "status": "COMPLETE" if complete else "INCOMPLETE",
+            "materialNetMinor": cost, "groups": groups,
+        })
+    return {
+        "syntheticOnly": True, "realMoney": False, "releaseAllowed": False,
+        "marginAvailable": False, "payrollAvailable": False, "currency": "RUB",
+        "basis": BASIS, "timeZone": base["timeZone"],
+        "fromDay": from_day, "toDay": to_day,
+        "summary": {"orderCount": len(items), "completeOrderCount": complete_count,
+                    "movementCount": len(movements),
+                    "materialNetMinor": complete_total if complete_count == len(items) else None},
+        "items": items,
+    }
 
 
 def _csv(result):
