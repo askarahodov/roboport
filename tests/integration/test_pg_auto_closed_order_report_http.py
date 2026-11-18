@@ -3,7 +3,7 @@ from datetime import datetime
 from io import StringIO
 from zoneinfo import ZoneInfo
 import csv
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -13,6 +13,9 @@ from roboport_api.main import app
 from test_pg_auto_mechanic_productivity_http import _close
 from test_pg_auto_document_lifecycle_http import ready
 from test_pg_baseline import DSN
+from roboport_api.auto_document_lifecycle import record_document_event
+from test_pg_auto_document_access_http import admin, set_rule, url as policy_url
+from test_pg_auto_work_order_estimate_http import token
 
 
 def test_closed_order_reconciliation_and_scope(monkeypatch):
@@ -86,3 +89,49 @@ def test_paid_but_unclosed_order_is_not_in_report(monkeypatch):
     assert result.status_code==200,result.text
     assert result.json()["summary"]["orderCount"]==0
     assert result.json()["items"]==[]
+
+
+def test_refund_repayment_and_policy_cutoff_are_reconciled_against_real_pg(monkeypatch):
+    d,org,loc,order,act,preview=ready(monkeypatch,with_refund=True)
+    with psycopg.connect(DSN) as db:
+        for action,actor in (("POSTED",d["intake"]),("CLIENT_ACK",d["client_a"]),
+                             ("CLOSED_TECHNICAL",d["intake"])):
+            record_document_event(
+                db,d["tokens"][actor],org,loc,order,request_key=uuid4(),action=action,
+                preview_id=UUID(preview["id"]),preview_digest=preview["digest"],
+                intake_act_id=UUID(act["id"]),intake_digest=act["sha256"])
+        admin(db,org,d["other"])
+        stamp,zone=db.execute("""
+          SELECT e.created_at,l.timezone_name FROM auto_order_demo_document_event e
+          JOIN auto_work_order w ON w.id=e.work_order_id
+          JOIN auto_service_location l ON l.id=w.location_id
+          WHERE e.work_order_id=%s AND e.action='CLOSED_TECHNICAL'
+        """,(order,)).fetchone()
+    day=stamp.astimezone(ZoneInfo(zone)).date().isoformat()
+    query={"fromDay":day,"toDay":day}
+    http=TestClient(app,base_url="https://127.0.0.1")
+    path=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/closed-orders"
+    token(http,d,d["intake"])
+    response=http.get(path,params=query)
+    assert response.status_code==200,response.text
+    data=response.json()
+    assert data["summary"]=={"orderCount":1,"cashEventCount":3,
+          "approvedBaseMinor":2500,"approvedExtraMinor":0,"approvedTotalMinor":2500,
+          "simulatedPaidMinor":3000,"simulatedRefundedMinor":500}
+    assert [x["kind"] for x in data["items"][0]["cashEvents"]]==[
+        "SIM_PAYMENT","SIM_REFUND","SIM_PAYMENT"]
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policy_url(org),owner,loc=loc,user=d["intake"],
+                    document="ESTIMATE",cap="PRICE_SALES").status_code==201
+    token(http,d,d["intake"])
+    assert http.get(path,params=query).status_code==403
+    assert http.get(path+"/export",params=query).status_code==403
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policy_url(org),owner,loc=loc,user=d["intake"],
+                    document="ESTIMATE",cap="PRICE_SALES",allowed=True).status_code==201
+    assert set_rule(http,policy_url(org),owner,loc=loc,user=d["intake"],
+                    document="HANDOVER",cap="READ",allowed=True,
+                    not_before="2099-01-01T00:00:00Z").status_code==201
+    token(http,d,d["intake"])
+    assert http.get(path,params=query).status_code==403
+    assert http.get(path+"/export",params=query).status_code==403
