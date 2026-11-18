@@ -16,6 +16,7 @@ from .auto_appointment_http import router as auto_appointment_router
 from .auto_bay_occupancy import router as auto_bay_occupancy_router
 from .auto_demo_finance_report import router as auto_demo_finance_report_router
 from .auto_closed_order_report import router as auto_closed_order_report_router
+from .auto_closed_order_materials import router as auto_closed_order_materials_router
 from .auto_treasury_http import router as auto_treasury_router
 from .auto_treasury_cashbook import router as auto_treasury_cashbook_router
 from .auto_crm_leads_http import router as auto_crm_leads_router
@@ -73,6 +74,7 @@ app.include_router(auto_appointment_router)
 app.include_router(auto_bay_occupancy_router)
 app.include_router(auto_demo_finance_report_router)
 app.include_router(auto_closed_order_report_router)
+app.include_router(auto_closed_order_materials_router)
 app.include_router(auto_treasury_router)
 app.include_router(auto_treasury_cashbook_router)
 app.include_router(auto_crm_leads_router)
