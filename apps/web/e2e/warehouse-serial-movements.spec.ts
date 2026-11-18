@@ -131,3 +131,34 @@ test('independent serial receipt proof through warehouse UI, role denial and mob
   await expect(section.getByRole('alert')).toContainText('Нет доступа');
   await expect(section.getByText(/Подтверждено/)).toHaveCount(0);
 });
+
+test('serial receipt ambiguous post preserves requestKey across location edits',async({page})=>{
+  const receipt='88888888-8888-4888-8888-888888888888';
+  const attestation='99999999-9999-4999-8999-999999999999';
+  const keys:string[]=[];
+  await page.route('**/warehouse/serial-receipts',route=>{
+    const req=route.request();
+    keys.push(req.postDataJSON().requestKey);
+    if(keys.length===1)return route.fulfill({status:503,body:'ambiguous'});
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({assertionId:attestation,serialId:serial,receiptId:receipt,
+        locationId:loc,assertedAt:'2030-10-27T09:00:00Z',
+        approvalId:null,approvedAt:null,syntheticOnly:true})});
+  });
+  await fill(page);
+  const section=page.getByRole('region',{name:'Привязка серийных деталей к приходам'});
+  await section.getByLabel('UUID серийной детали для первички').fill(serial);
+  await section.getByLabel('UUID принятого прихода').fill(receipt);
+  await section.getByRole('button',{name:'Связать серию с приходом'}).click();
+  await expect(section.getByRole('alert')).toContainText('Результат записи неизвестен');
+  const retry=section.getByRole('button',{name:'Повторить запись с тем же ключом'});
+  await expect(retry).toBeEnabled();
+  await page.getByRole('textbox',{name:'UUID исходного филиала'}).fill(destination);
+  await expect(retry).toBeDisabled();
+  await page.getByRole('textbox',{name:'UUID исходного филиала'}).fill(loc);
+  await expect(retry).toBeEnabled();
+  await retry.click();
+  await expect(section.getByRole('status')).toContainText('Операция подтверждена');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
