@@ -72,7 +72,7 @@ test('409 CSV limit makes no partial download; 403 removes previously visible ro
   });
   await scope(page);
   await page.getByRole('button',{name:'Скачать весь отфильтрованный реестр CSV'}).click();
-  await expect(page.getByRole('status')).toContainText('превышает 1000 строк');
+  await expect(page.getByText(/Экспорт превышает 1000 строк/)).toBeVisible();
   await expect(page.getByRole('table')).toContainText(order);
   exportStatus=403;
   await page.getByRole('button',{name:'Скачать весь отфильтрованный реестр CSV'}).click();
