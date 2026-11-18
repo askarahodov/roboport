@@ -49,6 +49,8 @@ def dossier(*, tamper=None, nested_tamper=None):
         nested_manifest["act"]["photos"][0]["sha256"] = "f" * 64
     if nested_tamper == "missing-photo-meta":
         nested_manifest["act"]["photos"].clear()
+    if nested_tamper == "file-entry-null":
+        nested_manifest["files"][0] = None
     intake = _zip([("manifest.json", _json(nested_manifest)), ("photos/1.png", png)])
     preview = {
         "kind": "SYNTHETIC_PRE_HANDOVER_PREVIEW", "workOrderId": order,
@@ -134,7 +136,7 @@ class VerifyTechnicalDossierTest(unittest.TestCase):
                     verify_dossier_bytes(dossier(tamper=kind))
 
     def test_rejects_nested_photo_and_disputed_act_with_valid_outer_hashes(self):
-        for kind in ("photo", "review", "photo-meta", "missing-photo-meta"):
+        for kind in ("photo", "review", "photo-meta", "missing-photo-meta", "file-entry-null"):
             with self.subTest(kind=kind):
                 with self.assertRaises(DossierVerificationError):
                     verify_dossier_bytes(dossier(nested_tamper=kind))
