@@ -23,7 +23,7 @@ const int=(x:unknown):x is number=>typeof x==='number'&&Number.isSafeInteger(x)&
 const money=(n:number|null)=>n===null?'Не определена':(n/100).toLocaleString('ru-RU',{
   minimumFractionDigits:2,maximumFractionDigits:2,
 })+' RUB';
-function parse(raw:unknown,from:string,to:string):Report{
+export function parseMaterialReport(raw:unknown,from:string,to:string):Report{
   const r=raw as Report;
   if(!r||r.syntheticOnly!==true||r.realMoney!==false||r.releaseAllowed!==false||
     r.marginAvailable!==false||r.payrollAvailable!==false||r.currency!=='RUB'||
@@ -108,7 +108,7 @@ export function AutoClosedOrderMaterials({org,loc,from,to,allowed}:{
         document.body.appendChild(a);a.click();a.remove();
         window.setTimeout(()=>URL.revokeObjectURL(href),1000);
       }else{
-        const data=parse(await res.json(),from,to);
+        const data=parseMaterialReport(await res.json(),from,to);
         if(!pending.signal.aborted){setReport(data);setStatus('ready');}
       }
     }catch{if(!pending.signal.aborted){setReport(null);setStatus('error');}}
