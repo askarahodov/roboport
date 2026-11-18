@@ -44,9 +44,7 @@ def _authority(conn, token, org, loc, write=False):
         raise Denied()
     try:
         for cap in ("READ", "PRICE_PURCHASE", *(("EDIT",) if write else ())):
-            # CASHIER не обладает базовым правом на закупочные/внутренние цены.
-            roles = ("MANAGER",) if cap == "PRICE_PURCHASE" else ("MANAGER", "CASHIER")
-            if require_document_access(conn, token, org, loc, roles,
+            if require_document_access(conn, token, org, loc, ("MANAGER", "CASHIER"),
                                        "FINANCE", cap) is not None:
                 raise Denied()
     except DocumentPolicyDenied:
