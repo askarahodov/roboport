@@ -107,3 +107,49 @@ test('workspace input rejects invalid locators before any API call',async({page}
   await expect(page.getByRole('button',{name:'Открыть заказ-наряд'})).toBeDisabled();
   expect(called).toBe(0);
 });
+
+
+test('assignment tab shows actions only for the locked order',async({page})=>{
+  const other='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const mechanic='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const appointment='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const work=(id:string,assignmentId:string)=>({
+    assignmentId,workOrderId:id,mechanicId:mechanic,
+    startsAt:'2030-01-20T09:00:00+00:00',
+    endsAt:'2030-01-20T10:00:00+00:00',
+    status:'OFFERED',acceptedAt:null,canRespond:false,
+  });
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path===root+'/workspace')return route.fulfill({status:200,
+      contentType:'application/json',body:JSON.stringify(snapshot())});
+    if(path===root+'/services'||path===root.replace('/orders/'+order,'')+'/service-catalog')
+      return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+    if(path.endsWith('/assignments')){
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({
+          syntheticOnly:true,releaseAllowed:false,organizationId:org,locationId:loc,
+          canOffer:true,items:[work(order,appointment),
+            work(other,'dddddddd-dddd-4ddd-8ddd-dddddddddddd')],
+          withdrawPage:0,withdrawHasMore:false,
+          withdrawable:[{...work(other,'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee')}],
+          releasePage:0,releaseHasMore:false,
+          releasable:[{...work(other,'ffffffff-ffff-4fff-8fff-ffffffffffff'),
+            status:'ACCEPTED',acceptedAt:'2030-01-19T10:00:00+00:00'}],
+        })});
+    }
+    throw Error('Unexpected API path '+path);
+  });
+  await page.goto(pageUrl);
+  await expect(page.getByRole('table',{name:/Серверная сводка/})).toBeVisible();
+  await page.getByRole('button',{name:/^Назначения ·/}).click();
+  const panel=page.getByRole('region',{name:'Активный раздел заказ-наряда'});
+  await expect(panel.getByRole('heading',{name:'Назначения механиков'})).toBeVisible();
+  await expect(panel.getByRole('textbox',{name:'UUID заказ-наряда'}))
+    .toHaveJSProperty('readOnly',true);
+  await expect(panel.getByRole('table',{name:'Назначения по времени начала'}))
+    .toContainText(order);
+  await expect(panel.getByText(other)).toHaveCount(0);
+  await expect(panel.getByRole('button',{name:/Отозвать предложение/})).toHaveCount(0);
+  await expect(panel.getByRole('button',{name:/Освободить назначение/})).toHaveCount(0);
+});
