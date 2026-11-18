@@ -135,3 +135,17 @@ npm run test:docs:e2e
 Это доказательство совместимости **frontend и Docsify** на Windows, **не** доказательство полного локального bootstrap контейнеров, HTTPS, PostgreSQL 17, Keycloak/OIDC или MinIO под CMD. Скрипт `infra/dev/bootstrap-local.sh` требует Unix shell; его нативная замена остаётся #122/#119. Реальные client/VIN/PII и production-credentials для smoke запрещены.
 
 **Benchmark/rollback:** производительность устранения холодных `apt` задержек подтверждена в PR #150: вместо 469–580 секунд **только на browser install** Linux container browser job ~102–109 секунд **целиком** (конкретные GitHub-run ссылки и caveats выше). При проблеме с Windows CMD приоритет — исправить реальную несовместимость, а не `continue-on-error` или пропуск. Для точечного отката Windows job допустим revert PR после фиксации причины; для Linux Chromium — документированный rollback к host-runner из PR #148 с `npx playwright install --with-deps chromium`, сохраняя полные E2E и Docsify.
+
+
+## CI после оптимизации: выбор проверок по риску PR (18.11.2026)
+
+**Полный release gate на `main` и при `workflow_dispatch` НЕ ослабляется:** все пять jobs (`postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`) обязаны успешно завершиться. PG17 выполняет полный integration suite, Alembic downgrade/re-upgrade и архивный backup/restore. Проверка `scripts/check_auto_release_ci.py` по-прежнему отвергает пропущенные обязательные jobs для release SHA.
+
+**Для PR** отдельный быстрый `impact` job проверяет правила (`tests/bootstrap/test_ci_impact.py`) и по `merge-base...HEAD` выбирает нужные jobs; независимая проверка `docs` (ссылки и AutoDealer GAP) запускается всегда. Неизвестные пути, CI, инфраструктура, скрипты, контракты, миграции и критичный auth/ACL/identity/core код запускают **все пять** jobs. Без безопасно вычислимого diff решение — полный CI, а не пропуск.
+
+- Только `docs/**` / Markdown → `impact` + `docs`; тяжёлые jobs отмечаются skipped.
+- Локальные `auto_*.py` + изменённые integration tests → `api` + `postgres` со scoped PG17 тестами; перед тестами обязательно выполняется Alembic upgrade. Если тесты не изменены, выполняется полный набор integration tests, чтобы не считать незакреплённое поведение проверенным.
+- `apps/web/src/**/*.css` и статические изображения → `web`; изменение исполняемого UI → `web` + `browser-e2e`; изменения в E2E → `browser-e2e`.
+- Общие frontend конфигурации и зависимости → `web`, `browser-e2e` и `windows-cmd`. Изменение миграций/прав/CI → все jobs, включая полный PG rollback и restore.
+
+Для проверки классификатора локально: `python -m unittest discover -s tests/bootstrap -p test_ci_impact.py`. Для ручного полного GitHub запуска используйте `workflow_dispatch`; эти настройки не заменяют независимые проверки #76 или legal/security/release #119. Историческое описание «каждый PR проходит все jobs» в разделе CI #135 выше относится к прежнему режиму, до этой оптимизации. При ложном исключении области — расширить `scripts/ci_impact.py` и тесты либо запустить полный workflow, а не объявлять skipped-проверки успешными испытаниями.

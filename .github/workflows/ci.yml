@@ -11,7 +11,42 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  impact:
+    runs-on: ubuntu-latest
+    outputs:
+      postgres: ${{ steps.classify.outputs.postgres }}
+      api: ${{ steps.classify.outputs.api }}
+      web: ${{ steps.classify.outputs.web }}
+      browser: ${{ steps.classify.outputs.browser_e2e }}
+      windows: ${{ steps.classify.outputs.windows_cmd }}
+      pg_full: ${{ steps.classify.outputs.pg_full }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify conservative impact rules
+        run: python -m unittest discover -s tests/bootstrap -p test_ci_impact.py
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python scripts/ci_impact.py --base "$BASE_SHA"
+          else
+            python scripts/ci_impact.py --full
+          fi
+  docs:
+    needs: impact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/check_docs_links.py
+      - run: python scripts/check_autodealer_audit.py
   postgres:
+    needs: impact
+    if: needs.impact.outputs.postgres == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -32,20 +67,34 @@ jobs:
       PYTHONPATH: apps/api
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - run: python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
       - run: python scripts/check_python_pins.py
       - run: python scripts/check_brand_tokens.py
-      - name: Real PostgreSQL upgrade / downgrade / re-upgrade
+      - name: Upgrade disposable PostgreSQL 17
+        run: python -m alembic -c apps/api/alembic.ini upgrade head
+      - name: Full downgrade / re-upgrade (main/manual/full-risk PR)
+        if: github.event_name != 'pull_request' || needs.impact.outputs.pg_full == 'true'
         run: |
-          python -m alembic -c apps/api/alembic.ini upgrade head
           python -m alembic -c apps/api/alembic.ini downgrade base
           python -m alembic -c apps/api/alembic.ini upgrade head
-      - name: PostgreSQL integrity integration tests
-        run: python -m pytest -q -ra tests/integration
+      - name: Relevant PostgreSQL tests (PR) or full suite (main)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python scripts/ci_impact.py --base "$BASE_SHA" --run-integration
+          else
+            python -m pytest -q -ra tests/integration
+          fi
       - name: Seed synthetic live automotive lifecycle before pg_dump
+        if: github.event_name != 'pull_request' || needs.impact.outputs.pg_full == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -63,6 +112,7 @@ jobs:
           PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_legacy_attachment_restore_probe \
             seed --manifest /tmp/roboport-legacy-attachment-restore.json
       - name: Synthetic PostgreSQL pg_dump / pg_restore roundtrip
+        if: github.event_name != 'pull_request' || needs.impact.outputs.pg_full == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -166,6 +216,8 @@ jobs:
           fi
           echo 'RESTORE INTEGRITY PASS: existing customer works, missing customer rejected'
   api:
+    needs: impact
+    if: needs.impact.outputs.api == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -198,6 +250,8 @@ jobs:
       - name: Validate isolated synthetic auto OpenAPI
         run: python -m openapi_spec_validator contracts/auto-dev-openapi.yaml
   web:
+    needs: impact
+    if: needs.impact.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -244,6 +298,8 @@ jobs:
             grep -q '"requestId"' /tmp/roboport-error.json
           done
   browser-e2e:
+    needs: impact
+    if: needs.impact.outputs.browser == 'true'
     runs-on: ubuntu-latest
     # Official Noble image pins Chromium and OS libs. Python 3.12 uses
     # OpenSSL 3.0 available in Noble; toolcache Python 3.13.18 now needs 3.3.
@@ -297,6 +353,8 @@ jobs:
           retention-days: 14
 
   windows-cmd:
+    needs: impact
+    if: needs.impact.outputs.windows == 'true'
     # Real native Windows runner, not Git Bash, WSL or PowerShell.
     # Dev smoke only: full PostgreSQL/API/browser E2E remain mandatory in Linux.
     runs-on: windows-latest
