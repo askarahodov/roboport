@@ -38,9 +38,11 @@ def test_closed_document_dossier_has_all_evidence_and_current_acl(monkeypatch):
     downloaded=http.get(endpoint)
     assert downloaded.status_code==200,downloaded.text[:140] if downloaded.status_code!=200 else ""
     assert downloaded.headers["content-type"]=="application/zip"
+    pinned_digest=downloaded.headers["x-technical-dossier-sha256"]
+    assert pinned_digest==sha256(downloaded.content).hexdigest()
     # The offline command verifies the exact real PostgreSQL-backed archive,
     # not only a synthetic hand-built ZIP fixture.
-    offline = verify_dossier_bytes(downloaded.content)
+    offline = verify_dossier_bytes(downloaded.content, expected_sha256=pinned_digest)
     assert offline["verified"] is True and offline["documentEvents"] == 3
     assert offline["releaseAllowed"] is False and offline["photos"] == 1
     assert downloaded.headers["cache-control"]=="no-store, private"
@@ -98,7 +100,9 @@ def test_closed_document_dossier_has_all_evidence_and_current_acl(monkeypatch):
             assert photographed["files"][0]["sha256"]==sha256(clean).hexdigest()
 
     # Байты детерминированны; собственный клиент получает ту же версию.
-    assert http.get(endpoint).content==downloaded.content
+    repeated=http.get(endpoint)
+    assert repeated.content==downloaded.content
+    assert repeated.headers["x-technical-dossier-sha256"]==pinned_digest
     owner=session(http,d,d["client_a"])
     assert http.get(endpoint).content==downloaded.content
     assert http.get(endpoint.replace(str(loc),str(uuid4()))).status_code==403
@@ -108,7 +112,9 @@ def test_closed_document_dossier_has_all_evidence_and_current_acl(monkeypatch):
     assert http.get(base.replace(str(loc),str(uuid4()))).status_code==403
 
     other=session(http,d,d["client_b"])
-    assert http.get(endpoint).status_code==403
+    forbidden=http.get(endpoint)
+    assert forbidden.status_code==403
+    assert "x-technical-dossier-sha256" not in forbidden.headers
     http.cookies.clear()
     assert http.get(endpoint).status_code in (401,403)
 

@@ -129,6 +129,26 @@ class VerifyTechnicalDossierTest(unittest.TestCase):
             file.write_bytes(b"not-a-zip")
             self.assertEqual(main([str(file), "--json"]), 1)
 
+    def test_separately_pinned_digest_rejects_whole_archive_substitution(self):
+        original = dossier()
+        pinned = sha256(original).hexdigest()
+        self.assertTrue(verify_dossier_bytes(original, expected_sha256=pinned)["verified"])
+        substituted = dossier()  # New internally consistent ZIP with all hashes recomputed.
+        self.assertTrue(verify_dossier_bytes(substituted)["verified"])
+        with self.assertRaisesRegex(DossierVerificationError, "ARCHIVE_SHA256_MISMATCH"):
+            verify_dossier_bytes(substituted, expected_sha256=pinned)
+        for invalid in ("", "z" * 64, pinned.upper(), "0" * 63):
+            with self.subTest(expected_sha256=invalid):
+                with self.assertRaisesRegex(DossierVerificationError, "INVALID_EXPECTED_SHA256"):
+                    verify_dossier_bytes(original, expected_sha256=invalid)
+        with tempfile.TemporaryDirectory() as folder:
+            archive = Path(folder) / "dossier.zip"
+            archive.write_bytes(original)
+            self.assertEqual(main([str(archive), "--expected-sha256", pinned, "--json"]), 0)
+            archive.write_bytes(substituted)
+            self.assertEqual(main([str(archive), "--expected-sha256", pinned, "--json"]), 1)
+            self.assertEqual(main([str(archive), "--expected-sha256", "bogus", "--json"]), 1)
+
     def test_rejects_internal_digest_and_cross_file_tampering(self):
         for kind in ("release", "events", "settlement", "filehash", "extra-total", "missing-extra"):
             with self.subTest(kind=kind):

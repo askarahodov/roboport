@@ -97,12 +97,16 @@ def _manifest_file_hashes(manifest: dict, archive: dict[str, bytes]) -> None:
                  "FILE_DIGEST_MISMATCH")
 
 
-def verify_dossier_bytes(data: bytes) -> dict:
+def verify_dossier_bytes(data: bytes, *, expected_sha256: str | None = None) -> dict:
     """Validate bounded ZIP structure, nested photos and cross-file invariants.
 
     No network or database access. PostgreSQL jsonb fingerprints cannot be
     recomputed reliably offline, but all recorded IDs/digests must agree.
     """
+    if expected_sha256 is not None:
+        _require(_hash(expected_sha256), "INVALID_EXPECTED_SHA256")
+        _require(sha256(data).hexdigest() == expected_sha256,
+                 "ARCHIVE_SHA256_MISMATCH")
     files = _read_zip(data, TOP_FILES, "INVALID_DOSSIER_ZIP")
     manifest = _json(files["manifest.json"], "INVALID_MANIFEST")
     _require(type(manifest) is dict and set(manifest) == {
@@ -245,11 +249,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Проверить синтетический ZIP закрытого заказ-наряда")
     parser.add_argument("archive", type=Path, help="Локальный технический ZIP (до 1 МиБ)")
     parser.add_argument("--json", action="store_true", help="Машинно-читаемый результат без ПДн")
+    parser.add_argument("--expected-sha256", metavar="64_HEX",
+                        help="Ранее отдельно сохранённый SHA-256 из авторизованного HTTPS-ответа")
     args = parser.parse_args(argv)
     try:
         if args.archive.stat().st_size > MAX_ARCHIVE_BYTES:
             raise DossierVerificationError("ARCHIVE_TOO_LARGE")
-        report = verify_dossier_bytes(args.archive.read_bytes())
+        report = verify_dossier_bytes(args.archive.read_bytes(),
+                                      expected_sha256=args.expected_sha256)
     except (OSError, DossierVerificationError) as exc:
         code = str(exc) if isinstance(exc, DossierVerificationError) else "FILE_READ_FAILED"
         if args.json:
