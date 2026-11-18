@@ -165,6 +165,12 @@ def test_serial_transfer_from_two_approved_source_receipts_to_closed_costs(monke
                     document="FINANCE",cap="PRICE_PURCHASE").status_code==201
     token(http,d,d["intake"])
     assert http.get(endpoint,params=period).status_code==403
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policy_url(org),owner,loc=proof["source"],user=d["intake"],
+                    document="FINANCE",cap="PRICE_PURCHASE",allowed=True).status_code==201
+    token(http,d,d["intake"])
+    assert http.get(endpoint,params=period).status_code==200
+    assert http.get(root+"/reports/internal-order-costs",params=period).status_code==200
     with psycopg.connect(DSN) as db:
         db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
           WHERE organization_id=%s AND location_id=%s AND user_id=%s
