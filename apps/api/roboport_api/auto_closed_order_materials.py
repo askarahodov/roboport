@@ -257,7 +257,7 @@ def _run(request, org_id, loc_id, from_day, to_day):
                                    UUID(org_id), UUID(loc_id), from_day, to_day)
     except Denied:
         return _response(request, 403, "FORBIDDEN")
-    except (Conflict, psycopg.errors.SerializationFailure):
+    except (Conflict, psycopg.errors.SerializationFailure, psycopg.errors.DeadlockDetected):
         return _response(request, 409, "REPORT_CONFLICT")
     except ValueError:
         return _response(request, 422, "INVALID_INPUT")
