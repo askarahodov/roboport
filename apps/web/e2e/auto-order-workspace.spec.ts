@@ -31,6 +31,10 @@ test('one scoped workspace switches real operations, reloads stages on 390/1280'
         body:JSON.stringify({syntheticOnly:true,releaseAllowed:false,
           inspectionRecorded:false,estimatePublished:false,services:[],items:[]})});
     }
+    if(url.pathname===root+'/inspection-qc'){
+      return route.fulfill({status:403,contentType:'application/json',
+        body:'{"code":"FORBIDDEN"}'});
+    }
     throw Error('Unexpected API path '+url.pathname);
   });
   await page.setViewportSize({width:390,height:844});
@@ -40,11 +44,19 @@ test('one scoped workspace switches real operations, reloads stages on 390/1280'
   await expect(page.getByRole('heading',{name:'Услуги заказ-наряда (dev)'})).toBeVisible();
   await expect(page.getByRole('region',{name:'Активный раздел заказ-наряда'})
     .getByRole('textbox',{name:'UUID заказ-наряда'})).toHaveValue(order);
+  await expect(page.getByRole('region',{name:'Активный раздел заказ-наряда'})
+    .getByRole('textbox',{name:'UUID заказ-наряда'})).toHaveJSProperty('readOnly',true);
   await page.getByRole('button',{name:/^Диагностика ·/}).click();
   await expect(page.getByRole('heading',{name:'Диагностика по услугам заказ-наряда (dev)'}))
     .toBeVisible();
   await expect(page.getByRole('region',{name:'Активный раздел заказ-наряда'})
     .getByRole('textbox',{name:'UUID заказ-наряда'})).toHaveValue(order);
+
+  await page.getByRole('button',{name:/^Контроль качества ·/}).click();
+  await expect(page.getByRole('region',{name:'Активный раздел заказ-наряда'})
+    .getByRole('textbox',{name:'UUID заказ-наряда'})).toHaveJSProperty('readOnly',true);
+  await expect(page.getByRole('region',{name:'Активный раздел заказ-наряда'})
+    .getByRole('region',{name:'Очередь нарядов на независимый QC'})).toHaveCount(0);
   progress={...steps,services:'SELECTED'};
   await page.getByRole('button',{name:'Обновить этапы с сервера'}).click();
   await expect(page.getByRole('table',{name:/Серверная сводка/})).toContainText('Выбраны услуги');
