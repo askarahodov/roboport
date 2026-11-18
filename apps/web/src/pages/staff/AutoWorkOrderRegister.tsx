@@ -5,6 +5,8 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const stages=['ALL','DRAFT','IN_WORK','READY','POSTED',
   'CLIENT_ACKNOWLEDGED','CLIENT_DISPUTED','CLOSED_TECHNICAL','CANCELED'] as const;
 type Stage=typeof stages[number];
+const validResultStage=(value:unknown):value is Exclude<Stage,'ALL'>=>
+  typeof value==='string' && stages.slice(1).includes(value as Stage);
 const names:Record<Stage,string>={
   ALL:'Все состояния',DRAFT:'Черновик',IN_WORK:'В работе',READY:'Работы завершены',
   POSTED:'Технически проведён',CLIENT_ACKNOWLEDGED:'Подтверждён клиентом',
@@ -29,7 +31,7 @@ function parse(raw:unknown,stage:Stage):Page{
          v=>typeof v==='string'&&uuid.test(v))||
       ![row.createdAt,row.startsAt,row.endsAt].every(
          v=>typeof v==='string'&&!Number.isNaN(Date.parse(v)))||
-      Date.parse(row.startsAt)>=Date.parse(row.endsAt)||!stages.includes(row.stage)||
+      Date.parse(row.startsAt)>=Date.parse(row.endsAt)||!validResultStage(row.stage)||
       (stage!=='ALL'&&row.stage!==stage)||
       ids.has(row.workOrderId))throw Error('invalid row');
     ids.add(row.workOrderId);
@@ -49,15 +51,17 @@ export function AutoWorkOrderRegister(){
   const [revision,setRevision]=React.useState(0);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [page,setPage]=React.useState<Page|null>(null);
+  const [loadedKey,setLoadedKey]=React.useState('');
   const valid=uuid.test(org.trim())&&uuid.test(loc.trim());
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
     '/locations/'+encodeURIComponent(loc.trim())+'/orders';
   const scope=org.trim()+':'+loc.trim()+':'+stage+':'+applied;
+  const queryKey=scope+':'+cursor+':'+revision;
   React.useEffect(()=>{
-    setCursor(null);setHistory([]);setPage(null);setSelected(null);
+    setCursor(null);setHistory([]);setPage(null);setSelected(null);setLoadedKey('');
   },[scope]);
   React.useEffect(()=>{
-    setPage(null);setSelected(null);
+    setPage(null);setSelected(null);setLoadedKey('');
     if(!valid|| (applied!==''&&!uuid.test(applied))){setStatus('idle');return;}
     const controller=new AbortController();
     setStatus('loading');
@@ -70,7 +74,7 @@ export function AutoWorkOrderRegister(){
       if([401,403,404].includes(response.status)){setStatus('denied');return;}
       if(!response.ok)throw Error('HTTP '+response.status);
       const data=parse(await response.json(),stage);
-      if(!controller.signal.aborted){setPage(data);setStatus('ready');}
+      if(!controller.signal.aborted){setPage(data);setLoadedKey(queryKey);setStatus('ready');}
     }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
     return ()=>controller.abort();
   },[scope,cursor,revision,valid]);
@@ -116,7 +120,7 @@ export function AutoWorkOrderRegister(){
     {status==='denied'&&<p role="alert">403 — нет действующего доступа к заказам этого филиала.</p>}
     {status==='error'&&<p role="alert">Реестр недоступен. Проверьте фильтры, сессию и попробуйте снова.
       <button type="button" onClick={()=>setRevision(x=>x+1)}>Повторить</button></p>}
-    {status==='ready'&&page&&<>
+    {status==='ready'&&page&&loadedKey===queryKey&&<>
       <p role="status">Записей на странице: {page.items.length}. Страница {history.length+1}.
         {page.nextCursor?' Есть следующая страница.':''}</p>
       {!page.items.length?<p>Заказ-наряды по этому фильтру не найдены.</p>:
