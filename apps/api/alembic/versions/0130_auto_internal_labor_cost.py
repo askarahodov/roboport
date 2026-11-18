@@ -12,6 +12,8 @@ depends_on = None
 
 
 def upgrade():
+    op.execute("""ALTER TABLE auto_service_location ADD COLUMN internal_cost_epoch bigint
+      NOT NULL DEFAULT 0 CHECK(internal_cost_epoch>=0)""")
     op.execute("""
       CREATE TABLE auto_internal_labor_cost_revision (
         id uuid PRIMARY KEY,
@@ -77,6 +79,9 @@ def upgrade():
           IF EXISTS(SELECT 1 FROM auto_internal_labor_cost_revision r
             WHERE r.location_id=scope_loc AND r.version>proposal.version)
           THEN RAISE EXCEPTION 'stale cost proposal'; END IF;
+          -- Фактическая MVCC-версия branch для RR-транзакции труда.
+          UPDATE auto_service_location SET internal_cost_epoch=internal_cost_epoch+1
+            WHERE id=scope_loc;
         END IF;
         -- Запрет подмены периода действия ставкой, опубликованной задним числом.
         NEW.created_at:=clock_timestamp();
@@ -91,7 +96,8 @@ def upgrade():
         op.execute(f"REVOKE ALL ON {table} FROM PUBLIC")
     op.execute("""
       ALTER TABLE auto_work_order_labor_entry ADD COLUMN internal_cost_approval_id uuid
-        REFERENCES auto_internal_labor_cost_approval(id)
+        REFERENCES auto_internal_labor_cost_approval(id),
+        ADD COLUMN internal_cost_registered_at timestamptz
     """)
     op.execute("""
       CREATE FUNCTION snapshot_auto_internal_labor_cost() RETURNS trigger
@@ -106,11 +112,12 @@ def upgrade():
         PERFORM 1 FROM auto_service_location WHERE id=scope_loc
           AND organization_id=scope_org AND disabled_at IS NULL FOR SHARE;
         IF NOT FOUND THEN RAISE EXCEPTION 'inactive cost location'; END IF;
+        NEW.internal_cost_registered_at:=clock_timestamp();
         SELECT a.id INTO selected
           FROM auto_internal_labor_cost_revision r
           JOIN auto_internal_labor_cost_approval a ON a.revision_id=r.id
           WHERE r.organization_id=scope_org AND r.location_id=scope_loc
-            AND a.created_at<=NEW.created_at
+            AND a.created_at<=NEW.internal_cost_registered_at
           ORDER BY r.version DESC LIMIT 1;
         IF NEW.internal_cost_approval_id IS NOT NULL
            AND NEW.internal_cost_approval_id IS DISTINCT FROM selected
@@ -131,6 +138,8 @@ def downgrade():
     op.execute("DROP TRIGGER auto_internal_labor_cost_snapshot ON auto_work_order_labor_entry")
     op.execute("DROP FUNCTION snapshot_auto_internal_labor_cost()")
     op.execute("ALTER TABLE auto_work_order_labor_entry DROP COLUMN internal_cost_approval_id")
+    op.execute("ALTER TABLE auto_work_order_labor_entry DROP COLUMN internal_cost_registered_at")
     op.execute("DROP TABLE auto_internal_labor_cost_approval")
     op.execute("DROP TABLE auto_internal_labor_cost_revision")
     op.execute("DROP FUNCTION guard_auto_internal_labor_cost()")
+    op.execute("ALTER TABLE auto_service_location DROP COLUMN internal_cost_epoch")
