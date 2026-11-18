@@ -18,10 +18,16 @@ function parseServices(value: unknown): Service[] {
   return value.items as Service[];
 }
 
+// Direct links are locators only; the API independently checks live authority.
+const initialScope=(key:string)=>{
+  const value=new URLSearchParams(window.location.search).get(key)??'';
+  return uuid.test(value)?value:'';
+};
+
 export function AutoOrderServices() {
-  const [organization, setOrganization] = React.useState('');
-  const [location, setLocation] = React.useState('');
-  const [order, setOrder] = React.useState('');
+  const [organization, setOrganization] = React.useState(()=>initialScope('org'));
+  const [location, setLocation] = React.useState(()=>initialScope('loc'));
+  const [order, setOrder] = React.useState(()=>initialScope('order'));
   const [status, setStatus] = React.useState<State>('idle');
   const [catalog, setCatalog] = React.useState<Service[]>([]);
   const [selected, setSelected] = React.useState<Service[]>([]);
