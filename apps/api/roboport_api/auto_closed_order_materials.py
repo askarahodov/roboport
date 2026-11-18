@@ -305,7 +305,7 @@ def _csv(result):
                                  s["quantity"]*s["unitNetMinor"]*(1 if s["action"]=="ISSUE" else -1),
                                  s["receiptId"],s["acceptanceId"],s["valuationId"],s["unitNetMinor"],
                                  s["stockEventId"],s["lotMovementId"],s["action"],s["quantity"],s["originalIssueId"],
-                                 s.get("serialId",""),s.get("serialApprovalId",""))
+                                 s.get("serialId",""),s.get("serialApprovalId","")))
     return "\ufeff" + output.getvalue()
 
 
