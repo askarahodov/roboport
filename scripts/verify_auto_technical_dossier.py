@@ -227,7 +227,7 @@ def verify_dossier_bytes(data: bytes) -> dict:
     _require(type(act_photos) is list and len(act_photos) == len(photos),
              "PHOTO_METADATA_MISMATCH")
     for name, entry, source in zip(names[1:], photos, act_photos, strict=True):
-        _require(type(source) is dict and
+        _require(type(source) is dict and type(entry) is dict and
                  all(source.get(field) == entry.get(field)
                      for field in ("sha256", "areaCode", "width", "height")),
                  "PHOTO_METADATA_MISMATCH")
