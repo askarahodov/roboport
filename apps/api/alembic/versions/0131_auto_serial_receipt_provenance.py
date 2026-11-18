@@ -38,6 +38,7 @@ def upgrade():
       RETURNS trigger LANGUAGE plpgsql AS $fn$
       DECLARE actor uuid; serial_row record; receipt_row record;
               maker uuid; assertion_row record; source_lot uuid;
+              scoped_serial uuid; scoped_receipt uuid; scoped_sku uuid;
               required_role text;
       BEGIN
         actor:=NULLIF(current_setting('roboport.serial_receipt_actor',true),'')::uuid;
@@ -57,6 +58,9 @@ def upgrade():
             AND d.location_id=serial_row.scoped_loc;
           IF NOT FOUND THEN RAISE EXCEPTION 'receipt not accepted in serial lot'; END IF;
           source_lot:=serial_row.lot_id;
+          scoped_serial:=NEW.serial_id;
+          scoped_receipt:=NEW.receipt_id;
+          scoped_sku:=serial_row.scoped_sku;
           maker:=NULL;
           required_role:='WAREHOUSE';
         ELSE
@@ -68,15 +72,18 @@ def upgrade():
           WHERE a.id=NEW.assertion_id;
           IF NOT FOUND THEN RAISE EXCEPTION 'serial assertion not found'; END IF;
           source_lot:=assertion_row.lot_id;
+          scoped_serial:=assertion_row.serial_id;
+          scoped_receipt:=assertion_row.receipt_id;
+          scoped_sku:=assertion_row.scoped_sku;
           maker:=assertion_row.proposed_by;
           required_role:='MANAGER';
           IF maker=actor THEN RAISE EXCEPTION 'independent serial source approval required'; END IF;
         END IF;
-        PERFORM 1 FROM auto_stock_sku WHERE id=COALESCE(serial_row.scoped_sku,assertion_row.scoped_sku)
+        PERFORM 1 FROM auto_stock_sku WHERE id=scoped_sku
           FOR UPDATE;
         -- No backdating provenance for a serial which has already moved.
         IF EXISTS(SELECT 1 FROM auto_stock_serial_movement m
-          WHERE m.serial_id=COALESCE(NEW.serial_id,assertion_row.serial_id))
+          WHERE m.serial_id=scoped_serial)
         THEN RAISE EXCEPTION 'serial receipt lineage must precede movement'; END IF;
         IF NOT EXISTS(SELECT 1 FROM auto_stock_serial_current current
           WHERE current.serial_id=COALESCE(NEW.serial_id,assertion_row.serial_id)
@@ -92,7 +99,7 @@ def upgrade():
             AND g.revoked_at IS NULL
             AND (g.location_id=d.location_id OR g.location_id IS NULL)
           JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
-          WHERE d.id=COALESCE(NEW.receipt_id,assertion_row.receipt_id)
+          WHERE d.id=scoped_receipt
             AND o.disabled_at IS NULL AND l.disabled_at IS NULL
           FOR SHARE OF o,l,g,u
         ) THEN RAISE EXCEPTION 'serial provenance authority required'; END IF;
