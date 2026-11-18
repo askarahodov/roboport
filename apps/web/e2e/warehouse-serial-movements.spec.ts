@@ -71,3 +71,63 @@ test('serial transfer retains request key on ambiguous response and branch edit'
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
+
+test('independent serial receipt proof through warehouse UI, role denial and mobile/dark',async({page},testInfo)=>{
+  const receipt='88888888-8888-4888-8888-888888888888';
+  const attestation='99999999-9999-4999-8999-999999999999';
+  const approval='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const item={assertionId:attestation,serialId:serial,receiptId:receipt,
+    locationId:loc,assertedAt:'2030-10-27T09:00:00+00:00',
+    approvalId:null as string|null,approvedAt:null as string|null,syntheticOnly:true};
+  let items:typeof item[]=[],status=200;
+  const keys:string[]=[];
+  await page.route('**/warehouse/serial-receipts*',route=>{
+    const req=route.request();
+    const isApprove=req.url().includes('/approve');
+    if(req.method()==='POST'){
+      expect(req.headers()['x-csrf-token']).toBe('csrf');
+      const body=req.postDataJSON();
+      expect(body.requestKey).toMatch(/^[0-9a-f-]{36}$/);
+      keys.push(body.requestKey);
+      if(isApprove){
+        items=[{...item,approvalId:approval,approvedAt:'2030-10-27T09:01:00+00:00'}];
+      }else{
+        expect(body.serialId).toBe(serial);
+        expect(body.receiptId).toBe(receipt);
+        items=[item];
+      }
+      return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify(items[0])});
+    }
+    return route.fulfill({status,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await fill(page);
+  const section=page.getByRole('region',{name:'Привязка серийных деталей к приходам'});
+  await section.getByLabel('UUID серийной детали для первички').fill(serial);
+  await section.getByLabel('UUID принятого прихода').fill(receipt);
+  await section.getByRole('button',{name:'Связать серию с приходом'}).click();
+  await expect(section.getByRole('status')).toContainText('Операция подтверждена');
+  await section.getByRole('button',{name:'Прочитать подтверждения серийных деталей'}).click();
+  await expect(section.getByText(/Ожидает независимого утверждения/)).toBeVisible();
+  await section.getByRole('button',{name:'Утвердить привязку '+attestation}).click();
+  await section.getByRole('button',{name:'Прочитать подтверждения серийных деталей'}).click();
+  await expect(section.getByText(/Подтверждено/)).toBeVisible();
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).not.toBe(keys[1]);
+  await page.screenshot({path:testInfo.outputPath('serial-receipts-mobile-light.png'),
+    fullPage:true,animations:'disabled'});
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('serial-receipts-desktop-light.png'),
+    fullPage:true,animations:'disabled'});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('serial-receipts-desktop-dark.png'),
+    fullPage:true,animations:'disabled'});
+  status=403;
+  await section.getByRole('button',{name:'Прочитать подтверждения серийных деталей'}).click();
+  await expect(section.getByRole('alert')).toContainText('Нет доступа');
+  await expect(section.getByText(/Подтверждено/)).toHaveCount(0);
+});
