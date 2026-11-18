@@ -337,3 +337,52 @@ test('FIFO mixed receipt UI reconciles return slices and rejects invented cost',
   await button.click();await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
   await expect(table).toHaveCount(0);
 });
+
+test('serial receipt finance report verifies independent original source and blocks tampered value',async({page},testInfo)=>{
+  const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+  const serial=id('1'),receipt=id('2'),acceptance=id('3'),valuation=id('4'),
+    sourceLoc=id('5'),movementId=id('6'),issueId=id('7'),eventId=id('8');
+  const group={skuId:id('9'),lotId:id('a'),issuedQuantity:1,returnedQuantity:0,netQuantity:1,
+    status:'SERIAL_TRACED',source:null,materialNetMinor:2000,fifoSlices:[],
+    serialSlices:[{serialId:serial,serialMovementId:movementId,originalIssueId:issueId,
+      sourceLocationId:sourceLoc,receiptId:receipt,acceptanceId:acceptance,
+      valuationId:valuation,unitNetMinor:2000,quantity:1,action:'ISSUE',
+      stockEventId:eventId,lotMovementId:issueId}],
+    movements:[{stockEventId:eventId,action:'ISSUE',quantity:1,lotMovementId:issueId}]};
+  const row={workOrderId:id('b'),closedDay:'2030-10-27',closedEventId:id('c'),
+    status:'COMPLETE',materialNetMinor:2000,groups:[group]};
+  const payload={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_RECEIPT_FIFO_NET_MATERIAL_USAGE',
+    timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
+    summary:{orderCount:1,completeOrderCount:1,movementCount:1,materialNetMinor:2000},items:[row]};
+  let response:unknown=payload;
+  await page.route('**/reports/closed-order-materials*',route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify(response),
+  }));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-demo-finance-report');await fill(page);
+  const section=page.getByRole('region',{name:'Оценка расхода материалов закрытых заказов'});
+  const button=section.getByRole('button',{name:'Проверить расход материалов'});
+  const table=section.getByRole('table');
+  await button.click();await expect(table).toContainText('20,00 RUB');
+  await table.getByText('Партии и движения',{exact:true}).click();
+  await expect(table.getByText(/Серия:/)).toContainText(serial);
+  await expect(table.getByText(/Серия:/)).toContainText(receipt);
+  await expect(table.getByText(/Серия:/)).toContainText(sourceLoc);
+  await page.screenshot({path:testInfo.outputPath('serial-cost-mobile-light.png'),fullPage:true,animations:'disabled'});
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('serial-cost-desktop-light.png'),fullPage:true,animations:'disabled'});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('serial-cost-desktop-dark.png'),fullPage:true,animations:'disabled'});
+  response={...payload,items:[{...row,groups:[{...group,serialSlices:[{
+    ...group.serialSlices[0],unitNetMinor:1}]}]}]};
+  await button.click();
+  await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
+  await expect(table).toHaveCount(0);
+  response={...payload,items:[{...row,groups:[{...group,serialSlices:[]}]}]};
+  await button.click();
+  await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
+  await expect(table).toHaveCount(0);
+});
