@@ -237,7 +237,8 @@ export function AutoInternalOrderCosts({org,loc,from,to,allowed}:{
               {g.fifoSlices.map((s,i)=><p key={s.stockEventId+':'+i}>{s.serialId?'Серийная деталь':'FIFO'}: {s.action==='ISSUE'?'Выдача':'Возврат'} ·
                 {s.quantity} × {money(s.unitNetMinor)} · Приход: {s.receiptId} · Приёмка: {s.acceptanceId}
                 {' '}· Оценка: {s.valuationId} · Исходная выдача: {s.originalIssueId}
-                {s.serialId&&' · Серийная запись: '+s.serialId+' · Подтверждение: '+s.serialApprovalId}</p>)}
+                {s.serialId&&' · Серийная запись: '+s.serialId+' · Подтверждение: '+s.serialApprovalId}
+                {s.sourceLocationId&&' · Филиал закупки: '+s.sourceLocationId}</p>)}
               {g.movements.map(m=><p key={m.stockEventId}>{m.action==='ISSUE'?'Выдача':'Возврат'}:
                 {m.quantity} · {m.stockEventId} · {m.lotMovementId||'Без партии'}</p>)}
             </div>)}
