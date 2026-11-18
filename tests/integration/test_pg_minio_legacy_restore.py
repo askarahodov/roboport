@@ -161,14 +161,15 @@ def test_legacy_attachment_physical_backup_restore_and_corruption_detection(tmp_
         for bucket in original_buckets.values():
             assert_absent(source, bucket, item["key"])
         put_object(source, item["bucket"], item["key"], PAYLOADS[role], item["mime"])
-    assert reconcile(source, expected, original_buckets) == PAYLOADS
+    verified_source_bytes = reconcile(source, expected, original_buckets)
+    assert verified_source_bytes == PAYLOADS
     # FileStorage's ordinary document lookup must not reach quarantine.
     assert storage.get(expected["ready"]["key"]) == PAYLOADS["ready"]
     with pytest.raises(S3Error):
         storage.get(expected["failed"]["key"])
 
     archive = tmp_path / "legacy-attachments.zip"
-    backup(archive, expected, PAYLOADS, graph_sha)
+    backup(archive, expected, verified_source_bytes, graph_sha)
     pg_restore(tmp_path)
     with psycopg.connect(clone_dsn) as db:
         db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
