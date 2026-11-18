@@ -89,3 +89,36 @@ def staff_order_workspace(org_id: str,loc_id: str,order_id: str,request: Request
             return _response(request,409,"WORKSPACE_CONFLICT")
     return JSONResponse(content=result,headers={"Cache-Control":"no-store",
                                                "X-Content-Type-Options":"nosniff"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/timeline")
+def staff_order_timeline(org_id: str,loc_id: str,order_id: str,
+                         request: Request,limit: str="25",cursor: str|None=None):
+    """Paged immutable technical events, without prices, payments or PII."""
+    from .auto_order_timeline import read_order_timeline
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    if (len(request.query_params.getlist("limit"))>1
+        or len(request.query_params.getlist("cursor"))>1
+        or not limit.isascii() or not limit.isdecimal() or len(limit)>2
+        or not 1<=int(limit)<=25
+        or (cursor is not None and (not cursor or len(cursor)>256))):
+        return _response(request,422,"INVALID_INPUT")
+    try:
+        org,loc,order=UUID(org_id),UUID(loc_id),UUID(order_id)
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            result=read_order_timeline(
+                db,request.cookies.get("rp_session",""),org,loc,order,
+                limit=int(limit),cursor=cursor,
+            )
+        except AutoStockDenied as exc:
+            return _response(request,422 if str(exc)=="INVALID_INPUT" else 403,
+                             "INVALID_INPUT" if str(exc)=="INVALID_INPUT" else "FORBIDDEN")
+        except (psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
+            return _response(request,409,"TIMELINE_CONFLICT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store",
+                                                 "X-Content-Type-Options":"nosniff"})
