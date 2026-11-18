@@ -234,9 +234,10 @@ export function AutoInternalOrderCosts({org,loc,from,to,allowed}:{
                 Расход: {g.netQuantity} · {money(g.materialNetMinor)}</p>
               {g.source&&<p>Приход: {g.source.receiptId} · Приёмка: {g.source.acceptanceId} ·
                 Оценка: {g.source.valuationId} · {money(g.source.unitNetMinor)}/ед.</p>}
-              {g.fifoSlices.map((s,i)=><p key={s.stockEventId+':'+i}>FIFO: {s.action==='ISSUE'?'Выдача':'Возврат'} ·
+              {g.fifoSlices.map((s,i)=><p key={s.stockEventId+':'+i}>{s.serialId?'Серийная деталь':'FIFO'}: {s.action==='ISSUE'?'Выдача':'Возврат'} ·
                 {s.quantity} × {money(s.unitNetMinor)} · Приход: {s.receiptId} · Приёмка: {s.acceptanceId}
-                {' '}· Оценка: {s.valuationId} · Исходная выдача: {s.originalIssueId}</p>)}
+                {' '}· Оценка: {s.valuationId} · Исходная выдача: {s.originalIssueId}
+                {s.serialId&&' · Серийная запись: '+s.serialId+' · Подтверждение: '+s.serialApprovalId}</p>)}
               {g.movements.map(m=><p key={m.stockEventId}>{m.action==='ISSUE'?'Выдача':'Возврат'}:
                 {m.quantity} · {m.stockEventId} · {m.lotMovementId||'Без партии'}</p>)}
             </div>)}
