@@ -76,7 +76,18 @@ def main() -> int:
     group.add_argument("--full", action="store_true")
     parser.add_argument("--run", action="store_true")
     args = parser.parse_args()
-    paths = [] if args.full else changed(args.base)
+    if args.full:
+        paths = []
+    else:
+        try:
+            paths = changed(args.base)
+        except (subprocess.CalledProcessError, OSError) as exc:
+            # Нет достоверного списка изменений: выполняем ВСЕ E2E.
+            error_text = getattr(exc, "stderr", b"") or b""
+            if isinstance(error_text, bytes):
+                error_text = error_text.decode("utf-8", errors="replace")
+            print("Diff недоступен: полный Playwright.", str(error_text), flush=True)
+            paths = []
     specs = plan(paths, full=args.full)
     print("Browser selection:", "FULL" if specs is None else " ".join(specs), flush=True)
     if not args.run:
