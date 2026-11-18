@@ -167,7 +167,9 @@ def test_serial_evidence_http_csrf_independence_replay_and_immutable(monkeypatch
                            (d["intake"],UUID(att)))
     assert client.get(base).status_code==200
     with psycopg.connect(DSN) as db:
-        db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(grant_id,))
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+          WHERE organization_id=%s AND user_id=%s AND role_code IN ('WAREHOUSE','MANAGER')
+            AND revoked_at IS NULL""",(org,d["intake"]))
     token(client,d,d["intake"])
     assert client.get(base).status_code==403
     assert client.post(base,json=body,headers=token(client,d,d["intake"])).status_code==403
