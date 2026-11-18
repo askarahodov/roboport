@@ -6,16 +6,22 @@ not authenticate a sender: an attacker could replace the entire archive.
 from __future__ import annotations
 
 import argparse
+import binascii
 from hashlib import sha256
 from io import BytesIO
 import json
 from pathlib import Path
 import re
+import struct
 import sys
+import zlib
 from uuid import UUID
 from zipfile import BadZipFile, ZipFile, ZIP_STORED
 
 MAX_ARCHIVE_BYTES = 1024 * 1024
+MAX_PNG_BYTES = 196608
+MAX_PNG_PIXELS = 262144
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TOP_FILES = ("manifest.json", "preview.json", "document-events.json",
              "settlement.json", "intake-evidence.zip")
 HEXDIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -95,6 +101,57 @@ def _manifest_file_hashes(manifest: dict, archive: dict[str, bytes]) -> None:
                  and _hash(entry["sha256"])
                  and sha256(payload).hexdigest() == entry["sha256"],
                  "FILE_DIGEST_MISMATCH")
+
+
+def _verify_sanitized_png(raw: bytes, width: object, height: object) -> None:
+    """Check exact sanitized PNG structure, not merely its signature or SHA.
+
+    The authorized exporter strips all ancillary chunks and writes exactly
+    IHDR, one IDAT and IEND. Decompression is bounded like the PG17 writer:
+    even a new archive with every file digest recomputed must reject invalid
+    pixel evidence.
+    """
+    _require(type(raw) is bytes and 0 < len(raw) <= MAX_PNG_BYTES and
+             raw.startswith(PNG_SIGNATURE), "INVALID_PHOTO_PNG")
+    pos = len(PNG_SIGNATURE)
+    chunks = {}
+    for expected_kind in (b"IHDR", b"IDAT", b"IEND"):
+        _require(len(raw) - pos >= 12, "INVALID_PHOTO_PNG")
+        length = int.from_bytes(raw[pos:pos + 4], "big")
+        kind = raw[pos + 4:pos + 8]
+        end = pos + 12 + length
+        _require(kind == expected_kind and length <= MAX_PNG_BYTES and
+                 end <= len(raw), "INVALID_PHOTO_PNG")
+        payload = raw[pos + 8:pos + 8 + length]
+        crc = int.from_bytes(raw[pos + 8 + length:end], "big")
+        _require((binascii.crc32(kind + payload) & 0xffffffff) == crc,
+                 "INVALID_PHOTO_PNG")
+        chunks[kind] = payload
+        pos = end
+    _require(pos == len(raw) and len(chunks[b"IHDR"]) == 13 and
+             len(chunks[b"IDAT"]) > 0 and chunks[b"IEND"] == b"",
+             "INVALID_PHOTO_PNG")
+    png_width, png_height, depth, color, compression, flt, interlace = (
+        struct.unpack(">IIBBBBB", chunks[b"IHDR"]))
+    _require(1 <= png_width <= 1024 and 1 <= png_height <= 1024 and
+             png_width * png_height <= MAX_PNG_PIXELS and
+             type(width) is int and width == png_width and
+             type(height) is int and height == png_height and
+             depth == 8 and color in (2, 6) and
+             compression == 0 and flt == 0 and interlace == 0,
+             "PHOTO_METADATA_MISMATCH")
+    row_size = png_width * (3 if color == 2 else 4) + 1
+    decoded_size = row_size * png_height
+    try:
+        decoder = zlib.decompressobj()
+        scanlines = decoder.decompress(chunks[b"IDAT"], decoded_size + 1)
+        scanlines += decoder.flush(decoded_size + 1 - len(scanlines))
+    except (zlib.error, ValueError):
+        raise DossierVerificationError("INVALID_PHOTO_PNG") from None
+    _require(len(scanlines) == decoded_size and decoder.eof and
+             not decoder.unused_data and not decoder.unconsumed_tail and
+             all(scanlines[row * row_size] <= 4 for row in range(png_height)),
+             "INVALID_PHOTO_PNG")
 
 
 def verify_dossier_bytes(data: bytes, *, expected_sha256: str | None = None) -> dict:
@@ -238,8 +295,10 @@ def verify_dossier_bytes(data: bytes, *, expected_sha256: str | None = None) -> 
         _require(type(entry) is dict and entry.get("path") == name and
                  _hash(entry.get("sha256")) and
                  sha256(nested[name]).hexdigest() == entry["sha256"] and
-                 nested[name].startswith(b"\x89PNG\r\n\x1a\n"),
+                 nested[name].startswith(PNG_SIGNATURE),
                  "PHOTO_DIGEST_MISMATCH")
+        _verify_sanitized_png(nested[name], entry.get("width"),
+                              entry.get("height"))
     return {"verified": True, "schemaVersion": 1, "documentStatus": "CLOSED_TECHNICAL",
             "syntheticOnly": True, "releaseAllowed": False,
             "documentEvents": len(events), "photos": len(photos)}
