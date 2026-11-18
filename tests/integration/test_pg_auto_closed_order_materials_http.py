@@ -193,3 +193,51 @@ def test_service_only_order_has_zero_registered_material_usage(monkeypatch):
     assert response.json()["summary"]==dict(orderCount=1,completeOrderCount=1,
                                            movementCount=0,materialNetMinor=0)
     assert response.json()["items"][0]["groups"]==[]
+
+
+def test_policy_epoch_rejects_repeatable_read_snapshot_older_than_new_deny(monkeypatch):
+    d,org,loc,order,evidence,path,query=fixture(monkeypatch)
+    # Снимок читателя старше конкурентной публикации. Блокировка org,
+    # полученная позже, должна отклонить старый снимок, а не раскрыть цены.
+    from roboport_api.auto_closed_order_report import report as closed_report
+    http=TestClient(app,base_url="https://127.0.0.1")
+    with psycopg.connect(DSN) as reader:
+        with pytest.raises(psycopg.errors.SerializationFailure):
+            with reader.transaction():
+                reader.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                epoch=reader.execute("""SELECT document_policy_epoch FROM auto_organization
+                   WHERE id=%s""",(org,)).fetchone()[0]
+                owner=token(http,d,d["other"])
+                assert set_rule(http,policy_url(org),owner,loc=loc,user=d["intake"],
+                    document="SUPPLIER_ORDER",cap="PRICE_PURCHASE").status_code==201
+                with psycopg.connect(DSN) as fresh:
+                    assert fresh.execute("SELECT document_policy_epoch FROM auto_organization WHERE id=%s",
+                                         (org,)).fetchone()[0]==epoch+1
+                closed_report(reader,d["tokens"][d["intake"]],org,loc,query["fromDay"],query["toDay"])
+    token(http,d,d["intake"])
+    assert http.get(path,params=query).status_code==403
+    assert http.get(path+"/export",params=query).status_code==403
+
+
+def test_older_transaction_timestamp_cannot_backdate_cost_registration(monkeypatch):
+    # now() старой транзакции предшествует выдаче; регистрация оценки
+    # происходит после выдачи в другой committed транзакции.
+    with psycopg.connect(DSN) as older:
+        started=older.execute("SELECT now()").fetchone()[0]
+        d,org,loc,order,evidence,path,query=fixture(monkeypatch,"unvalued")
+        ident=record_receipt_valuation(older,d["tokens"][d["intake"]],org,loc,evidence["receipt"],
+           uuid4(),"RUB",1250,600,"SYN-OLDER-TX",datetime.now(timezone.utc))
+        older.commit()
+    with psycopg.connect(DSN) as db:
+        row=db.execute("""SELECT v.created_at,v.cost_registration_seq,a.created_at,a.cost_registration_seq
+          FROM auto_stock_receipt_valuation v
+          JOIN auto_stock_lot_work_order_issue i ON i.id=%s
+          JOIN auto_stock_lot_allocation a ON a.id=i.lot_debit_id WHERE v.id=%s
+        """,(evidence["issue"],ident)).fetchone()
+        assert row[0]==started and row[0]<row[2] and row[1]>row[3]
+    http=TestClient(app,base_url="https://127.0.0.1")
+    token(http,d,d["intake"])
+    result=http.get(path,params=query)
+    assert result.status_code==200,result.text
+    assert result.json()["items"][0]["groups"][0]["status"]=="LATE_VALUATION"
+    assert result.json()["summary"]["materialNetMinor"] is None
