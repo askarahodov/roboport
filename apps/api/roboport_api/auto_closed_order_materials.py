@@ -18,6 +18,7 @@ from .auto_closed_order_report import (
     report as closed_report, Denied, Conflict, MAX_SAFE,
 )
 from . import auto_material_fifo as fifo
+from . import auto_serial_cost_replay as serial_cost
 from .auto_document_access import require_document_access, DocumentPolicyDenied
 from .auto_vehicle_claim_http import _request_dsn, _response
 
@@ -163,18 +164,49 @@ def _material_report(conn, token, org, loc, from_day, to_day, base):
         by_lot[row[0]].append(row)
     sources = {}
     fifo_results = {}
-    # Mixed serial lots lack per-serial receipt attribution.
-    serial_lots = {r[0] for r in conn.execute("""
-        SELECT DISTINCT lot_id FROM auto_stock_serial WHERE lot_id=ANY(%s::uuid[])
-        """,(lots,)).fetchall()}
+    # Registration and all issue/return/transfer movements are checked
+    # across the entire current lot, not only orders in the requested period.
+    serial_lots={row[0] for row in conn.execute("""
+      SELECT lot_id FROM auto_stock_serial WHERE lot_id=ANY(%s::uuid[])
+      UNION
+      SELECT source_lot_id FROM auto_stock_serial_movement
+        WHERE source_lot_id=ANY(%s::uuid[])
+      UNION
+      SELECT destination_lot_id FROM auto_stock_serial_movement
+        WHERE destination_lot_id=ANY(%s::uuid[])
+    """,(lots,lots,lots)).fetchall() if row[0] is not None}
+    serial_rows=conn.execute("""
+      SELECT m.source_lot_id,m.destination_lot_id,m.serial_id,m.action,
+             m.issue_id,m.return_id,m.work_order_id,m.movement_sequence,
+             p.receipt_id,ap.id,p.cost_registration_seq,ap.cost_registration_seq,
+             d.lot_id,ac.id,v.id,v.cost_registration_seq,v.currency,v.purchase_unit_net_minor
+      FROM auto_stock_serial_movement m
+      LEFT JOIN auto_stock_serial_receipt_assertion p ON p.serial_id=m.serial_id
+      LEFT JOIN auto_stock_serial_receipt_approval ap ON ap.assertion_id=p.id
+      LEFT JOIN auto_stock_receipt_document d ON d.id=p.receipt_id
+      LEFT JOIN auto_stock_receipt_acceptance ac ON ac.document_id=d.id
+      LEFT JOIN auto_stock_receipt_valuation v ON v.document_id=d.id
+      WHERE m.source_lot_id=ANY(%s::uuid[])
+         OR m.destination_lot_id=ANY(%s::uuid[])
+      ORDER BY m.movement_sequence LIMIT %s
+    """,(lots,lots,serial_cost.MAX_SERIAL_EVENTS+1)).fetchall()
+    if len(serial_rows)>serial_cost.MAX_SERIAL_EVENTS:
+        raise Conflict()
+    serial_by_lot=defaultdict(list)
+    for row in serial_rows:
+        if row[0] in serial_lots:
+            serial_by_lot[row[0]].append(row)
+        if row[1] in serial_lots and row[1]!=row[0]:
+            serial_by_lot[row[1]].append(row)
     slice_budget = fifo.MAX_SLICES
     for lot in lots:
         rows = by_lot[lot]
         if sum(r[4] is not None for r in rows)>1:
             if lot in serial_lots:
-                sources[lot]=("UNPROVEN",None)
-                continue
-            status, parts = fifo.replay(rows,limit=slice_budget)
+                status, parts = serial_cost.replay(rows,serial_by_lot[lot],
+                    limit=slice_budget)
+            else:
+                status, parts = fifo.replay(rows,limit=slice_budget)
             slice_budget-=sum(len(p) for p in parts.values())
             sources[lot]=(status,None)
             fifo_results[lot]=parts
@@ -201,7 +233,7 @@ def _material_report(conn, token, org, loc, from_day, to_day, base):
             status, source = "UNPROVEN", None
         cost = net * source["unitNetMinor"] if source else None
         slices = []
-        if status == "FIFO_TRACED":
+        if status in ("FIFO_TRACED","SERIAL_TRACED"):
             cost, slices = fifo.group_slices(events, fifo_results[lot])
         if cost is not None and cost > MAX_SAFE:
             raise Conflict()
@@ -220,7 +252,7 @@ def _material_report(conn, token, org, loc, from_day, to_day, base):
     for row in base["items"]:
         groups = sorted(all_groups[UUID(row["workOrderId"])],
                         key=lambda g: (g["skuId"], g["lotId"] or ""))
-        complete = all(g["status"] in ("TRACED","FIFO_TRACED") for g in groups)
+        complete = all(g["status"] in ("TRACED","FIFO_TRACED","SERIAL_TRACED") for g in groups)
         cost = sum(g["materialNetMinor"] for g in groups) if complete else None
         if cost is not None:
             complete_count += 1
@@ -252,27 +284,28 @@ def _csv(result):
                      "Статус", "SKU UUID", "Партия UUID", "Выдано", "Возвращено",
                      "Расход", "Оценка без НДС, коп.", "Приход UUID", "Приёмка UUID",
                      "Оценка UUID", "Цена единицы, коп.", "Складское событие UUID",
-                     "Движение партии UUID", "Действие", "Количество", "Исходная выдача UUID"))
+                     "Движение партии UUID", "Действие", "Количество", "Исходная выдача UUID", "Серийная деталь UUID", "Подтверждение происхождения UUID"))
     for row in result["items"]:
         order = (row["workOrderId"], row["closedDay"], row["closedEventId"])
         writer.writerow((*order, "ORDER", row["status"], "", "", "", "", "",
-                         row["materialNetMinor"], "", "", "", "", "", "", "", "", ""))
+                         row["materialNetMinor"], "", "", "", "", "", "", "", "", "", "", ""))
         for group in row["groups"]:
             source = group["source"] or {}
             writer.writerow((*order, "LOT", group["status"], group["skuId"], group["lotId"],
                              group["issuedQuantity"], group["returnedQuantity"], group["netQuantity"],
                              group["materialNetMinor"], source.get("receiptId"),
                              source.get("acceptanceId"), source.get("valuationId"),
-                             source.get("unitNetMinor"), "", "", "", "", ""))
+                             source.get("unitNetMinor"), "", "", "", "", "", "", ""))
             for movement in group["movements"]:
                 writer.writerow((*order, "MOVEMENT", "", group["skuId"], group["lotId"],
                                  "", "", "", "", "", "", "", "", movement["stockEventId"],
-                                 movement["lotMovementId"], movement["action"], movement["quantity"], ""))
+                                 movement["lotMovementId"], movement["action"], movement["quantity"], "", "", ""))
             for s in group["fifoSlices"]:
                 writer.writerow((*order,"FIFO_SLICE","",group["skuId"],group["lotId"],"","","",
                                  s["quantity"]*s["unitNetMinor"]*(1 if s["action"]=="ISSUE" else -1),
                                  s["receiptId"],s["acceptanceId"],s["valuationId"],s["unitNetMinor"],
-                                 s["stockEventId"],s["lotMovementId"],s["action"],s["quantity"],s["originalIssueId"]))
+                                 s["stockEventId"],s["lotMovementId"],s["action"],s["quantity"],s["originalIssueId"],
+                                 s.get("serialId",""),s.get("serialApprovalId",""))
     return "\ufeff" + output.getvalue()
 
 
