@@ -327,30 +327,82 @@ def report(conn,token,org,loc,*,from_day,to_day):
     if not 1<=count<=31:
         raise TreasuryInvalid("INVALID_RANGE")
     with conn.transaction():
+        # A single snapshot prevents account/day totals and closing events
+        # from coming from different committed states. Grant revocations
+        # racing our locked read fail closed with a serialization conflict.
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         _staff(conn,token,org,loc,("MANAGER","CASHIER"))
         accounts=list_accounts(conn,token,org,loc)["items"]
+        account_ids=[UUID(item["id"]) for item in accounts]
+        if not account_ids:
+            return {"syntheticOnly":True,"realMoney":False,"currency":"RUB",
+                    "basis":"INDEPENDENT_TREASURY_EVENT_DAYS",
+                    "accounts":accounts,"items":[]}
+
+        # Lock in deterministic order. All authorized treasury writes take an
+        # account FOR UPDATE before appending, so a write cannot interleave
+        # with this bounded branch-wide reconciliation.
+        locked=conn.execute("""
+            SELECT id FROM auto_treasury_account
+            WHERE organization_id=%s AND location_id=%s
+              AND id=ANY(%s::uuid[])
+            ORDER BY id FOR SHARE
+        """,(org,loc,account_ids)).fetchall()
+        if len(locked)!=len(account_ids):
+            raise TreasuryConflict("ACCOUNT_CONFLICT")
+
+        # One aggregated SQL read replaces up to 50 x 31 separate _day_numbers
+        # queries. All dates before the requested window form ONE opening
+        # bucket (NULL), avoiding a historical row per business day.
+        totals=conn.execute("""
+            SELECT account_id,
+                   CASE WHEN business_day<%s THEN NULL ELSE business_day END AS day,
+                   COALESCE(sum(amount_minor) FILTER(
+                       WHERE kind IN ('ADVANCE','PAYMENT')),0)::bigint,
+                   COALESCE(sum(amount_minor) FILTER(
+                       WHERE kind IN ('REFUND_ADVANCE','REFUND_PAYMENT')),0)::bigint
+            FROM auto_treasury_event
+            WHERE account_id=ANY(%s::uuid[]) AND business_day<=%s
+            GROUP BY account_id,
+                     CASE WHEN business_day<%s THEN NULL ELSE business_day END
+        """,(first,account_ids,last,first)).fetchall()
+        opening={ident:0 for ident in account_ids}
+        daily={}
+        for ident,day,inc,out in totals:
+            if day is None:
+                opening[ident]=inc-out
+            else:
+                daily[(ident,day)]=(inc,out)
+
+        closes=conn.execute("""
+            SELECT account_id,business_day,id,opening_minor,
+                   incoming_minor,outgoing_minor,closing_minor,created_at
+            FROM auto_treasury_day_close
+            WHERE account_id=ANY(%s::uuid[])
+              AND business_day >= %s AND business_day <= %s
+        """,(account_ids,first,last)).fetchall()
+        closed_by_day={(row[0],row[1]):row for row in closes}
         rows=[]
         for account in accounts:
             aid=UUID(account["id"])
+            balance=opening[aid]
             for i in range(count):
                 day=first+timedelta(days=i)
-                opening,incoming,outgoing=_day_numbers(conn,aid,day)
-                closed=conn.execute("""
-                   SELECT id,actor_id,closing_minor,created_at
-                   FROM auto_treasury_day_close
-                   WHERE account_id=%s AND business_day=%s
-                """,(aid,day)).fetchone()
-                if closed and closed[2]!=opening+incoming-outgoing:
+                incoming,outgoing=daily.get((aid,day),(0,0))
+                closing=balance+incoming-outgoing
+                sealed=closed_by_day.get((aid,day))
+                if sealed is not None and tuple(sealed[3:7])!=(
+                        balance,incoming,outgoing,closing):
                     raise TreasuryConflict("CLOSE_INTEGRITY")
                 rows.append({
                     "accountId":account["id"],"accountCode":account["code"],
                     "kind":account["kind"],"localDay":day.isoformat(),
-                    "openingMinor":opening,"incomingMinor":incoming,
-                    "outgoingMinor":outgoing,
-                    "closingMinor":opening+incoming-outgoing,
-                    "closeId":str(closed[0]) if closed else None,
-                    "closedAt":closed[3].isoformat() if closed else None,
+                    "openingMinor":balance,"incomingMinor":incoming,
+                    "outgoingMinor":outgoing,"closingMinor":closing,
+                    "closeId":str(sealed[2]) if sealed else None,
+                    "closedAt":sealed[7].isoformat() if sealed else None,
                 })
-        return {"syntheticOnly":True,"realMoney":False,
-                "currency":"RUB","basis":"INDEPENDENT_TREASURY_EVENT_DAYS",
+                balance=closing
+        return {"syntheticOnly":True,"realMoney":False,"currency":"RUB",
+                "basis":"INDEPENDENT_TREASURY_EVENT_DAYS",
                 "accounts":accounts,"items":rows}
