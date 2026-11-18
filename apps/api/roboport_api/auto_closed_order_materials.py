@@ -290,32 +290,36 @@ def _material_report(conn, token, org, loc, from_day, to_day, base):
 def _csv(result):
     output = StringIO(newline="")
     writer = csv.writer(output, delimiter=";", lineterminator="\r\n")
-    writer.writerow(("Заказ UUID", "День закрытия", "Закрытие UUID", "Уровень",
+    def emit(fields):
+        if len(fields)>23:
+            raise Conflict()
+        writer.writerow((*fields, *[""]*(23-len(fields))))
+    emit(("Заказ UUID", "День закрытия", "Закрытие UUID", "Уровень",
                      "Статус", "SKU UUID", "Партия UUID", "Выдано", "Возвращено",
                      "Расход", "Оценка без НДС, коп.", "Приход UUID", "Приёмка UUID",
                      "Оценка UUID", "Цена единицы, коп.", "Складское событие UUID",
-                     "Движение партии UUID", "Действие", "Количество", "Исходная выдача UUID", "Серийная деталь UUID", "Подтверждение происхождения UUID"))
+                     "Движение партии UUID", "Действие", "Количество", "Исходная выдача UUID", "Серийная деталь UUID", "Подтверждение происхождения UUID", "Филиал-источник UUID"))
     for row in result["items"]:
         order = (row["workOrderId"], row["closedDay"], row["closedEventId"])
-        writer.writerow((*order, "ORDER", row["status"], "", "", "", "", "",
+        emit((*order, "ORDER", row["status"], "", "", "", "", "",
                          row["materialNetMinor"], "", "", "", "", "", "", "", "", "", "", ""))
         for group in row["groups"]:
             source = group["source"] or {}
-            writer.writerow((*order, "LOT", group["status"], group["skuId"], group["lotId"],
+            emit((*order, "LOT", group["status"], group["skuId"], group["lotId"],
                              group["issuedQuantity"], group["returnedQuantity"], group["netQuantity"],
                              group["materialNetMinor"], source.get("receiptId"),
                              source.get("acceptanceId"), source.get("valuationId"),
                              source.get("unitNetMinor"), "", "", "", "", "", "", ""))
             for movement in group["movements"]:
-                writer.writerow((*order, "MOVEMENT", "", group["skuId"], group["lotId"],
+                emit((*order, "MOVEMENT", "", group["skuId"], group["lotId"],
                                  "", "", "", "", "", "", "", "", movement["stockEventId"],
                                  movement["lotMovementId"], movement["action"], movement["quantity"], "", "", ""))
             for s in group["fifoSlices"]:
-                writer.writerow((*order,"FIFO_SLICE","",group["skuId"],group["lotId"],"","","",
+                emit((*order,"FIFO_SLICE","",group["skuId"],group["lotId"],"","","",
                                  s["quantity"]*s["unitNetMinor"]*(1 if s["action"]=="ISSUE" else -1),
                                  s["receiptId"],s["acceptanceId"],s["valuationId"],s["unitNetMinor"],
                                  s["stockEventId"],s["lotMovementId"],s["action"],s["quantity"],s["originalIssueId"],
-                                 s.get("serialId",""),s.get("serialApprovalId","")))
+                                 s.get("serialId",""),s.get("serialApprovalId",""),s.get("sourceLocationId","")))
     return "\ufeff" + output.getvalue()
 
 
