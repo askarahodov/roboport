@@ -1,4 +1,9 @@
 import React from 'react';
+
+const initialScope=(key:string)=>{
+  const value=new URLSearchParams(window.location.search).get(key)??'';
+  return uuid.test(value)?value:'';
+};
 import { Link } from 'react-router-dom';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -115,9 +120,9 @@ function formatDate(stamp:string){
 }
 
 export function AutoAssignments(){
-  const [org,setOrg]=React.useState('');
-  const [loc,setLoc]=React.useState('');
-  const [order,setOrder]=React.useState('');
+  const [org,setOrg]=React.useState(()=>initialScope('org'));
+  const [loc,setLoc]=React.useState(()=>initialScope('loc'));
+  const [order,setOrder]=React.useState(()=>initialScope('order'));
   const [mechanic,setMechanic]=React.useState('');
   const [starts,setStarts]=React.useState('');
   const [ends,setEnds]=React.useState('');
