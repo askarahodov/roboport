@@ -151,7 +151,7 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
             problems.append(f"{where}: invalid fields")
             continue
         ident=item["id"]
-        if not isinstance(ident,str) or re.fullmatch(r"ADF-\\d{3}",ident) is None:
+        if not isinstance(ident,str) or re.fullmatch(r"ADF-\d{3}",ident) is None:
             problems.append(f"{where}: invalid ID")
         elif ident in seen_ids:
             problems.append(f"{where}: duplicate ID")
