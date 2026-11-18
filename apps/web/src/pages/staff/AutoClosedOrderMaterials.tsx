@@ -6,7 +6,7 @@ type Status=typeof statuses[number];
 type Movement={stockEventId:string;action:'ISSUE'|'RETURN';quantity:number;lotMovementId:string|null};
 type Source={receiptId:string;acceptanceId:string;valuationId:string;unitNetMinor:number};
 type FifoSlice=Source&{stockEventId:string;lotMovementId:string;originalIssueId:string;
-  action:'ISSUE'|'RETURN';quantity:number;serialId?:string;serialApprovalId?:string};
+  action:'ISSUE'|'RETURN';quantity:number;serialId?:string;serialApprovalId?:string;sourceLocationId?:string};
 type Group={skuId:string;lotId:string|null;issuedQuantity:number;returnedQuantity:number;
   netQuantity:number;status:Status;source:Source|null;materialNetMinor:number|null;fifoSlices:FifoSlice[];movements:Movement[]};
 type Item={workOrderId:string;closedDay:string;closedEventId:string;
@@ -79,14 +79,15 @@ export function parseMaterialReport(raw:unknown,from:string,to:string):Report{
             !int(s.quantity)||s.quantity===0||!int(s.unitNetMinor)||s.unitNetMinor>1e9||
             ++sliceCount>5000)throw Error('fifo slice');
           if(g.status==='SERIAL_TRACED'){
-            if(!validId(s.serialId)||!validId(s.serialApprovalId)||s.quantity!==1)
+            if(!validId(s.serialId)||!validId(s.serialApprovalId)||
+              (s.sourceLocationId!==undefined&&!validId(s.sourceLocationId))||s.quantity!==1)
               throw Error('serial proof');
             const id=s.serialId+':'+s.originalIssueId;
-            const val=s.receiptId+':'+s.acceptanceId+':'+s.valuationId+':'+s.serialApprovalId+':'+s.unitNetMinor;
+            const val=s.receiptId+':'+s.acceptanceId+':'+s.valuationId+':'+s.serialApprovalId+':'+s.unitNetMinor+':'+(s.sourceLocationId??'');
             if(serialSources.has(id)&&serialSources.get(id)!==val)throw Error('serial source');
             serialSources.set(id,val);
             serialBalance.set(id,(serialBalance.get(id)||0)+(s.action==='ISSUE'?1:-1));
-          }else if(s.serialId!==undefined||s.serialApprovalId!==undefined)throw Error('unexpected serial');
+          }else if(s.serialId!==undefined||s.serialApprovalId!==undefined||s.sourceLocationId!==undefined)throw Error('unexpected serial');
           const source=s.acceptanceId+':'+s.valuationId+':'+s.unitNetMinor;
           if(sources.has(s.receiptId)&&sources.get(s.receiptId)!==source)throw Error('source');
           sources.set(s.receiptId,source);
@@ -192,7 +193,8 @@ export function AutoClosedOrderMaterials({org,loc,from,to,allowed}:{
               {g.fifoSlices.map((s,i)=><p key={s.stockEventId+':'+i}>{s.serialId?'Серийная деталь':'FIFO'}: {s.action==='ISSUE'?'Выдача':'Возврат'} ·
                 {' '}{s.quantity} × {money(s.unitNetMinor)} · Приход: {s.receiptId} · Приёмка: {s.acceptanceId}
                 {' '}· Оценка: {s.valuationId} · Событие: {s.stockEventId} · Исходная выдача: {s.originalIssueId}
-                {s.serialId&&' · Серийная запись: '+s.serialId+' · Подтверждение: '+s.serialApprovalId}</p>)}
+                {s.serialId&&' · Серийная запись: '+s.serialId+' · Подтверждение: '+s.serialApprovalId}
+                {s.sourceLocationId&&' · Филиал закупки: '+s.sourceLocationId}</p>)}
               {g.movements.map(m=><p key={m.stockEventId}>{m.action==='ISSUE'?'Выдача':'Возврат'}:
                 {' '}{m.quantity} · {m.stockEventId} · {m.lotMovementId||'Без партии'}</p>)}
             </div>)}
