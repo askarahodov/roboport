@@ -47,6 +47,18 @@ def test_browser_runs_pinned_playwright_image_and_checks_actual_launch():
     assert not any("npx playwright install --with-deps" in step.get("run", "") for step in steps)
     assert steps.index(smoke) < next(i for i, step in enumerate(steps) if step.get("name") == "Browser E2E against synthetic FastAPI")
 
+    # PR может запускать только безопасные связанные сценарии; release обязателен полный.
+    checkout=next(step for step in steps
+                  if step.get("uses","").startswith("actions/checkout@"))
+    assert checkout["with"]["fetch-depth"]==0
+    browser_run=next(step["run"] for step in steps
+                     if step.get("name")=="Browser E2E against synthetic FastAPI")
+    assert "python -m scripts.ci_browser --paths-base64" in browser_run
+    assert "python -m scripts.ci_browser --full --run" in browser_run
+    assert "github.event_name" in browser_run
+    assert "needs.impact.outputs.browser_paths_b64" in browser_run
+    assert jobs["impact"]["outputs"]["browser_paths_b64"] == "${{ steps.classify.outputs.browser_paths_b64 }}"
+    assert "continue-on-error" not in browser_run
     assert any(step.get("name") == "Browser E2E against synthetic FastAPI" for step in steps)
     assert any(step.get("name") == "Browser navigation and search smoke for local Docsify portal" for step in steps)
     assert all(step.get("continue-on-error") is not True for step in steps)
