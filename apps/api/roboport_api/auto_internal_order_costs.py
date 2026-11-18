@@ -83,6 +83,10 @@ def read_policies(conn, token, org, loc):
 
 
 def propose(conn, token, org, loc, key, expected_version, rate):
+    if (any(type(x) is not UUID for x in (org,loc,key)) or
+        type(expected_version) is not int or not 0<=expected_version<100 or
+        type(rate) is not int or not 0<=rate<=10**10):
+        raise ValueError("INVALID_INPUT")
     with conn.transaction():
         actor = _authority(conn, token, org, loc, write=True)
         prior = conn.execute("""
@@ -112,6 +116,8 @@ def propose(conn, token, org, loc, key, expected_version, rate):
 
 
 def approve(conn, token, org, loc, ident, key):
+    if any(type(x) is not UUID for x in (org,loc,ident,key)):
+        raise ValueError("INVALID_INPUT")
     with conn.transaction():
         actor = _authority(conn, token, org, loc, write=True)
         row = conn.execute("""
@@ -154,7 +160,7 @@ def cost_report(conn, token, org, loc, from_day, to_day):
           SELECT e.work_order_id,l.id,l.service_id,l.actual_minutes,
                  l.internal_cost_approval_id,r.id,r.version,r.rate_minor_per_hour,
                  (r.organization_id=e.organization_id AND r.location_id=e.location_id
-                  AND a.created_at<=l.created_at) AS valid_rate,
+                  AND a.created_at<=l.internal_cost_registered_at) AS valid_rate,
                  EXISTS(SELECT 1 FROM app_user u
                   JOIN auto_organization_role_grant g ON g.user_id=u.id
                   WHERE u.id=l.actor_id AND u.status='ACTIVE'
