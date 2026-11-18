@@ -1,3 +1,4 @@
+import {useSearchParams} from 'react-router-dom';
 import React from 'react';
 import { Link } from 'react-router-dom';
 
@@ -115,9 +116,10 @@ function formatDate(stamp:string){
 }
 
 export function AutoAssignments(){
-  const [org,setOrg]=React.useState('');
-  const [loc,setLoc]=React.useState('');
-  const [order,setOrder]=React.useState('');
+  const [query]=useSearchParams();
+  const [org,setOrg]=React.useState(()=>uuid.test(query.get('org')??'')?query.get('org')!:'');
+  const [loc,setLoc]=React.useState(()=>uuid.test(query.get('loc')??'')?query.get('loc')!:'');
+  const [order,setOrder]=React.useState(()=>uuid.test(query.get('order')??'')?query.get('order')!:'');
   const [mechanic,setMechanic]=React.useState('');
   const [starts,setStarts]=React.useState('');
   const [ends,setEnds]=React.useState('');
