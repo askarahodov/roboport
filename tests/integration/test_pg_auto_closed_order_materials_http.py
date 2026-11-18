@@ -157,7 +157,7 @@ def test_exact_single_receipt_net_cost_and_live_price_scope(monkeypatch):
     export=http.get(path+"/export",params=query)
     assert export.status_code==200 and export.headers["x-content-type-options"]=="nosniff"
     lines=list(csv.reader(StringIO(export.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(lines)==5 and all(len(row)==20 for row in lines)
+    assert len(lines)==5 and all(len(row)==22 for row in lines)
     assert lines[1][3:5]==["ORDER","COMPLETE"] and lines[1][10]=="1250"
     assert lines[2][3:5]==["LOT","TRACED"] and lines[2][14]=="1250"
     assert http.get(path.replace(str(loc),str(uuid4())),params=query).status_code==403
