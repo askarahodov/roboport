@@ -327,62 +327,17 @@ next/previous, 403/409, повреждённые данные,
 сброс при смене филиала. Без миграции и новых
 изменяемых журналов; rollback — revert API/UI/docs.
 
-## Выработка механиков по закрытым техническим работам (current-dev, #448)
+## Выработка механиков: трассируемые записи труда по техническому закрытию (current-dev, #448)
 
-**Что работает:** закрытый `synthetic HTTPS loopback` отчёт
-`/staff/auto-mechanic-productivity` для действующего `MANAGER` филиала.
-Это **фактические минуты**, не оценочные нормочасы, не payroll, прибыль,
-выручка, касса или реальные документы. Источник:
-`auto_work_order_labor_entry` → `auto_work_order_execution` →
-`auto_work_order_execution_finish`, только если есть
-`auto_order_demo_document_event(POSTED, CLOSED_TECHNICAL)` и последний
-`auto_work_order_qc_event` имеет `PASS`, отмеченный после finish.
+**Готовый синтетический сценарий:** `/staff/auto-mechanic-productivity`, только MANAGER организации и своего филиала с HANDOVER READ; период 1–31 **локальный день события CLOSED_TECHNICAL**, а не день исполнения/создания/завершения WorkOrder. Если механик закончил 26 октября, а менеджер закрыл заказ 27 октября, 45 минут попадают только в 27 октября. Каждый отчёт читается из реальных immutable PostgreSQL 17 событий `auto_order_demo_document_event(CLOSED_TECHNICAL/POSTED/CLIENT_ACK)`, `auto_work_order_execution_finish`, последнего `auto_work_order_qc_event(PASS)` и `auto_work_order_labor_entry`. QC PASS должен быть после finish, но не позже закрытия. Пока документ только POSTED или подтверждён клиентом, без CLOSED_TECHNICAL, его труд в отчёт не попадает.
 
-**Сценарий:** менеджер выбирает UUID своей организации и филиала, диапазон
-локальных дат окончания работ 1–31 день и нажимает «Рассчитать выработку».
-На экране — количество действующих механиков, уникальных закрытых
-заказ-нарядов, услуг, минуты и подробные UUID заказов/сотрудников.
-Нажатие «Скачать выработку CSV» повторно читает PostgreSQL и проверяет
-полномочия, поэтому возможна разница с ранее показанным экраном.
-CSV: UTF-8 BOM, разделитель `;`, только UUID и числовые значения без
-формульных или персональных строк. Нет доступа по одному VIN.
+**Как сверить:** у каждого механика/заказа есть `closedDay`, `closedEventId`, `finishEventId`, `qcEventId` и массив `laborEntries` с `laborEntryId`, `serviceId`, `actualMinutes`; `serviceCount` равен длине массива, `actualMinutes` — сумме записей. Один immutable labor-entry UUID должен присутствовать ровно один раз в одном отчёте. В UI раскройте «Первичные записи труда» рядом с заказом: отобразятся UUID закрытия, завершения, QC PASS, работ и их минуты. В CSV используются отдельные уровни ORDER (один итог по заказу и механику) и LABOR (каждая первичная запись труда). Суммировать оба уровня вместе **нельзя**. UTF-8 BOM, `;`, 12 колонок, только UUID, числовые значения, ISO day и фиксированные словарные статусы; не выводятся ФИО, VIN, телефон, контрагенты, цены или формулы Excel. CSV запрашивает новый snapshot и повторно проверяет ACL.
 
-**Инварианты и ограничения:**
-- Сервер проверяет текущую сессию `MANAGER`, свою организацию/филиал,
-  `HANDOVER:READ` и historical cutoff. При DENY — `403`; cutoff
-  исключает более старые WorkOrder из данных, а не показывает их суммы.
-- В выборку входят только актуальные подтверждённые owner-links,
-  активные учётные записи механиков с неотозванным `MECHANIC` grant в
-  этом филиале. Отзыв доступа сотрудника исключает его прошлые строки из
-  нового отчёта; это **текущий scope**, не неизменяемый payroll ledger.
-- Только документы `CLOSED_TECHNICAL` и независимый последний `QC PASS`
-  после завершения работ. Незавершённые, отклонённые, чужие,
-  отозванные и неоднозначные данные не попадают.
-- События учитываются по `finish.created_at` с пересчётом локальной
-  полуночи IANA в UTC для каждого края периода. День перехода DST может
-  иметь 23 или 25 часов. Не объединять с SIM, CHARGE/CREDIT или
-  синтетической казной; материальная себестоимость здесь не рассчитывается.
-- Максимум **500 записей работ**, при превышении — явный `409 REPORT_LIMIT`
-  без частичного отчёта или CSV; некорректные даты/диапазон — `422`;
-  чужой scope или отозванный MANAGER — `403`. Только `GET` без мутаций,
-  `Cache-Control: no-store`; не опубликовано в production OpenAPI.
+**Права и согласованность:** один REPEATABLE READ SQL snapshot с живыми MANAGER/HANDOVER:READ и cutoff по времени создания WorkOrder, активными ролями MECHANIC и staff, verified+unrevoked vehicle ownership и филиальной binding. Действующие grant/owner proof/binding/staff блокируются FOR SHARE; одновременный отзыв прав у старого MVCC-снимка вызывает 40001 → 409, а не подтверждение прежнего состояния. Отозванный механик **исключается** из повторного отчёта: это текущая аналитика действующих исполнителей, а не замороженный payroll-регистр. Отзыв MANAGER или DENY → 403. До 500 labor source rows за один запрос, больше → 409 без частичных сумм/CSV, неверный период → 422. Смена филиала, 403/409 и повреждённый JSON очищают прежние результаты браузера.
 
-**Контракт:** `GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/mechanic-productivity?fromDay=YYYY-MM-DD&toDay=YYYY-MM-DD`,
-плюс `/export`. Ответ содержит
-`syntheticOnly:true`, `realMoney:false`, `payrollAvailable:false`,
-`releaseAllowed:false`, `activeMechanicsOnly:true`, `basis`,
-`timeZone`, `summary` и `items[].orders[]` с UUID и минутами.
+**Точный контракт:** `GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/mechanic-productivity?fromDay=YYYY-MM-DD&toDay=YYYY-MM-DD` и `/export`, basis `CLOSED_TECHNICAL_LOCAL_DAY_QC_PASS_LABOR_SOURCES`, `periodBasis=CLOSED_TECHNICAL_LOCAL_DAY`; `syntheticOnly=true, realMoney=false, payrollAvailable=false, releaseAllowed=false, activeMechanicsOnly=true`. Границы 23/24/25-часовых локальных суток IANA независимо преобразуются в UTC; дата закрытия всегда пересчитывается в TZ филиала. Нет новых DDL или миграций; откат — общий revert read-only API/UI/tests/docs без удаления событий.
 
-**Доказательства:** PG17/HTTPS
-`tests/integration/test_pg_auto_mechanic_productivity_http.py`
-проверяет реальный закрытый lifecycle, статусы 403/422, отзыв прав,
-сверку SQL→API→CSV и DST 23/25 часов. Playwright
-`apps/web/e2e/auto-mechanic-productivity.spec.ts` —
-390/1280, light/dark, клавиатура, повреждённый ответ, 409, 403 и
-отзыв перед выгрузкой. Скриншоты искусственные. Миграций нет,
-откат — revert нового read-only API, UI, тестов и документации.
-Payroll/ставки/удержания, реальные финансовые отчёты и выпуск до
-юридического #119 остаются `planned`.
+**Доказательства:** `tests/integration/test_pg_auto_mechanic_productivity_http.py` — полный акт/смета/работы/QC/posted/client ack/technical close, 0 до CLOSE, source UUIDs через SQL→JSON→CSV, отзыв/403, 409/422, чужой scope, DST; `apps/web/e2e/auto-mechanic-productivity.spec.ts` — 390/1280, Light/Dark, клавиатура, подробный drill-down, повреждение ID/minutes/day, 403/409 и очистка. Это не нормочасы, KPI личной эффективности, факт присутствия, зарплата, бухгалтерская выручка или реальное закрытие/выдача: production, ставки и удержания остаются после legal/security #119.
 
 ## Аудит первички материалов на заказ-наряды (current-dev, #448)
 
