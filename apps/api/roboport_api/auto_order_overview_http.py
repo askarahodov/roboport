@@ -2,7 +2,7 @@
 from uuid import UUID
 import psycopg
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_order_overview import get_order_overview
 from .auto_stock_service import AutoStockDenied
@@ -65,6 +65,48 @@ def staff_work_order_register(org_id: str,loc_id: str,request: Request,
         except (psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
             return _response(request,409,"REGISTER_CONFLICT")
     return JSONResponse(content=data,headers={"Cache-Control":"no-store"})
+
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/export")
+def export_staff_work_order_register(org_id: str,loc_id: str,request: Request,
+                                     stage: str="ALL",orderId: str|None=None):
+    """Complete filtered register CSV; fail closed rather than truncate."""
+    from .auto_work_order_register import (
+        export_work_orders_csv,RegisterDenied,RegisterInvalid,
+    )
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    if (any(len(request.query_params.getlist(name))>1
+            for name in ("stage","orderId"))
+        or any(key not in ("stage","orderId") for key in request.query_params)):
+        return _response(request,422,"INVALID_INPUT")
+    try:
+        org,loc=UUID(org_id),UUID(loc_id)
+        lookup=UUID(orderId) if orderId is not None else None
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            result=export_work_orders_csv(
+                db,request.cookies.get("rp_session",""),org,loc,
+                stage=stage,order_id=lookup,
+            )
+        except RegisterDenied:
+            return _response(request,403,"FORBIDDEN")
+        except RegisterInvalid as exc:
+            if str(exc)=="EXPORT_LIMIT":
+                return _response(request,409,"REGISTER_LIMIT")
+            return _response(request,422,"INVALID_INPUT")
+        except (psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
+            return _response(request,409,"REGISTER_CONFLICT")
+    return Response(
+        content=result,media_type="text/csv; charset=utf-8",
+        headers={"Cache-Control":"no-store",
+                 "X-Content-Type-Options":"nosniff",
+                 "Content-Disposition":'attachment; filename="auto-work-order-register.csv"'},
+    )
 
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/workspace")

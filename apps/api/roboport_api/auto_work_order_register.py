@@ -6,6 +6,8 @@ The product's full AutoDealer parity and legal handover remain open.
 from __future__ import annotations
 
 import hashlib
+import csv
+from io import StringIO
 from datetime import datetime
 from uuid import UUID
 
@@ -28,15 +30,17 @@ STAGES = frozenset((
     "CLIENT_ACKNOWLEDGED", "CLIENT_DISPUTED", "CLOSED_TECHNICAL", "CANCELED",
 ))
 PAGE_SIZE = 25
+EXPORT_LIMIT = 1000
 
 
 def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
                      *, stage: str = "ALL", order_id: UUID | None = None,
-                     cursor: str | None = None) -> dict:
+                     cursor: str | None = None, limit: int = PAGE_SIZE) -> dict:
     if (type(token) is not str or not token.strip()
         or type(org) is not UUID or type(loc) is not UUID):
         raise RegisterDenied("FORBIDDEN")
-    if (stage not in STAGES or
+    if (stage not in STAGES or type(limit) is not int or
+        limit not in (PAGE_SIZE, EXPORT_LIMIT) or
         (order_id is not None and type(order_id) is not UUID)):
         raise RegisterInvalid("INVALID_INPUT")
     scope = hashlib.sha256(
@@ -133,8 +137,8 @@ def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
         """, (org, loc, org, loc, stage, stage, order_id, order_id,
               after[0] if after else None,
               after[0] if after else None,
-              after[1] if after else None, PAGE_SIZE + 1)).fetchall()
-        page = rows[:PAGE_SIZE]
+              after[1] if after else None, limit + 1)).fetchall()
+        page = rows[:limit]
         items = [{
             "workOrderId": str(ident),
             "appointmentId": str(appointment),
@@ -145,6 +149,38 @@ def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
             "stage": value,
         } for ident,created,appointment,bay,starts,ends,value in page]
         next_cursor = (encode_cursor(page[-1][1], page[-1][0], scope, token)
-                       if len(rows)>PAGE_SIZE else None)
+                       if len(rows)>limit else None)
         return {"syntheticOnly": True, "releaseAllowed": False,
                 "items": items, "nextCursor": next_cursor}
+
+
+def export_work_orders_csv(conn: psycopg.Connection, token: str, org: UUID,
+                           loc: UUID, *, stage: str = "ALL",
+                           order_id: UUID | None = None) -> str:
+    """Complete, bounded, one-statement snapshot of the exact register filter.
+
+    The same SQL, role checks and verified-link predicates power interactive
+    pages. Never silently truncate a report or stream half a download.
+    Only fixed-schema UUIDs, UTC offsets and enumerated stages leave the API.
+    """
+    report = list_work_orders(conn, token, org, loc, stage=stage,
+                              order_id=order_id, limit=EXPORT_LIMIT)
+    if report["nextCursor"] is not None:
+        raise RegisterInvalid("EXPORT_LIMIT")
+    out = StringIO(newline="")
+    writer = csv.writer(out, delimiter=";", lineterminator="\r\n")
+    writer.writerow(("Заказ-наряд", "Запись", "Пост", "Создан",
+                     "Начало записи", "Окончание записи", "Технический статус"))
+    for row in report["items"]:
+        # No free-text fields, formulas, prices, PII, or customer identifiers.
+        # Assert the finite enum before CSV to keep every cell inert.
+        if (row["stage"] not in STAGES or row["stage"] == "ALL"
+                or any(not isinstance(row[key], str) or
+                       not row[key] or row[key][0] in "=+-@\t\r\n"
+                       for key in ("workOrderId", "appointmentId", "bayId",
+                                   "createdAt", "startsAt", "endsAt"))):
+            raise RegisterInvalid("EXPORT_INVALID")
+        writer.writerow((row["workOrderId"], row["appointmentId"], row["bayId"],
+                         row["createdAt"], row["startsAt"], row["endsAt"],
+                         row["stage"]))
+    return "\ufeff" + out.getvalue()
