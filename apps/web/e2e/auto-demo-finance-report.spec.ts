@@ -138,3 +138,53 @@ test('closed-order report reconciles source IDs and clears on revoked scope',asy
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(id('3'));
   await expect(table).toHaveCount(0);
 });
+
+test('material assessment shows traceability, unknown values and live price denial',async({page})=>{
+  const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+  const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
+    status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
+    materialNetMinor:1250,movements:[
+      {stockEventId:id('6'),action:'ISSUE',quantity:2,lotMovementId:id('7')},
+      {stockEventId:id('8'),action:'RETURN',quantity:1,lotMovementId:id('9')},
+    ]};
+  const row={workOrderId:id('a'),closedDay:'2030-10-27',closedEventId:id('b'),
+    status:'COMPLETE',materialNetMinor:1250,groups:[group]};
+  const sample={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_SINGLE_RECEIPT_NET_MATERIAL_USAGE',
+    timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
+    summary:{orderCount:1,completeOrderCount:1,movementCount:2,materialNetMinor:1250},items:[row]};
+  const unknown={...sample,summary:{...sample.summary,completeOrderCount:0,materialNetMinor:null},
+    items:[{...row,status:'INCOMPLETE',materialNetMinor:null,
+      groups:[{...group,status:'UNPROVEN',source:null,materialNetMinor:null}]}]};
+  let response:unknown=sample,status=200;
+  await page.route('**/reports/closed-order-materials*',route=>route.fulfill({
+    status,contentType:'application/json',body:JSON.stringify(response),
+  }));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-demo-finance-report');await fill(page);
+  const section=page.getByRole('region',{name:'Оценка расхода материалов закрытых заказов'});
+  const button=section.getByRole('button',{name:'Проверить расход материалов'});
+  const table=section.getByRole('table');
+  await button.click();await expect(table).toBeVisible();
+  await expect(table).toContainText('12,50 RUB');
+  await table.getByText('Партии и движения',{exact:true}).click();
+  await expect(table.getByText(/Подтверждён единственный приход/)).toContainText('Расход: 1');
+  await expect(table.getByText(/Приход:/)).toContainText(id('3'));
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  response=unknown;await button.click();
+  await expect(table).toContainText('Не определена');
+  await expect(table).not.toContainText('12,50 RUB');
+  response={...unknown,summary:{...unknown.summary,materialNetMinor:0}};
+  await button.click();await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
+  await expect(table).toHaveCount(0);
+  response=sample;await button.click();await expect(table).toBeVisible();
+  status=403;await button.click();
+  await expect(section.getByRole('alert')).toContainText('Доступ к закупочным сведениям запрещён');
+  await expect(table).toHaveCount(0);
+  status=200;await button.click();await expect(table).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(id('c'));
+  await expect(table).toHaveCount(0);
+});
