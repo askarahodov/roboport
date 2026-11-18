@@ -5,7 +5,7 @@ import base64
 import json
 from unittest.mock import patch
 
-from scripts.ci_browser import PAGE_SCENARIOS, plan
+from scripts.ci_browser import PAGE_SCENARIOS, E2E_ROOT, plan
 
 
 SPECS={
@@ -112,6 +112,14 @@ class BrowserImpactTests(unittest.TestCase):
             self.assertEqual(main(),0)
             self.assertEqual(launch.call_args.args[0],
                              ["npm","run","test:e2e"])
+
+    def test_explicit_page_mappings_exist_in_repository(self):
+        for source, specs in PAGE_SCENARIOS.items():
+            with self.subTest(source=source):
+                self.assertTrue(specs)
+                for spec in specs:
+                    self.assertTrue((E2E_ROOT / spec).is_file(),
+                                    f"{source} references missing {spec}")
 
     def test_explicit_page_mappings_are_nonempty_and_deduplicated(self):
         for key,value in PAGE_SCENARIOS.items():
