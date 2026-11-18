@@ -50,3 +50,5 @@
 Не создавать внешние аккаунты, платежи, публичные сервисы и инфраструктуру без явной задачи. Не запускать `db/legacy_drafts/*.sql` на настоящих БД. Не объявлять draft OpenAPI реализованным. Не заменять оригинальный SVG угловой R (C) на гексагон A. При неразрешённой коллизии требований — блокировка узкой задачи + ADR, остальные независимые задачи можно продолжать.
 
 Формат постановки задач: [`docs/implementation/ISSUE_STANDARD.md`](docs/implementation/ISSUE_STANDARD.md).
+
+Пошаговый безопасный выбор следующей Ready Issue, PR/CI repair и checkpoint: [`docs/implementation/AUTONOMOUS_AGENT_WORKFLOW.md`](docs/implementation/AUTONOMOUS_AGENT_WORKFLOW.md). Это регламент запускаемого агента, а не автоматически работающий GitHub-бот.
