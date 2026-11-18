@@ -95,6 +95,7 @@ export function AutoTreasury(){
   const [report,setReport]=React.useState<Report|null>(null);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [busy,setBusy]=React.useState(false);
+  const [exportBusy,setExportBusy]=React.useState(false);
   const [revision,setRevision]=React.useState(0);
   const [message,setMessage]=React.useState('');
   const [pending,setPending]=React.useState<Pending|null>(null);
@@ -135,6 +136,9 @@ export function AutoTreasury(){
     })();
     return ()=>controller.abort();
   },[scope,valid,validOrder,revision]);
+
+  // An edited period invalidates the previously reconciled snapshot.
+  React.useEffect(()=>{setReport(null);},[fromDay,toDay]);
 
   async function submit(url:string,body:string){
     if(busy||status!=='ready')return;
@@ -190,6 +194,39 @@ export function AutoTreasury(){
       setReport(parseReport(await response.json()));
     }catch{setMessage('Сверка не получена. Проверьте период и права и повторите.');}
   }
+  async function downloadReport(){
+    if(!valid||!dateRange||status!=='ready'||!report||exportBusy)return;
+    setExportBusy(true);setMessage('');
+    try{
+      const url=base+'/report/export?'+new URLSearchParams({fromDay,toDay});
+      const response=await fetch(url,{credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(response.status)){
+        setStatus('denied');setAccounts(null);setLedger(null);setReport(null);
+        return;
+      }
+      if(response.status===409||response.status===422){
+        setReport(null);
+        setMessage('Экспорт отклонён (409/422): изменился журнал или период. Повторите сверку.');
+        return;
+      }
+      if(!response.ok||!response.headers.get('content-type')?.startsWith('text/csv'))
+        throw Error('export');
+      const data=await response.blob();
+      const link=document.createElement('a');
+      const objectUrl=URL.createObjectURL(data);
+      try{
+        link.href=objectUrl;
+        link.download='auto-treasury-report.csv';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }finally{URL.revokeObjectURL(objectUrl);}
+    }catch{
+      setReport(null);
+      setMessage('CSV не получен. Обновите сверку перед повтором.');
+    }finally{setExportBusy(false);}
+  }
+
   const ready=status==='ready'&&accounts!==null&&!busy&&!pending;
   return <section aria-label="Синтетическая касса и сверка" className="ui-page"
     style={{maxWidth:'77rem',margin:'1rem auto',overflowWrap:'anywhere'}}>
@@ -289,6 +326,9 @@ export function AutoTreasury(){
           value={toDay} onChange={e=>setToDay(e.target.value)}/></label>
         <button type="button" disabled={!ready||!dateRange} onClick={()=>void loadReport()}>
           Сверить модельные остатки</button>
+        <button type="button" disabled={!ready||!dateRange||!report||exportBusy}
+          onClick={()=>void downloadReport()}>
+          Скачать сводную сверку CSV</button>
       </div>
       {report&&<div style={{overflowX:'auto'}}>
         <table>
