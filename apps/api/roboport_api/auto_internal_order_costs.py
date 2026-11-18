@@ -44,7 +44,9 @@ def _authority(conn, token, org, loc, write=False):
         raise Denied()
     try:
         for cap in ("READ", "PRICE_PURCHASE", *(("EDIT",) if write else ())):
-            if require_document_access(conn, token, org, loc, ("MANAGER", "CASHIER"),
+            # CASHIER не обладает базовым правом на закупочные/внутренние цены.
+            roles = ("MANAGER",) if cap == "PRICE_PURCHASE" else ("MANAGER", "CASHIER")
+            if require_document_access(conn, token, org, loc, roles,
                                        "FINANCE", cap) is not None:
                 raise Denied()
     except DocumentPolicyDenied:
@@ -149,6 +151,30 @@ def _bounded(n):
     return n
 
 
+def _load_labor(conn, ids, org, loc):
+    return conn.execute("""
+      SELECT e.work_order_id,l.id,l.service_id,l.actual_minutes,
+             l.internal_cost_approval_id,r.id,r.version,r.rate_minor_per_hour,
+             (r.organization_id=e.organization_id AND r.location_id=e.location_id
+              AND a.created_at<=l.internal_cost_registered_at) AS valid_rate,
+             EXISTS(SELECT 1 FROM app_user u
+              JOIN auto_organization_role_grant g ON g.user_id=u.id
+              WHERE u.id=l.actor_id AND u.status='ACTIVE'
+                AND g.organization_id=e.organization_id
+                AND g.role_code='MECHANIC' AND g.revoked_at IS NULL
+                AND (g.location_id=e.location_id OR g.location_id IS NULL)
+                FOR SHARE OF u,g) AS live_mechanic
+      FROM auto_work_order_execution e
+      JOIN auto_work_order_labor_entry l ON l.execution_id=e.id
+      JOIN auto_work_order_execution_finish f ON f.execution_id=e.id
+      LEFT JOIN auto_internal_labor_cost_approval a ON a.id=l.internal_cost_approval_id
+      LEFT JOIN auto_internal_labor_cost_revision r ON r.id=a.revision_id
+      WHERE e.work_order_id=ANY(%s::uuid[])
+        AND e.organization_id=%s AND e.location_id=%s
+      ORDER BY e.work_order_id,l.id LIMIT %s
+    """, (ids,org,loc,MAX_LABOR+1)).fetchall()
+
+
 def cost_report(conn, token, org, loc, from_day, to_day):
     with conn.transaction():
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
@@ -156,26 +182,7 @@ def cost_report(conn, token, org, loc, from_day, to_day):
         base=closed_report(conn,token,org,loc,from_day,to_day)
         materials=_material_report(conn,token,org,loc,from_day,to_day,base)
         ids=[UUID(x["workOrderId"]) for x in base["items"]]
-        rows=conn.execute("""
-          SELECT e.work_order_id,l.id,l.service_id,l.actual_minutes,
-                 l.internal_cost_approval_id,r.id,r.version,r.rate_minor_per_hour,
-                 (r.organization_id=e.organization_id AND r.location_id=e.location_id
-                  AND a.created_at<=l.internal_cost_registered_at) AS valid_rate,
-                 EXISTS(SELECT 1 FROM app_user u
-                  JOIN auto_organization_role_grant g ON g.user_id=u.id
-                  WHERE u.id=l.actor_id AND u.status='ACTIVE'
-                    AND g.organization_id=e.organization_id
-                    AND g.role_code='MECHANIC' AND g.revoked_at IS NULL
-                    AND (g.location_id=e.location_id OR g.location_id IS NULL)) AS live_mechanic
-          FROM auto_work_order_execution e
-          JOIN auto_work_order_labor_entry l ON l.execution_id=e.id
-          JOIN auto_work_order_execution_finish f ON f.execution_id=e.id
-          LEFT JOIN auto_internal_labor_cost_approval a ON a.id=l.internal_cost_approval_id
-          LEFT JOIN auto_internal_labor_cost_revision r ON r.id=a.revision_id
-          WHERE e.work_order_id=ANY(%s::uuid[])
-            AND e.organization_id=%s AND e.location_id=%s
-          ORDER BY e.work_order_id,l.id LIMIT %s
-        """, (ids,org,loc,MAX_LABOR+1)).fetchall()
+        rows=_load_labor(conn,ids,org,loc)
         if len(rows)>MAX_LABOR:
             raise Conflict()
         labor=defaultdict(list)
