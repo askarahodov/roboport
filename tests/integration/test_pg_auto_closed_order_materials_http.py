@@ -58,8 +58,8 @@ def fixture(monkeypatch,mode="traced",before_labor=None):
                     datetime.now(timezone.utc))
             evidence.update(second=second,second_accept=second_accept,second_value=second_value)
             if mode=="fifo-serial":
-                from roboport_api.auto_stock_serial import register_serial
-                register_serial(db,warehouse,org,loc,lot,uuid4(),"SYN-FIFO-SERIAL")
+                from roboport_api.auto_stock_serial import register_lot_serial
+                register_lot_serial(db,warehouse,org,loc,lot,uuid4(),"SYN-FIFO-SERIAL")
         if mode=="mixed":
             record(db,item,"RECEIPT",1)
             lot_action(db,d,org,loc,lot,"ALLOCATE",1)
