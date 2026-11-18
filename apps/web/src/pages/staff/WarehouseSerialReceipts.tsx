@@ -3,7 +3,7 @@ import React from 'react';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Item={assertionId:string;serialId:string;receiptId:string;locationId:string;
   assertedAt:string;approvalId:string|null;approvedAt:string|null;syntheticOnly:true};
-type Pending={url:string;body:string};
+type Pending={url:string;body:string;org:string;loc:string};
 const valid=(raw:unknown,loc:string):Item[]=>{
   const x=raw as {syntheticOnly?:boolean;items?:Item[]};
   if(!x||x.syntheticOnly!==true||!Array.isArray(x.items)||x.items.length>200)throw Error('response');
@@ -30,6 +30,9 @@ export function WarehouseSerialReceipts({org,loc}:{org:string;loc:string}){
   const [success,setSuccess]=React.useState('');
   const abort=React.useRef<AbortController|null>(null);
   React.useEffect(()=>()=>abort.current?.abort(),[]);
+  React.useEffect(()=>{
+    abort.current?.abort();setItems([]);setReady(false);setSuccess('');setError('');
+  },[org,loc]);
   const active=uuid.test(org)&&uuid.test(loc);
   const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
     '/locations/'+encodeURIComponent(loc)+'/warehouse/serial-receipts';
@@ -39,7 +42,7 @@ export function WarehouseSerialReceipts({org,loc}:{org:string;loc:string}){
     const controller=new AbortController();abort.current=controller;
     setBusy(true);setError('');setSuccess('');
     setReady(false);setItems([]);
-    if(body)setPending({url,body});
+    if(body)setPending({url,body,org,loc});
     try{
       let headers:Record<string,string>|undefined;
       if(body){
@@ -108,7 +111,7 @@ export function WarehouseSerialReceipts({org,loc}:{org:string;loc:string}){
     {busy&&<p role="status">Проверка первички…</p>}
     {error&&<p role="alert">{error}</p>}
     {success&&<p role="status">{success}</p>}
-    {pending&&<button type="button" disabled={busy}
+    {pending&&<button type="button" disabled={busy||pending.org!==org||pending.loc!==loc}
       onClick={()=>void run(pending.url,pending.body)}>Повторить запись с тем же ключом</button>}
   </section>;
 }
