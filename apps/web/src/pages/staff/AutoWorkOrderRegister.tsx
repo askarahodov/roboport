@@ -86,7 +86,7 @@ export function AutoWorkOrderRegister(){
     setHistory([]);setRevision(x=>x+1);
   }
   function detailLink(orderId:string){
-    return '/staff/auto-order-services?'+new URLSearchParams({
+    return '/staff/auto-order-workspace?'+new URLSearchParams({
       org:org.trim(),loc:loc.trim(),order:orderId,
     });
   }
@@ -147,7 +147,7 @@ export function AutoWorkOrderRegister(){
           <p>Запись: <code>{row.appointmentId}</code>. Пост: <code>{row.bayId}</code>.</p>
           <p>Интервал: {new Date(row.startsAt).toLocaleString('ru-RU')} —
             {' '}{new Date(row.endsAt).toLocaleString('ru-RU')}.</p>
-          <Link to={detailLink(row.workOrderId)}>Открыть услуги выбранного наряда</Link>
+          <Link to={detailLink(row.workOrderId)}>Открыть рабочее место выбранного наряда</Link>
           <p>Стоимость, платежи, фото и документы доступны лишь в отдельных
             операционных экранах при наличии специальных полномочий.</p>
         </section>;
