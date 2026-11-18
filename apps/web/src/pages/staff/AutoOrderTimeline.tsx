@@ -1,6 +1,6 @@
 import React from 'react';
 
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const actionNames:Record<string,string>={
   ORDER_CREATED:'Создан заказ-наряд',
   SERVICE_SELECTED:'Выбрана работа',
