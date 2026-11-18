@@ -86,11 +86,25 @@ def test_windows_cmd_smoke_is_native_and_cannot_suppress_linux_quality_gates():
     upload = next(x for x in steps if x.get("name") == "Upload Windows CMD Docsify traces and screenshots")
     assert upload["if"] == "always()"
     assert upload["with"]["name"] == "roboport-windows-cmd-evidence"
-    # Fail-closed scope: no conditional browser path filtering. API, contracts,
-    # migrations and docs can all change browser behavior or documentation.
+    # PR may skip unaffected heavyweight work; main and manual runs must
+    # always emit all five jobs, with no path-based skip or missing release evidence.
+    from scripts.ci_impact import FULL, impact
+
+    assert {"impact", "docs"} <= set(jobs)
+    for name, output in (("postgres", "postgres"), ("api", "api"),
+                         ("web", "web"), ("browser-e2e", "browser"),
+                         ("windows-cmd", "windows")):
+        assert jobs[name]["needs"] == "impact"
+        assert jobs[name]["if"] == f"needs.impact.outputs.{output} == 'true'"
+    assert impact(["docs/auto/REPORTING.md"]) == (set(), False)
+    assert impact(["apps/api/alembic/versions/0140_test.py"]) == (set(FULL), True)
+    assert impact(["docs/auto/REPORTING.md"], full=True) == (set(FULL), True)
+    workflow_script = next(s["run"] for s in jobs["impact"]["steps"]
+                           if s.get("id") == "classify")
+    assert 'github.event_name' in workflow_script
+    assert 'python scripts/ci_impact.py --full' in workflow_script
+    assert all("continue-on-error" not in jobs[name] for name in FULL)
     linux_browser = jobs["browser-e2e"]
-    assert "if" not in linux_browser
-    assert "if" not in jobs["api"] and "if" not in jobs["postgres"]
     names = {s.get("name") for s in linux_browser["steps"]}
     assert "Browser E2E against synthetic FastAPI" in names
     assert "Browser navigation and search smoke for local Docsify portal" in names
