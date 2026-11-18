@@ -397,3 +397,68 @@ test('approved multi-receipt serial costs have an explained reversible source',a
   await expect(section.getByRole('alert')).toContainText('Не удалось проверить расход');
   await expect(table).toHaveCount(0);
 });
+
+
+test('interbranch serial cost shows source branch and rejects tampered provenance',async({page},testInfo)=>{
+  const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+  const source=id('a'),issue1=id('1'),issue2=id('2'),ret=id('3');
+  const serial1=id('4'),serial2=id('5');
+  const receipt1=id('6'),receipt2=id('7');
+  const common=(serialId:string,receiptId:string,unitNetMinor:number,origin:string)=>({
+    serialId,receiptId,unitNetMinor,originalIssueId:origin,sourceLocationId:source,
+    serialApprovalId:id(serialId===serial1?'8':'9'),
+    acceptanceId:id(serialId===serial1?'b':'c'),
+    valuationId:id(serialId===serial1?'d':'e'),
+  });
+  const s1={...common(serial1,receipt1,1250,issue1),
+    stockEventId:id('f'),lotMovementId:issue1,action:'ISSUE',quantity:1};
+  const s2={...common(serial2,receipt2,2000,issue2),
+    stockEventId:id('a'),lotMovementId:issue2,action:'ISSUE',quantity:1};
+  const sr={...common(serial2,receipt2,2000,issue2),
+    stockEventId:id('b'),lotMovementId:ret,action:'RETURN',quantity:1};
+  const group={skuId:id('c'),lotId:id('d'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
+    status:'SERIAL_TRACED',source:null,materialNetMinor:1250,
+    fifoSlices:[s1,s2,sr],movements:[
+      {stockEventId:s1.stockEventId,lotMovementId:issue1,action:'ISSUE',quantity:1},
+      {stockEventId:s2.stockEventId,lotMovementId:issue2,action:'ISSUE',quantity:1},
+      {stockEventId:sr.stockEventId,lotMovementId:ret,action:'RETURN',quantity:1},
+    ]};
+  const row={workOrderId:id('e'),closedDay:'2030-10-27',closedEventId:id('f'),
+    status:'COMPLETE',materialNetMinor:1250,groups:[group]};
+  const payload={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_RECEIPT_FIFO_NET_MATERIAL_USAGE',
+    timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
+    summary:{orderCount:1,completeOrderCount:1,movementCount:3,materialNetMinor:1250},items:[row]};
+  let response:unknown=payload,status=200;
+  await page.route('**/reports/closed-order-materials*',route=>route.fulfill({
+    status,contentType:'application/json',body:JSON.stringify(response),
+  }));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-demo-finance-report');await fill(page);
+  const section=page.getByRole('region',{name:'Оценка расхода материалов закрытых заказов'});
+  const button=section.getByRole('button',{name:'Проверить расход материалов'});
+  const table=section.getByRole('table');
+  await button.click();
+  await expect(table).toContainText('12,50 RUB');
+  await table.getByText('Партии и движения',{exact:true}).click();
+  await expect(table.getByText(/Филиал закупки:/).first()).toContainText(source);
+  await page.screenshot({path:testInfo.outputPath('serial-interbranch-mobile-light.png'),
+    fullPage:true,animations:'disabled'});
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('serial-interbranch-desktop-light.png'),
+    fullPage:true,animations:'disabled'});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('serial-interbranch-desktop-dark.png'),
+    fullPage:true,animations:'disabled'});
+  response={...payload,items:[{...row,groups:[{...group,
+    fifoSlices:[s1,{...s2,sourceLocationId:'not-a-uuid'},sr]}]}]};
+  await button.click();
+  await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
+  await expect(table).toHaveCount(0);
+  response=payload;await button.click();await expect(table).toBeVisible();
+  status=403;await button.click();
+  await expect(section.getByRole('alert')).toContainText('Доступ');
+  await expect(table).toHaveCount(0);
+});
