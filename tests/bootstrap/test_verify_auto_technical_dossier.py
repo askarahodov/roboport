@@ -1,10 +1,13 @@
 """Offline verifier: complete valid synthetic dossier and tampering failures."""
+import binascii
 from hashlib import sha256
 from io import BytesIO
 import json
 from pathlib import Path
+import struct
 import tempfile
 import unittest
+import zlib
 from uuid import uuid4
 from zipfile import ZipFile, ZIP_STORED, ZIP_DEFLATED
 
@@ -26,10 +29,25 @@ def _zip(files, *, compression=ZIP_STORED):
     return output.getvalue()
 
 
+def _chunk(kind: bytes, payload: bytes) -> bytes:
+    return (struct.pack(">I", len(payload)) + kind + payload +
+            struct.pack(">I", binascii.crc32(kind + payload) & 0xffffffff))
+
+
+def _synthetic_png(*, width=2, height=2, filter_byte=0, compressed=None,
+                   extra_chunk=False) -> bytes:
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    scans = (bytes([filter_byte]) + b"\x10\x20\x30\xff" * width) * height
+    stream = zlib.compress(scans) if compressed is None else compressed
+    optional = _chunk(b"sRGB", b"\x00") if extra_chunk else b""
+    return (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", header) + optional +
+            _chunk(b"IDAT", stream) + _chunk(b"IEND", b""))
+
+
 def dossier(*, tamper=None, nested_tamper=None):
     org, loc, order, preview_id, act_id, rev = [str(uuid4()) for _ in range(6)]
     digest_preview, digest_act = "a" * 64, "b" * 64
-    png = b"\x89PNG\r\n\x1a\n" + b"synthetic-pixels"
+    png = _synthetic_png()
     nested_manifest = {
         "schemaVersion": 1, "syntheticOnly": True, "releaseAllowed": False,
         "legalSignatureStatus": "NOT_IMPLEMENTED", "organizationId": org,
@@ -43,6 +61,27 @@ def dossier(*, tamper=None, nested_tamper=None):
     }
     if nested_tamper == "photo":
         png += b"changed"
+    if nested_tamper == "png-crc":
+        png = png[:-1] + bytes([png[-1] ^ 1])
+    if nested_tamper == "png-idat":
+        png = _synthetic_png(compressed=b"broken-zlib")
+    if nested_tamper == "png-filter":
+        png = _synthetic_png(filter_byte=5)
+    if nested_tamper == "png-ihdr-metadata":
+        png = _synthetic_png(width=1)
+    if nested_tamper == "png-trailer":
+        png += b"extra"
+    if nested_tamper == "png-ancillary":
+        png = _synthetic_png(extra_chunk=True)
+    if nested_tamper == "png-bomb":
+        # Tiny compressed data but disallowed declared pixel count.
+        png = _synthetic_png(width=1024, height=1024, compressed=b"small")
+    if nested_tamper and nested_tamper.startswith("png-"):
+        # Attacker recomputed every nested/outer SHA after substituting the
+        # photograph. A valid signature and matching hashes were insufficient.
+        digest = sha256(png).hexdigest()
+        nested_manifest["act"]["photos"][0]["sha256"] = digest
+        nested_manifest["files"][0]["sha256"] = digest
     if nested_tamper == "review":
         nested_manifest["act"]["review"]["decision"] = "DISPUTED"
     if nested_tamper == "photo-meta":
@@ -160,6 +199,19 @@ class VerifyTechnicalDossierTest(unittest.TestCase):
             with self.subTest(kind=kind):
                 with self.assertRaises(DossierVerificationError):
                     verify_dossier_bytes(dossier(nested_tamper=kind))
+
+    def test_rejects_corrupt_png_with_all_digests_recomputed(self):
+        for kind in ("png-crc", "png-idat", "png-filter", "png-ihdr-metadata",
+                     "png-trailer", "png-ancillary", "png-bomb"):
+            with self.subTest(kind=kind):
+                invalid = dossier(nested_tamper=kind)
+                with self.assertRaisesRegex(
+                    DossierVerificationError, "INVALID_PHOTO_PNG|PHOTO_METADATA_MISMATCH"
+                ):
+                    verify_dossier_bytes(invalid)
+                with self.assertRaises(DossierVerificationError):
+                    verify_dossier_bytes(
+                        invalid, expected_sha256=sha256(invalid).hexdigest())
 
     def test_rejects_duplicates_compression_and_size(self):
         valid = dossier()
