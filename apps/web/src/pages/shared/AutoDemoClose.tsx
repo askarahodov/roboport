@@ -103,17 +103,22 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
   const [revision,setRevision]=React.useState(0),[busy,setBusy]=React.useState(false);
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [message,setMessage]=React.useState('');
+  const [verifiedDigest,setVerifiedDigest]=React.useState('');
   const [kind,setKind]=React.useState<'SIM_PAYMENT'|'SIM_REFUND'>('SIM_PAYMENT');
   const [amount,setAmount]=React.useState('');
   const [sku,setSku]=React.useState(''),[qty,setQty]=React.useState('1');
   const scope=[org.trim(),loc.trim(),order.trim()].join(':');
+  const latestScope=React.useRef(scope);
+  latestScope.current=scope;
+  const activeDownload=React.useRef<AbortController|null>(null);
   const valid=[org,loc,order].every(x=>uuid.test(x.trim()));
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())
     +'/locations/'+encodeURIComponent(loc.trim())+'/orders/'+encodeURIComponent(order.trim())
     +'/demo-close';
   const ready=status==='ready'&&loaded===scope&&data!==null;
   React.useEffect(()=>{
-    setStatus(valid?'loading':'idle');setLoaded('');setData(null);setPending(null);setMessage('');
+    setStatus(valid?'loading':'idle');setLoaded('');setData(null);setPending(null);
+    setMessage('');setVerifiedDigest('');
     if(!valid)return;
     const controller=new AbortController();
     void fetch(base,{credentials:'include',cache:'no-store',signal:controller.signal})
@@ -155,13 +160,20 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
     }finally{setBusy(false);}
   }
 
+  // A scope change/unmount must not save a stale archive from the previous order.
+  React.useEffect(()=>()=>activeDownload.current?.abort(),[scope,role]);
+
   async function downloadTechnicalDossier(){
     if(!ready||busy||workflow?.status!=='CLOSED_TECHNICAL')return;
-    setBusy(true);setMessage('');
+    const controller=new AbortController();
+    activeDownload.current=controller;
+    setBusy(true);setMessage('');setVerifiedDigest('');
+    let integrityFailed=false;
     try{
       const response=await fetch(base+'/technical-dossier.zip',{
-        credentials:'include',cache:'no-store',
+        credentials:'include',cache:'no-store',signal:controller.signal,
       });
+      if(controller.signal.aborted||latestScope.current!==scope)return;
       if([401,403,404].includes(response.status)){
         setData(null);setStatus('denied');setPending(null);return;
       }
@@ -172,8 +184,18 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
       }
       if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/zip')
         throw new Error('invalid archive');
+      // No archive is saved until the *entire received ZIP* matches the hash
+      // returned by the currently authorized same-origin HTTPS response.
+      const expected=response.headers.get('x-technical-dossier-sha256');
+      if(!expected||!/^[0-9a-f]{64}$/.test(expected)){
+        integrityFailed=true;throw new Error('missing/invalid digest');
+      }
       const payload=await response.blob();
       if(payload.size===0||payload.size>1024*1024)throw new Error('archive size');
+      const hashBytes=await crypto.subtle.digest('SHA-256',await payload.arrayBuffer());
+      if(controller.signal.aborted||latestScope.current!==scope)return;
+      const actual=Array.from(new Uint8Array(hashBytes),b=>b.toString(16).padStart(2,'0')).join('');
+      if(actual!==expected){integrityFailed=true;throw new Error('digest mismatch');}
       const url=URL.createObjectURL(payload);
       try{
         const link=document.createElement('a');
@@ -181,9 +203,16 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
         link.download='auto-technical-dossier-'+order.trim()+'.zip';
         document.body.appendChild(link);link.click();link.remove();
       }finally{URL.revokeObjectURL(url);}
+      setVerifiedDigest(expected);
     }catch{
-      setMessage('Не удалось скачать технический архив. Перечитайте статус и повторите.');
-    }finally{setBusy(false);}
+      if(!controller.signal.aborted&&latestScope.current===scope){
+        setMessage(integrityFailed?
+          'Архив не сохранён: контрольная сумма SHA-256 отсутствует или не совпадает. Обратитесь к администратору.':
+          'Не удалось скачать и проверить технический архив. Перечитайте статус и повторите.');
+      }
+    }finally{
+      if(activeDownload.current===controller){activeDownload.current=null;setBusy(false);}
+    }
   }
 
   function submit(path:string,payload:Record<string,unknown>){
@@ -327,6 +356,9 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
             onClick={()=>void downloadTechnicalDossier()}>
             Скачать технический архив заказ-наряда (ZIP)
           </button>
+          {verifiedDigest&&<p role="status">Архив проверен перед сохранением.
+            {' '}SHA-256 ZIP: <code>{verifiedDigest}</code>.
+            {' '}Это не юридическая подпись и не разрешение на выдачу.</p>}
         </section>}
       </section>}
       <p role="note">Разрешение на выдачу: НЕТ. Юридический и security gate: НЕ ПРОЙДЕН.</p>
