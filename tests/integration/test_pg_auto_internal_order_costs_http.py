@@ -21,7 +21,10 @@ from test_pg_baseline import DSN
 def setup(monkeypatch,*,rated=True,mode="traced"):
     rate={}
     def before_labor(db,d,org,loc,order):
-        grant(db,d["other"],org,loc,"MANAGER")
+        if not db.execute("""SELECT 1 FROM auto_organization_role_grant
+          WHERE organization_id=%s AND location_id=%s AND user_id=%s
+          AND role_code='MANAGER' AND revoked_at IS NULL""",(org,loc,d["other"])).fetchone():
+            grant(db,d["other"],org,loc,"MANAGER")
         if rated:
             state=module.propose(db,d["tokens"][d["intake"]],org,loc,uuid4(),0,2001)
             ident=UUID(state["items"][0]["id"])
