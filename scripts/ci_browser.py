@@ -9,6 +9,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import json
 import subprocess
 from pathlib import Path
 
@@ -69,20 +72,50 @@ def plan(paths: list[str], *, full: bool = False,
     return ["e2e/" + name for name in sorted(selected)]
 
 
+
+def decode_paths(encoded: str) -> list[str] | None:
+    """Получить доказанный список только от impact job. None = полный прогон."""
+    if encoded == "FULL":
+        return None
+    if (type(encoded) is not str or not (1 <= len(encoded) <= 12000)):
+        return None
+    try:
+        blob = base64.b64decode(
+            encoded + "=" * (-len(encoded) % 4),
+            altchars=b"-_", validate=True,
+        )
+        if base64.urlsafe_b64encode(blob).decode("ascii").rstrip("=") != encoded:
+            return None
+        paths = json.loads(blob)
+        if (type(paths) is not list or not 1 <= len(paths) <= 250
+            or any(type(path) is not str or not path
+                   or path.startswith("/") or "\\x00" in path
+                   or "\\n" in path or "\\r" in path
+                   or "\\" in path or ".." in path.split("/")
+                   for path in paths)):
+            return None
+        return paths
+    except (ValueError, UnicodeDecodeError, TypeError, binascii.Error):
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--base")
+    group.add_argument("--paths-base64")
     group.add_argument("--full", action="store_true")
     parser.add_argument("--run", action="store_true")
     args = parser.parse_args()
     if args.full:
         paths = []
+    elif args.paths_base64 is not None:
+        paths = decode_paths(args.paths_base64) or []
     else:
         try:
             paths = changed(args.base)
         except (subprocess.CalledProcessError, OSError) as exc:
-            # Нет достоверного списка изменений: выполняем ВСЕ E2E.
+            # Для локального --base без Git также выбираем ВСЕ E2E.
             error_text = getattr(exc, "stderr", b"") or b""
             if isinstance(error_text, bytes):
                 error_text = error_text.decode("utf-8", errors="replace")
