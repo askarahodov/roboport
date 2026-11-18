@@ -97,7 +97,7 @@ test('malformed monetary aggregate, mixed currencies, and bad net fail closed',a
   await expect(page.getByRole('table')).toHaveCount(0);
 });
 
-test('closed-order report reconciles source IDs and clears on revoked scope',async({page})=>{
+test('closed-order report reconciles source IDs and clears on revoked scope',async({page},testInfo)=>{
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const row={workOrderId:id('a'),closedDay:'2030-10-27',previewId:id('b'),
     previewDigest:'f'.repeat(64),estimateRevisionId:id('c'),postedEventId:id('d'),
@@ -124,10 +124,13 @@ test('closed-order report reconciles source IDs and clears on revoked scope',asy
   await table.getByText('Первичные события',{exact:true}).click();
   await expect(table.getByText('Проведение: '+id('d'))).toBeVisible();
   await expect(table.getByText(/Имитация возврата:/)).toContainText('5,00');
+  await page.screenshot({path:testInfo.outputPath('closed-orders-mobile-light.png'),fullPage:true,animations:'disabled'});
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('closed-orders-desktop-light.png'),fullPage:true,animations:'disabled'});
   await page.getByLabel('Тема оформления').selectOption('dark');
   await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('closed-orders-desktop-dark.png'),fullPage:true,animations:'disabled'});
   status=403;await button.click();
   await expect(page.getByRole('alert')).toContainText('Доступ к реестру запрещён');
   await expect(table).toHaveCount(0);
@@ -139,7 +142,7 @@ test('closed-order report reconciles source IDs and clears on revoked scope',asy
   await expect(table).toHaveCount(0);
 });
 
-test('material assessment shows traceability, unknown values and live price denial',async({page})=>{
+test('material assessment shows traceability, unknown values and live price denial',async({page},testInfo)=>{
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
     status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
@@ -170,10 +173,13 @@ test('material assessment shows traceability, unknown values and live price deni
   await table.getByText('Партии и движения',{exact:true}).click();
   await expect(table.getByText(/Подтверждён единственный приход/)).toContainText('Расход: 1');
   await expect(table.getByText(/Приход:/)).toContainText(id('3'));
+  await page.screenshot({path:testInfo.outputPath('material-assessment-mobile-light.png'),fullPage:true,animations:'disabled'});
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('material-assessment-desktop-light.png'),fullPage:true,animations:'disabled'});
   await page.getByLabel('Тема оформления').selectOption('dark');
   await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('material-assessment-desktop-dark.png'),fullPage:true,animations:'disabled'});
   response=unknown;await button.click();
   await expect(table).toContainText('Не определена');
   await expect(table).not.toContainText('12,50 RUB');
@@ -189,7 +195,7 @@ test('material assessment shows traceability, unknown values and live price deni
   await expect(table).toHaveCount(0);
 });
 
-test('internal cost rate approval and reconciled negative difference, unknowns and live denial',async({page})=>{
+test('internal cost rate approval and reconciled negative difference, unknowns and live denial',async({page},testInfo)=>{
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
     status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
@@ -263,10 +269,13 @@ test('internal cost rate approval and reconciled negative difference, unknowns a
   await table.getByText('Источники затрат',{exact:true}).click();
   await expect(table.getByText(/Труд:/)).toContainText('15,01 RUB');
   await expect(table.getByText(/Приход:/)).toContainText(id('3'));
+  await page.screenshot({path:testInfo.outputPath('internal-costs-mobile-light.png'),fullPage:true,animations:'disabled'});
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('internal-costs-desktop-light.png'),fullPage:true,animations:'disabled'});
   await page.getByLabel('Тема оформления').selectOption('dark');
   await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('internal-costs-desktop-dark.png'),fullPage:true,animations:'disabled'});
   report=noRate;await calculate.click();await expect(table).toContainText('Не определено');
   report={...noRate,summary:{...noRate.summary,syntheticDifferenceMinor:0}};
   await calculate.click();await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
