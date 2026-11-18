@@ -52,11 +52,21 @@ export function AutoWorkOrderRegister(){
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [page,setPage]=React.useState<Page|null>(null);
   const [loadedKey,setLoadedKey]=React.useState('');
+  const [exportBusy,setExportBusy]=React.useState(false);
+  const [exportMessage,setExportMessage]=React.useState('');
+  const exportController=React.useRef<AbortController|null>(null);
+  const currentScope=React.useRef('');
   const valid=uuid.test(org.trim())&&uuid.test(loc.trim());
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
     '/locations/'+encodeURIComponent(loc.trim())+'/orders';
   const scope=org.trim()+':'+loc.trim()+':'+stage+':'+applied;
   const queryKey=scope+':'+cursor+':'+revision;
+  currentScope.current=scope;
+  React.useEffect(()=>{
+    exportController.current?.abort();
+    setExportBusy(false);setExportMessage('');
+    return ()=>exportController.current?.abort();
+  },[scope]);
   React.useEffect(()=>{
     setCursor(null);setHistory([]);setPage(null);setSelected(null);setLoadedKey('');
   },[scope]);
@@ -84,6 +94,50 @@ export function AutoWorkOrderRegister(){
     if(search.trim()!==''&&!uuid.test(search.trim()))return;
     setApplied(search.trim().toLowerCase());setCursor(null);
     setHistory([]);setRevision(x=>x+1);
+  }
+  async function exportRegister(){
+    if(!valid||status!=='ready'||loadedKey!==queryKey||exportBusy)return;
+    exportController.current?.abort();
+    const controller=new AbortController();
+    exportController.current=controller;
+    const requested=scope;
+    setExportBusy(true);setExportMessage('');
+    const params=new URLSearchParams({stage});
+    if(applied)params.set('orderId',applied);
+    try{
+      const response=await fetch(base+'/export?'+params,{
+        credentials:'include',cache:'no-store',signal:controller.signal,
+      });
+      if(controller.signal.aborted||currentScope.current!==requested)return;
+      if([401,403,404].includes(response.status)){
+        setPage(null);setLoadedKey('');setStatus('denied');
+        setExportMessage('Сеанс или доступ к филиалу отозван.');return;
+      }
+      if(response.status===409){
+        setExportMessage('Экспорт превышает 1000 строк или данные изменились. '+
+          'Уточните фильтр и повторите запрос. Файл не создавался.');return;
+      }
+      if(!response.ok||!response.headers.get('content-type')?.startsWith('text/csv'))
+        throw Error('bad download');
+      const blob=await response.blob();
+      if(controller.signal.aborted||currentScope.current!==requested)return;
+      if(blob.size>1048576)throw Error('unexpected size');
+      const href=URL.createObjectURL(blob);
+      try{
+        const element=document.createElement('a');
+        element.href=href;element.download='auto-work-order-register.csv';
+        document.body.appendChild(element);element.click();element.remove();
+        setExportMessage('CSV реестра сформирован для текущего фильтра (только dev).');
+      }finally{window.setTimeout(()=>URL.revokeObjectURL(href),1000);}
+    }catch{
+      if(!controller.signal.aborted&&currentScope.current===requested)
+        setExportMessage('Экспорт не выполнен. Проверьте соединение и обновите реестр.');
+    }finally{
+      if(exportController.current===controller){
+        exportController.current=null;
+        if(currentScope.current===requested)setExportBusy(false);
+      }
+    }
   }
   function detailLink(orderId:string){
     return '/staff/auto-order-services?'+new URLSearchParams({
@@ -121,6 +175,14 @@ export function AutoWorkOrderRegister(){
     {status==='error'&&<p role="alert">Реестр недоступен. Проверьте фильтры, сессию и попробуйте снова.
       <button type="button" onClick={()=>setRevision(x=>x+1)}>Повторить</button></p>}
     {status==='ready'&&page&&loadedKey===queryKey&&<>
+      <div>
+        <button type="button" disabled={exportBusy} onClick={()=>void exportRegister()}>
+          {exportBusy?'Подготовка CSV…':'Скачать весь отфильтрованный реестр CSV'}
+        </button>
+        <p>Экспорт выгружает до 1000 записей в одном серверном срезе,
+          а не только видимую страницу. При превышении лимита файл не скачивается.
+          Только технические UUID, даты и состояния — без ПДн, денег и подписей.</p>
+      </div>
       <p role="status">Записей на странице: {page.items.length}. Страница {history.length+1}.
         {page.nextCursor?' Есть следующая страница.':''}</p>
       {!page.items.length?<p>Заказ-наряды по этому фильтру не найдены.</p>:
@@ -165,6 +227,7 @@ export function AutoWorkOrderRegister(){
         }}>Следующая страница</button>}
       </nav>
     </>}
+    {exportMessage&&<p role="status">{exportMessage}</p>}
     <button type="button" onClick={()=>{setCursor(null);setHistory([]);
       setRevision(x=>x+1);}}>Обновить реестр</button>
   </section>;
