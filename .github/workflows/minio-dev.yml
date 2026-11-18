@@ -8,6 +8,16 @@ on:
       - "docs/quality/ISSUE_26_QA_EXECUTION_LEDGER.md"
       - "tests/integration/test_minio_storage.py"
       - "tests/integration/test_pg_minio_attachment_http.py"
+      - "tests/integration/test_pg_minio_legacy_restore.py"
+      - "scripts/auto_legacy_attachment_restore_probe.py"
+      - "scripts/auto_restore_lifecycle_probe.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/minio-dev.yml"
+      - "tests/integration/test_pg_minio_legacy_restore.py"
+      - "scripts/auto_legacy_attachment_restore_probe.py"
+      - "scripts/auto_restore_lifecycle_probe.py"
   workflow_dispatch:
 
 permissions:
@@ -126,6 +136,39 @@ jobs:
           mc mirror --overwrite /tmp/roboport-backup app/roboport-documents-dev
           test "$(mc cat app/roboport-documents-dev/backup-probe.txt)" = 'synthetic-backup-restore'
           mc rm app/roboport-documents-dev/backup-probe.txt
+      - name: Real legacy attachment PostgreSQL and isolated MinIO archive restore
+        env:
+          ROBOport_MINIO_ENDPOINT: http://127.0.0.1:9000
+          ROBOport_LEGACY_RESTORE_CI: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          mc() { docker compose -f infra/dev/compose.minio.yml exec -T minio mc "$@"; }
+          # Isolated restore destinations; use a narrowly scoped disposable
+          # policy extending the existing dev app policy, never root in Python.
+          for bucket in roboport-documents-restore-dev roboport-quarantine-restore-dev; do
+            mc mb root/"$bucket"
+            mc anonymous set none root/"$bucket"
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          policy = json.loads(Path("infra/dev/minio-app-policy.json").read_text())
+          for statement in policy["Statement"]:
+              statement["Resource"] += [
+                  item.replace("-dev", "-restore-dev")
+                  for item in statement["Resource"]
+              ]
+          Path("/tmp/roboport-restore-policy.json").write_text(json.dumps(policy))
+          PY
+          cat /tmp/roboport-restore-policy.json | mc admin policy create root roboport-app-restore /dev/stdin
+          mc admin policy attach root roboport-app-restore --user "$MINIO_APP_ACCESS_KEY"
+          export ROBOport_RESTORE_PG_CONTAINER="$(docker ps --filter ancestor=postgres:17 --format '{{.ID}}' | head -1)"
+          test -n "$ROBOport_RESTORE_PG_CONTAINER"
+          PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_minio_legacy_restore.py
+          for bucket in roboport-documents-restore-dev roboport-quarantine-restore-dev; do
+            test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:9000/$bucket/?list-type=2")" = 403
+          done
       - name: Tear down disposable volumes
         if: always()
         run: docker compose -f infra/dev/compose.minio.yml down -v --remove-orphans
