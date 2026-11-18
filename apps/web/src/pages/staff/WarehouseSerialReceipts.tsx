@@ -78,7 +78,7 @@ export function WarehouseSerialReceipts({org,loc}:{org:string;loc:string}){
       if(!controller.signal.aborted)setError(body?
         'Результат записи неизвестен. Повторите тот же запрос и ключ или перечитайте журнал.':
         'Не удалось загрузить журнал серийной первички.');
-    }finally{if(!controller.signal.aborted)setBusy(false);}
+    }finally{if(abort.current===controller)setBusy(false);}
   }
   return <section aria-label="Привязка серийных деталей к приходам">
     <h2>Серийные детали: первичка прихода (dev)</h2>
