@@ -146,7 +146,7 @@ test('material assessment shows traceability, unknown values and live price deni
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
     status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
-    materialNetMinor:1250,fifoSlices:[],movements:[
+    materialNetMinor:1250,fifoSlices:[],serialSlices:[],movements:[
       {stockEventId:id('6'),action:'ISSUE',quantity:2,lotMovementId:id('7')},
       {stockEventId:id('8'),action:'RETURN',quantity:1,lotMovementId:id('9')},
     ]};
@@ -199,7 +199,7 @@ test('internal cost rate approval and reconciled negative difference, unknowns a
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
     status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
-    materialNetMinor:1250,fifoSlices:[],movements:[
+    materialNetMinor:1250,fifoSlices:[],serialSlices:[],movements:[
       {stockEventId:id('6'),action:'ISSUE',quantity:2,lotMovementId:id('7')},
       {stockEventId:id('8'),action:'RETURN',quantity:1,lotMovementId:id('9')},
     ]};
@@ -299,7 +299,7 @@ test('FIFO mixed receipt UI reconciles return slices and rejects invented cost',
     {...b,stockEventId:returnEvent,lotMovementId:returned,originalIssueId:issue,action:'RETURN',quantity:1},
   ];
   const group={skuId:id('b'),lotId:id('c'),issuedQuantity:5,returnedQuantity:1,netQuantity:4,
-    status:'FIFO_TRACED',source:null,materialNetMinor:5750,fifoSlices:slices,movements:[
+    status:'FIFO_TRACED',source:null,materialNetMinor:5750,fifoSlices:slices,serialSlices:[],movements:[
       {stockEventId:issueEvent,action:'ISSUE',quantity:5,lotMovementId:issue},
       {stockEventId:returnEvent,action:'RETURN',quantity:1,lotMovementId:returned},
     ]};
