@@ -89,7 +89,6 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "$BASE_SHA"
             python scripts/ci_impact.py --base "$BASE_SHA" --run-integration
           else
             python -m pytest -q -ra tests/integration
