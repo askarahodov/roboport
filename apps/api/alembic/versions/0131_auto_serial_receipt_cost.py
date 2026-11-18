@@ -52,6 +52,10 @@ def upgrade():
           END IF;
           v_actor:=NEW.approved_by;
         END IF;
+        IF NULLIF(current_setting('roboport.serial_receipt_actor',true),'')::uuid
+            IS DISTINCT FROM v_actor THEN
+          RAISE EXCEPTION 'serial receipt authenticated actor mismatch';
+        END IF;
         SELECT s.organization_id,s.location_id,s.lot_id,s.sku_id
           INTO v_org,v_loc,v_lot,v_sku FROM auto_stock_serial s
           WHERE s.id=v_serial FOR SHARE;
