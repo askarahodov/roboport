@@ -48,18 +48,30 @@ def fixture(monkeypatch,mode="traced",before_labor=None):
                 db,manager,org,loc,receipt,uuid4(),
                 "USD" if mode=="currency" else "RUB",1250,600,
                 "SYN-QUOTE-1",datetime.now(timezone.utc))
-        if mode.startswith("fifo"):
+        if mode.startswith(("fifo","serial")):
             second=create_receipt_document(db,maker,org,loc,lot,uuid4(),3,"SYN-FIFO-SECOND")
             second_accept=accept_receipt_document(db,manager,org,loc,second,uuid4())
             second_value=None
-            if mode!="fifo-unvalued":
+            if mode not in ("fifo-unvalued","serial-unvalued"):
                 second_value=record_receipt_valuation(db,manager,org,loc,second,uuid4(),
-                    "USD" if mode=="fifo-currency" else "RUB",2000,600,"SYN-QUOTE-2",
+                    "USD" if mode in ("fifo-currency","serial-currency") else "RUB",2000,600,"SYN-QUOTE-2",
                     datetime.now(timezone.utc))
             evidence.update(second=second,second_accept=second_accept,second_value=second_value)
             if mode=="fifo-serial":
                 from roboport_api.auto_stock_serial import register_lot_serial
                 register_lot_serial(db,warehouse,org,loc,lot,uuid4(),"SYN-FIFO-SERIAL")
+        if mode.startswith("serial"):
+            from roboport_api.auto_stock_serial import register_lot_serial
+            from roboport_api.auto_serial_receipt_provenance import propose,approve
+            serial1=register_lot_serial(db,maker,org,loc,lot,uuid4(),"SRC-SERIAL-001")
+            serial2=register_lot_serial(db,maker,org,loc,lot,uuid4(),"SRC-SERIAL-002")
+            p1=propose(db,maker,org,loc,serial1,receipt,uuid4())
+            p2=propose(db,maker,org,loc,serial2,second,uuid4())
+            a1=a2=None
+            if mode!="serial-unapproved":
+                a1=approve(db,manager,org,loc,UUID(p1["assertionId"]),uuid4())
+                a2=approve(db,manager,org,loc,UUID(p2["assertionId"]),uuid4())
+            evidence.update(serial1=serial1,serial2=serial2,p1=p1,p2=p2,a1=a1,a2=a2)
         if mode=="mixed":
             record(db,item,"RECEIPT",1)
             lot_action(db,d,org,loc,lot,"ALLOCATE",1)
@@ -70,6 +82,22 @@ def fixture(monkeypatch,mode="traced",before_labor=None):
         if before_labor is not None:
             before_labor(db,d,org,loc,order)
         def consume():
+            if mode.startswith("serial"):
+                from roboport_api.auto_stock_serial_movement import move_lot_serial
+                # Each serial issue has its own immutable one-unit lot issue.
+                for name in ("serial1","serial2"):
+                    sid=evidence[name]
+                    move=move_lot_serial(db,warehouse,org,loc,sid,uuid4(),"ISSUE",order)
+                    linked=db.execute("""SELECT issue_id FROM auto_stock_serial_movement
+                      WHERE id=%s""",(move,)).fetchone()[0]
+                    receive_material(db,d["tokens"][d["manager"]],org,loc,order,linked,uuid4())
+                    evidence[name+"Issue"]=linked
+                returned=move_lot_serial(db,warehouse,org,loc,evidence["serial2"],uuid4(),
+                                         "RETURN",order)
+                evidence["serial2Return"]=db.execute("""
+                  SELECT return_id FROM auto_stock_serial_movement WHERE id=%s
+                """,(returned,)).fetchone()[0]
+                return
             issue_key=uuid4()
             quantity=5 if mode.startswith("fifo") else 2
             issued=issue_material(db,warehouse,org,loc,order,lot,quantity,issue_key)
@@ -129,7 +157,7 @@ def test_exact_single_receipt_net_cost_and_live_price_scope(monkeypatch):
     export=http.get(path+"/export",params=query)
     assert export.status_code==200 and export.headers["x-content-type-options"]=="nosniff"
     lines=list(csv.reader(StringIO(export.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(lines)==5 and all(len(row)==20 for row in lines)
+    assert len(lines)==5 and all(len(row)==22 for row in lines)
     assert lines[1][3:5]==["ORDER","COMPLETE"] and lines[1][10]=="1250"
     assert lines[2][3:5]==["LOT","TRACED"] and lines[2][14]=="1250"
     assert http.get(path.replace(str(loc),str(uuid4())),params=query).status_code==403
@@ -279,10 +307,10 @@ def test_fifo_two_accepted_receipts_return_reverses_expensive_layer_and_csv(monk
     export=http.get(path+"/export",params=query)
     assert export.status_code==200,export.text
     lines=list(csv.reader(StringIO(export.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(lines)==8 and all(len(line)==20 for line in lines)
+    assert len(lines)==8 and all(len(line)==22 for line in lines)
     fifo_rows=[line for line in lines if line[3]=="FIFO_SLICE"]
     assert sorted(int(line[10]) for line in fifo_rows)==[-2000,3750,4000]
-    assert {line[-1] for line in fifo_rows}=={str(evidence["issue"])}
+    assert {line[-3] for line in fifo_rows}=={str(evidence["issue"])}
     monkeypatch.setattr(module.fifo,"MAX_SLICES",2)
     assert http.get(path,params=query).status_code==409
     assert http.get(path+"/export",params=query).status_code==409

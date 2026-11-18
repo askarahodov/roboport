@@ -71,3 +71,62 @@ test('serial transfer retains request key on ambiguous response and branch edit'
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
+
+test('serial receipt provenance is an independent two-role UI flow with scope reset',async({page},testInfo)=>{
+  const receipt='88888888-8888-4888-8888-888888888888';
+  const assertion='99999999-9999-4999-8999-999999999999';
+  const approval='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let approved=false,proposed=false;
+  const keys:string[]=[];
+  await page.route('**/locations/*/serial-receipt-provenance**',route=>{
+    const req=route.request();
+    if(req.method()==='POST'){
+      expect(req.headers()['x-csrf-token']).toBe('csrf');
+      const payload=req.postDataJSON();
+      keys.push(payload.requestKey);
+      if(req.url().endsWith('/approve')){
+        approved=true;
+        return route.fulfill({status:201,contentType:'application/json',
+          body:JSON.stringify({approvalId:approval,replayed:false})});
+      }
+      expect(payload.serialId).toBe(serial);expect(payload.receiptId).toBe(receipt);
+      proposed=true;
+      return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify({assertionId:assertion,replayed:false})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,accountingApproved:false,items:proposed?[{
+        assertionId:assertion,serialId:serial,receiptId:receipt,
+        assertionSequence:11,approvalId:approved?approval:null,
+        approvalSequence:approved?13:null,
+      }]:[],
+    })});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await fill(page);
+  const section=page.getByRole('region',{name:'Происхождение серийных деталей'});
+  await section.getByLabel('UUID принятого прихода').fill(receipt);
+  await section.getByRole('button',{name:'Заявить источник серийной детали'}).click();
+  await expect(section.getByRole('status')).toContainText('Требуется независимое подтверждение');
+  await section.getByRole('button',{name:'Проверить подтверждения филиала'}).click();
+  await expect(section.getByText(/Ожидает независимого подтверждения/)).toBeVisible();
+  await section.getByRole('button',{name:'Подтвердить приход для '+serial}).click();
+  await expect(section.getByRole('status')).toContainText('Источник подтверждён');
+  await section.getByRole('button',{name:'Проверить подтверждения филиала'}).click();
+  await expect(section.getByText(/Подтверждение: /)).toContainText(approval);
+  expect(keys).toHaveLength(2);expect(keys[0]).not.toBe(keys[1]);
+  await page.screenshot({path:testInfo.outputPath('serial-receipt-mobile-light.png'),
+    animations:'disabled',fullPage:true});
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('serial-receipt-desktop-light.png'),
+    animations:'disabled',fullPage:true});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('serial-receipt-desktop-dark.png'),
+    animations:'disabled',fullPage:true});
+  await page.getByRole('textbox',{name:'UUID исходного филиала'}).fill(
+    '77777777-7777-4777-8777-777777777777');
+  await expect(section).toBeVisible();
+  await expect(section.getByText(/Подтверждение: /)).toHaveCount(0);
+});

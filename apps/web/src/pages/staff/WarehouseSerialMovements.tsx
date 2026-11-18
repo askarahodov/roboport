@@ -1,4 +1,5 @@
 import React from 'react';
+import {WarehouseSerialReceiptProvenance} from './WarehouseSerialReceiptProvenance';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Action='issue'|'return'|'transfer';
@@ -100,6 +101,8 @@ export function WarehouseSerialMovements(){
       <button type="button" disabled={busy||!!pending||!scopeValid||!uuid.test(destination.trim())}
         onClick={()=>void submit('transfer')}>Переместить серийную деталь</button>
     </section>
+    <WarehouseSerialReceiptProvenance key={organization+':'+location+':'+serial}
+      organization={organization} location={location} serial={serial}/>
     {busy&&<p role="status">Операция выполняется…</p>}
     {pending&&<p role="alert">Результат операции не определён; новый ключ запрещён.</p>}
     {pending&&<button type="button" disabled={busy||

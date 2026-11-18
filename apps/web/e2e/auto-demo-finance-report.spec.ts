@@ -337,3 +337,63 @@ test('FIFO mixed receipt UI reconciles return slices and rejects invented cost',
   await button.click();await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
   await expect(table).toHaveCount(0);
 });
+
+test('approved multi-receipt serial costs have an explained reversible source',async({page},testInfo)=>{
+  const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+  const issue1=id('1'),issue2=id('2'),returned=id('3');
+  const approval1=id('4'),approval2=id('5');
+  const serial1=id('6'),serial2=id('7');
+  const receipt1=id('8'),receipt2=id('9');
+  const a={receiptId:receipt1,acceptanceId:id('a'),valuationId:id('b'),
+    unitNetMinor:1250,serialId:serial1,serialApprovalId:approval1};
+  const b={receiptId:receipt2,acceptanceId:id('c'),valuationId:id('d'),
+    unitNetMinor:2000,serialId:serial2,serialApprovalId:approval2};
+  const movement1=id('e'),movement2=id('f'),movement3=id('0');
+  const group={skuId:id('a'),lotId:id('b'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
+    status:'SERIAL_TRACED',source:null,materialNetMinor:1250,
+    fifoSlices:[
+      {...a,stockEventId:movement1,lotMovementId:issue1,originalIssueId:issue1,action:'ISSUE',quantity:1},
+      {...b,stockEventId:movement2,lotMovementId:issue2,originalIssueId:issue2,action:'ISSUE',quantity:1},
+      {...b,stockEventId:movement3,lotMovementId:returned,originalIssueId:issue2,action:'RETURN',quantity:1},
+    ],
+    movements:[
+      {stockEventId:movement1,action:'ISSUE',quantity:1,lotMovementId:issue1},
+      {stockEventId:movement2,action:'ISSUE',quantity:1,lotMovementId:issue2},
+      {stockEventId:movement3,action:'RETURN',quantity:1,lotMovementId:returned},
+    ]};
+  const item={workOrderId:id('a'),closedDay:'2030-10-27',closedEventId:id('b'),
+    status:'COMPLETE',materialNetMinor:1250,groups:[group]};
+  const payload={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_RECEIPT_FIFO_NET_MATERIAL_USAGE',
+    timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
+    summary:{orderCount:1,completeOrderCount:1,movementCount:3,materialNetMinor:1250},
+    items:[item]};
+  let result:unknown=payload;
+  await page.route('**/reports/closed-order-materials*',route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify(result),
+  }));
+  await page.setViewportSize({width:390,height:844});await page.goto('/staff/auto-demo-finance-report');
+  await fill(page);
+  const section=page.getByRole('region',{name:'Оценка расхода материалов закрытых заказов'});
+  const check=section.getByRole('button',{name:'Проверить расход материалов'});
+  await check.click();
+  const table=section.getByRole('table');await expect(table).toContainText('12,50 RUB');
+  await table.getByText('Партии и движения',{exact:true}).click();
+  await expect(table.getByText(/Серийная деталь: Возврат/)).toContainText(approval2);
+  await expect(table.getByText(/Серийная деталь: Возврат/)).toContainText(issue2);
+  await page.screenshot({path:testInfo.outputPath('serial-cost-mobile-light.png'),
+    animations:'disabled',fullPage:true});
+  await page.setViewportSize({width:1280,height:800});
+  await page.screenshot({path:testInfo.outputPath('serial-cost-desktop-light.png'),
+    animations:'disabled',fullPage:true});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('serial-cost-desktop-dark.png'),
+    animations:'disabled',fullPage:true});
+  result={...payload,items:[{...item,groups:[{...group,fifoSlices:[
+    ...group.fifoSlices.slice(0,2),{...group.fifoSlices[2],serialApprovalId:id('9')},
+  ]}]}]};
+  await check.click();
+  await expect(section.getByRole('alert')).toContainText('Не удалось проверить расход');
+  await expect(table).toHaveCount(0);
+});
