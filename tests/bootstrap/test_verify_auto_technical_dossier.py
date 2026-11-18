@@ -35,13 +35,20 @@ def dossier(*, tamper=None, nested_tamper=None):
         "legalSignatureStatus": "NOT_IMPLEMENTED", "organizationId": org,
         "locationId": loc, "orderId": order,
         "act": {"id": act_id, "sha256": digest_act,
-                "review": {"decision": "ACKNOWLEDGED"}},
-        "files": [{"path": "photos/1.png", "sha256": sha256(png).hexdigest()}],
+                "review": {"decision": "ACKNOWLEDGED"},
+                "photos": [{"sha256": sha256(png).hexdigest(),
+                            "areaCode": "FRONT", "width": 2, "height": 2}]},
+        "files": [{"path": "photos/1.png", "sha256": sha256(png).hexdigest(),
+                   "areaCode": "FRONT", "width": 2, "height": 2}],
     }
     if nested_tamper == "photo":
         png += b"changed"
     if nested_tamper == "review":
         nested_manifest["act"]["review"]["decision"] = "DISPUTED"
+    if nested_tamper == "photo-meta":
+        nested_manifest["act"]["photos"][0]["sha256"] = "f" * 64
+    if nested_tamper == "missing-photo-meta":
+        nested_manifest["act"]["photos"].clear()
     intake = _zip([("manifest.json", _json(nested_manifest)), ("photos/1.png", png)])
     preview = {
         "kind": "SYNTHETIC_PRE_HANDOVER_PREVIEW", "workOrderId": order,
@@ -51,6 +58,7 @@ def dossier(*, tamper=None, nested_tamper=None):
         "approvedBaseMinor": 500, "approvedExtraMinor": 100,
         "approvedTotalMinor": 600, "simulatedPaidMinor": 700,
         "simulatedRefundedMinor": 100, "simulatedDueMinor": 0,
+        "extraLines": [{"amountMinor": 100}],
     }
     events = [{
         "id": str(uuid4()), "actorId": str(uuid4()), "action": action,
@@ -75,6 +83,10 @@ def dossier(*, tamper=None, nested_tamper=None):
         events[1]["intakeDigest"] = "c" * 64
     if tamper == "settlement":
         settlement["simulatedDueMinor"] = 100
+    if tamper == "extra-total":
+        preview["extraLines"][0]["amountMinor"] = 90
+    if tamper == "missing-extra":
+        preview["extraLines"].clear()
     files = [("preview.json", _json(preview)),
              ("document-events.json", _json(events)),
              ("settlement.json", _json(settlement)),
@@ -116,13 +128,13 @@ class VerifyTechnicalDossierTest(unittest.TestCase):
             self.assertEqual(main([str(file), "--json"]), 1)
 
     def test_rejects_internal_digest_and_cross_file_tampering(self):
-        for kind in ("release", "events", "settlement", "filehash"):
+        for kind in ("release", "events", "settlement", "filehash", "extra-total", "missing-extra"):
             with self.subTest(kind=kind):
                 with self.assertRaises(DossierVerificationError):
                     verify_dossier_bytes(dossier(tamper=kind))
 
     def test_rejects_nested_photo_and_disputed_act_with_valid_outer_hashes(self):
-        for kind in ("photo", "review"):
+        for kind in ("photo", "review", "photo-meta", "missing-photo-meta"):
             with self.subTest(kind=kind):
                 with self.assertRaises(DossierVerificationError):
                     verify_dossier_bytes(dossier(nested_tamper=kind))
