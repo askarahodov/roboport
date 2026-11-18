@@ -307,6 +307,8 @@ jobs:
       image: mcr.microsoft.com/playwright:v1.56.1-noble
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -337,8 +339,11 @@ jobs:
           PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000 > /tmp/roboport-e2e-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
-          cd apps/web
-          npm run test:e2e
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            python -m scripts.ci_browser --base "${{ github.event.pull_request.base.sha }}" --run
+          else
+            python -m scripts.ci_browser --full --run
+          fi
       - name: Browser navigation and search smoke for local Docsify portal
         working-directory: apps/web
         run: npm run test:docs:e2e
