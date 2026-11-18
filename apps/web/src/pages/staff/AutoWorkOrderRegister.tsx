@@ -30,7 +30,7 @@ function parse(raw:unknown,stage:Stage):Page{
       ![row.createdAt,row.startsAt,row.endsAt].every(
          v=>typeof v==='string'&&!Number.isNaN(Date.parse(v)))||
       Date.parse(row.startsAt)>=Date.parse(row.endsAt)||!stages.includes(row.stage)||
-      row.stage==='ALL'||(stage!=='ALL'&&row.stage!==stage)||
+      (stage!=='ALL'&&row.stage!==stage)||
       ids.has(row.workOrderId))throw Error('invalid row');
     ids.add(row.workOrderId);
   }
