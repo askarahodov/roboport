@@ -20,6 +20,7 @@ import { AutoMaterialCostEvidence } from './pages/staff/AutoMaterialCostEvidence
 import { AutoStockAbcXyz } from './pages/staff/AutoStockAbcXyz';
 import { AutoOrderServices } from './pages/staff/AutoOrderServices';
 import { AutoWorkOrderRegister } from './pages/staff/AutoWorkOrderRegister';
+import { AutoWorkOrderWorkspace } from './pages/staff/AutoWorkOrderWorkspace';
 import { AutoWorkshopQc } from './pages/staff/AutoWorkshopQc';
 import { AutoIntakeAct } from './pages/shared/AutoIntakeAct';
 import { AutoDiagnostics } from './pages/staff/AutoDiagnostics';
@@ -86,6 +87,7 @@ function App() {
         <NavLink to="/staff/auto-material-cost-evidence" end>Первичка материалов (dev)</NavLink>
         <NavLink to="/staff/auto-stock-abc-xyz" end>ABC/XYZ склада (dev)</NavLink>
         <NavLink to="/staff/auto-order-register" end>Заказ-наряды (dev)</NavLink>
+        <NavLink to="/staff/auto-order-workspace" end>Рабочее место наряда (dev)</NavLink>
         <NavLink to="/staff/auto-order-services" end>Услуги наряда (dev)</NavLink>
         <NavLink to="/staff/auto-workshop-qc" end>Осмотр и QC (dev)</NavLink>
         <NavLink to="/staff/auto-intake-act" end>Акт приёмки (dev)</NavLink>
@@ -160,6 +162,7 @@ function App() {
       <Route path="/staff/auto-material-cost-evidence" element={<AutoMaterialCostEvidence />} />
       <Route path="/staff/auto-stock-abc-xyz" element={<AutoStockAbcXyz />} />
       <Route path="/staff/auto-order-register" element={<AutoWorkOrderRegister />} />
+      <Route path="/staff/auto-order-workspace" element={<AutoWorkOrderWorkspace />} />
       <Route path="/staff/auto-order-services" element={<AutoOrderServices />} />
       <Route path="/staff/auto-workshop-qc" element={<AutoWorkshopQc />} />
       <Route path="/staff/auto-intake-act" element={<AutoIntakeAct role="staff" />} />
