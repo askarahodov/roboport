@@ -158,3 +158,62 @@ def test_concurrent_rate_proposals_one_winner(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT count(*) FROM auto_internal_labor_cost_revision WHERE location_id=%s",
                           (loc,)).fetchone()==(1,)
+
+
+def test_finance_preview_and_dual_role_cost_denial_match_real_api(monkeypatch):
+    d,org,loc,order,evidence,root,query,_=setup(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    path=root+"/reports/internal-order-costs"
+    policies=root+"/internal-labor-cost-policies"
+    # CASHIER без MANAGER не имеет доступа даже к ставке филиала.
+    with psycopg.connect(DSN) as db:
+        grant(db,d["manager"],org,loc,"CASHIER")
+        grant(db,d["intake"],org,loc,"CASHIER")
+    owner=token(http,d,d["other"])
+    def preview(user):
+        res=http.get(policy_url(org)+"/effective",params={
+            "locationId":str(loc),"userId":str(user),"documentKind":"FINANCE"})
+        assert res.status_code==200,res.text
+        return res.json()["capabilities"]["PRICE_PURCHASE"]["allowed"]
+    assert preview(d["intake"]) is True and preview(d["manager"]) is False
+    token(http,d,d["manager"])
+    assert http.get(policies).status_code==403
+    owner=token(http,d,d["other"])
+    assert set_rule(http,policy_url(org),owner,role="CASHIER",loc=loc,
+                    document="FINANCE",cap="PRICE_PURCHASE").status_code==201
+    assert preview(d["intake"]) is False
+    token(http,d,d["intake"])
+    assert http.get(policies).status_code==403
+    assert http.get(path,params=query).status_code==403
+    assert http.get(path+"/export",params=query).status_code==403
+
+
+def test_stale_mechanic_and_owner_proof_snapshot_cannot_reveal_cost(monkeypatch):
+    d,org,loc,order,evidence,root,query,_=setup(monkeypatch)
+    from roboport_api.auto_closed_order_report import report as closed_report
+    # Старая MVCC-версия допуска механика не даёт положительную оценку
+    # после того, как отзыв уже committed в другой транзакции.
+    with psycopg.connect(DSN) as reader:
+        with pytest.raises(psycopg.errors.SerializationFailure):
+            with reader.transaction():
+                reader.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                assert reader.execute("SELECT count(*) FROM auto_work_order_labor_entry").fetchone()[0]>0
+                with psycopg.connect(DSN) as writer:
+                    writer.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+                      WHERE organization_id=%s AND user_id=%s AND role_code='MECHANIC'
+                      AND revoked_at IS NULL""",(org,d["manager"]))
+                module._load_labor(reader,[order],org,loc)
+    # Отдельно владелец: снимок до отзыва proof не может вернуть закрытый заказ.
+    with psycopg.connect(DSN) as reader:
+        with pytest.raises(psycopg.errors.SerializationFailure):
+            with reader.transaction():
+                reader.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                reader.execute("SELECT id FROM auto_vehicle_customer_link WHERE id=%s",(d["link"],)).fetchone()
+                with psycopg.connect(DSN) as writer:
+                    writer.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+                closed_report(reader,d["tokens"][d["intake"]],org,loc,query["fromDay"],query["toDay"])
+    http=TestClient(app,base_url="https://127.0.0.1")
+    token(http,d,d["intake"])
+    res=http.get(root+"/reports/internal-order-costs",params=query)
+    assert res.status_code==200,res.text
+    assert res.json()["items"]==[]
