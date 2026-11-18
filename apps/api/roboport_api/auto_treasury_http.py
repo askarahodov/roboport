@@ -145,4 +145,8 @@ def read_report(org_id:str,loc_id:str,request:Request,
                           from_day=fromDay,to_day=toDay)
         except (TreasuryDenied,TreasuryInvalid,TreasuryConflict) as exc:
             return _reject(request,exc)
+        except (psycopg.errors.SerializationFailure,
+                psycopg.errors.DeadlockDetected):
+            # No stale or partial reconciliation on concurrent revocation.
+            return _response(request,409,"REPORT_CONFLICT")
     return _respond(result)

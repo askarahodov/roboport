@@ -272,3 +272,58 @@ def test_account_cashier_role_grants_are_admin_only(monkeypatch):
     assert create(http,base,cashier).status_code==403
     demo=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/demo-close"
     assert http.get(demo).status_code==403
+
+
+def test_monthly_multi_account_reconciliation_and_conflict_response(monkeypatch):
+    """Two accounts, 31 days and a sealed account keep independent balances."""
+    from datetime import date, timedelta
+    from roboport_api import auto_treasury_http as treasury_http
+
+    d,org,loc,order,service,http,base,manager=prepare(monkeypatch)
+    first=create(http,base,manager,"CASH-MONTH")
+    second=create(http,base,manager,"BANK-MONTH")
+    assert first.status_code==201 and second.status_code==201
+    cash=UUID(first.json()["accountId"])
+    bank=UUID(second.json()["accountId"])
+    cashier=session(http,d,d["manager"])
+    assert event(http,base,cashier,order,cash,"ADVANCE",500).status_code==201
+    assert event(http,base,cashier,order,bank,"ADVANCE",700).status_code==201
+    with psycopg.connect(DSN) as db:
+        day=local_day(db,loc)
+    start=(date.fromisoformat(day)-timedelta(days=30)).isoformat()
+    params={"fromDay":start,"toDay":day}
+    got=http.get(base+"/report",params=params)
+    assert got.status_code==200,got.text
+    rows=got.json()["items"]
+    assert len(rows)==62
+    for ident,amount in ((cash,500),(bank,700)):
+        account_rows=[row for row in rows if row["accountId"]==str(ident)]
+        assert len(account_rows)==31
+        assert all(row["openingMinor"]==0 and row["closingMinor"]==0
+                   for row in account_rows[:-1])
+        assert account_rows[-1]["localDay"]==day
+        assert account_rows[-1]["incomingMinor"]==amount
+        assert account_rows[-1]["outgoingMinor"]==0
+        assert account_rows[-1]["closingMinor"]==amount
+    close=http.post(base+f"/accounts/{cash}/close-day",headers=cashier,json={
+        "requestKey":str(uuid4()),"businessDay":day,
+    })
+    assert close.status_code==201,close.text
+    same=http.get(base+"/report",params=params)
+    assert same.status_code==200,same.text
+    assert [row for row in same.json()["items"] if row["accountId"]==str(cash)][-1][
+        "closeId"]==close.json()["closeId"]
+    assert [row for row in same.json()["items"] if row["accountId"]==str(bank)][-1][
+        "closeId"] is None
+
+    original=treasury_http.report
+    try:
+        def conflict(*args,**kwargs):
+            raise psycopg.errors.SerializationFailure("concurrent grant revocation")
+        monkeypatch.setattr(treasury_http,"report",conflict)
+        denied=http.get(base+"/report",params=params)
+        assert denied.status_code==409
+        assert "REPORT_CONFLICT" in denied.text
+        assert denied.headers["content-type"].startswith("application/json")
+    finally:
+        monkeypatch.setattr(treasury_http,"report",original)
