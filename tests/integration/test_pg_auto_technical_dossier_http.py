@@ -12,6 +12,7 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from roboport_api.main import app
+from scripts.verify_auto_technical_dossier import verify_dossier_bytes
 from roboport_api.auto_intake_act import sanitize_png
 from test_pg_auto_intake_act_http import synthetic_png
 from test_pg_auto_document_lifecycle_http import ready,path,event
@@ -37,6 +38,11 @@ def test_closed_document_dossier_has_all_evidence_and_current_acl(monkeypatch):
     downloaded=http.get(endpoint)
     assert downloaded.status_code==200,downloaded.text[:140] if downloaded.status_code!=200 else ""
     assert downloaded.headers["content-type"]=="application/zip"
+    # The offline command verifies the exact real PostgreSQL-backed archive,
+    # not only a synthetic hand-built ZIP fixture.
+    offline = verify_dossier_bytes(downloaded.content)
+    assert offline["verified"] is True and offline["documentEvents"] == 3
+    assert offline["releaseAllowed"] is False and offline["photos"] == 1
     assert downloaded.headers["cache-control"]=="no-store, private"
     assert downloaded.headers["x-content-type-options"]=="nosniff"
     assert downloaded.headers["cross-origin-resource-policy"]=="same-origin"
