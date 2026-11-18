@@ -173,3 +173,81 @@ def test_serial_evidence_http_csrf_independence_replay_and_immutable(monkeypatch
     token(client,d,d["intake"])
     assert client.get(base).status_code==403
     assert client.post(base,json=body,headers=token(client,d,d["intake"])).status_code==403
+
+
+def test_transfer_retains_original_receipt_and_requires_source_branch_purchase_access():
+    from roboport_api.auto_serial_cost_proof import prove_lot, STATUS
+    from roboport_api.auto_closed_order_report import Denied
+    from roboport_api.auto_stock_serial import register_lot_serial
+    from roboport_api.auto_stock_serial_movement import move_lot_serial
+    from roboport_api.auto_stock_receipt_document import create_receipt_document,accept_receipt_document
+    from roboport_api.auto_stock_receipt_valuation import record_receipt_valuation
+    from test_pg_auto_stock_interbranch_transfer import setup as transfer_setup
+    from test_pg_auto_vehicle_claim_http import _scenario
+    from test_pg_auto_stock_service import grant
+    from datetime import datetime,timezone
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,src,dst,sku_src,sku_dst,lot_src,lot_dst,_,_=transfer_setup(db,d,2)
+        grant(db,d["manager"],org,src,"WAREHOUSE")
+        grant(db,d["other"],org,src,"MANAGER")
+        grant(db,d["other"],org,dst,"MANAGER")
+        maker=d["tokens"][d["manager"]]
+        warehouse=d["tokens"][d["intake"]]
+        receipt=create_receipt_document(db,maker,org,src,lot_src,uuid4(),1,"XFER-SERIAL-COST")
+        accept_receipt_document(db,warehouse,org,src,receipt,uuid4())
+        record_receipt_valuation(db,warehouse,org,src,receipt,uuid4(),
+                                  "RUB",980,0,"XFER-COST-QUOTE",datetime.now(timezone.utc))
+        serial=register_lot_serial(db,warehouse,org,src,lot_src,uuid4(),"SERIAL-CROSS-BRANCH")
+        _,att=assert_receipt(db,warehouse,org,src,serial,receipt,uuid4())
+        approve_receipt(db,d["tokens"][d["other"]],org,src,UUID(att["assertionId"]),uuid4())
+        move=move_lot_serial(db,warehouse,org,src,serial,uuid4(),"TRANSFER",None,lot_dst)
+        assert move
+        allocation=db.execute("""
+            SELECT t.credit_allocation_id,a.cost_registration_seq
+            FROM auto_stock_serial_movement m
+            JOIN auto_stock_interbranch_transfer t ON t.id=m.interbranch_id
+            JOIN auto_stock_lot_allocation a ON a.id=t.credit_allocation_id
+            WHERE m.id=%s
+        """,(move,)).fetchone()
+        # One transfer-in allocation, no claim about unregistered supplier prices
+        # from the destination branch.
+        history=[(lot_dst,allocation[0],"ALLOCATE",1,None,None,None,
+                  None,None,None,None,None,None,0,False,allocation[1],None)]
+        result,parts,scanned=prove_lot(db,d["tokens"][d["other"]],
+                                      org,dst,lot_dst,history)
+        assert result==STATUS and parts=={} and scanned==1
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+           WHERE organization_id=%s AND location_id=%s AND user_id=%s
+             AND role_code='MANAGER' AND revoked_at IS NULL""",
+           (org,src,d["other"]))
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(Denied):
+            prove_lot(db,d["tokens"][d["other"]],org,dst,lot_dst,history)
+
+
+def test_direct_forged_serial_receipt_actor_is_rejected_by_database(monkeypatch):
+    from roboport_api.auto_stock_receipt_document import create_receipt_document,accept_receipt_document
+    from roboport_api.auto_stock_serial import register_lot_serial
+    from test_pg_auto_stock_lot_allocation import setup
+    from test_pg_auto_stock_service import grant
+    from test_pg_auto_vehicle_claim_http import _scenario
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,sku,lot,_=setup(db,d,1)
+        grant(db,d["manager"],org,loc,"WAREHOUSE")
+        receipt=create_receipt_document(db,d["tokens"][d["manager"]],org,loc,lot,uuid4(),
+                                         1,"FORGED-SERIAL-RECEIPT")
+        accept_receipt_document(db,d["tokens"][d["intake"]],org,loc,receipt,uuid4())
+        serial=register_lot_serial(db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),
+                                   "FORGED-SERIAL-UNIT")
+        # Even an existing WAREHOUSE UUID cannot impersonate an authenticated actor.
+        with pytest.raises(psycopg.errors.RaiseException,match="authenticated actor mismatch"):
+            with db.transaction():
+                db.execute("""INSERT INTO auto_stock_serial_receipt_assertion
+                  (id,serial_id,receipt_id,organization_id,location_id,asserted_by,request_key)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                  (uuid4(),serial,receipt,org,loc,d["intake"],uuid4()))
+        assert db.execute("SELECT count(*) FROM auto_stock_serial_receipt_assertion WHERE serial_id=%s",
+                          (serial,)).fetchone()==(0,)
