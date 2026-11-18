@@ -15,7 +15,7 @@ async function fill(page:Page){
   await expect(page.getByRole('heading',{name:'Движения серийных деталей (dev)'})).toBeVisible();
   await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
   await page.getByRole('textbox',{name:'UUID исходного филиала'}).fill(loc);
-  await page.getByRole('textbox',{name:'UUID серийной детали'}).fill(serial);
+  await page.getByRole('textbox',{name:'UUID серийной детали',exact:true}).fill(serial);
   await page.getByRole('textbox',{name:'UUID заказ-наряда'}).fill(order);
   await page.getByRole('textbox',{name:'UUID партии назначения'}).fill(destination);
 }
