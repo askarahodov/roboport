@@ -327,3 +327,90 @@ def test_monthly_multi_account_reconciliation_and_conflict_response(monkeypatch)
         assert denied.headers["content-type"].startswith("application/json")
     finally:
         monkeypatch.setattr(treasury_http,"report",original)
+
+
+def test_treasury_branch_report_csv_rechecks_acl_and_reconciles_each_day(monkeypatch):
+    """End-to-end: separate accounts, source CSV rows, close and live revocation."""
+    import csv
+    from io import StringIO
+    from datetime import date,timedelta
+
+    d,org,loc,order,service,http,base,manager=prepare(monkeypatch)
+    a=create(http,base,manager,"CASH-CSV")
+    b=create(http,base,manager,"BANK-CSV")
+    assert a.status_code==201 and b.status_code==201
+    cash,bank=UUID(a.json()["accountId"]),UUID(b.json()["accountId"])
+    cashier=session(http,d,d["manager"])
+    assert event(http,base,cashier,order,cash,"ADVANCE",900).status_code==201
+    assert event(http,base,cashier,order,cash,"REFUND_ADVANCE",200).status_code==201
+    assert event(http,base,cashier,order,bank,"ADVANCE",300).status_code==201
+    with psycopg.connect(DSN) as db:
+        today=local_day(db,loc)
+    first=(date.fromisoformat(today)-timedelta(days=1)).isoformat()
+    params={"fromDay":first,"toDay":today}
+    path=base+"/report"
+    close=http.post(base+f"/accounts/{cash}/close-day",headers=cashier,json={
+        "requestKey":str(uuid4()),"businessDay":today,
+    })
+    assert close.status_code==201,close.text
+    parsed=http.get(path,params=params)
+    assert parsed.status_code==200,parsed.text
+    rows=parsed.json()["items"]
+    assert len(rows)==4
+    result=http.get(path+"/export",params=params)
+    assert result.status_code==200,result.text
+    assert result.headers["cache-control"]=="no-store"
+    assert result.headers["x-content-type-options"]=="nosniff"
+    assert result.headers["content-type"].startswith("text/csv")
+    assert "attachment" in result.headers["content-disposition"]
+    assert result.content.startswith(b"\xef\xbb\xbf")
+    data=list(csv.reader(StringIO(result.text.lstrip("\ufeff")),delimiter=";"))
+    assert len(data)==5
+    assert all(len(line)==10 for line in data)
+    assert data[0][:4]==["Счёт UUID","Код счёта","Тип счёта","Локальный день"]
+    expected={(row["accountId"],row["localDay"]):row for row in rows}
+    for line in data[1:]:
+        original=expected[(line[0],line[3])]
+        assert line[1:3]==[original["accountCode"],original["kind"]]
+        assert line[4:8]==[str(original[key]) for key in (
+            "openingMinor","incomingMinor","outgoingMinor","closingMinor")]
+        assert line[8]==(original["closeId"] or "")
+        assert line[9]=="SIM_ONLY_NOT_REAL_MONEY"
+    assert sum(int(x[5]) for x in data[1:])==1200
+    assert sum(int(x[6]) for x in data[1:])==200
+    assert str(order) not in result.text
+    assert str(d["client_a"]) not in result.text
+    assert "Тестовый акт оплаты" not in result.text
+
+    assert http.get(path+"/export",params={"fromDay":"2026-02-30",
+        "toDay":today}).status_code==422
+    assert http.get(path+"/export",params={
+        "fromDay":"2020-01-01","toDay":today}).status_code==422
+    assert http.get(path.replace(str(loc),str(uuid4()))+"/export",
+                    params=params).status_code==403
+    http.cookies.clear()
+    assert http.get(path+"/export",params=params).status_code==403
+    session(http,d,d["client_a"])
+    assert http.get(path+"/export",params=params).status_code==403
+    session(http,d,d["manager"])
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+          WHERE organization_id=%s AND user_id=%s AND role_code='CASHIER'
+          AND revoked_at IS NULL""",(org,d["manager"]))
+    revoked=http.get(path+"/export",params=params)
+    assert revoked.status_code==403
+    assert "text/csv" not in revoked.headers["content-type"]
+    session(http,d,d["intake"])
+    assert http.get(path+"/export",params=params).status_code==200
+
+
+def test_treasury_csv_rejects_formula_injection_in_future_projections():
+    from roboport_api.auto_treasury_http import _report_csv
+    from roboport_api.auto_treasury import TreasuryConflict
+
+    record={"accountId":str(uuid4()),"accountCode":"=1+1",
+        "kind":"CASH_SIM","localDay":"2026-11-18",
+        "openingMinor":0,"incomingMinor":0,"outgoingMinor":0,
+        "closingMinor":0,"closeId":None}
+    with pytest.raises(TreasuryConflict,match="CSV_INTEGRITY"):
+        _report_csv({"items":[record]})

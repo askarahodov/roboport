@@ -1,8 +1,11 @@
 """Private HTTPS synthetic treasury: no payment processor, webhooks or fiscalization."""
 from uuid import UUID
+import csv
+from io import StringIO
+import re
 import psycopg
 from fastapi import APIRouter,Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse,Response
 from pydantic import BaseModel,ConfigDict,Field,StrictInt,ValidationError
 
 from .auth_http import _mutation_ok
@@ -150,3 +153,53 @@ def read_report(org_id:str,loc_id:str,request:Request,
             # No stale or partial reconciliation on concurrent revocation.
             return _response(request,409,"REPORT_CONFLICT")
     return _respond(result)
+
+def _report_csv(value: dict) -> str:
+    """One source row per account/day, fixed fields only (never account labels).
+
+    No free-text reason, client/order identifiers, formulas or credentials.
+    The export intentionally repeats day balances only once; summing closing
+    balances or multiple accounts as revenue is not meaningful.
+    """
+    output=StringIO(newline="")
+    writer=csv.writer(output,delimiter=";",lineterminator="\r\n")
+    writer.writerow(("Счёт UUID","Код счёта","Тип счёта","Локальный день",
+                     "Остаток на начало, коп.","Приход, коп.","Расход, коп.",
+                     "Остаток на конец, коп.","Закрытие UUID",
+                     "Синтетический источник"))
+    for item in value["items"]:
+        # Fail closed even if future query changes accidentally introduce
+        # untrusted free-text fields into the read-side projection.
+        if (not re.fullmatch(r"[A-Z0-9_-]{2,32}",item["accountCode"])
+            or item["kind"] not in ("CASH_SIM","BANK_SIM")
+            or not re.fullmatch(r"\d{4}-\d{2}-\d{2}",item["localDay"])):
+            raise TreasuryConflict("CSV_INTEGRITY")
+        writer.writerow((
+            str(UUID(item["accountId"])),item["accountCode"],item["kind"],
+            item["localDay"],*[str(item[field]) for field in (
+                "openingMinor","incomingMinor","outgoingMinor","closingMinor")],
+            str(UUID(item["closeId"])) if item["closeId"] else "",
+            "SIM_ONLY_NOT_REAL_MONEY",
+        ))
+    return "\ufeff"+output.getvalue()
+
+
+@router.get(prefix+"/report/export")
+def export_report(org_id:str,loc_id:str,request:Request,fromDay:str,toDay:str):
+    # Repeat authentication and PostgreSQL reconciliation for each download;
+    # a CSV must never be assembled from previously authorized browser JSON.
+    scoped=_scope(request,org_id,loc_id)
+    if isinstance(scoped,JSONResponse):return scoped
+    dsn,org,loc=scoped
+    try:
+        with psycopg.connect(dsn) as db:
+            value=report(db,request.cookies.get("rp_session",""),org,loc,
+                         from_day=fromDay,to_day=toDay)
+        data=_report_csv(value)
+    except (TreasuryDenied,TreasuryInvalid,TreasuryConflict) as exc:
+        return _reject(request,exc)
+    except (psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
+        return _response(request,409,"REPORT_CONFLICT")
+    return Response(content=data,media_type="text/csv; charset=utf-8",
+        headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+                 "Content-Disposition":'attachment; filename="auto-treasury-report.csv"'})

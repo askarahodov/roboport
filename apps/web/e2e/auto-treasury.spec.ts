@@ -150,3 +150,63 @@ test('revocation and cross-scope 403 clear prices and events',async({page})=>{
   await expect(page.getByText('Незачтённый аванс:',{exact:false})).toHaveCount(0);
   await expect(page.getByRole('listitem').getByText('CASH-01 · Тестовая касса',{exact:false})).toHaveCount(0);
 });
+
+
+test('branch CSV is downloaded from fresh HTTP snapshot; revocation clears report',async({page})=>{
+  let exportDenied=false,downloads=0;
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const url=new URL(route.request().url()),path=url.pathname;
+    if(path===base+'/accounts')return route.fulfill({
+      status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,realMoney:false,currency:'RUB',items:[{
+          id:account,code:'CASH-01',label:'Тестовая касса',kind:'CASH_SIM',
+          currency:'RUB',balanceMinor:500,lastClosedDay:null,
+        }],
+      }),
+    });
+    if(path===base+'/report')return route.fulfill({
+      status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,realMoney:false,currency:'RUB',
+        basis:'INDEPENDENT_TREASURY_EVENT_DAYS',accounts:[],items:[{
+          accountId:account,accountCode:'CASH-01',kind:'CASH_SIM',localDay:day,
+          openingMinor:0,incomingMinor:500,outgoingMinor:0,closingMinor:500,
+          closeId:null,closedAt:null,
+        }],
+      }),
+    });
+    if(path===base+'/report/export'){
+      expect(url.searchParams.get('fromDay')).toBe(day);
+      expect(url.searchParams.get('toDay')).toBe(day);
+      downloads+=1;
+      if(exportDenied)return route.fulfill({status:403,
+        contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+      return route.fulfill({status:200,contentType:'text/csv; charset=utf-8',
+        headers:{'Content-Disposition':'attachment; filename="auto-treasury-report.csv"',
+          'Cache-Control':'no-store'},
+        body:'\ufeffСчёт UUID;Локальный день;Остаток, коп.\r\n'+account+';'+day+';500\r\n'});
+    }
+    throw Error('Unexpected treasury route '+path);
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-treasury');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const exportButton=page.getByRole('button',{name:'Скачать сводную сверку CSV'});
+  await expect(exportButton).toBeDisabled();
+  await page.getByRole('button',{name:'Сверить модельные остатки'}).click();
+  await expect(page.getByRole('table')).toBeVisible();
+  const [download]=await Promise.all([
+    page.waitForEvent('download'),exportButton.click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('auto-treasury-report.csv');
+  expect(downloads).toBe(1);
+  await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
+  await page.setViewportSize({width:1280,height:900});
+  await expect(exportButton).toBeEnabled();
+  exportDenied=true;
+  await exportButton.click();
+  await expect(page.getByRole('alert')).toContainText('доступ запрещён');
+  await expect(page.getByRole('table')).toHaveCount(0);
+  await expect(exportButton).toHaveCount(0);
+  expect(downloads).toBe(2);
+});
