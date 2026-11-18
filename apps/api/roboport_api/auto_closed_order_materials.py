@@ -19,6 +19,7 @@ from .auto_closed_order_report import (
 )
 from . import auto_material_fifo as fifo
 from . import auto_serial_cost_replay as serial_cost
+from . import auto_serial_transfer_cost as transfer_cost
 from .auto_document_access import require_document_access, DocumentPolicyDenied
 from .auto_vehicle_claim_http import _request_dsn, _response
 
@@ -201,7 +202,16 @@ def _material_report(conn, token, org, loc, from_day, to_day, base):
     slice_budget = fifo.MAX_SLICES
     for lot in lots:
         rows = by_lot[lot]
-        if sum(r[4] is not None for r in rows)>1:
+        # A transfer carries physical identity to another branch. Its
+        # original receipt is NOT in the destination lot history, so a
+        # local FIFO or single-source guess would be false.
+        if lot in serial_lots and any(r[3]=="TRANSFER" for r in serial_by_lot[lot]):
+            status,parts,scanned=transfer_cost.prove(
+                conn,token,org,loc,lot,rows,limit=slice_budget)
+            slice_budget-=scanned
+            sources[lot]=(status,None)
+            fifo_results[lot]=parts
+        elif sum(r[4] is not None for r in rows)>1:
             if lot in serial_lots:
                 status, parts = serial_cost.replay(rows,serial_by_lot[lot],
                     limit=slice_budget)
