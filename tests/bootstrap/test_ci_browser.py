@@ -1,6 +1,8 @@
 """Offline regression for PR-only browser test selection and release safety."""
 import unittest
 import subprocess
+import base64
+import json
 from unittest.mock import patch
 
 from scripts.ci_browser import PAGE_SCENARIOS, plan
@@ -79,6 +81,25 @@ class BrowserImpactTests(unittest.TestCase):
             ["apps/web/e2e/auto-order-register.spec.ts"],
             full=True,available=SPECS,
         ))
+
+    def test_host_provided_paths_are_canonical_and_fail_full_on_corruption(self):
+        from scripts.ci_browser import decode_paths
+        changed=["apps/web/e2e/auto-order-register.spec.ts"]
+        encoded=base64.urlsafe_b64encode(
+            json.dumps(changed,separators=(",",":")).encode()
+        ).decode().rstrip("=")
+        self.assertEqual(decode_paths(encoded),changed)
+        self.assertEqual(plan(decode_paths(encoded),available=SPECS),
+                         ["e2e/auto-order-register.spec.ts"])
+        for invalid in ("", "FULL", "@@@", encoded+"!", "A"*12001):
+            self.assertIsNone(decode_paths(invalid))
+        for invalid_path in ("../outside.spec.ts", "/tmp/out.spec.ts",
+                             "apps/web/e2e/bad\\\\path.spec.ts",
+                             "apps/web/e2e/bad\\n.spec.ts"):
+            value=base64.urlsafe_b64encode(
+                json.dumps([invalid_path]).encode()
+            ).decode().rstrip("=")
+            self.assertIsNone(decode_paths(value))
 
     def test_git_failure_runs_full_suite_not_zero_tests(self):
         from scripts.ci_browser import main
