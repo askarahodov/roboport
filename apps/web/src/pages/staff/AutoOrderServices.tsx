@@ -24,10 +24,14 @@ const initialScope=(key:string)=>{
   return uuid.test(value)?value:'';
 };
 
-export function AutoOrderServices() {
-  const [organization, setOrganization] = React.useState(()=>initialScope('org'));
-  const [location, setLocation] = React.useState(()=>initialScope('loc'));
-  const [order, setOrder] = React.useState(()=>initialScope('order'));
+export function AutoOrderServices({lockedScope}:{lockedScope?:{org:string;loc:string;order:string}}={}) {
+  const [localOrganization,setOrganization] = React.useState(()=>initialScope('org'));
+  const [localLocation,setLocation] = React.useState(()=>initialScope('loc'));
+  const [localOrder,setOrder] = React.useState(()=>initialScope('order'));
+  // В рабочем месте выбранный заказ не может изменяться локальным выбором.
+  const organization=lockedScope?.org??localOrganization;
+  const location=lockedScope?.loc??localLocation;
+  const order=lockedScope?.order??localOrder;
   const [status, setStatus] = React.useState<State>('idle');
   const [catalog, setCatalog] = React.useState<Service[]>([]);
   const [selected, setSelected] = React.useState<Service[]>([]);
@@ -112,11 +116,11 @@ export function AutoOrderServices() {
     <h1>Услуги заказ-наряда (dev)</h1>
     <p>Только синтетический стенд. Выбор услуги не означает согласование цены,
       выполнение ремонта или начисление оплаты.</p>
-    <label>UUID организации <input aria-label="UUID организации" disabled={busy} value={organization}
+    <label>UUID организации <input aria-label="UUID организации" disabled={busy} value={organization} readOnly={lockedScope!==undefined}
       onChange={e => setOrganization(e.target.value)} /></label>
-    <label>UUID филиала <input aria-label="UUID филиала" disabled={busy} value={location}
+    <label>UUID филиала <input aria-label="UUID филиала" disabled={busy} value={location} readOnly={lockedScope!==undefined}
       onChange={e => setLocation(e.target.value)} /></label>
-    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" disabled={busy} value={order}
+    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" disabled={busy} value={order} readOnly={lockedScope!==undefined}
       onChange={e => setOrder(e.target.value)} /></label>
     {status === 'idle' && <p>Укажите организацию, филиал и заказ-наряд.</p>}
     {status === 'loading' && <p role="status">Загрузка услуг…</p>}
