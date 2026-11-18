@@ -1,7 +1,7 @@
-"""Read-only stage checklist for a single synthetic WorkOrder.
+"""Закрытая сводка этапов одного синтетического заказ-наряда.
 
-Never returns prices, customer identity, financial transactions or release authority.
-It is navigation guidance, not a substitute for each stage's document ACL.
+Не возвращает цены, данные клиента, финансовую первичку или право выдачи.
+Это навигация по этапам, а не замена документных ACL каждого раздела.
 """
 from uuid import UUID
 
@@ -17,8 +17,8 @@ def read_order_workspace(conn: psycopg.Connection, token: str,
             or any(type(x) is not UUID for x in (org, loc, order))):
         raise AutoStockDenied("FORBIDDEN")
     with conn.transaction():
-        # Locks session, role, organization, branch, original proof and identity
-        # for the duration of the complete state snapshot.
+        # Удерживаем в одной транзакции сессию, роль, филиал,
+        # исходное подтверждение связи и идентичность заказ-наряда.
         get_order_customer_summary(conn, token, org, loc, order)
         row = conn.execute("""
             SELECT
