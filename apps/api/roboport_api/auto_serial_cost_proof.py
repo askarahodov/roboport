@@ -43,15 +43,15 @@ def prove_lot(conn,token,org,loc,lot,history,*,budget=MAX_SERIAL_MOVEMENTS):
     if len(mrows)>budget:
         raise Conflict()
     if not mrows:
-        return "UNPROVEN",{}
+        return "UNPROVEN",{},len(mrows)
     by_issue,by_return,by_transfer={}, {}, {}
     by_serial=defaultdict(list)
     for m in mrows:
         ident,serial,action,src,dst,order,issue,returned,transfer,seq,cseq,receipt,approval,            source_org,source_loc,source_lot,source_sku,acceptance,valuation,currency,unit,            value_seq,debit,credit,actor=m
         if cseq is None or receipt is None or approval is None or acceptance is None:
-            return "UNPROVEN",{}
+            return "UNPROVEN",{},len(mrows)
         if source_org!=org:
-            return "UNPROVEN",{}
+            return "UNPROVEN",{},len(mrows)
         # The report runs for a destination branch; an interbranch receipt
         # provenance is purchase-sensitive to the ORIGINAL branch.
         if source_loc!=loc:
@@ -69,29 +69,29 @@ def prove_lot(conn,token,org,loc,lot,history,*,budget=MAX_SERIAL_MOVEMENTS):
             except DocumentPolicyDenied:
                 raise Denied() from None
         if valuation is None:
-            return "UNVALUED",{}
+            return "UNVALUED",{},len(mrows)
         if currency!="RUB":
-            return "OTHER_CURRENCY",{}
+            return "OTHER_CURRENCY",{},len(mrows)
         if type(unit) is not int or not 0<=unit<=10**9:
             raise Conflict()
         if value_seq is None or value_seq>=cseq:
-            return "LATE_VALUATION",{}
+            return "LATE_VALUATION",{},len(mrows)
         if source_lot is None or source_sku is None:
-            return "UNPROVEN",{}
+            return "UNPROVEN",{},len(mrows)
         if action=="ISSUE":
             if issue is None or order is None or issue in by_issue:
-                return "UNPROVEN",{}
+                return "UNPROVEN",{},len(mrows)
             by_issue[issue]=m
         elif action=="RETURN":
             if returned is None or order is None or returned in by_return:
-                return "UNPROVEN",{}
+                return "UNPROVEN",{},len(mrows)
             by_return[returned]=m
         elif action=="TRANSFER":
             if transfer is None or debit is None or credit is None or transfer in by_transfer:
-                return "UNPROVEN",{}
+                return "UNPROVEN",{},len(mrows)
             by_transfer[transfer]=m
         else:
-            return "UNPROVEN",{}
+            return "UNPROVEN",{},len(mrows)
         by_serial[serial].append(m)
 
     # Check even movements of OTHER orders in the same lot, not merely the
@@ -101,29 +101,29 @@ def prove_lot(conn,token,org,loc,lot,history,*,budget=MAX_SERIAL_MOVEMENTS):
     for row in history:
         _,aid,action,qty,receipt,acceptance,valuation,_,_,_,_,issue,returned,legs,valid,seq,order=row
         if seq is None or type(qty) is not int or qty!=1 and receipt is None:
-            return "UNPROVEN",{}
+            return "UNPROVEN",{},len(mrows)
         if receipt is not None:
             if legs!=1 or valid is not True or action!="ALLOCATE":
-                return "UNPROVEN",{}
+                return "UNPROVEN",{},len(mrows)
             continue
         if issue is not None or returned is not None:
             if legs!=1 or valid is not True or qty!=1:
-                return "UNPROVEN",{}
+                return "UNPROVEN",{},len(mrows)
             movement=by_issue.get(issue) if issue is not None else by_return.get(returned)
             if movement is None or movement[3]!=lot or movement[5]!=order:
-                return "UNPROVEN",{}
+                return "UNPROVEN",{},len(mrows)
             allocation_ids.add(aid)
             continue
         # An interbranch transfer requires an exactly paired serial movement.
         transfer=next((m for m in by_transfer.values()
                        if aid in (m[22],m[23]) and lot in (m[3],m[4])),None)
         if transfer is None or qty!=1:
-            return "UNPROVEN",{}
+            return "UNPROVEN",{},len(mrows)
         if action!=("DEALLOCATE" if lot==transfer[3] else "ALLOCATE"):
-            return "UNPROVEN",{}
+            return "UNPROVEN",{},len(mrows)
         allocation_ids.add(aid)
     if len(allocation_ids)!=sum(r[4] is None for r in history):
-        return "UNPROVEN",{}
+        return "UNPROVEN",{},len(mrows)
 
     for serial,movements in by_serial.items():
         open_issue=None
@@ -131,18 +131,18 @@ def prove_lot(conn,token,org,loc,lot,history,*,budget=MAX_SERIAL_MOVEMENTS):
             _,_,action,src,dst,order,issue,returned,transfer,seq,cseq,receipt,                approval,source_org,source_loc,source_lot,source_sku,acceptance,valuation,                currency,unit,value_seq,debit,credit,actor=m
             if action=="ISSUE":
                 if open_issue is not None:
-                    return "UNPROVEN",{}
+                    return "UNPROVEN",{},len(mrows)
                 open_issue=(issue,order,src)
                 movement_id=issue
                 sign=1
             elif action=="RETURN":
                 if open_issue is None or open_issue[1:]!=(order,src):
-                    return "UNPROVEN",{}
+                    return "UNPROVEN",{},len(mrows)
                 movement_id=returned
                 sign=-1
             else:
                 if open_issue is not None:
-                    return "UNPROVEN",{}
+                    return "UNPROVEN",{},len(mrows)
                 continue
             original_issue=open_issue[0]
             part={
@@ -153,14 +153,14 @@ def prove_lot(conn,token,org,loc,lot,history,*,budget=MAX_SERIAL_MOVEMENTS):
                 "unitNetMinor":unit,"quantity":1,
             }
             if movement_id in parts:
-                return "UNPROVEN",{}
+                return "UNPROVEN",{},len(mrows)
             parts[movement_id]=part
             if sign==-1:
                 open_issue=None
     if any(r[11] is not None and r[11] not in parts or
            r[12] is not None and r[12] not in parts for r in history):
-        return "UNPROVEN",{}
-    return STATUS,parts
+        return "UNPROVEN",{},len(mrows)
+    return STATUS,parts,len(mrows)
 
 
 def group_slices(events,parts):
