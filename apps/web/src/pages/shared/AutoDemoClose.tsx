@@ -1,3 +1,4 @@
+import {useSearchParams} from 'react-router-dom';
 import React from 'react';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -86,7 +87,9 @@ const reasons:Record<string,string>={
 };
 
 export function AutoDemoClose({role}:{role:'staff'|'client'}){
-  const [org,setOrg]=React.useState(''),[loc,setLoc]=React.useState(''),[order,setOrder]=React.useState('');
+  const [query]=useSearchParams();
+  const initial=(name:string)=>{const value=query.get(name)??'';return uuid.test(value)?value:'';};
+  const [org,setOrg]=React.useState(()=>initial('org')),[loc,setLoc]=React.useState(()=>initial('loc')),[order,setOrder]=React.useState(()=>initial('order'));
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [loaded,setLoaded]=React.useState(''),[data,setData]=React.useState<Snapshot|null>(null);
   const [revision,setRevision]=React.useState(0),[busy,setBusy]=React.useState(false);
