@@ -48,28 +48,56 @@ def fixture(monkeypatch,mode="traced",before_labor=None):
                 db,manager,org,loc,receipt,uuid4(),
                 "USD" if mode=="currency" else "RUB",1250,600,
                 "SYN-QUOTE-1",datetime.now(timezone.utc))
-        if mode.startswith("fifo"):
+        if mode.startswith("fifo") or mode.startswith("serial"):
             second=create_receipt_document(db,maker,org,loc,lot,uuid4(),3,"SYN-FIFO-SECOND")
             second_accept=accept_receipt_document(db,manager,org,loc,second,uuid4())
             second_value=None
-            if mode!="fifo-unvalued":
+            if mode not in ("fifo-unvalued","serial-unvalued"):
                 second_value=record_receipt_valuation(db,manager,org,loc,second,uuid4(),
-                    "USD" if mode=="fifo-currency" else "RUB",2000,600,"SYN-QUOTE-2",
+                    "USD" if mode in ("fifo-currency","serial-currency") else "RUB",2000,600,"SYN-QUOTE-2",
                     datetime.now(timezone.utc))
             evidence.update(second=second,second_accept=second_accept,second_value=second_value)
             if mode=="fifo-serial":
                 from roboport_api.auto_stock_serial import register_lot_serial
                 register_lot_serial(db,warehouse,org,loc,lot,uuid4(),"SYN-FIFO-SERIAL")
+        if mode.startswith("serial"):
+            from roboport_api.auto_stock_serial import register_lot_serial
+            from roboport_api.auto_serial_receipt_evidence import assert_receipt,approve_receipt
+            from test_pg_auto_stock_service import grant
+            grant(db,d["other"],org,loc,"MANAGER")
+            identities=[]
+            for i in range(5):
+                serial=register_lot_serial(db,warehouse,org,loc,lot,uuid4(),f"SERIAL-COST-{uuid4().hex[:15]}")
+                source=receipt if i<3 else evidence["second"]
+                _,attested=assert_receipt(db,warehouse,org,loc,serial,source,uuid4())
+                if mode!="serial-unapproved" or i<4:
+                    approve_receipt(db,d["tokens"][d["other"]],org,loc,
+                                    UUID(attested["assertionId"]),uuid4())
+                identities.append(serial)
+            evidence["serials"]=identities
         if mode=="mixed":
             record(db,item,"RECEIPT",1)
             lot_action(db,d,org,loc,lot,"ALLOCATE",1)
         if mode=="unpaired":
             record(db,item,"RECEIPT",1)
-        work_stock(db,d,org,loc,order,item,"RESERVE",5 if mode.startswith("fifo") else (3 if mode=="unpaired" else 2))
+        work_stock(db,d,org,loc,order,item,"RESERVE",5 if mode.startswith(("fifo","serial")) else (3 if mode=="unpaired" else 2))
         evidence.update(item=item,lot=lot,receipt=receipt,acceptance=acceptance,valuation=valuation)
         if before_labor is not None:
             before_labor(db,d,org,loc,order)
         def consume():
+            if mode.startswith("serial"):
+                from roboport_api.auto_stock_serial_movement import move_lot_serial
+                issue_ids=[]
+                for serial_id in evidence["serials"]:
+                    movement=move_lot_serial(db,warehouse,org,loc,serial_id,uuid4(),"ISSUE",order)
+                    issue_id=db.execute("SELECT issue_id FROM auto_stock_serial_movement WHERE id=%s",
+                                        (movement,)).fetchone()[0]
+                    receive_material(db,d["tokens"][d["manager"]],org,loc,order,issue_id,uuid4())
+                    issue_ids.append(issue_id)
+                move_lot_serial(db,warehouse,org,loc,evidence["serials"][-1],uuid4(),"RETURN",order)
+                evidence["issue"]=issue_ids[-1]
+                evidence["issuedIds"]=issue_ids
+                return
             issue_key=uuid4()
             quantity=5 if mode.startswith("fifo") else 2
             issued=issue_material(db,warehouse,org,loc,order,lot,quantity,issue_key)
