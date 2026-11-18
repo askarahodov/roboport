@@ -133,7 +133,7 @@ def test_serial_evidence_http_csrf_independence_replay_and_immutable(monkeypatch
         from test_pg_auto_stock_lot_allocation import act
         # Allocation is created solely through independent accepted receipt.
         maker=d["tokens"][d["manager"]]
-        acceptor=d["tokens"][d["intake"]]
+        acceptor=d["tokens"][d["other"]]
         receipt=create_receipt_document(db,maker,org,loc,lot,uuid4(),2,"SRC-SERIAL-EVIDENCE")
         accept_receipt_document(db,acceptor,org,loc,receipt,uuid4())
         serial=register_lot_serial(db,acceptor,org,loc,lot,uuid4(),"SERIAL-PROOF-TEST")
@@ -195,8 +195,8 @@ def test_transfer_retains_original_receipt_and_requires_source_branch_purchase_a
         maker=d["tokens"][d["manager"]]
         warehouse=d["tokens"][d["intake"]]
         receipt=create_receipt_document(db,maker,org,src,lot_src,uuid4(),1,"XFER-SERIAL-COST")
-        accept_receipt_document(db,warehouse,org,src,receipt,uuid4())
-        record_receipt_valuation(db,warehouse,org,src,receipt,uuid4(),
+        accept_receipt_document(db,d["tokens"][d["other"]],org,src,receipt,uuid4())
+        record_receipt_valuation(db,d["tokens"][d["other"]],org,src,receipt,uuid4(),
                                   "RUB",980,0,"XFER-COST-QUOTE",datetime.now(timezone.utc))
         serial=register_lot_serial(db,warehouse,org,src,lot_src,uuid4(),"SERIAL-CROSS-BRANCH")
         _,att=assert_receipt(db,warehouse,org,src,serial,receipt,uuid4())
@@ -237,9 +237,10 @@ def test_direct_forged_serial_receipt_actor_is_rejected_by_database(monkeypatch)
     with psycopg.connect(DSN) as db:
         org,loc,sku,lot,_=setup(db,d,1)
         grant(db,d["manager"],org,loc,"WAREHOUSE")
+        grant(db,d["other"],org,loc,"MANAGER")
         receipt=create_receipt_document(db,d["tokens"][d["manager"]],org,loc,lot,uuid4(),
                                          1,"FORGED-SERIAL-RECEIPT")
-        accept_receipt_document(db,d["tokens"][d["intake"]],org,loc,receipt,uuid4())
+        accept_receipt_document(db,d["tokens"][d["other"]],org,loc,receipt,uuid4())
         serial=register_lot_serial(db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),
                                    "FORGED-SERIAL-UNIT")
         # Even an existing WAREHOUSE UUID cannot impersonate an authenticated actor.
