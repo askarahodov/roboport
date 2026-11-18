@@ -307,10 +307,10 @@ def test_fifo_two_accepted_receipts_return_reverses_expensive_layer_and_csv(monk
     export=http.get(path+"/export",params=query)
     assert export.status_code==200,export.text
     lines=list(csv.reader(StringIO(export.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(lines)==8 and all(len(line)==20 for line in lines)
+    assert len(lines)==8 and all(len(line)==22 for line in lines)
     fifo_rows=[line for line in lines if line[3]=="FIFO_SLICE"]
     assert sorted(int(line[10]) for line in fifo_rows)==[-2000,3750,4000]
-    assert {line[-1] for line in fifo_rows}=={str(evidence["issue"])}
+    assert {line[-3] for line in fifo_rows}=={str(evidence["issue"])}
     monkeypatch.setattr(module.fifo,"MAX_SLICES",2)
     assert http.get(path,params=query).status_code==409
     assert http.get(path+"/export",params=query).status_code==409
