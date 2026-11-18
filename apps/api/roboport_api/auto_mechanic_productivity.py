@@ -252,9 +252,12 @@ def _run(request: Request, org_id: str, loc_id: str,
         return _response(request, 403, "FORBIDDEN")
     except ProductivityInvalid:
         return _response(request, 422, "INVALID_INPUT")
-    except (ProductivityLimit, psycopg.errors.SerializationFailure,
-            psycopg.errors.DeadlockDetected):
+    except ProductivityLimit:
         return _response(request, 409, "REPORT_LIMIT")
+    except (psycopg.errors.SerializationFailure, psycopg.errors.DeadlockDetected):
+        # A revoked grant/proof or concurrent DB update is a retryable
+        # snapshot conflict, not an oversized report. Never return partial data.
+        return _response(request, 409, "REPORT_CONFLICT")
 
 
 @router.get(PREFIX)

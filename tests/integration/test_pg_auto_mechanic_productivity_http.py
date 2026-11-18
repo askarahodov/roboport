@@ -153,6 +153,29 @@ def test_verified_labor_report_export_revocation_and_cross_branch(monkeypatch):
     assert http.get(path + "/export", params=query).status_code == 403
 
 
+@pytest.mark.parametrize("failure,code", [
+    (productivity.ProductivityLimit, "REPORT_LIMIT"),
+    (psycopg.errors.SerializationFailure, "REPORT_CONFLICT"),
+    (psycopg.errors.DeadlockDetected, "REPORT_CONFLICT"),
+])
+def test_report_failure_codes_are_distinct_for_json_and_csv(monkeypatch, failure, code):
+    """Capacity and concurrent revocation must not share a misleading error."""
+    monkeypatch.setattr(productivity, "_request_dsn", lambda request: "unused")
+
+    def fail_connect(dsn):
+        raise failure("synthetic test failure")
+
+    monkeypatch.setattr(productivity.psycopg, "connect", fail_connect)
+    client = TestClient(app, base_url="https://127.0.0.1")
+    path = report_path(uuid4(), uuid4())
+    for url in (path, path + "/export"):
+        result = client.get(url, params={"fromDay": "2026-11-18", "toDay": "2026-11-18"})
+        assert result.status_code == 409
+        assert code in result.text
+        assert result.headers.get("content-type", "").startswith("application/json")
+        assert "Механик UUID" not in result.text
+
+
 def test_local_days_dst_and_export_contract():
     berlin = ZoneInfo("Europe/Berlin")
     spring = _period("2026-03-29", "2026-03-29", berlin)
