@@ -28,7 +28,7 @@ from test_pg_auto_stock_service import grant
 from test_pg_baseline import DSN
 
 
-def ready(monkeypatch,*,with_photo=False):
+def ready(monkeypatch,*,with_photo=False,with_refund=False):
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
@@ -66,6 +66,11 @@ def ready(monkeypatch,*,with_photo=False):
                              request_key=uuid4(),result="PASS",finding_code="NONE")
         simulate_cash(db,d["tokens"][d["intake"]],org,loc,order,
                       request_key=uuid4(),kind="SIM_PAYMENT",amount_minor=2500)
+        if with_refund:
+            simulate_cash(db,d["tokens"][d["intake"]],org,loc,order,
+                          request_key=uuid4(),kind="SIM_REFUND",amount_minor=500)
+            simulate_cash(db,d["tokens"][d["intake"]],org,loc,order,
+                          request_key=uuid4(),kind="SIM_PAYMENT",amount_minor=500)
         sealed=seal_handover_preview(db,d["tokens"][d["intake"]],org,loc,order,
                                      request_key=uuid4())
         assert sealed["preview"]["snapshot"]["simulatedDueMinor"]==0

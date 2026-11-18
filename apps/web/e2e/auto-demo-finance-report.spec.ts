@@ -96,3 +96,45 @@ test('malformed monetary aggregate, mixed currencies, and bad net fail closed',a
   await expect(page.getByRole('alert')).toContainText('Не удалось получить сверку');
   await expect(page.getByRole('table')).toHaveCount(0);
 });
+
+test('closed-order report reconciles source IDs and clears on revoked scope',async({page})=>{
+  const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+  const row={workOrderId:id('a'),closedDay:'2030-10-27',previewId:id('b'),
+    previewDigest:'f'.repeat(64),estimateRevisionId:id('c'),postedEventId:id('d'),
+    ackEventId:id('e'),closedEventId:id('f'),approvedBaseMinor:2500,approvedExtraMinor:500,
+    approvedTotalMinor:3000,simulatedPaidMinor:3500,simulatedRefundedMinor:500,
+    cashEvents:[{id:id('1'),kind:'SIM_PAYMENT',amountMinor:3500,revisionId:id('c')},
+      {id:id('2'),kind:'SIM_REFUND',amountMinor:500,revisionId:id('c')}]};
+  const payload={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_RECONCILED_PREVIEW_AND_CASH',
+    timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
+    summary:{orderCount:1,cashEventCount:2,approvedBaseMinor:2500,approvedExtraMinor:500,
+      approvedTotalMinor:3000,simulatedPaidMinor:3500,simulatedRefundedMinor:500},items:[row]};
+  let status=200,invalid=false;
+  await page.route('**/reports/closed-orders*',route=>route.fulfill({
+    status,contentType:'application/json',body:JSON.stringify(invalid?
+      {...payload,summary:{...payload.summary,approvedTotalMinor:4000}}:payload),
+  }));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-demo-finance-report');await fill(page);
+  const button=page.getByRole('button',{name:'Сверить закрытые заказ-наряды'});
+  await button.click();
+  const table=page.getByRole('table',{name:'Сверка закрытых заказ-нарядов с первичными событиями'});
+  await expect(table).toBeVisible();
+  await table.getByText('Первичные события',{exact:true}).click();
+  await expect(table.getByText('Проведение: '+id('d'))).toBeVisible();
+  await expect(table.getByText(/Имитация возврата:/)).toContainText('5,00');
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  status=403;await button.click();
+  await expect(page.getByRole('alert')).toContainText('Доступ к реестру запрещён');
+  await expect(table).toHaveCount(0);
+  status=200;invalid=true;await button.click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось сверить реестр');
+  await expect(table).toHaveCount(0);
+  invalid=false;await button.click();await expect(table).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(id('3'));
+  await expect(table).toHaveCount(0);
+});
