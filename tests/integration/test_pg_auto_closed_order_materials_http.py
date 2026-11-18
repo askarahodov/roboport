@@ -155,3 +155,41 @@ def test_unknown_or_non_rub_cost_never_becomes_zero(monkeypatch,mode,status):
         assert retry.status_code==200,retry.text
         assert retry.json()["items"][0]["groups"][0]["status"]=="LATE_VALUATION"
         assert retry.json()["summary"]["materialNetMinor"] is None
+
+
+def test_unpaired_movement_prevents_complete_order_cost(monkeypatch):
+    d,org,loc,order,evidence,path,query=fixture(monkeypatch,"unpaired")
+    http=TestClient(app,base_url="https://127.0.0.1")
+    token(http,d,d["intake"])
+    response=http.get(path,params=query)
+    assert response.status_code==200,response.text
+    data=response.json()
+    assert data["summary"]==dict(orderCount=1,completeOrderCount=0,
+                                 movementCount=3,materialNetMinor=None)
+    item=data["items"][0]
+    assert item["status"]=="INCOMPLETE" and item["materialNetMinor"] is None
+    assert {group["status"] for group in item["groups"]}=={"UNPAIRED","TRACED"}
+    unpaired=next(group for group in item["groups"] if group["status"]=="UNPAIRED")
+    assert unpaired["lotId"] is None and unpaired["source"] is None
+    assert unpaired["netQuantity"]==1 and unpaired["materialNetMinor"] is None
+
+
+def test_service_only_order_has_zero_registered_material_usage(monkeypatch):
+    from test_pg_auto_mechanic_productivity_http import _close
+    d,org,loc,order=_close(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        stamp,zone=db.execute("""
+          SELECT e.created_at,l.timezone_name FROM auto_order_demo_document_event e
+          JOIN auto_work_order w ON w.id=e.work_order_id
+          JOIN auto_service_location l ON l.id=w.location_id
+          WHERE e.work_order_id=%s AND e.action='CLOSED_TECHNICAL'
+        """,(order,)).fetchone()
+    day=stamp.astimezone(ZoneInfo(zone)).date().isoformat()
+    http=TestClient(app,base_url="https://127.0.0.1")
+    token(http,d,d["intake"])
+    response=http.get(f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/closed-order-materials",
+                      params={"fromDay":day,"toDay":day})
+    assert response.status_code==200,response.text
+    assert response.json()["summary"]==dict(orderCount=1,completeOrderCount=1,
+                                           movementCount=0,materialNetMinor=0)
+    assert response.json()["items"][0]["groups"]==[]
