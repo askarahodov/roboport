@@ -90,10 +90,14 @@ const reasons:Record<string,string>={
   EXTRA_BASE_REVISION_MISMATCH:'Допработа относится не к действующей смете',
 };
 
-export function AutoDemoClose({role}:{role:'staff'|'client'}){
-  const [org,setOrg]=React.useState(()=>initialScope('org')),
-    [loc,setLoc]=React.useState(()=>initialScope('loc')),
-    [order,setOrder]=React.useState(()=>initialScope('order'));
+export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedScope?:{org:string;loc:string;order:string}}){
+  const [localOrg,setOrg]=React.useState(()=>initialScope('org')),
+    [localLoc,setLoc]=React.useState(()=>initialScope('loc')),
+    [localOrder,setOrder]=React.useState(()=>initialScope('order'));
+  // Фиксированный контекст рабочего места имеет приоритет над локальной формой.
+  const org=lockedScope?.org??localOrg;
+  const loc=lockedScope?.loc??localLoc;
+  const order=lockedScope?.order??localOrder;
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [loaded,setLoaded]=React.useState(''),[data,setData]=React.useState<Snapshot|null>(null);
   const [revision,setRevision]=React.useState(0),[busy,setBusy]=React.useState(false);
@@ -206,11 +210,11 @@ export function AutoDemoClose({role}:{role:'staff'|'client'}){
     <p>Только искусственные данные. Условные события — НЕ платежи и НЕ кассовые чеки.
       Пакет не является актом выдачи; автомобиль нельзя выдавать по этому экрану.</p>
     <label>UUID организации <input aria-label="UUID организации" disabled={busy}
-      value={org} onChange={e=>setOrg(e.target.value)}/></label>
+      value={org} readOnly={lockedScope!==undefined} onChange={e=>setOrg(e.target.value)}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" disabled={busy}
-      value={loc} onChange={e=>setLoc(e.target.value)}/></label>
+      value={loc} readOnly={lockedScope!==undefined} onChange={e=>setLoc(e.target.value)}/></label>
     <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" disabled={busy}
-      value={order} onChange={e=>setOrder(e.target.value)}/></label>
+      value={order} readOnly={lockedScope!==undefined} onChange={e=>setOrder(e.target.value)}/></label>
     {status==='idle'&&<p>Введите три UUID для проверки заказа.</p>}
     {status==='loading'&&<p role="status">Загрузка технической сверки…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
