@@ -59,7 +59,7 @@ def test_complete_cost_sources_rounding_negative_difference_and_frozen_rate(monk
     out=http.get(path+"/export",params=query)
     assert out.status_code==200 and out.headers["x-content-type-options"]=="nosniff"
     lines=list(csv.reader(StringIO(out.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(lines)==6 and all(len(line)==26 for line in lines)
+    assert len(lines)==6 and all(len(line)==27 for line in lines)
     assert lines[1][4:9]==["2500","1250","1501","2751","-251"]
     assert lines[2][12:16]==[rate["revisionId"],rate["approvalId"],"1","2001"]
     # Новый revision не меняет snapshot старой записи.
@@ -217,3 +217,25 @@ def test_stale_mechanic_and_owner_proof_snapshot_cannot_reveal_cost(monkeypatch)
     res=http.get(root+"/reports/internal-order-costs",params=query)
     assert res.status_code==200,res.text
     assert res.json()["items"]==[]
+
+
+def test_fifo_material_cost_flows_into_complete_internal_cost_report(monkeypatch):
+    d,org,loc,order,evidence,root,query,rate=setup(monkeypatch,mode="fifo")
+    http=TestClient(app,base_url="https://127.0.0.1")
+    token(http,d,d["intake"])
+    path=root+"/reports/internal-order-costs"
+    res=http.get(path,params=query)
+    assert res.status_code==200,res.text
+    data=res.json()
+    assert data["summary"]==dict(orderCount=1,completeOrderCount=1,laborEntryCount=1,
+        approvedTotalMinor=2500,materialNetMinor=5750,laborCostMinor=1501,
+        directCostMinor=7251,syntheticDifferenceMinor=-4751)
+    group=data["items"][0]["materialGroups"][0]
+    assert group["status"]=="FIFO_TRACED" and len(group["fifoSlices"])==3
+    out=http.get(path+"/export",params=query)
+    assert out.status_code==200,out.text
+    lines=list(csv.reader(StringIO(out.text.lstrip("\ufeff")),delimiter=";"))
+    assert len(lines)==9 and all(len(line)==27 for line in lines)
+    slices=[line for line in lines if line[2]=="FIFO_SLICE"]
+    assert sorted(int(line[5]) for line in slices)==[-2000,3750,4000]
+    assert {line[-1] for line in slices}=={str(evidence["issue"])}

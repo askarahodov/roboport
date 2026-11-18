@@ -249,25 +249,30 @@ def _csv(data):
                 "Запись труда UUID","Услуга UUID","Минуты","Ставка UUID","Утверждение ставки UUID",
                 "Версия","Ставка, коп./час","Партия UUID","SKU UUID","Приход UUID",
                 "Приёмка UUID","Оценка UUID","Цена единицы, коп.","Складское событие UUID",
-                "Движение партии UUID","Действие","Количество"))
+                "Движение партии UUID","Действие","Количество","Исходная выдача UUID"))
     for x in data["items"]:
         scope=(x["workOrderId"],x["closedEventId"])
         w.writerow((*scope,"ORDER",x["status"],x["approvedTotalMinor"],x["materialNetMinor"],
                     x["laborCostMinor"],x["directCostMinor"],x["syntheticDifferenceMinor"],
-                    *[""]*17))
+                    *[""]*18))
         for l in x["laborEntries"]:
             s=l["source"] or {}
             w.writerow((*scope,"LABOR",l["status"],"","",l["costMinor"],"","",
                         l["laborEntryId"],l["serviceId"],l["actualMinutes"],s.get("revisionId"),
-                        s.get("approvalId"),s.get("version"),s.get("rateMinorPerHour"),*[""]*10))
+                        s.get("approvalId"),s.get("version"),s.get("rateMinorPerHour"),*[""]*11))
         for g in x["materialGroups"]:
             s=g["source"] or {}
             w.writerow((*scope,"LOT",g["status"],"",g["materialNetMinor"],"","","",
                         *[""]*7,g["lotId"],g["skuId"],s.get("receiptId"),s.get("acceptanceId"),
-                        s.get("valuationId"),s.get("unitNetMinor"),"","","",""))
+                        s.get("valuationId"),s.get("unitNetMinor"),"","","","",""))
             for m in g["movements"]:
                 w.writerow((*scope,"MOVEMENT","","","","","","",*[""]*7,g["lotId"],g["skuId"],
-                            "","","","",m["stockEventId"],m["lotMovementId"],m["action"],m["quantity"]))
+                            "","","","",m["stockEventId"],m["lotMovementId"],m["action"],m["quantity"],""))
+            for s in g["fifoSlices"]:
+                w.writerow((*scope,"FIFO_SLICE","","",s["quantity"]*s["unitNetMinor"]*(1 if s["action"]=="ISSUE" else -1),
+                            "","","",*[""]*7,g["lotId"],g["skuId"],s["receiptId"],s["acceptanceId"],
+                            s["valuationId"],s["unitNetMinor"],s["stockEventId"],s["lotMovementId"],
+                            s["action"],s["quantity"],s["originalIssueId"]))
     return "\ufeff"+out.getvalue()
 
 

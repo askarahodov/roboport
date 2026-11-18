@@ -92,7 +92,7 @@ function parseReport(raw:unknown,from:string,to:string):Report{
     status:x.materialNetMinor===null?'INCOMPLETE':'COMPLETE',materialNetMinor:x.materialNetMinor,
     groups:x.materialGroups,
   }));
-  parseMaterialReport({...r,basis:'CLOSED_TECHNICAL_SINGLE_RECEIPT_NET_MATERIAL_USAGE',
+  parseMaterialReport({...r,basis:'CLOSED_TECHNICAL_RECEIPT_FIFO_NET_MATERIAL_USAGE',
     items:materialItems,summary:{orderCount:r.items.length,
       completeOrderCount:materialItems.filter(x=>x.status==='COMPLETE').length,
       movementCount:materialItems.reduce((n,x)=>n+x.groups.reduce((m,g)=>m+g.movements.length,0),0),
@@ -234,6 +234,9 @@ export function AutoInternalOrderCosts({org,loc,from,to,allowed}:{
                 Расход: {g.netQuantity} · {money(g.materialNetMinor)}</p>
               {g.source&&<p>Приход: {g.source.receiptId} · Приёмка: {g.source.acceptanceId} ·
                 Оценка: {g.source.valuationId} · {money(g.source.unitNetMinor)}/ед.</p>}
+              {g.fifoSlices.map((s,i)=><p key={s.stockEventId+':'+i}>FIFO: {s.action==='ISSUE'?'Выдача':'Возврат'} ·
+                {s.quantity} × {money(s.unitNetMinor)} · Приход: {s.receiptId} · Приёмка: {s.acceptanceId}
+                {' '}· Оценка: {s.valuationId} · Исходная выдача: {s.originalIssueId}</p>)}
               {g.movements.map(m=><p key={m.stockEventId}>{m.action==='ISSUE'?'Выдача':'Возврат'}:
                 {m.quantity} · {m.stockEventId} · {m.lotMovementId||'Без партии'}</p>)}
             </div>)}

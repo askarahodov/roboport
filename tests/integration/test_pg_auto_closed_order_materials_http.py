@@ -48,20 +48,33 @@ def fixture(monkeypatch,mode="traced",before_labor=None):
                 db,manager,org,loc,receipt,uuid4(),
                 "USD" if mode=="currency" else "RUB",1250,600,
                 "SYN-QUOTE-1",datetime.now(timezone.utc))
+        if mode.startswith("fifo"):
+            second=create_receipt_document(db,maker,org,loc,lot,uuid4(),3,"SYN-FIFO-SECOND")
+            second_accept=accept_receipt_document(db,manager,org,loc,second,uuid4())
+            second_value=None
+            if mode!="fifo-unvalued":
+                second_value=record_receipt_valuation(db,manager,org,loc,second,uuid4(),
+                    "USD" if mode=="fifo-currency" else "RUB",2000,600,"SYN-QUOTE-2",
+                    datetime.now(timezone.utc))
+            evidence.update(second=second,second_accept=second_accept,second_value=second_value)
+            if mode=="fifo-serial":
+                from roboport_api.auto_stock_serial import register_lot_serial
+                register_lot_serial(db,warehouse,org,loc,lot,uuid4(),"SYN-FIFO-SERIAL")
         if mode=="mixed":
             record(db,item,"RECEIPT",1)
             lot_action(db,d,org,loc,lot,"ALLOCATE",1)
         if mode=="unpaired":
             record(db,item,"RECEIPT",1)
-        work_stock(db,d,org,loc,order,item,"RESERVE",3 if mode=="unpaired" else 2)
+        work_stock(db,d,org,loc,order,item,"RESERVE",5 if mode.startswith("fifo") else (3 if mode=="unpaired" else 2))
         evidence.update(item=item,lot=lot,receipt=receipt,acceptance=acceptance,valuation=valuation)
         if before_labor is not None:
             before_labor(db,d,org,loc,order)
         def consume():
             issue_key=uuid4()
-            issued=issue_material(db,warehouse,org,loc,order,lot,2,issue_key)
+            quantity=5 if mode.startswith("fifo") else 2
+            issued=issue_material(db,warehouse,org,loc,order,lot,quantity,issue_key)
             ident=UUID(issued["issueId"])
-            assert issue_material(db,warehouse,org,loc,order,lot,2,issue_key)["issueId"]==str(ident)
+            assert issue_material(db,warehouse,org,loc,order,lot,quantity,issue_key)["issueId"]==str(ident)
             receive_material(db,d["tokens"][d["manager"]],org,loc,order,ident,uuid4())
             return_key=uuid4()
             returned=ret(db,d,org,loc,order,lot,1,return_key)
@@ -116,7 +129,7 @@ def test_exact_single_receipt_net_cost_and_live_price_scope(monkeypatch):
     export=http.get(path+"/export",params=query)
     assert export.status_code==200 and export.headers["x-content-type-options"]=="nosniff"
     lines=list(csv.reader(StringIO(export.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(lines)==5 and all(len(row)==19 for row in lines)
+    assert len(lines)==5 and all(len(row)==20 for row in lines)
     assert lines[1][3:5]==["ORDER","COMPLETE"] and lines[1][10]=="1250"
     assert lines[2][3:5]==["LOT","TRACED"] and lines[2][14]=="1250"
     assert http.get(path.replace(str(loc),str(uuid4())),params=query).status_code==403
@@ -243,3 +256,47 @@ def test_older_transaction_timestamp_cannot_backdate_cost_registration(monkeypat
     assert result.status_code==200,result.text
     assert result.json()["items"][0]["groups"][0]["status"]=="LATE_VALUATION"
     assert result.json()["summary"]["materialNetMinor"] is None
+
+
+def test_fifo_two_accepted_receipts_return_reverses_expensive_layer_and_csv(monkeypatch):
+    d,org,loc,order,evidence,path,query=fixture(monkeypatch,"fifo")
+    http=TestClient(app,base_url="https://127.0.0.1")
+    token(http,d,d["intake"])
+    response=http.get(path,params=query)
+    assert response.status_code==200,response.text
+    data=response.json()
+    assert data["summary"]==dict(orderCount=1,completeOrderCount=1,movementCount=2,materialNetMinor=5750)
+    row=data["items"][0]["groups"][0]
+    assert row["status"]=="FIFO_TRACED" and row["source"] is None
+    slices=row["fifoSlices"]
+    assert len(slices)==3
+    assert {(s["action"],s["receiptId"],s["quantity"],s["unitNetMinor"]) for s in slices}=={
+        ("ISSUE",str(evidence["receipt"]),3,1250),
+        ("ISSUE",str(evidence["second"]),2,2000),
+        ("RETURN",str(evidence["second"]),1,2000)}
+    assert {s["originalIssueId"] for s in slices}=={str(evidence["issue"])}
+    assert row["netQuantity"]==4 and row["materialNetMinor"]==5750
+    export=http.get(path+"/export",params=query)
+    assert export.status_code==200,export.text
+    lines=list(csv.reader(StringIO(export.text.lstrip("\ufeff")),delimiter=";"))
+    assert len(lines)==8 and all(len(line)==20 for line in lines)
+    fifo_rows=[line for line in lines if line[3]=="FIFO_SLICE"]
+    assert sorted(int(line[10]) for line in fifo_rows)==[-2000,3750,4000]
+    assert {line[-1] for line in fifo_rows}=={str(evidence["issue"])}
+    monkeypatch.setattr(module.fifo,"MAX_SLICES",2)
+    assert http.get(path,params=query).status_code==409
+    assert http.get(path+"/export",params=query).status_code==409
+
+
+@pytest.mark.parametrize("mode,status",[("fifo-unvalued","UNVALUED"),("fifo-currency","OTHER_CURRENCY"),
+                                        ("fifo-serial","UNPROVEN")])
+def test_fifo_unknown_provenance_never_invents_cost(monkeypatch,mode,status):
+    d,org,loc,order,evidence,path,query=fixture(monkeypatch,mode)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    token(http,d,d["intake"])
+    res=http.get(path,params=query)
+    assert res.status_code==200,res.text
+    group=res.json()["items"][0]["groups"][0]
+    assert group["status"]==status and group["materialNetMinor"] is None
+    assert group["fifoSlices"]==[]
+    assert res.json()["summary"]["materialNetMinor"] is None

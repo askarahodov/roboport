@@ -146,14 +146,14 @@ test('material assessment shows traceability, unknown values and live price deni
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
     status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
-    materialNetMinor:1250,movements:[
+    materialNetMinor:1250,fifoSlices:[],movements:[
       {stockEventId:id('6'),action:'ISSUE',quantity:2,lotMovementId:id('7')},
       {stockEventId:id('8'),action:'RETURN',quantity:1,lotMovementId:id('9')},
     ]};
   const row={workOrderId:id('a'),closedDay:'2030-10-27',closedEventId:id('b'),
     status:'COMPLETE',materialNetMinor:1250,groups:[group]};
   const sample={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
-    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_SINGLE_RECEIPT_NET_MATERIAL_USAGE',
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_RECEIPT_FIFO_NET_MATERIAL_USAGE',
     timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
     summary:{orderCount:1,completeOrderCount:1,movementCount:2,materialNetMinor:1250},items:[row]};
   const unknown={...sample,summary:{...sample.summary,completeOrderCount:0,materialNetMinor:null},
@@ -199,7 +199,7 @@ test('internal cost rate approval and reconciled negative difference, unknowns a
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
     status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
-    materialNetMinor:1250,movements:[
+    materialNetMinor:1250,fifoSlices:[],movements:[
       {stockEventId:id('6'),action:'ISSUE',quantity:2,lotMovementId:id('7')},
       {stockEventId:id('8'),action:'RETURN',quantity:1,lotMovementId:id('9')},
     ]};
@@ -285,5 +285,55 @@ test('internal cost rate approval and reconciled negative difference, unknowns a
   await expect(table).toHaveCount(0);
   status=200;await calculate.click();await expect(table).toBeVisible();
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(id('f'));
+  await expect(table).toHaveCount(0);
+});
+
+test('FIFO mixed receipt UI reconciles return slices and rejects invented cost',async({page},testInfo)=>{
+  const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+  const a={receiptId:id('1'),acceptanceId:id('2'),valuationId:id('3'),unitNetMinor:1250};
+  const b={receiptId:id('4'),acceptanceId:id('5'),valuationId:id('6'),unitNetMinor:2000};
+  const issue=id('7'),returned=id('8'),issueEvent=id('9'),returnEvent=id('a');
+  const slices=[
+    {...a,stockEventId:issueEvent,lotMovementId:issue,originalIssueId:issue,action:'ISSUE',quantity:3},
+    {...b,stockEventId:issueEvent,lotMovementId:issue,originalIssueId:issue,action:'ISSUE',quantity:2},
+    {...b,stockEventId:returnEvent,lotMovementId:returned,originalIssueId:issue,action:'RETURN',quantity:1},
+  ];
+  const group={skuId:id('b'),lotId:id('c'),issuedQuantity:5,returnedQuantity:1,netQuantity:4,
+    status:'FIFO_TRACED',source:null,materialNetMinor:5750,fifoSlices:slices,movements:[
+      {stockEventId:issueEvent,action:'ISSUE',quantity:5,lotMovementId:issue},
+      {stockEventId:returnEvent,action:'RETURN',quantity:1,lotMovementId:returned},
+    ]};
+  const row={workOrderId:id('d'),closedDay:'2030-10-27',closedEventId:id('e'),
+    status:'COMPLETE',materialNetMinor:5750,groups:[group]};
+  const payload={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_RECEIPT_FIFO_NET_MATERIAL_USAGE',
+    timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
+    summary:{orderCount:1,completeOrderCount:1,movementCount:2,materialNetMinor:5750},items:[row]};
+  let response:unknown=payload;
+  await page.route('**/reports/closed-order-materials*',route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify(response),
+  }));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-demo-finance-report');await fill(page);
+  const section=page.getByRole('region',{name:'Оценка расхода материалов закрытых заказов'});
+  const button=section.getByRole('button',{name:'Проверить расход материалов'});
+  const table=section.getByRole('table');
+  await button.click();await expect(table).toContainText('57,50 RUB');
+  await table.getByText('Партии и движения',{exact:true}).click();
+  await expect(table.getByText(/FIFO: Возврат/)).toContainText('20,00 RUB');
+  await expect(table.getByText(/FIFO: Возврат/)).toContainText(issue);
+  await page.screenshot({path:testInfo.outputPath('fifo-mobile-light.png'),fullPage:true,animations:'disabled'});
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('fifo-desktop-light.png'),fullPage:true,animations:'disabled'});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('fifo-desktop-dark.png'),fullPage:true,animations:'disabled'});
+  response={...payload,items:[{...row,groups:[{...group,fifoSlices:slices.slice(0,2)}]}]};
+  await button.click();await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
+  await expect(table).toHaveCount(0);
+  response={...payload,items:[{...row,groups:[{...group,fifoSlices:[...slices.slice(0,2),
+    {...slices[2],originalIssueId:id('f')}]}]}]};
+  await button.click();await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
   await expect(table).toHaveCount(0);
 });

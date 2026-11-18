@@ -1,12 +1,14 @@
 import React from 'react';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const statuses=['TRACED','UNPROVEN','UNVALUED','LATE_VALUATION','OTHER_CURRENCY','UNPAIRED'] as const;
+const statuses=['TRACED','FIFO_TRACED','UNPROVEN','UNVALUED','LATE_VALUATION','OTHER_CURRENCY','UNPAIRED'] as const;
 type Status=typeof statuses[number];
 type Movement={stockEventId:string;action:'ISSUE'|'RETURN';quantity:number;lotMovementId:string|null};
 type Source={receiptId:string;acceptanceId:string;valuationId:string;unitNetMinor:number};
+type FifoSlice=Source&{stockEventId:string;lotMovementId:string;originalIssueId:string;
+  action:'ISSUE'|'RETURN';quantity:number};
 type Group={skuId:string;lotId:string|null;issuedQuantity:number;returnedQuantity:number;
-  netQuantity:number;status:Status;source:Source|null;materialNetMinor:number|null;movements:Movement[]};
+  netQuantity:number;status:Status;source:Source|null;materialNetMinor:number|null;fifoSlices:FifoSlice[];movements:Movement[]};
 type Item={workOrderId:string;closedDay:string;closedEventId:string;
   status:'COMPLETE'|'INCOMPLETE';materialNetMinor:number|null;groups:Group[]};
 type Report={syntheticOnly:true;realMoney:false;releaseAllowed:false;marginAvailable:false;
@@ -14,7 +16,7 @@ type Report={syntheticOnly:true;realMoney:false;releaseAllowed:false;marginAvail
   summary:{orderCount:number;completeOrderCount:number;movementCount:number;materialNetMinor:number|null};
   items:Item[]};
 const labels:Record<Status,string>={
-  TRACED:'Подтверждён единственный приход',UNPROVEN:'Происхождение не подтверждено',
+  TRACED:'Подтверждён единственный приход',FIFO_TRACED:'Подтверждён расход FIFO по приходам',UNPROVEN:'Происхождение не подтверждено',
   UNVALUED:'Нет оценки прихода',LATE_VALUATION:'Оценка после первой выдачи',
   OTHER_CURRENCY:'Другая валюта',UNPAIRED:'Нет связанной партии',
 };
@@ -27,12 +29,12 @@ export function parseMaterialReport(raw:unknown,from:string,to:string):Report{
   const r=raw as Report;
   if(!r||r.syntheticOnly!==true||r.realMoney!==false||r.releaseAllowed!==false||
     r.marginAvailable!==false||r.payrollAvailable!==false||r.currency!=='RUB'||
-    r.basis!=='CLOSED_TECHNICAL_SINGLE_RECEIPT_NET_MATERIAL_USAGE'||
+    r.basis!=='CLOSED_TECHNICAL_RECEIPT_FIFO_NET_MATERIAL_USAGE'||
     r.fromDay!==from||r.toDay!==to||typeof r.timeZone!=='string'||!r.timeZone||
     !r.summary||!Array.isArray(r.items)||r.items.length>200||
     r.summary.orderCount!==r.items.length)throw Error('contract');
   const orders=new Set<string>(),events=new Set<string>();
-  let count=0,complete=0,total=0;
+  let count=0,complete=0,total=0,sliceCount=0;
   for(const item of r.items){
     if(!item||!validId(item.workOrderId)||!validId(item.closedEventId)||
       orders.has(item.workOrderId)||!/^\d{4}-\d{2}-\d{2}$/.test(item.closedDay)||
@@ -44,7 +46,7 @@ export function parseMaterialReport(raw:unknown,from:string,to:string):Report{
       if(!g||!validId(g.skuId)||(g.lotId!==null&&!validId(g.lotId))||
         !statuses.includes(g.status)||!int(g.issuedQuantity)||!int(g.returnedQuantity)||
         !Number.isSafeInteger(g.netQuantity)||g.netQuantity!==g.issuedQuantity-g.returnedQuantity||
-        !Array.isArray(g.movements)||!g.movements.length||
+        !Array.isArray(g.movements)||!g.movements.length||!Array.isArray(g.fifoSlices)||
         groups.has(g.skuId+':'+g.lotId))throw Error('group');
       groups.add(g.skuId+':'+g.lotId);
       let issued=0,returned=0;
@@ -59,12 +61,40 @@ export function parseMaterialReport(raw:unknown,from:string,to:string):Report{
       if(issued!==g.issuedQuantity||returned!==g.returnedQuantity)throw Error('quantities');
       if(g.status==='TRACED'){
         const s=g.source;
-        if(!g.lotId||!s||![s.receiptId,s.acceptanceId,s.valuationId].every(validId)||
+        if(!g.lotId||!s||g.fifoSlices.length!==0||![s.receiptId,s.acceptanceId,s.valuationId].every(validId)||
           !int(s.unitNetMinor)||!int(g.materialNetMinor)||g.netQuantity<0||
           g.netQuantity*s.unitNetMinor!==g.materialNetMinor)throw Error('cost');
         subtotal+=g.materialNetMinor;
+      }else if(g.status==='FIFO_TRACED'){
+        if(!g.lotId||g.source!==null||!int(g.materialNetMinor)||g.netQuantity<0||!g.fifoSlices.length)
+          throw Error('fifo');
+        const quantities=new Map<string,number>(),open=new Map<string,number>(),sources=new Map<string,string>();
+        const moves=new Map(g.movements.map(m=>[m.stockEventId,m]));
+        let cost=0;
+        for(const s of g.fifoSlices){
+          const m=moves.get(s.stockEventId);
+          if(!m||s.lotMovementId!==m.lotMovementId||s.action!==m.action||
+            ![s.originalIssueId,s.receiptId,s.acceptanceId,s.valuationId].every(validId)||
+            !int(s.quantity)||s.quantity===0||!int(s.unitNetMinor)||s.unitNetMinor>1e9||
+            ++sliceCount>5000)throw Error('fifo slice');
+          const source=s.acceptanceId+':'+s.valuationId+':'+s.unitNetMinor;
+          if(sources.has(s.receiptId)&&sources.get(s.receiptId)!==source)throw Error('source');
+          sources.set(s.receiptId,source);
+          const sign=s.action==='ISSUE'?1:-1;
+          if(sign===1&&s.originalIssueId!==s.lotMovementId)throw Error('origin');
+          const key=s.originalIssueId+':'+s.receiptId;
+          open.set(key,(open.get(key)||0)+sign*s.quantity);
+          quantities.set(s.stockEventId,(quantities.get(s.stockEventId)||0)+s.quantity);
+          const amount=s.quantity*s.unitNetMinor;
+          if(!int(amount))throw Error('overflow');
+          cost+=sign*amount;
+          if(!Number.isSafeInteger(cost))throw Error('overflow');
+        }
+        if(g.movements.some(m=>quantities.get(m.stockEventId)!==m.quantity)||
+          [...open.values()].some(q=>!int(q))||cost!==g.materialNetMinor)throw Error('fifo totals');
+        subtotal+=cost;
       }else{
-        if(g.source!==null||g.materialNetMinor!==null)throw Error('unknown');
+        if(g.source!==null||g.materialNetMinor!==null||g.fifoSlices.length!==0)throw Error('unknown');
         all=false;
       }
     }
@@ -117,7 +147,7 @@ export function AutoClosedOrderMaterials({org,loc,from,to,allowed}:{
   return <section aria-label="Оценка расхода материалов закрытых заказов">
     <h2>Оценка расхода материалов закрытых заказов</h2>
     <p>Только synthetic-dev, без НДС. Оценка по источнику единственной приёмки
-      и связанным выдачам и возвратам. Не бухгалтерская себестоимость,
+      или FIFO по нескольким принятым приходам и связанным выдачам и возвратам. Не бухгалтерская себестоимость,
       прибыль или зарплата. Неизвестная стоимость не заменяется нулём.</p>
     <button type="button" disabled={!allowed||status==='loading'||exporting}
       onClick={()=>void load()}>Проверить расход материалов</button>
@@ -148,6 +178,9 @@ export function AutoClosedOrderMaterials({org,loc,from,to,allowed}:{
                 {' '}· Расход: {g.netQuantity} · Оценка: {money(g.materialNetMinor)}</p>
               {g.source&&<p>Приход: {g.source.receiptId} · Приёмка: {g.source.acceptanceId}
                 {' '}· Оценка: {g.source.valuationId} · Цена единицы: {money(g.source.unitNetMinor)}</p>}
+              {g.fifoSlices.map((s,i)=><p key={s.stockEventId+':'+i}>FIFO: {s.action==='ISSUE'?'Выдача':'Возврат'} ·
+                {' '}{s.quantity} × {money(s.unitNetMinor)} · Приход: {s.receiptId} · Приёмка: {s.acceptanceId}
+                {' '}· Оценка: {s.valuationId} · Событие: {s.stockEventId} · Исходная выдача: {s.originalIssueId}</p>)}
               {g.movements.map(m=><p key={m.stockEventId}>{m.action==='ISSUE'?'Выдача':'Возврат'}:
                 {' '}{m.quantity} · {m.stockEventId} · {m.lotMovementId||'Без партии'}</p>)}
             </div>)}
