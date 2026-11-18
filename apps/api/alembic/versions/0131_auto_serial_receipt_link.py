@@ -86,7 +86,7 @@ def upgrade():
           WHERE m.serial_id=scoped_serial)
         THEN RAISE EXCEPTION 'serial receipt lineage must precede movement'; END IF;
         IF NOT EXISTS(SELECT 1 FROM auto_stock_serial_current current
-          WHERE current.serial_id=COALESCE(NEW.serial_id,assertion_row.serial_id)
+          WHERE current.serial_id=scoped_serial
             AND current.lot_id=source_lot AND current.state='IN_STOCK')
         THEN RAISE EXCEPTION 'serial not in accepted receipt lot'; END IF;
         IF NOT EXISTS(
