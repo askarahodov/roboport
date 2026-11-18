@@ -12,7 +12,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from ci_impact import changed
+from scripts.ci_impact import changed
 
 ROOT = Path(__file__).resolve().parent.parent
 E2E_ROOT = ROOT / "apps/web/e2e"
