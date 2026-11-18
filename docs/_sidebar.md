@@ -33,6 +33,7 @@
   - [Архитектура и безопасность](/auto/ARCHITECTURE.md)
   - [Функциональная матрица](/auto/FUNCTIONAL_MATRIX.md)
   - [Постраничная сверка AutoDealer Online (частичная)](/auto/AUTODEALER_PAGE_AUDIT.md)
+  - [89 требований полного функционального аналога (статус PARTIAL)](/auto/AUTODEALER_PARITY_ACCEPTANCE.md)
   - [Дорожная карта полного автосервиса](/auto/FEATURE_ROADMAP.md)
   - [Пакетный synthetic cutover (разработчикам/QA)](/auto/SYNTHETIC_CUTOVER.md)
   - [Загрузка постов: методика и API (dev)](/auto/REPORTING.md)
