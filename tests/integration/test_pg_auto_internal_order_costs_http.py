@@ -241,4 +241,4 @@ def test_fifo_material_cost_flows_into_complete_internal_cost_report(monkeypatch
     assert len(lines)==9 and all(len(line)==30 for line in lines)
     slices=[line for line in lines if line[2]=="FIFO_SLICE"]
     assert sorted(int(line[5]) for line in slices)==[-2000,3750,4000]
-    assert {line[-1] for line in slices}=={str(evidence["issue"])}
+    assert {line[-4] for line in slices}=={str(evidence["issue"])}
