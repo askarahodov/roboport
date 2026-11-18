@@ -28,7 +28,7 @@ from test_pg_auto_stock_service import grant
 from test_pg_baseline import DSN
 
 
-def ready(monkeypatch,*,with_photo=False,with_refund=False):
+def ready(monkeypatch,*,with_photo=False,with_refund=False,material_setup=None):
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
@@ -58,9 +58,12 @@ def ready(monkeypatch,*,with_photo=False,with_refund=False):
         decide_auto_estimate(
             db,d["tokens"][d["client_a"]],org,loc,order,
             revision_id=UUID(rev),request_key=uuid4(),decision="APPROVED")
+        consume = material_setup(db,d,org,loc,order) if material_setup else None
         start_execution(db,d["tokens"][d["intake"]],org,loc,order,uuid4())
         labor_execution(db,d["tokens"][d["manager"]],org,loc,order,
                         service,45,uuid4())
+        if consume:
+            consume()
         finish_execution(db,d["tokens"][d["manager"]],org,loc,order,uuid4())
         record_work_order_qc(db,d["tokens"][d["other"]],org,loc,order,
                              request_key=uuid4(),result="PASS",finding_code="NONE")
