@@ -28,7 +28,7 @@ from test_pg_auto_stock_lot_work_order_return import ret
 from test_pg_baseline import DSN
 
 
-def fixture(monkeypatch,mode="traced"):
+def fixture(monkeypatch,mode="traced",before_labor=None):
     evidence={}
     def setup(db,d,org,loc,order):
         item=sku(db,org,loc)
@@ -55,6 +55,8 @@ def fixture(monkeypatch,mode="traced"):
             record(db,item,"RECEIPT",1)
         work_stock(db,d,org,loc,order,item,"RESERVE",3 if mode=="unpaired" else 2)
         evidence.update(item=item,lot=lot,receipt=receipt,acceptance=acceptance,valuation=valuation)
+        if before_labor is not None:
+            before_labor(db,d,org,loc,order)
         def consume():
             issue_key=uuid4()
             issued=issue_material(db,warehouse,org,loc,order,lot,2,issue_key)
