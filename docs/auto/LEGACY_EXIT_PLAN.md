@@ -43,6 +43,23 @@ PYTHONPATH="apps/api:tests/integration" python -m scripts.auto_legacy_attachment
 
 **Граница доказательства:** у записей `attachment` только синтетические метаданные, их ключи **не соответствуют загруженным объектам MinIO**. Проверка **не** доказывает существование файла, совпадение его реальных байтов и SHA, восстановление/карантин MinIO, сроки хранения и право на реальную историю. Не объявлять этот CI-тест «полным backup вложений». Для закрытия #165 нужен отдельно санкционированный private-object inventory, byte/hash reconciliation и восстановление object storage, плюс независимые approvals #119. Утилита не исполняет `DROP`/`DELETE` и не предоставляет клиентский API.
 
+## Физическое восстановление legacy-вложений MinIO + PostgreSQL 17 (#165, current-dev)
+
+Workflow `.github/workflows/minio-dev.yml` запускает `tests/integration/test_pg_minio_legacy_restore.py` на одноразовых PostgreSQL 17 и MinIO с loopback endpoints и одноразовыми app credentials. Это отдельное доказательство от metadata-only проверки выше. Восстанавливаются **два** синтетических объекта: READY/CLEAR в documents и FAILED/QUARANTINED в quarantine. SQL-граф содержит исходного автора, клиента, заявку, оба attachment и связь idempotency. Проверяются реальные bytes, размер, MIME и SHA-256, отсутствие копии в неправильном бакете. Обычный FileStorage не выдаёт карантинный объект.
+
+1. Перед backup прочитать граф и сверить оба объекта с SQL; собрать временный ZIP (manifest и два файла), привязать его к SHA-256 графа.
+2. Выполнить реальный `pg_dump -Fc` с последующим `pg_restore --exit-on-error` в отдельную БД `roboport_restored`; проверить восстановленный SQL-граф в read-only транзакции.
+3. Проверить manifest, допустимый набор файлов, размеры и SHA-256 **до записи**; восстановить только в два пустых приватных restore-бакета, отличных от source. Используются отдельные CI-only разрешения, не меняющие штатный app policy. Проверить запрет анонимного доступа.
+4. Повторно сверить bytes, MIME, SHA-256 и размещение с восстановленной SQL-метаинформацией. Некорректный архив не должен записать ни одного объекта, повторный restore в непустое назначение отвергается. Негативные сценарии (missing / corrupted / wrong bucket) выполняются только в disposable restore-бакетах; в конце проверяется неизменность исходного графа и source-объектов.
+
+Команда теста, **только внутри подготовленного MinIO workflow**:
+
+```bash
+PYTHONPATH=apps/api ROBOport_LEGACY_RESTORE_CI=1 python -m pytest -q tests/integration/test_pg_minio_legacy_restore.py
+```
+
+Не запускать на локальной рабочей базе и реальных бакетах. Требуются disposable credentials, loopback DSN, ID одноразового postgres-контейнера, отдельные пустые restore-бакеты. Архив и дамп временные, не публикуются как artifacts. MinIO workflow запускается на PR и push в main для затронутых файлов. Для production по-прежнему необходимы реальный полный inventory/reconciliation (не только два контрольных объекта), правовое основание хранения, проверка миграции истории и независимые approvals #119, RPO/RTO и отдельная финальная миграция. Этот тест не выдаёт разрешений на удаление или релиз.
+
 ## Гейты для полного закрытия
 
 1. **HTTP:** у всех robot URL всегда 404, даже с тестовыми переключателями и поддельными заголовками; нет robot пути в runtime OpenAPI; автомобильные CRUD/ACL и вход работают.
