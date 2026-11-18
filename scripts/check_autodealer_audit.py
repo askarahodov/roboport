@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Offline structural contract for page-by-page AutoDealer Online gap inventory.
 
+Per-row source dates survive incremental discovery. Evidence older than 60d
+must be reviewed rather than falsely stamped with the latest inventory date.
 Never crawls an external website in CI. Checking source contents, freshness and
 business acceptance requires an independent human/web review (issue #108).
 """
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from pathlib import Path
 import re
 from urllib.parse import urlparse
@@ -37,14 +40,17 @@ def validate(document: object, matrix_text: str) -> list[str]:
         or "PARTIAL" not in document["completeness"]
     ):
         problems.append("audit must explicitly report incomplete navigation")
-    if not isinstance(document.get("checkedOn"), str) or not re.fullmatch(
-        r"20\d{2}-\d{2}-\d{2}", document["checkedOn"]
-    ):
+    try:
+        reviewed = date.fromisoformat(document["checkedOn"])
+        if not 2025 <= reviewed.year <= 2100:
+            raise ValueError("unsupported audit year")
+    except (KeyError, TypeError, ValueError):
+        reviewed = None
         problems.append("missing or invalid checkedOn")
     records = document.get("records")
     if not isinstance(records, list):
         return problems + ["records must be an array"]
-    if len(records) < 25:
+    if len(records) < 49:
         problems.append("verified coverage must not silently shrink")
     urls: set[str] = set()
     ids: set[str] = set()
@@ -89,8 +95,12 @@ def validate(document: object, matrix_text: str) -> list[str]:
             problems.append(f"{where}: cannot claim unverified production status")
         if row["evidence"] not in VALID_EVIDENCE:
             problems.append(f"{where}: invalid evidence provenance")
-        if row["checkedOn"] != document.get("checkedOn"):
-            problems.append(f"{where}: inconsistent check date")
+        try:
+            evidence_day = date.fromisoformat(row["checkedOn"])
+            if reviewed is None or not reviewed - timedelta(days=60) <= evidence_day <= reviewed:
+                problems.append(f"{where}: inconsistent or stale check date")
+        except (TypeError, ValueError):
+            problems.append(f"{where}: invalid source check date")
         for key in ("title", "section", "scenario", "gap"):
             if not isinstance(row[key], str) or len(row[key].strip()) < (2 if key in ("title", "section") else 6):
                 problems.append(f"{where}: empty or short {key}")
