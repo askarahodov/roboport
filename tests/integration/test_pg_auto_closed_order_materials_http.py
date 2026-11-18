@@ -157,7 +157,7 @@ def test_exact_single_receipt_net_cost_and_live_price_scope(monkeypatch):
     export=http.get(path+"/export",params=query)
     assert export.status_code==200 and export.headers["x-content-type-options"]=="nosniff"
     lines=list(csv.reader(StringIO(export.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(lines)==5 and all(len(row)==22 for row in lines)
+    assert len(lines)==5 and all(len(row)==23 for row in lines)
     assert lines[1][3:5]==["ORDER","COMPLETE"] and lines[1][10]=="1250"
     assert lines[2][3:5]==["LOT","TRACED"] and lines[2][14]=="1250"
     assert http.get(path.replace(str(loc),str(uuid4())),params=query).status_code==403
@@ -307,10 +307,11 @@ def test_fifo_two_accepted_receipts_return_reverses_expensive_layer_and_csv(monk
     export=http.get(path+"/export",params=query)
     assert export.status_code==200,export.text
     lines=list(csv.reader(StringIO(export.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(lines)==8 and all(len(line)==22 for line in lines)
+    assert len(lines)==8 and all(len(line)==23 for line in lines)
     fifo_rows=[line for line in lines if line[3]=="FIFO_SLICE"]
     assert sorted(int(line[10]) for line in fifo_rows)==[-2000,3750,4000]
-    assert {line[-3] for line in fifo_rows}=={str(evidence["issue"])}
+    original_col=lines[0].index("Исходная выдача UUID")
+    assert {line[original_col] for line in fifo_rows}=={str(evidence["issue"])}
     monkeypatch.setattr(module.fifo,"MAX_SLICES",2)
     assert http.get(path,params=query).status_code==409
     assert http.get(path+"/export",params=query).status_code==409

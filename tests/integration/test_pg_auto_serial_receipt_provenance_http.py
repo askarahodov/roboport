@@ -43,11 +43,13 @@ def test_serial_receipt_costs_match_exact_approved_sources_and_both_exports(monk
     out=http.get(path+"/export",params=query)
     assert out.status_code==200
     rows=list(csv.reader(StringIO(out.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(rows)==9 and all(len(row)==22 for row in rows)
+    assert len(rows)==9 and all(len(row)==23 for row in rows)
     source_rows=[r for r in rows if r[3]=="FIFO_SLICE"]
     assert sorted(int(r[10]) for r in source_rows)==[-2000,1250,2000]
-    assert {r[-2] for r in source_rows}=={str(proof["serial1"]),str(proof["serial2"])}
-    assert {r[-1] for r in source_rows}=={
+    serial_col=rows[0].index("Серийная деталь UUID")
+    approval_col=rows[0].index("Подтверждение происхождения UUID")
+    assert {r[serial_col] for r in source_rows}=={str(proof["serial1"]),str(proof["serial2"])}
+    assert {r[approval_col] for r in source_rows}=={
         proof["a1"]["approvalId"],proof["a2"]["approvalId"]}
     policy=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/serial-receipt-provenance"
     assert http.get(policy).status_code==200
@@ -122,5 +124,5 @@ def test_sealed_order_uses_serial_cost_but_missing_internal_rate_remains_unknown
     out=http.get(root+"/reports/internal-order-costs/export",params=query)
     assert out.status_code==200
     rows=list(csv.reader(StringIO(out.text.lstrip("\ufeff")),delimiter=";"))
-    assert len(rows)==10 and all(len(r)==29 for r in rows)
+    assert len(rows)==10 and all(len(r)==30 for r in rows)
     assert len([r for r in rows if r[2]=="FIFO_SLICE"])==3
