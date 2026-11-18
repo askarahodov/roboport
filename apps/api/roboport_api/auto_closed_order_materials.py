@@ -32,23 +32,25 @@ def _source(rows):
     receipts = []
     first_issue = None
     for (lot, allocation, action, qty, receipt, acceptance, valuation,
-         currency, unit, valued_at, received_at, issue, returned,
-         provenance_count, valid, stamp) in rows:
-        if provenance_count != 1 or not valid:
+         currency, unit, valuation_seq, receipt_seq, issue, returned,
+         provenance_count, valid, allocation_seq) in rows:
+        if provenance_count != 1 or not valid or allocation_seq is None:
             return "UNPROVEN", None
         if receipt is not None:
             receipts.append((receipt, acceptance, valuation, currency, unit,
-                             valued_at, received_at))
+                             valuation_seq, receipt_seq))
         if issue is not None:
-            first_issue = stamp if first_issue is None else min(first_issue, stamp)
+            first_issue = allocation_seq if first_issue is None else min(first_issue, allocation_seq)
     if len(receipts) != 1 or first_issue is None:
         return "UNPROVEN", None
-    receipt, acceptance, valuation, currency, unit, valued_at, received_at = receipts[0]
-    if received_at > first_issue:
+    receipt, acceptance, valuation, currency, unit, valuation_seq, receipt_seq = receipts[0]
+    if receipt_seq is None or receipt_seq >= first_issue:
         return "UNPROVEN", None
     if valuation is None:
         return "UNVALUED", None
-    if valued_at > first_issue:
+    if valuation_seq is None or valuation_seq <= receipt_seq:
+        return "UNPROVEN", None
+    if valuation_seq >= first_issue:
         return "LATE_VALUATION", None
     if currency != "RUB":
         return "OTHER_CURRENCY", None
@@ -110,7 +112,8 @@ def _material_report(conn, token, org, loc, from_day, to_day, base):
     lots = sorted({row[5] for row in movements if row[7] is True})
     history = conn.execute("""
       SELECT a.lot_id,a.id,a.action,a.quantity,d.id,ac.id,v.id,
-             v.currency,v.purchase_unit_net_minor,v.created_at,ac.created_at,
+             v.currency,v.purchase_unit_net_minor,v.cost_registration_seq,
+                 CASE WHEN ac.id IS NOT NULL THEN a.cost_registration_seq END,
              i.id,r.id,
              (CASE WHEN ac.id IS NULL THEN 0 ELSE 1 END
               + CASE WHEN i.id IS NULL THEN 0 ELSE 1 END
@@ -135,7 +138,7 @@ def _material_report(conn, token, org, loc, from_day, to_day, base):
                  AND wr.location_id=l.location_id
                  AND mr.work_order_id=r.work_order_id AND mr.sku_id=a.sku_id
                  AND mr.action='RETURN' AND mr.quantity=a.quantity
-               ELSE false END AS valid, a.created_at
+               ELSE false END AS valid, a.cost_registration_seq
       FROM auto_stock_lot_allocation a
       JOIN auto_stock_lot l ON l.id=a.lot_id AND l.sku_id=a.sku_id
       LEFT JOIN auto_stock_receipt_acceptance ac ON ac.allocation_event_id=a.id
