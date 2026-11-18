@@ -101,8 +101,7 @@ export function WarehouseSerialMovements(){
       <button type="button" disabled={busy||!!pending||!scopeValid||!uuid.test(destination.trim())}
         onClick={()=>void submit('transfer')}>Переместить серийную деталь</button>
     </section>
-    <WarehouseSerialReceipts key={organization+':'+location}
-      org={organization.trim()} loc={location.trim()}/>
+    <WarehouseSerialReceipts org={organization.trim()} loc={location.trim()}/>
     {busy&&<p role="status">Операция выполняется…</p>}
     {pending&&<p role="alert">Результат операции не определён; новый ключ запрещён.</p>}
     {pending&&<button type="button" disabled={busy||
