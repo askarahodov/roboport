@@ -1,4 +1,5 @@
 """Closed HTTPS dev-only synthetic reconciliation and pre-handover documents."""
+from hashlib import sha256
 from uuid import UUID
 import psycopg
 from fastapi import APIRouter, Request
@@ -95,6 +96,9 @@ def download_technical_dossier(org_id:str,loc_id:str,order_id:str,request:Reques
             return _response(request,409,str(exc))
     return Response(content=data,media_type="application/zip",headers={
         "Content-Disposition":f'attachment; filename="auto-technical-dossier-{order}.zip"',
+        # A separately retained digest can detect replacement after download.
+        # This is NOT an authenticated signature or a production release grant.
+        "X-Technical-Dossier-SHA256":sha256(data).hexdigest(),
         "Cache-Control":"no-store, private",
         "X-Content-Type-Options":"nosniff",
         "Cross-Origin-Resource-Policy":"same-origin",
