@@ -76,17 +76,17 @@ function parse(raw:unknown,expectedOrder:string):Snapshot{
   return raw as Snapshot;
 }
 
-function ActivePanel({tab}:{tab:Tab}){
+function ActivePanel({tab,lockedScope}:{tab:Tab;lockedScope:{org:string;loc:string;order:string}}){
   switch(tab){
-    case 'services':return <AutoOrderServices/>;
-    case 'inspection':return <AutoWorkshopQc/>;
-    case 'intake':return <AutoIntakeAct role="staff"/>;
-    case 'diagnostics':return <AutoDiagnostics/>;
-    case 'estimate':return <AutoEstimateConsole role="manager"/>;
-    case 'assignments':return <AutoAssignments/>;
-    case 'execution':return <AutoWorkExecution/>;
-    case 'qc':return <AutoWorkshopQc/>;
-    case 'documents':return <AutoDemoClose role="staff"/>;
+    case 'services':return <AutoOrderServices lockedScope={lockedScope}/>;
+    case 'inspection':return <AutoWorkshopQc lockedScope={lockedScope}/>;
+    case 'intake':return <AutoIntakeAct role="staff" lockedScope={lockedScope}/>;
+    case 'diagnostics':return <AutoDiagnostics lockedScope={lockedScope}/>;
+    case 'estimate':return <AutoEstimateConsole role="manager" lockedScope={lockedScope}/>;
+    case 'assignments':return <AutoAssignments lockedScope={lockedScope}/>;
+    case 'execution':return <AutoWorkExecution lockedScope={lockedScope}/>;
+    case 'qc':return <AutoWorkshopQc lockedScope={lockedScope}/>;
+    case 'documents':return <AutoDemoClose role="staff" lockedScope={lockedScope}/>;
   }
 }
 
@@ -176,7 +176,8 @@ export function AutoWorkOrderWorkspace(){
         Обновить этапы с сервера</button>
       <h2>Операции по выбранному заказу</h2>
       <p>Выберите раздел ниже. Изменения внутри раздела становятся видны в сводке
-        после «Обновить этапы». Открытие раздела не выдаёт новых полномочий.</p>
+        после «Обновить этапы». Открытие раздела не выдаёт новых полномочий. UUID заказа, филиала и организации
+        закреплены: для другого документа вернитесь в реестр.</p>
       <nav aria-label="Разделы рабочего места" style={{display:'flex',flexWrap:'wrap',
         gap:'0.5rem'}}>
         {tabs.map(t=><button key={t.id} type="button"
@@ -187,7 +188,7 @@ export function AutoWorkOrderWorkspace(){
         </button>)}
       </nav>
       <section aria-label="Активный раздел заказ-наряда" key={scope+':'+active}>
-        <ActivePanel tab={active}/>
+        <ActivePanel tab={active} lockedScope={{org,loc,order}}/>
       </section>
     </>}
   </section>;
