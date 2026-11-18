@@ -89,6 +89,7 @@ def assert_receipt(conn,token,org,loc,serial,receipt,key):
             raise AutoStockConflict("CONFLICT")
         try:
             with conn.transaction():
+                conn.execute("SELECT set_config('roboport.serial_receipt_actor',%s,true)",(str(actor),))
                 ident=uuid4()
                 conn.execute("""
                   INSERT INTO auto_stock_serial_receipt_assertion
@@ -125,6 +126,7 @@ def approve_receipt(conn,token,org,loc,ident,key):
             return False,_item(conn,ident)
         try:
             with conn.transaction():
+                conn.execute("SELECT set_config('roboport.serial_receipt_actor',%s,true)",(str(actor),))
                 conn.execute("""
                   INSERT INTO auto_stock_serial_receipt_approval
                     (id,assertion_id,approved_by,request_key)
