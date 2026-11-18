@@ -20,6 +20,7 @@ jobs:
       browser: ${{ steps.classify.outputs.browser_e2e }}
       windows: ${{ steps.classify.outputs.windows_cmd }}
       pg_full: ${{ steps.classify.outputs.pg_full }}
+      browser_paths_b64: ${{ steps.classify.outputs.browser_paths_b64 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -340,7 +341,7 @@ jobs:
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            python -m scripts.ci_browser --base "${{ github.event.pull_request.base.sha }}" --run
+            python -m scripts.ci_browser --paths-base64 "${{ needs.impact.outputs.browser_paths_b64 }}" --run
           else
             python -m scripts.ci_browser --full --run
           fi
