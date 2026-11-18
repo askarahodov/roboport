@@ -248,6 +248,8 @@ ROLE_BASE={
     "READ":{"MANAGER","CASHIER"},"CREATE":{"MANAGER"},
     "EDIT":{"CASHIER","MANAGER"},"CLOSE":{"CASHIER"},
     "PRICE_SALES":{"MANAGER","CASHIER"},
+    # Внутренние затраты филиала — только MANAGER; CASHIER не получает ставки.
+    "PRICE_PURCHASE":{"MANAGER"},
   },
 }
 
@@ -298,6 +300,10 @@ def preview_employee_document_access(conn,token,org,loc,user,document):
         rights={}
         for cap in CAPABILITIES:
             applicable=active & ROLE_BASE[document].get(cap,active if cap=="WRITE" else set())
+            # Стоимость труда имеет только MANAGER; при совмещении с CASHIER
+            # его запрет тоже сужает действительное право, как в cost API.
+            if document=="FINANCE" and cap=="PRICE_PURCHASE" and "MANAGER" in active:
+                applicable=active & {"MANAGER","CASHIER"}
             controls=(cap,"WRITE") if cap in ("CREATE","EDIT","CLOSE") else (cap,)
             matching=[(allowed,stamp) for (role,location,target,rule_cap),(allowed,stamp)
                       in latest.items() if role in applicable and rule_cap in controls]

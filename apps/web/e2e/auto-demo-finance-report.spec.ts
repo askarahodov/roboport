@@ -97,7 +97,7 @@ test('malformed monetary aggregate, mixed currencies, and bad net fail closed',a
   await expect(page.getByRole('table')).toHaveCount(0);
 });
 
-test('closed-order report reconciles source IDs and clears on revoked scope',async({page})=>{
+test('closed-order report reconciles source IDs and clears on revoked scope',async({page},testInfo)=>{
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const row={workOrderId:id('a'),closedDay:'2030-10-27',previewId:id('b'),
     previewDigest:'f'.repeat(64),estimateRevisionId:id('c'),postedEventId:id('d'),
@@ -124,10 +124,13 @@ test('closed-order report reconciles source IDs and clears on revoked scope',asy
   await table.getByText('Первичные события',{exact:true}).click();
   await expect(table.getByText('Проведение: '+id('d'))).toBeVisible();
   await expect(table.getByText(/Имитация возврата:/)).toContainText('5,00');
+  await page.screenshot({path:testInfo.outputPath('closed-orders-mobile-light.png'),fullPage:true,animations:'disabled'});
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('closed-orders-desktop-light.png'),fullPage:true,animations:'disabled'});
   await page.getByLabel('Тема оформления').selectOption('dark');
   await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('closed-orders-desktop-dark.png'),fullPage:true,animations:'disabled'});
   status=403;await button.click();
   await expect(page.getByRole('alert')).toContainText('Доступ к реестру запрещён');
   await expect(table).toHaveCount(0);
@@ -139,7 +142,7 @@ test('closed-order report reconciles source IDs and clears on revoked scope',asy
   await expect(table).toHaveCount(0);
 });
 
-test('material assessment shows traceability, unknown values and live price denial',async({page})=>{
+test('material assessment shows traceability, unknown values and live price denial',async({page},testInfo)=>{
   const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
   const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
     status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
@@ -170,10 +173,13 @@ test('material assessment shows traceability, unknown values and live price deni
   await table.getByText('Партии и движения',{exact:true}).click();
   await expect(table.getByText(/Подтверждён единственный приход/)).toContainText('Расход: 1');
   await expect(table.getByText(/Приход:/)).toContainText(id('3'));
+  await page.screenshot({path:testInfo.outputPath('material-assessment-mobile-light.png'),fullPage:true,animations:'disabled'});
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('material-assessment-desktop-light.png'),fullPage:true,animations:'disabled'});
   await page.getByLabel('Тема оформления').selectOption('dark');
   await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('material-assessment-desktop-dark.png'),fullPage:true,animations:'disabled'});
   response=unknown;await button.click();
   await expect(table).toContainText('Не определена');
   await expect(table).not.toContainText('12,50 RUB');
@@ -186,5 +192,98 @@ test('material assessment shows traceability, unknown values and live price deni
   await expect(table).toHaveCount(0);
   status=200;await button.click();await expect(table).toBeVisible();
   await page.getByRole('textbox',{name:'UUID филиала'}).fill(id('c'));
+  await expect(table).toHaveCount(0);
+});
+
+test('internal cost rate approval and reconciled negative difference, unknowns and live denial',async({page},testInfo)=>{
+  const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+  const group={skuId:id('1'),lotId:id('2'),issuedQuantity:2,returnedQuantity:1,netQuantity:1,
+    status:'TRACED',source:{receiptId:id('3'),acceptanceId:id('4'),valuationId:id('5'),unitNetMinor:1250},
+    materialNetMinor:1250,movements:[
+      {stockEventId:id('6'),action:'ISSUE',quantity:2,lotMovementId:id('7')},
+      {stockEventId:id('8'),action:'RETURN',quantity:1,lotMovementId:id('9')},
+    ]};
+  const rate={id:id('a'),version:1,rateMinorPerHour:2001,proposedBy:id('b'),
+    createdAt:'2030-10-27T08:00:00Z',approvalId:null,approvedBy:null,approvedAt:null};
+  const approval={...rate,approvalId:id('c'),approvedBy:id('d'),approvedAt:'2030-10-27T08:01:00Z'};
+  const labor={laborEntryId:id('e'),serviceId:id('f'),actualMinutes:45,status:'TRACED',costMinor:1501,
+    source:{approvalId:approval.approvalId,revisionId:approval.id,version:1,rateMinorPerHour:2001}};
+  const row={workOrderId:id('a'),closedDay:'2030-10-27',closedEventId:id('b'),
+    previewId:id('c'),previewDigest:'f'.repeat(64),status:'COMPLETE',approvedTotalMinor:2500,
+    materialNetMinor:1250,laborCostMinor:1501,directCostMinor:2751,syntheticDifferenceMinor:-251,
+    laborEntries:[labor],materialGroups:[group]};
+  const payload={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_TRACED_MATERIAL_AND_APPROVED_INTERNAL_LABOR_COST',
+    timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
+    summary:{orderCount:1,completeOrderCount:1,laborEntryCount:1,approvedTotalMinor:2500,
+      materialNetMinor:1250,laborCostMinor:1501,directCostMinor:2751,syntheticDifferenceMinor:-251},items:[row]};
+  const noRate={...payload,summary:{...payload.summary,completeOrderCount:0,laborCostMinor:null,
+    directCostMinor:null,syntheticDifferenceMinor:null},items:[{...row,status:'INCOMPLETE',
+    laborCostMinor:null,directCostMinor:null,syntheticDifferenceMinor:null,
+    laborEntries:[{...labor,status:'NO_APPROVED_RATE',costMinor:null,source:null}]}]};
+  let policies={syntheticOnly:true,payrollAvailable:false,currency:'RUB',items:[] as (typeof rate|typeof approval)[],
+    active:null as typeof approval|null};
+  let report:unknown=payload,status=200;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify({csrfToken:'synthetic-csrf'}),
+  }));
+  await page.route('**/internal-labor-cost-policies*',route=>{
+    const req=route.request();
+    if(req.method()==='POST'){
+      expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+      const body=req.postDataJSON();
+      expect(body.requestKey).toMatch(/^[0-9a-f-]{36}$/);
+      if(req.url().endsWith('/approve')) policies={...policies,items:[approval],active:approval};
+      else{
+        expect(body.rateMinorPerHour).toBe(2001);
+        expect(body.expectedVersion).toBe(0);
+        policies={...policies,items:[rate]};
+      }
+    }
+    return route.fulfill({status:req.method()==='POST'?201:200,contentType:'application/json',
+      body:JSON.stringify(policies)});
+  });
+  // Approve has a slash after the path, so use an explicit pattern.
+  await page.route('**/internal-labor-cost-policies/*/approve',route=>{
+    expect(route.request().headers()['x-csrf-token']).toBe('synthetic-csrf');
+    expect(route.request().postDataJSON().requestKey).toMatch(/^[0-9a-f-]{36}$/);
+    policies={...policies,items:[approval],active:approval};
+    return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify(policies)});
+  });
+  await page.route('**/reports/internal-order-costs*',route=>route.fulfill({
+    status,contentType:'application/json',body:JSON.stringify(report),
+  }));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-demo-finance-report');await fill(page);
+  const section=page.getByRole('region',{name:'Внутренние затраты закрытых заказов'});
+  await section.getByRole('button',{name:'Прочитать внутренние ставки'}).click();
+  await expect(section.getByText('Активная ставка: Не утверждена.')).toBeVisible();
+  await section.getByLabel('Внутренняя ставка, копеек за час').fill('2001');
+  await section.getByRole('button',{name:'Предложить внутреннюю ставку'}).click();
+  await expect(section.getByText(/Ожидает независимого утверждения/)).toBeVisible();
+  await section.getByRole('button',{name:'Утвердить внутреннюю ставку версии 1'}).click();
+  await expect(section.getByText(/Активная ставка: 20,01 RUB/)).toBeVisible();
+  const calculate=section.getByRole('button',{name:'Рассчитать внутренние затраты'});
+  await calculate.click();const table=section.getByRole('table');
+  await expect(table).toContainText('-2,51 RUB');
+  await table.getByText('Источники затрат',{exact:true}).click();
+  await expect(table.getByText(/Труд:/)).toContainText('15,01 RUB');
+  await expect(table.getByText(/Приход:/)).toContainText(id('3'));
+  await page.screenshot({path:testInfo.outputPath('internal-costs-mobile-light.png'),fullPage:true,animations:'disabled'});
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('internal-costs-desktop-light.png'),fullPage:true,animations:'disabled'});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('internal-costs-desktop-dark.png'),fullPage:true,animations:'disabled'});
+  report=noRate;await calculate.click();await expect(table).toContainText('Не определено');
+  report={...noRate,summary:{...noRate.summary,syntheticDifferenceMinor:0}};
+  await calculate.click();await expect(section.getByRole('alert')).toContainText('Не удалось проверить');
+  await expect(table).toHaveCount(0);
+  report=payload;await calculate.click();await expect(table).toBeVisible();
+  status=403;await calculate.click();await expect(section.getByRole('alert')).toContainText('Доступ');
+  await expect(table).toHaveCount(0);
+  status=200;await calculate.click();await expect(table).toBeVisible();
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(id('f'));
   await expect(table).toHaveCount(0);
 });

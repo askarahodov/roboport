@@ -96,6 +96,7 @@ def report(conn, token, org, loc, from_day, to_day):
               AND (SELECT q.result FROM auto_work_order_qc_event q
                    WHERE q.work_order_id=w.id ORDER BY q.created_at DESC,q.id DESC LIMIT 1)='PASS'
             ORDER BY c.created_at,c.id LIMIT %s
+            FOR SHARE OF proof,binding
           )
           SELECT s.order_id,s.close_id,s.closed_at,s.preview_id,s.revision_id,
                  s.snapshot,s.preview_digest,s.post_id,s.ack_id,
@@ -194,7 +195,7 @@ def _run(request,org_id,loc_id,from_day,to_day):
             return report(conn,request.cookies.get("rp_session",""),org,loc,from_day,to_day)
     except Denied:
         return _response(request,403,"FORBIDDEN")
-    except Conflict:
+    except (Conflict, psycopg.errors.SerializationFailure, psycopg.errors.DeadlockDetected):
         return _response(request,409,"REPORT_CONFLICT")
     except (ValueError,MaterialAuditInvalid):
         return _response(request,422,"INVALID_INPUT")

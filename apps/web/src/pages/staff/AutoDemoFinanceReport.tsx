@@ -1,6 +1,7 @@
 import React from 'react';
 import {AutoClosedOrderReport} from './AutoClosedOrderReport';
 import {AutoClosedOrderMaterials} from './AutoClosedOrderMaterials';
+import {AutoInternalOrderCosts} from './AutoInternalOrderCosts';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const day=/^\d{4}-\d{2}-\d{2}$/;
@@ -132,5 +133,6 @@ export function AutoDemoFinanceReport(){
     </div>}
     <AutoClosedOrderReport key={'closed:'+org+':'+loc+':'+from+':'+to} org={org} loc={loc} from={from} to={to} allowed={allowed}/>
     <AutoClosedOrderMaterials key={'materials:'+org+':'+loc+':'+from+':'+to} org={org} loc={loc} from={from} to={to} allowed={allowed}/>
+    <AutoInternalOrderCosts key={'costs:'+org+':'+loc+':'+from+':'+to} org={org} loc={loc} from={from} to={to} allowed={allowed}/>
   </section>;
 }
