@@ -1,6 +1,11 @@
 import React from 'react';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const initialScope=(key:string)=>{
+  const value=new URLSearchParams(window.location.search).get(key)??'';
+  return uuid.test(value)?value:'';
+};
 type Event={id:string;kind:'SIM_PAYMENT'|'SIM_REFUND';amountMinor:number;createdAt:string};
 type Stock={skuId:string;quantity:number};
 type Preview={id:string;revisionId:string;digest:string;createdAt:string;
@@ -86,7 +91,9 @@ const reasons:Record<string,string>={
 };
 
 export function AutoDemoClose({role}:{role:'staff'|'client'}){
-  const [org,setOrg]=React.useState(''),[loc,setLoc]=React.useState(''),[order,setOrder]=React.useState('');
+  const [org,setOrg]=React.useState(()=>initialScope('org')),
+    [loc,setLoc]=React.useState(()=>initialScope('loc')),
+    [order,setOrder]=React.useState(()=>initialScope('order'));
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [loaded,setLoaded]=React.useState(''),[data,setData]=React.useState<Snapshot|null>(null);
   const [revision,setRevision]=React.useState(0),[busy,setBusy]=React.useState(false);
