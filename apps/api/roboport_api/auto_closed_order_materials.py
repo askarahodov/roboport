@@ -182,9 +182,9 @@ def _material_report(conn, token, org, loc, from_day, to_day, base):
         receipts = sum(r[4] is not None for r in rows)
         other_legs = any(r[13]==0 for r in rows)
         if lot in serial_lots and (receipts!=1 or other_legs):
-            status, parts = serial.prove_lot(conn,token,org,loc,lot,rows,
+            status, parts, scanned = serial.prove_lot(conn,token,org,loc,lot,rows,
                                              budget=serial_budget)
-            serial_budget-=len(parts)
+            serial_budget-=scanned
             sources[lot]=(status,None)
             serial_results[lot]=parts
         elif receipts>1:
