@@ -76,3 +76,64 @@ def test_timeline_reauthorization_role_and_customer_proof(monkeypatch):
     assert client.get(url).status_code==403
     monkeypatch.delenv("ROBOport_SYNTHETIC_AUTO_API")
     assert client.get(url).status_code==404
+
+
+def test_timeline_document_policy_deny_and_cutoff_exclude_sources(monkeypatch):
+    """Real PG17 ADMIN policies must filter entire families before LIMIT."""
+    from roboport_api.auto_order_timeline import read_order_timeline
+    from roboport_api.auto_document_access import publish_policy
+    from test_pg_auto_document_access_http import admin
+
+    d,org,loc,_,_,orders,client,_=setup(monkeypatch,count=1)
+    order=orders[0]
+    intake_token=d["tokens"][d["intake"]]
+    manager_token=d["tokens"][d["manager"]]
+
+    class Recorder:
+        def __init__(self, db):
+            self.db=db
+            self.sql=[]
+        def transaction(self):
+            return self.db.transaction()
+        def execute(self, query, params=None):
+            self.sql.append(query)
+            return self.db.execute(query,params)
+
+    def sourced_sql():
+        with psycopg.connect(DSN) as db:
+            recorder=Recorder(db)
+            value=read_order_timeline(recorder,intake_token,org,loc,order)
+            assert value["items"][0]["action"]=="ORDER_CREATED"
+            assert "customerLinkId" not in str(value)
+            return next(q for q in recorder.sql if "WITH evidence AS" in q)
+
+    # An INTAKE actor ordinarily can read their intake-act documents, but
+    # cannot read ESTIMATE/HANDOVER history without a MANAGER grant.
+    initial=sourced_sql()
+    assert "FROM auto_work_order_intake_act item" in initial
+    assert "FROM auto_work_order_estimate_revision item" not in initial
+    assert "FROM auto_order_demo_document_event item" not in initial
+
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["manager"])
+        def rule(*,allowed,not_before=None):
+            publish_policy(db,manager_token,org,request_key=uuid4(),
+                role="INTAKE",loc=loc,user=None,document="INTAKE_ACT",
+                cap="READ",allowed=allowed,not_before=not_before)
+        rule(allowed=False)
+    denied=sourced_sql()
+    assert "FROM auto_work_order_intake_act item" not in denied
+    assert "FROM auto_work_order_intake_act_review item" not in denied
+    with psycopg.connect(DSN) as db:
+        publish_policy(db,manager_token,org,request_key=uuid4(),
+            role="INTAKE",loc=loc,user=None,document="INTAKE_ACT",cap="READ",
+            allowed=True,not_before=__import__("datetime").datetime(
+                2099,1,1,tzinfo=__import__("datetime").timezone.utc))
+    cutoff=sourced_sql()
+    assert "FROM auto_work_order_intake_act item" not in cutoff
+    with psycopg.connect(DSN) as db:
+        publish_policy(db,manager_token,org,request_key=uuid4(),
+            role="INTAKE",loc=loc,user=None,document="INTAKE_ACT",cap="READ",
+            allowed=True,not_before=None)
+    allowed=sourced_sql()
+    assert "FROM auto_work_order_intake_act item" in allowed
