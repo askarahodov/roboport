@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {createHash} from 'node:crypto';
 
 const org='11111111-1111-4111-8111-111111111111';
 const loc='22222222-2222-4222-8222-222222222222';
@@ -188,6 +189,11 @@ test('390/1280: ZIP закрытого документа доступен MANAG
     let state:'CLIENT_ACKNOWLEDGED'|'CLOSED_TECHNICAL'='CLIENT_ACKNOWLEDGED';
     let revoke=false;
     let downloads=0;
+    let savedDownloads=0;
+    page.on('download',()=>{savedDownloads++;});
+    let digestMode:'valid'|'mismatch'|'missing'='valid';
+    const zipBytes=Buffer.from([0x50,0x4b,0x03,0x04,0,0,0,0]);
+    const zipHash=createHash('sha256').update(zipBytes).digest('hex');
     const dossierName='auto-technical-dossier-'+order+'.zip';
     await page.route(root,route=>{
       const request=route.request(),path=new URL(request.url()).pathname;
@@ -201,8 +207,11 @@ test('390/1280: ZIP закрытого документа доступен MANAG
           headers:{
             'Content-Disposition':'attachment; filename="'+dossierName+'"',
             'Cache-Control':'no-store, private',
+            ...(digestMode==='missing'?{}:{
+              'X-Technical-Dossier-SHA256':digestMode==='valid'?zipHash:'0'.repeat(64),
+            }),
           },
-          body:Buffer.from([0x50,0x4b,0x03,0x04,0,0,0,0]),
+          body:zipBytes,
         });
       }
       const flow={
@@ -249,7 +258,10 @@ test('390/1280: ZIP закрытого документа доступен MANAG
     const first=page.waitForEvent('download');
     await button.click();
     expect((await first).suggestedFilename()).toBe(dossierName);
+    await expect(page.getByRole('status').filter({hasText:'Архив проверен перед сохранением'}))
+      .toContainText(zipHash);
     expect(downloads).toBe(1);
+    expect(savedDownloads).toBe(1);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(390);
 
@@ -260,17 +272,37 @@ test('390/1280: ZIP закрытого документа доступен MANAG
     const second=page.waitForEvent('download');
     await button.click();
     expect((await second).suggestedFilename()).toBe(dossierName);
+    await expect(page.getByRole('status').filter({hasText:'Архив проверен перед сохранением'}))
+      .toContainText(zipHash);
     expect(downloads).toBe(2);
+    expect(savedDownloads).toBe(2);
     await page.screenshot({path:testInfo.outputPath('dossier-1280-client.png'),
       fullPage:true,animations:'disabled'});
     expect(await page.evaluate(()=>document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(1280);
 
+    // Even a syntactically correct but incorrect hash fails closed: no ZIP saved.
+    digestMode='mismatch';
+    await button.click();
+    await expect(page.getByRole('alert')).toContainText('контрольная сумма SHA-256');
+    await expect(page.getByText('Архив проверен перед сохранением.')).toHaveCount(0);
+    expect(downloads).toBe(3);
+    expect(savedDownloads).toBe(2);
+
+    // No header is also an error, not an invitation to download an unchecked ZIP.
+    digestMode='missing';
+    await button.click();
+    await expect(page.getByRole('alert')).toContainText('контрольная сумма SHA-256');
+    expect(downloads).toBe(4);
+    expect(savedDownloads).toBe(2);
+
     // Отзыв доступа очищает не только кнопку, но и старое содержимое пакета.
+    digestMode='valid';
     revoke=true;
     await button.click();
     await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
     await expect(button).toHaveCount(0);
     await expect(page.getByText('Технический пакет зафиксирован')).toHaveCount(0);
-    expect(downloads).toBe(3);
+    expect(downloads).toBe(5);
+    expect(savedDownloads).toBe(2);
   });
