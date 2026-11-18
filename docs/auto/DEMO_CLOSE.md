@@ -382,7 +382,10 @@ ZIP **и** отдельно сохранённое значение, этот к
 фискализацию, неизменность внешнего диска или физическую выдачу.
 Использовать только для synthetic-dev, до gate #119.
 
-Проверки: `tests/bootstrap/test_verify_auto_technical_dossier.py`
+Проверки браузерного сценария: `apps/web/e2e/auto-demo-close.spec.ts`
+(390/1280, staff/client, корректный SHA, отказ при отсутствии/подмене,
+403 и запрет сохранения неподтверждённого ZIP).
+Проверки CLI: `tests/bootstrap/test_verify_auto_technical_dossier.py`
 (включая tampering и повреждённый ZIP) и
 `tests/integration/test_pg_auto_technical_dossier_http.py`
 (настоящий PG17+HTTPS архив сразу после технического закрытия).
