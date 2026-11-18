@@ -4,8 +4,11 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const day=/^\d{4}-\d{2}-\d{2}$/;
 const today=()=>new Date().toISOString().slice(0,10);
 const safe=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
+type LaborSource={laborEntryId:string;serviceId:string;actualMinutes:number};
 type WorkOrder={
-  workOrderId:string;serviceCount:number;actualMinutes:number;serviceIds:string[];
+  workOrderId:string;closedDay:string;closedEventId:string;finishEventId:string;
+  qcEventId:string;serviceCount:number;actualMinutes:number;serviceIds:string[];
+  laborEntries:LaborSource[];
 };
 type Mechanic={
   mechanicId:string;workOrderCount:number;serviceCount:number;
@@ -13,7 +16,8 @@ type Mechanic={
 };
 type Report={
   syntheticOnly:true;realMoney:false;payrollAvailable:false;releaseAllowed:false;
-  basis:'CLOSED_TECHNICAL_QC_PASSED_ACTIVE_MECHANIC_LABOR';
+  basis:'CLOSED_TECHNICAL_LOCAL_DAY_QC_PASS_LABOR_SOURCES';
+  periodBasis:'CLOSED_TECHNICAL_LOCAL_DAY';
   timeZone:string;fromDay:string;toDay:string;activeMechanicsOnly:true;
   limitedToEntries:500;
   summary:{mechanicCount:number;workOrderCount:number;
@@ -26,7 +30,8 @@ function parse(raw:unknown,from:string,to:string):Report{
   const r=raw as Partial<Report>;
   if(r.syntheticOnly!==true||r.realMoney!==false||
     r.payrollAvailable!==false||r.releaseAllowed!==false||
-    r.basis!=='CLOSED_TECHNICAL_QC_PASSED_ACTIVE_MECHANIC_LABOR'||
+    r.basis!=='CLOSED_TECHNICAL_LOCAL_DAY_QC_PASS_LABOR_SOURCES'||
+    r.periodBasis!=='CLOSED_TECHNICAL_LOCAL_DAY'||
     r.activeMechanicsOnly!==true||r.limitedToEntries!==500||
     r.fromDay!==from||r.toDay!==to||
     typeof r.timeZone!=='string'||r.timeZone.length<2||r.timeZone.length>100||
@@ -34,6 +39,7 @@ function parse(raw:unknown,from:string,to:string):Report{
     ![r.summary.mechanicCount,r.summary.workOrderCount,
       r.summary.serviceCount,r.summary.actualMinutes].every(safe))throw Error('invalid');
   const ids=new Set<string>(),uniqueOrders=new Set<string>();
+  const immutable=new Map<string,string>(),sourceIds=new Set<string>();
   let minutes=0,services=0;
   for(const mechanic of r.items){
     if(!mechanic||typeof mechanic!=='object'||!uuid.test(mechanic.mechanicId)||
@@ -45,10 +51,28 @@ function parse(raw:unknown,from:string,to:string):Report{
     let mechanicMinutes=0,mechanicServices=0;
     for(const order of mechanic.orders){
       if(!order||!uuid.test(order.workOrderId)||seen.has(order.workOrderId)||
+        !day.test(order.closedDay)||order.closedDay<from||order.closedDay>to||
+        ![order.closedEventId,order.finishEventId,order.qcEventId].every(x=>uuid.test(x))||
         !safe(order.actualMinutes)||!safe(order.serviceCount)||
         order.serviceCount<1||!Array.isArray(order.serviceIds)||
-        order.serviceIds.length!==order.serviceCount||
-        !order.serviceIds.every(x=>typeof x==='string'&&uuid.test(x)))throw Error('invalid');
+        !Array.isArray(order.laborEntries)||
+        order.laborEntries.length!==order.serviceCount||
+        order.serviceIds.length!==order.serviceCount)throw Error('invalid');
+      const proof=[order.closedDay,order.closedEventId,order.finishEventId,order.qcEventId].join(':');
+      if(immutable.has(order.workOrderId)&&immutable.get(order.workOrderId)!==proof)
+        throw Error('mixed proof');
+      immutable.set(order.workOrderId,proof);
+      let verifiedMinutes=0;
+      for(const [index,entry] of order.laborEntries.entries()){
+        if(!entry||!uuid.test(entry.laborEntryId)||sourceIds.has(entry.laborEntryId)||
+          !uuid.test(entry.serviceId)||!safe(entry.actualMinutes)||
+          entry.actualMinutes<1||entry.actualMinutes>1440||
+          order.serviceIds[index]!==entry.serviceId)throw Error('labor proof');
+        sourceIds.add(entry.laborEntryId);
+        verifiedMinutes+=entry.actualMinutes;
+      }
+      if(!Number.isSafeInteger(verifiedMinutes)||verifiedMinutes!==order.actualMinutes)
+        throw Error('labor sum');
       seen.add(order.workOrderId);uniqueOrders.add(order.workOrderId);
       mechanicMinutes+=order.actualMinutes;
       mechanicServices+=order.serviceCount;
@@ -137,7 +161,7 @@ export function AutoMechanicProductivity(){
       QC PASS. Только сотрудники с действующим доступом и подтверждённые
       связи с автомобилем. Это <strong>не зарплата, не прибыль, не выручка</strong>
       и не юридически завершённый ремонт. Период — локальная дата
-      завершения работ в филиале (1–31 день).</p>
+      события технического закрытия CLOSED_TECHNICAL, не дата завершения работ (1–31 день).</p>
     <label>UUID организации <input aria-label="UUID организации" value={org}
       onChange={e=>{reset();setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" value={loc}
@@ -160,7 +184,7 @@ export function AutoMechanicProductivity(){
         Закрытых нарядов: {report.summary.workOrderCount}.
         Услуг: {report.summary.serviceCount}.
         Факт: {report.summary.actualMinutes} мин.</p>
-      <p>Часовой пояс: {report.timeZone}. Показаны только действующие сотрудники.
+      <p>Часовой пояс: {report.timeZone}. День отчёта — закрытие заказ-наряда; показаны только действующие сотрудники.
         При отзыве прав отчёт перечитывается, ранее показанные строки не гарантированы.
         UUID сотрудника — технический идентификатор без имени и ставки.</p>
       <button type="button" disabled={exporting}
@@ -170,12 +194,20 @@ export function AutoMechanicProductivity(){
         <table>
           <caption>Фактические минуты с детализацией по заказ-нарядам</caption>
           <thead><tr><th scope="col">Механик UUID</th>
-            <th scope="col">Заказ-наряд UUID</th><th scope="col">Услуг</th>
-            <th scope="col">Факт, минут</th></tr></thead>
+            <th scope="col">Заказ-наряд UUID</th><th scope="col">День закрытия</th><th scope="col">Услуг</th>
+            <th scope="col">Факт, минут</th><th scope="col">Первичные события</th></tr></thead>
           <tbody>{report.items.flatMap(person=>person.orders.map(order=>
             <tr key={person.mechanicId+order.workOrderId}>
               <td>{person.mechanicId}</td><th scope="row">{order.workOrderId}</th>
-              <td>{order.serviceCount}</td><td>{order.actualMinutes}</td>
+              <td>{order.closedDay}</td><td>{order.serviceCount}</td><td>{order.actualMinutes}</td>
+              <td><details><summary>Первичные записи труда</summary>
+                <p>Техническое закрытие: {order.closedEventId}</p>
+                <p>Завершение работ: {order.finishEventId}</p>
+                <p>QC PASS: {order.qcEventId}</p>
+                <ul>{order.laborEntries.map(entry=><li key={entry.laborEntryId}>
+                  Запись труда: {entry.laborEntryId} · Услуга: {entry.serviceId}
+                  {' '}· {entry.actualMinutes} мин
+                </li>)}</ul></details></td>
             </tr>))}</tbody>
         </table>
       </div>
