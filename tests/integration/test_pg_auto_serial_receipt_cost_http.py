@@ -136,7 +136,7 @@ def test_serial_evidence_http_csrf_independence_replay_and_immutable(monkeypatch
         acceptor=d["tokens"][d["other"]]
         receipt=create_receipt_document(db,maker,org,loc,lot,uuid4(),2,"SRC-SERIAL-EVIDENCE")
         accept_receipt_document(db,acceptor,org,loc,receipt,uuid4())
-        serial=register_lot_serial(db,acceptor,org,loc,lot,uuid4(),"SERIAL-PROOF-TEST")
+        serial=register_lot_serial(db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),"SERIAL-PROOF-TEST")
     client=TestClient(app,base_url="https://127.0.0.1")
     base=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/warehouse/serial-receipts"
     key=uuid4()
