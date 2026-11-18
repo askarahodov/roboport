@@ -29,7 +29,7 @@ function parse(raw:unknown,stage:Stage):Page{
          v=>typeof v==='string'&&uuid.test(v))||
       ![row.createdAt,row.startsAt,row.endsAt].every(
          v=>typeof v==='string'&&!Number.isNaN(Date.parse(v)))||
-      row.startsAt>=row.endsAt||!stages.includes(row.stage)||
+      Date.parse(row.startsAt)>=Date.parse(row.endsAt)||!stages.includes(row.stage)||
       row.stage==='ALL'||(stage!=='ALL'&&row.stage!==stage)||
       ids.has(row.workOrderId))throw Error('invalid row');
     ids.add(row.workOrderId);
@@ -138,7 +138,7 @@ export function AutoWorkOrderRegister(){
       {selected&&page.items.some(x=>x.workOrderId===selected)&&(()=>{
         const row=page.items.find(x=>x.workOrderId===selected)!;
         return <section aria-label="Сведения о выбранном заказ-наряде">
-          <h2>Сведения об заказ-наряде</h2>
+          <h2>Сведения о заказ-наряде</h2>
           <p>Заказ: <code>{row.workOrderId}</code>. Состояние: {names[row.stage]}.</p>
           <p>Запись: <code>{row.appointmentId}</code>. Пост: <code>{row.bayId}</code>.</p>
           <p>Интервал: {new Date(row.startsAt).toLocaleString('ru-RU')} —
