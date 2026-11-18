@@ -248,6 +248,8 @@ ROLE_BASE={
     "READ":{"MANAGER","CASHIER"},"CREATE":{"MANAGER"},
     "EDIT":{"CASHIER","MANAGER"},"CLOSE":{"CASHIER"},
     "PRICE_SALES":{"MANAGER","CASHIER"},
+    # Внутренние затраты филиала — только MANAGER; CASHIER не получает ставки.
+    "PRICE_PURCHASE":{"MANAGER"},
   },
 }
 
