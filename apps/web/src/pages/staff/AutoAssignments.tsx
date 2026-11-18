@@ -127,6 +127,8 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
   const org=lockedScope?.org??localOrg;
   const loc=lockedScope?.loc??localLoc;
   const order=lockedScope?.order??localOrder;
+  const withinOrder=(id:string)=>!lockedScope||
+    id.toLowerCase()===lockedScope.order.toLowerCase();
   const [mechanic,setMechanic]=React.useState('');
   const [starts,setStarts]=React.useState('');
   const [ends,setEnds]=React.useState('');
@@ -200,7 +202,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
     });
   }
   function respond(a:Assignment,action:'accept'|'decline'){
-    if(!canMutate||!a.canRespond||a.status!=='OFFERED')return;
+    if(!canMutate||!withinOrder(a.workOrderId)||!a.canRespond||a.status!=='OFFERED')return;
     void send({
       path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/'+action,
       body:JSON.stringify({requestKey:crypto.randomUUID()}),
@@ -208,7 +210,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
     });
   }
   function withdraw(a:Withdrawable){
-    if(!canMutate||!queue?.canOffer||a.status!=='OFFERED')return;
+    if(!canMutate||!withinOrder(a.workOrderId)||!queue?.canOffer||a.status!=='OFFERED')return;
     void send({
       path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/withdraw',
       body:JSON.stringify({requestKey:crypto.randomUUID()}),
@@ -216,7 +218,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
     });
   }
   function releaseAccepted(a:Releasable){
-    if(!canMutate||!queue?.canOffer||a.status!=='ACCEPTED')return;
+    if(!canMutate||!withinOrder(a.workOrderId)||!queue?.canOffer||a.status!=='ACCEPTED')return;
     void send({
       path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/release',
       body:JSON.stringify({requestKey:crypto.randomUUID()}),
@@ -346,7 +348,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
         отмены смены, отзыва прав механика или связи автомобиля.
         Снять можно только статус «Ожидает ответа». Уже принятые
         назначения не отменяются этой операцией.</p>
-      {(queue.withdrawable??[]).filter(a=>!lockedScope||a.workOrderId===lockedScope.order).length===0?
+      {(queue.withdrawable??[]).filter(a=>withinOrder(a.workOrderId)).length===0?
         <p>Непринятых предложений на этой странице нет.</p>:
         <div style={{maxWidth:'100%',overflowX:'auto'}}>
           <table>
@@ -354,7 +356,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
             <thead><tr><th scope="col">Заказ-наряд</th>
               <th scope="col">Механик</th><th scope="col">Интервал</th>
               <th scope="col">Действие</th></tr></thead>
-            <tbody>{(queue.withdrawable??[]).filter(a=>!lockedScope||a.workOrderId===lockedScope.order).map(a=><tr key={a.assignmentId}>
+            <tbody>{(queue.withdrawable??[]).filter(a=>withinOrder(a.workOrderId)).map(a=><tr key={a.assignmentId}>
               <th scope="row">{a.workOrderId}</th>
               <td>{a.mechanicId}</td>
               <td>{formatDate(a.startsAt)} — {formatDate(a.endsAt)}</td>
@@ -385,7 +387,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
         техническом старте, фактических работах, выдаче материалов или
         QC. Исходное принятие и его время останутся в истории.
         Снятие после начала работ запрещено.</p>
-      {(queue.releasable??[]).filter(a=>!lockedScope||a.workOrderId===lockedScope.order).length===0?
+      {(queue.releasable??[]).filter(a=>withinOrder(a.workOrderId)).length===0?
         <p>Принятых назначений без начала работ на этой странице нет.</p>:
         <div style={{maxWidth:'100%',overflowX:'auto'}}>
           <table>
@@ -393,7 +395,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
             <thead><tr><th scope="col">Заказ-наряд</th>
               <th scope="col">Механик</th><th scope="col">Интервал</th>
               <th scope="col">Принято</th><th scope="col">Действие</th></tr></thead>
-            <tbody>{(queue.releasable??[]).filter(a=>!lockedScope||a.workOrderId===lockedScope.order).map(a=><tr key={a.assignmentId}>
+            <tbody>{(queue.releasable??[]).filter(a=>withinOrder(a.workOrderId)).map(a=><tr key={a.assignmentId}>
               <th scope="row">{a.workOrderId}</th>
               <td>{a.mechanicId}</td>
               <td>{formatDate(a.startsAt)} — {formatDate(a.endsAt)}</td>
@@ -423,7 +425,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
         <p role="alert">Более 100 действующих назначений: полный живой
           список недоступен без фильтра. Отзыв и освобождение остаются
           доступны в отдельных постраничных очередях.</p>:
-      queue.items.filter(a=>!lockedScope||a.workOrderId===lockedScope.order).length===0
+      queue.items.filter(a=>withinOrder(a.workOrderId)).length===0
         ? <p>Для ваших прав действующих назначений нет.</p>
         : <div style={{maxWidth:'100%',overflowX:'auto'}}>
           <table>
@@ -431,7 +433,7 @@ export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:stri
             <thead><tr><th scope="col">Заказ-наряд</th>
               <th scope="col">Механик</th><th scope="col">Интервал</th>
               <th scope="col">Статус</th><th scope="col">Действия</th></tr></thead>
-            <tbody>{queue.items.filter(a=>!lockedScope||a.workOrderId===lockedScope.order).map(a=><tr key={a.assignmentId}>
+            <tbody>{queue.items.filter(a=>withinOrder(a.workOrderId)).map(a=><tr key={a.assignmentId}>
               <th scope="row">{a.workOrderId}</th>
               <td>{a.mechanicId}</td>
               <td>{formatDate(a.startsAt)} — {formatDate(a.endsAt)}</td>
