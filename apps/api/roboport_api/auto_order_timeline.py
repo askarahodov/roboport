@@ -14,6 +14,7 @@ import psycopg
 from .auto_order_customer_read import get_order_customer_summary
 from .auto_stock_service import AutoStockDenied
 from .keyset_cursor import decode_cursor, encode_cursor
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 
 
 def read_order_timeline(conn: psycopg.Connection, token: str, org: UUID,
@@ -33,28 +34,50 @@ def read_order_timeline(conn: psycopg.Connection, token: str, org: UUID,
         raise AutoStockDenied("INVALID_INPUT") from exc
     with conn.transaction():
         get_order_customer_summary(conn, token, org, loc, order)
+        # Document ACL and not_before apply to events as well as documents.
+        # A generic INTAKE/MANAGER workspace grant must not reveal the
+        # existence, timestamps or client decisions of forbidden documents.
+        # Evaluate policies BEFORE paginating, preserving keyset integrity.
+        document_roles = {
+            "INTAKE_ACT": ("INTAKE", "MANAGER"),
+            "ESTIMATE": ("MANAGER",),
+            "HANDOVER": ("MANAGER",),
+        }
+        visible_documents = set()
+        for kind, roles in document_roles.items():
+            try:
+                require_document_access(
+                    conn, token, org, loc, roles, kind, "READ", order=order,
+                )
+            except DocumentPolicyDenied:
+                continue
+            visible_documents.add(kind)
         # Every branch has the *same* order identity parameter. Do not filter
         # after LIMIT: this query orders immutable evidence across all stages.
+        # Last field identifies document-scoped event families.
         sources = (
-            ("auto_work_order", "id", "'ORDER_CREATED'"),
-            ("auto_work_order_service", "id", "'SERVICE_SELECTED'"),
-            ("auto_work_order_inspection", "id", "'INSPECTION_RECORDED'"),
-            ("auto_work_order_intake_act", "id", "'INTAKE_ACT_CREATED'"),
+            ("auto_work_order", "id", "'ORDER_CREATED'", None),
+            ("auto_work_order_service", "id", "'SERVICE_SELECTED'", None),
+            ("auto_work_order_inspection", "id", "'INSPECTION_RECORDED'", None),
+            ("auto_work_order_intake_act", "id", "'INTAKE_ACT_CREATED'", "INTAKE_ACT"),
             ("auto_work_order_intake_act_review", "id",
-             "'INTAKE_' || decision"),
-            ("auto_work_order_estimate_revision", "id", "'ESTIMATE_PUBLISHED'"),
+             "'INTAKE_' || decision", "INTAKE_ACT"),
+            ("auto_work_order_estimate_revision", "id", "'ESTIMATE_PUBLISHED'", "ESTIMATE"),
             ("auto_work_order_estimate_decision", "id",
-             "'ESTIMATE_' || decision"),
-            ("auto_work_order_execution", "id", "'EXECUTION_STARTED'"),
-            ("auto_work_order_labor_entry", "id", "'LABOR_RECORDED'"),
-            ("auto_work_order_execution_finish", "id", "'EXECUTION_FINISHED'"),
-            ("auto_work_order_qc_event", "id", "'QC_' || result"),
-            ("auto_order_demo_handover_preview", "id", "'PREVIEW_SEALED'"),
-            ("auto_order_demo_document_event", "id", "'DOCUMENT_' || action"),
+             "'ESTIMATE_' || decision", "ESTIMATE"),
+            ("auto_work_order_execution", "id", "'EXECUTION_STARTED'", None),
+            ("auto_work_order_labor_entry", "id", "'LABOR_RECORDED'", None),
+            ("auto_work_order_execution_finish", "id", "'EXECUTION_FINISHED'", None),
+            ("auto_work_order_qc_event", "id", "'QC_' || result", None),
+            ("auto_order_demo_handover_preview", "id", "'PREVIEW_SEALED'", "HANDOVER"),
+            ("auto_order_demo_document_event", "id",
+             "'DOCUMENT_' || action", "HANDOVER"),
         )
         selects = []
         args = []
-        for table, ident, action in sources:
+        for table, ident, action, document_kind in sources:
+            if document_kind is not None and document_kind not in visible_documents:
+                continue
             if table in ("auto_work_order_labor_entry",
                          "auto_work_order_execution_finish"):
                 selects.append(
