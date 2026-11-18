@@ -53,7 +53,8 @@ test('order register: scoped lookup, page navigation and link to selected order'
   await expect(page.getByRole('region',{name:'Сведения о выбранном заказ-наряде'})).toContainText(booking);
   await page.setViewportSize({width:1280,height:900});
   await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
-  await page.getByRole('link',{name:'Открыть услуги выбранного наряда'}).click();
+  await page.getByRole('link',{name:'Открыть рабочее место выбранного наряда'}).click();
+  await expect(page.getByRole('heading',{name:'Заказ-наряд: единое рабочее место (dev)'})).toBeVisible();
   await expect(page.getByRole('textbox',{name:'UUID заказ-наряда'})).toHaveValue(order);
   await expect(page.getByRole('textbox',{name:'UUID организации'})).toHaveValue(org);
   await expect(page.getByRole('textbox',{name:'UUID филиала'})).toHaveValue(loc);
