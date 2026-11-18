@@ -144,6 +144,15 @@ def verify_dossier_bytes(data: bytes) -> dict:
              preview["approvedTotalMinor"] - preview["simulatedPaidMinor"] +
              preview["simulatedRefundedMinor"] == 0, "INVALID_SETTLEMENT")
 
+    # Verify priced extra work against its immutable line items, not only totals.
+    extra_lines = preview.get("extraLines")
+    _require(type(extra_lines) is list and len(extra_lines) <= 20
+             and (preview["approvedExtraMinor"] == 0 or len(extra_lines) > 0)
+             and all(type(line) is dict and _integer(line.get("amountMinor"))
+                     for line in extra_lines)
+             and sum(line["amountMinor"] for line in extra_lines) ==
+             preview["approvedExtraMinor"], "EXTRA_LINES_MISMATCH")
+
     events = _json(files["document-events.json"], "INVALID_DOCUMENT_EVENTS")
     _require(type(events) is list and len(events) == 3 and
              [e.get("action") for e in events if type(e) is dict] ==
@@ -212,7 +221,16 @@ def verify_dossier_bytes(data: bytes) -> dict:
     photos = intake.get("files")
     _require(type(photos) is list and len(photos) == len(names) - 1,
              "INVALID_INTAKE_MANIFEST")
-    for name, entry in zip(names[1:], photos, strict=True):
+    # Preserve the independently recorded photo set inside the act itself.
+    # A matching nested file list cannot silently omit an act photograph.
+    act_photos = act.get("photos")
+    _require(type(act_photos) is list and len(act_photos) == len(photos),
+             "PHOTO_METADATA_MISMATCH")
+    for name, entry, source in zip(names[1:], photos, act_photos, strict=True):
+        _require(type(source) is dict and
+                 all(source.get(field) == entry.get(field)
+                     for field in ("sha256", "areaCode", "width", "height")),
+                 "PHOTO_METADATA_MISMATCH")
         _require(type(entry) is dict and entry.get("path") == name and
                  _hash(entry.get("sha256")) and
                  sha256(nested[name]).hexdigest() == entry["sha256"] and
