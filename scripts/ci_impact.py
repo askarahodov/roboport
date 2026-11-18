@@ -6,6 +6,8 @@ Only explicitly changed PG integration tests may be selected for scoped runs.
 from __future__ import annotations
 
 import argparse
+import base64
+import json
 import os
 import subprocess
 import sys
@@ -96,6 +98,15 @@ def main() -> int:
     lines = [f"{job.replace('-', '_')}={'true' if job in selected else 'false'}"
              for job in JOBS]
     lines.append(f"pg_full={'true' if full_pg else 'false'}")
+    # Browser container does not mount .git. Transfer a bounded, canonical
+    # list computed by the trusted host impact job. Oversized/unknown = FULL.
+    browser_paths = "FULL"
+    if not args.full and paths and len(paths) <= 250:
+        blob = json.dumps(paths, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+        encoded = base64.urlsafe_b64encode(blob).decode("ascii").rstrip("=")
+        if len(encoded) <= 12000:
+            browser_paths = encoded
+    lines.append(f"browser_paths_b64={browser_paths}")
     output = "\n".join(lines) + "\n"
     print(output, end="")
     if target := os.environ.get("GITHUB_OUTPUT"):
