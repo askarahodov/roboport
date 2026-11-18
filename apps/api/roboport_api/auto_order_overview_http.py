@@ -69,7 +69,7 @@ def staff_work_order_register(org_id: str,loc_id: str,request: Request,
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/workspace")
 def staff_order_workspace(org_id: str,loc_id: str,order_id: str,request: Request):
-    """One scoped stage snapshot, never a bypass for stage-specific ACLs."""
+    """Сводка этапов в одном филиале; специальные права разделов не обходятся."""
     from .auto_order_workspace import read_order_workspace
     dsn=_request_dsn(request)
     if isinstance(dsn,JSONResponse):
