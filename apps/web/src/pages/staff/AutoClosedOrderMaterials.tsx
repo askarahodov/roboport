@@ -98,7 +98,7 @@ export function parseMaterialReport(raw:unknown,from:string,to:string):Report{
         if(!g.lotId||g.source!==null||g.fifoSlices.length!==0||!int(g.materialNetMinor)||
           g.netQuantity<0||!g.serialSlices.length)throw Error('serial');
         const movementMap=new Map(g.movements.map(m=>[m.stockEventId,m]));
-        const consumed=new Set<string>(),issueOrigin=new Map<string,string>();
+        const consumed=new Set<string>(),issued=new Map<string,SerialSlice>(),returned=new Set<string>();
         const units=new Map<string,number>(),receipts=new Map<string,string>();
         let cost=0;
         for(const s of g.serialSlices){
@@ -114,13 +114,22 @@ export function parseMaterialReport(raw:unknown,from:string,to:string):Report{
           if(receipts.has(s.serialId)&&receipts.get(s.serialId)!==source)throw Error('serial receipt');
           receipts.set(s.serialId,source);
           if(s.action==='ISSUE'){
-            if(s.lotMovementId!==s.originalIssueId)throw Error('serial origin');
-            issueOrigin.set(s.serialId+':'+s.originalIssueId,s.receiptId);
-          }else if(issueOrigin.has(s.serialId+':'+s.originalIssueId)&&
-            issueOrigin.get(s.serialId+':'+s.originalIssueId)!==s.receiptId)throw Error('serial return');
+            if(s.lotMovementId!==s.originalIssueId||issued.has(s.originalIssueId))
+              throw Error('serial origin');
+            issued.set(s.originalIssueId,s);
+          }
           units.set(s.stockEventId,(units.get(s.stockEventId)||0)+1);
           cost+=s.unitNetMinor*(s.action==='ISSUE'?1:-1);
           if(!Number.isSafeInteger(cost))throw Error('serial overflow');
+        }
+        for(const s of g.serialSlices){
+          if(s.action==='RETURN'){
+            const origin=issued.get(s.originalIssueId);
+            if(!origin||origin.serialId!==s.serialId||origin.receiptId!==s.receiptId||
+              origin.sourceLocationId!==s.sourceLocationId||origin.unitNetMinor!==s.unitNetMinor||
+              returned.has(s.originalIssueId))throw Error('serial return');
+            returned.add(s.originalIssueId);
+          }
         }
         if(g.movements.some(m=>units.get(m.stockEventId)!==m.quantity)||
           cost!==g.materialNetMinor)throw Error('serial totals');
