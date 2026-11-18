@@ -1,5 +1,7 @@
 """Offline regression for PR-only browser test selection and release safety."""
 import unittest
+import subprocess
+from unittest.mock import patch
 
 from scripts.ci_browser import PAGE_SCENARIOS, plan
 
@@ -77,6 +79,18 @@ class BrowserImpactTests(unittest.TestCase):
             ["apps/web/e2e/auto-order-register.spec.ts"],
             full=True,available=SPECS,
         ))
+
+    def test_git_failure_runs_full_suite_not_zero_tests(self):
+        from scripts.ci_browser import main
+        failure=subprocess.CalledProcessError(
+            129,["git","diff"],stderr=b"usage: git diff",
+        )
+        with patch("sys.argv",["ci_browser","--base","abcdef","--run"]), \
+             patch("scripts.ci_browser.changed",side_effect=failure), \
+             patch("scripts.ci_browser.subprocess.call",return_value=0) as launch:
+            self.assertEqual(main(),0)
+            self.assertEqual(launch.call_args.args[0],
+                             ["npm","run","test:e2e"])
 
     def test_explicit_page_mappings_are_nonempty_and_deduplicated(self):
         for key,value in PAGE_SCENARIOS.items():
