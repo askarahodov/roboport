@@ -8,6 +8,7 @@ import {AutoWorkExecution} from './AutoWorkExecution';
 import {AutoIntakeAct} from '../shared/AutoIntakeAct';
 import {AutoEstimateConsole} from '../shared/AutoEstimateConsole';
 import {AutoDemoClose} from '../shared/AutoDemoClose';
+import {AutoOrderTimeline} from './AutoOrderTimeline';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Steps={
@@ -50,7 +51,7 @@ const stateNames:Record<string,string>={
   CLIENT_DISPUTED:'Клиент оспорил',CLOSED_TECHNICAL:'Технически закрыт',
 };
 type Tab='services'|'inspection'|'intake'|'diagnostics'|'estimate'|
-  'assignments'|'execution'|'qc'|'documents';
+  'assignments'|'execution'|'qc'|'documents'|'history';
 const tabs:ReadonlyArray<{id:Tab;label:string;stage:Stage}>= [
   {id:'services',label:'Услуги',stage:'services'},
   {id:'inspection',label:'Осмотр',stage:'inspection'},
@@ -61,6 +62,7 @@ const tabs:ReadonlyArray<{id:Tab;label:string;stage:Stage}>= [
   {id:'execution',label:'Работы и материалы',stage:'execution'},
   {id:'qc',label:'Контроль качества',stage:'quality'},
   {id:'documents',label:'Сверка и документы',stage:'technicalDocuments'},
+  {id:'history',label:'История',stage:'technicalDocuments'},
 ];
 
 function parse(raw:unknown,expectedOrder:string):Snapshot{
@@ -87,6 +89,7 @@ function ActivePanel({tab,lockedScope}:{tab:Tab;lockedScope:{org:string;loc:stri
     case 'execution':return <AutoWorkExecution lockedScope={lockedScope}/>;
     case 'qc':return <AutoWorkshopQc lockedScope={lockedScope}/>;
     case 'documents':return <AutoDemoClose role="staff" lockedScope={lockedScope}/>;
+    case 'history':return <AutoOrderTimeline lockedScope={lockedScope}/>;
   }
 }
 
