@@ -38,11 +38,15 @@ const severityLabels:Record<Severity,string>={
   ROUTINE:'Планово',SOON:'В ближайшее время',URGENT:'Срочно',
 };
 
-export function AutoDiagnostics(){
+export function AutoDiagnostics({lockedScope}:{lockedScope?:{org:string;loc:string;order:string}}={}){
   const [query]=useSearchParams();
-  const [org,setOrg]=React.useState(query.get('org')??'');
-  const [loc,setLoc]=React.useState(query.get('loc')??'');
-  const [order,setOrder]=React.useState(query.get('order')??'');
+  const [localOrg,setOrg]=React.useState(query.get('org')??'');
+  const [localLoc,setLoc]=React.useState(query.get('loc')??'');
+  const [localOrder,setOrder]=React.useState(query.get('order')??'');
+  // Фиксированный контекст рабочего места имеет приоритет над локальной формой.
+  const org=lockedScope?.org??localOrg;
+  const loc=lockedScope?.loc??localLoc;
+  const order=lockedScope?.order??localOrder;
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [data,setData]=React.useState<State|null>(null);
   const [loaded,setLoaded]=React.useState('');
@@ -116,11 +120,11 @@ export function AutoDiagnostics(){
     <p>Структурированное синтетическое заключение. Нет свободного текста, фото,
       юридической подписи или разрешения на выдачу. Заключения становятся частью
       неизменяемого снимка сметы, который отдельно согласует клиент.</p>
-    <label>UUID организации <input aria-label="UUID организации" value={org}
+    <label>UUID организации <input aria-label="UUID организации" value={org} readOnly={lockedScope!==undefined}
       disabled={busy} onChange={e=>setOrg(e.target.value)}/></label>
-    <label>UUID филиала <input aria-label="UUID филиала" value={loc}
+    <label>UUID филиала <input aria-label="UUID филиала" value={loc} readOnly={lockedScope!==undefined}
       disabled={busy} onChange={e=>setLoc(e.target.value)}/></label>
-    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" value={order}
+    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" value={order} readOnly={lockedScope!==undefined}
       disabled={busy} onChange={e=>setOrder(e.target.value)}/></label>
     {status==='idle'&&<p>Укажите организацию, филиал и заказ-наряд.</p>}
     {status==='loading'&&<p role="status">Загрузка диагностики…</p>}

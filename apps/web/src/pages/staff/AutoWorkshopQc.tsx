@@ -39,11 +39,15 @@ function validate(raw:unknown):Snapshot {
   return raw as Snapshot;
 }
 
-export function AutoWorkshopQc() {
+export function AutoWorkshopQc({lockedScope}:{lockedScope?:{org:string;loc:string;order:string}}={}) {
   const [query]=useSearchParams();
-  const [org,setOrg]=React.useState(query.get('org')??'');
-  const [loc,setLoc]=React.useState(query.get('loc')??'');
-  const [order,setOrder]=React.useState(query.get('order')??'');
+  const [localOrg,setOrg]=React.useState(query.get('org')??'');
+  const [localLoc,setLoc]=React.useState(query.get('loc')??'');
+  const [localOrder,setOrder]=React.useState(query.get('order')??'');
+  // Фиксированный контекст рабочего места имеет приоритет над локальной формой.
+  const org=lockedScope?.org??localOrg;
+  const loc=lockedScope?.loc??localLoc;
+  const order=lockedScope?.order??localOrder;
   const [revision,setRevision]=React.useState(0);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [loadedScope,setLoadedScope]=React.useState('');
@@ -183,12 +187,12 @@ export function AutoWorkshopQc() {
     <p>Только синтетический HTTPS-стенд. Осмотр и QC не подтверждают согласование
        сметы, оплату или разрешение на выдачу автомобиля.</p>
     <label>UUID организации <input aria-label="UUID организации" disabled={busy}
-      value={org} onChange={e=>setOrg(e.target.value)}/></label>
+      value={org} readOnly={lockedScope!==undefined} onChange={e=>setOrg(e.target.value)}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" disabled={busy}
-      value={loc} onChange={e=>setLoc(e.target.value)}/></label>
+      value={loc} readOnly={lockedScope!==undefined} onChange={e=>setLoc(e.target.value)}/></label>
     <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" disabled={busy}
-      value={order} onChange={e=>setOrder(e.target.value)}/></label>
-    <section aria-label="Очередь нарядов на независимый QC">
+      value={order} readOnly={lockedScope!==undefined} onChange={e=>setOrder(e.target.value)}/></label>
+    {!lockedScope&&<section aria-label="Очередь нарядов на независимый QC">
       <h2>Наряды к проверке качества</h2>
       <p>Только MECHANIC действующего филиала: приёмочный осмотр завершён,
         независимый QC ожидается либо требуется повтор после FAIL.
@@ -214,7 +218,7 @@ export function AutoWorkshopQc() {
       {queue.status==='ready'&&queue.cursor&&
         <button type="button" disabled={busy}
           onClick={()=>void loadQueue()}>Первая страница QC</button>}
-    </section>
+    </section>}
     {status==='idle'&&<p>Укажите три UUID для проверки действующего заказ-наряда.</p>}
     {status==='loading'&&<p role="status">Загрузка осмотра и журнала QC…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён, запись отменена

@@ -23,9 +23,13 @@ function parse(raw:unknown):Snapshot{
   return raw as Snapshot;
 }
 
-export function AutoWorkExecution(){
+export function AutoWorkExecution({lockedScope}:{lockedScope?:{org:string;loc:string;order:string}}={}){
   const [query]=useSearchParams();
-  const [org,setOrg]=React.useState(query.get('org')??''),[loc,setLoc]=React.useState(query.get('loc')??''),[order,setOrder]=React.useState(query.get('order')??'');
+  const [localOrg,setOrg]=React.useState(query.get('org')??''),[localLoc,setLoc]=React.useState(query.get('loc')??''),[localOrder,setOrder]=React.useState(query.get('order')??'');
+  // Фиксированный контекст рабочего места имеет приоритет над локальной формой.
+  const org=lockedScope?.org??localOrg;
+  const loc=lockedScope?.loc??localLoc;
+  const order=lockedScope?.order??localOrder;
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [loaded,setLoaded]=React.useState(''),[snapshot,setSnapshot]=React.useState<Snapshot|null>(null);
   const [revision,setRevision]=React.useState(0),[busy,setBusy]=React.useState(false);
@@ -119,11 +123,11 @@ export function AutoWorkExecution(){
     <p>Только синтетический HTTPS-стенд. Все действия записываются неизменяемо.
       Ни один этап не разрешает выдачу, оплату или проведение документа.</p>
     <label>UUID организации <input aria-label="UUID организации" disabled={busy}
-      value={org} onChange={e=>setOrg(e.target.value)}/></label>
+      value={org} readOnly={lockedScope!==undefined} onChange={e=>setOrg(e.target.value)}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" disabled={busy}
-      value={loc} onChange={e=>setLoc(e.target.value)}/></label>
+      value={loc} readOnly={lockedScope!==undefined} onChange={e=>setLoc(e.target.value)}/></label>
     <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" disabled={busy}
-      value={order} onChange={e=>setOrder(e.target.value)}/></label>
+      value={order} readOnly={lockedScope!==undefined} onChange={e=>setOrder(e.target.value)}/></label>
     {status==='idle'&&<p>Укажите UUID для чтения актуального заказ-наряда.</p>}
     {status==='loading'&&<p role="status">Загрузка статуса исполнения…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён, связь отозвана или запись отменена.</p>}

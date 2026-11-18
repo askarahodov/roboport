@@ -147,6 +147,10 @@ export function AutoWorkOrderRegister(){
           <p>Запись: <code>{row.appointmentId}</code>. Пост: <code>{row.bayId}</code>.</p>
           <p>Интервал: {new Date(row.startsAt).toLocaleString('ru-RU')} —
             {' '}{new Date(row.endsAt).toLocaleString('ru-RU')}.</p>
+          <Link to={'/staff/auto-order-workspace?'+new URLSearchParams({
+            org:org.trim(),loc:loc.trim(),order:row.workOrderId,
+          })}>Открыть рабочее место наряда</Link>
+          {' · '}
           <Link to={detailLink(row.workOrderId)}>Открыть услуги выбранного наряда</Link>
           <p>Стоимость, платежи, фото и документы доступны лишь в отдельных
             операционных экранах при наличии специальных полномочий.</p>

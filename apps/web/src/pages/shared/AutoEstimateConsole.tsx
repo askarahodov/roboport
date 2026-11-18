@@ -107,14 +107,18 @@ function parseServices(raw:unknown):Service[]{
   return raw.items as Service[];
 }
 
-export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
+export function AutoEstimateConsole({role,lockedScope}:{role:'manager'|'client';lockedScope?:{org:string;loc:string;order:string}}){
   const [query]=useSearchParams();
   const [extraOpen,setExtraOpen]=React.useState(false);
   const [tariffsOpen,setTariffsOpen]=React.useState(false);
   const [complexesOpen,setComplexesOpen]=React.useState(false);
-  const [org,setOrg]=React.useState(query.get('org')??'');
-  const [loc,setLoc]=React.useState(query.get('loc')??'');
-  const [order,setOrder]=React.useState(query.get('order')??'');
+  const [localOrg,setOrg]=React.useState(query.get('org')??'');
+  const [localLoc,setLoc]=React.useState(query.get('loc')??'');
+  const [localOrder,setOrder]=React.useState(query.get('order')??'');
+  // Фиксированный контекст рабочего места имеет приоритет над локальной формой.
+  const org=lockedScope?.org??localOrg;
+  const loc=lockedScope?.loc??localLoc;
+  const order=lockedScope?.order??localOrder;
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [scopeLoaded,setScopeLoaded]=React.useState('');
   const [data,setData]=React.useState<Estimates|null>(null);
@@ -225,11 +229,11 @@ export function AutoEstimateConsole({role}:{role:'manager'|'client'}){
     <h1>{role==='manager'?'Сметы заказ-наряда (dev)':'Согласование сметы (dev)'}</h1>
     <p>Только синтетические данные. Решение не является юридической электронной подписью,
       оплатой или разрешением на выдачу.</p>
-    <label>UUID организации <input aria-label="UUID организации" value={org}
+    <label>UUID организации <input aria-label="UUID организации" value={org} readOnly={lockedScope!==undefined}
       disabled={busy} onChange={e=>setOrg(e.target.value)}/></label>
-    <label>UUID филиала <input aria-label="UUID филиала" value={loc}
+    <label>UUID филиала <input aria-label="UUID филиала" value={loc} readOnly={lockedScope!==undefined}
       disabled={busy} onChange={e=>setLoc(e.target.value)}/></label>
-    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" value={order}
+    <label>UUID заказ-наряда <input aria-label="UUID заказ-наряда" value={order} readOnly={lockedScope!==undefined}
       disabled={busy} onChange={e=>setOrder(e.target.value)}/></label>
     {status==='idle'&&<p>Укажите организацию, филиал и заказ-наряд.</p>}
     {status==='loading'&&<p role="status">Загрузка версий сметы…</p>}

@@ -1,4 +1,9 @@
 import React from 'react';
+
+const initialScope=(key:string)=>{
+  const value=new URLSearchParams(window.location.search).get(key)??'';
+  return uuid.test(value)?value:'';
+};
 import { Link } from 'react-router-dom';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -114,10 +119,16 @@ function formatDate(stamp:string){
   return new Date(stamp).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'});
 }
 
-export function AutoAssignments(){
-  const [org,setOrg]=React.useState('');
-  const [loc,setLoc]=React.useState('');
-  const [order,setOrder]=React.useState('');
+export function AutoAssignments({lockedScope}:{lockedScope?:{org:string;loc:string;order:string}}={}){
+  const [localOrg,setOrg]=React.useState(()=>initialScope('org'));
+  const [localLoc,setLoc]=React.useState(()=>initialScope('loc'));
+  const [localOrder,setOrder]=React.useState(()=>initialScope('order'));
+  // Фиксированный контекст рабочего места имеет приоритет над локальной формой.
+  const org=lockedScope?.org??localOrg;
+  const loc=lockedScope?.loc??localLoc;
+  const order=lockedScope?.order??localOrder;
+  const withinOrder=(id:string)=>!lockedScope||
+    id.toLowerCase()===lockedScope.order.toLowerCase();
   const [mechanic,setMechanic]=React.useState('');
   const [starts,setStarts]=React.useState('');
   const [ends,setEnds]=React.useState('');
@@ -191,7 +202,7 @@ export function AutoAssignments(){
     });
   }
   function respond(a:Assignment,action:'accept'|'decline'){
-    if(!canMutate||!a.canRespond||a.status!=='OFFERED')return;
+    if(!canMutate||!withinOrder(a.workOrderId)||!a.canRespond||a.status!=='OFFERED')return;
     void send({
       path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/'+action,
       body:JSON.stringify({requestKey:crypto.randomUUID()}),
@@ -199,7 +210,7 @@ export function AutoAssignments(){
     });
   }
   function withdraw(a:Withdrawable){
-    if(!canMutate||!queue?.canOffer||a.status!=='OFFERED')return;
+    if(!canMutate||!withinOrder(a.workOrderId)||!queue?.canOffer||a.status!=='OFFERED')return;
     void send({
       path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/withdraw',
       body:JSON.stringify({requestKey:crypto.randomUUID()}),
@@ -207,7 +218,7 @@ export function AutoAssignments(){
     });
   }
   function releaseAccepted(a:Releasable){
-    if(!canMutate||!queue?.canOffer||a.status!=='ACCEPTED')return;
+    if(!canMutate||!withinOrder(a.workOrderId)||!queue?.canOffer||a.status!=='ACCEPTED')return;
     void send({
       path:root+'/assignments/'+encodeURIComponent(a.assignmentId)+'/release',
       body:JSON.stringify({requestKey:crypto.randomUUID()}),
@@ -284,10 +295,10 @@ export function AutoAssignments(){
       Не является разрешением на ремонт, QC или выдачу.</p>
     <div style={{display:'flex',flexWrap:'wrap',gap:'1rem',alignItems:'end'}}>
       <label>UUID организации <input aria-label="UUID организации" style={inputStyle}
-        value={org} disabled={busy}
+        value={org} readOnly={lockedScope!==undefined} disabled={busy}
         onChange={e=>scopeChanged(setOrg,e.target.value)}/></label>
       <label>UUID филиала <input aria-label="UUID филиала" style={inputStyle}
-        value={loc} disabled={busy}
+        value={loc} readOnly={lockedScope!==undefined} disabled={busy}
         onChange={e=>scopeChanged(setLoc,e.target.value)}/></label>
       <button type="button" disabled={!valid||busy} onClick={()=>setRevision(n=>n+1)}>
         Обновить назначения</button>
@@ -308,7 +319,7 @@ export function AutoAssignments(){
         и продолжаться не более 24 часов. Время показывается в локальной зоне браузера.</p>
       <div style={{display:'flex',flexWrap:'wrap',gap:'1rem'}}>
         <label>UUID заказ-наряда <input style={inputStyle}
-          aria-label="UUID заказ-наряда" value={order}
+          aria-label="UUID заказ-наряда" value={order} readOnly={lockedScope!==undefined}
           disabled={pending!==null||busy}
           onChange={e=>setOrder(e.target.value)}/></label>
         <label>UUID механика <input style={inputStyle}
@@ -337,7 +348,7 @@ export function AutoAssignments(){
         отмены смены, отзыва прав механика или связи автомобиля.
         Снять можно только статус «Ожидает ответа». Уже принятые
         назначения не отменяются этой операцией.</p>
-      {(queue.withdrawable??[]).length===0?
+      {(queue.withdrawable??[]).filter(a=>withinOrder(a.workOrderId)).length===0?
         <p>Непринятых предложений на этой странице нет.</p>:
         <div style={{maxWidth:'100%',overflowX:'auto'}}>
           <table>
@@ -345,7 +356,7 @@ export function AutoAssignments(){
             <thead><tr><th scope="col">Заказ-наряд</th>
               <th scope="col">Механик</th><th scope="col">Интервал</th>
               <th scope="col">Действие</th></tr></thead>
-            <tbody>{(queue.withdrawable??[]).map(a=><tr key={a.assignmentId}>
+            <tbody>{(queue.withdrawable??[]).filter(a=>withinOrder(a.workOrderId)).map(a=><tr key={a.assignmentId}>
               <th scope="row">{a.workOrderId}</th>
               <td>{a.mechanicId}</td>
               <td>{formatDate(a.startsAt)} — {formatDate(a.endsAt)}</td>
@@ -376,7 +387,7 @@ export function AutoAssignments(){
         техническом старте, фактических работах, выдаче материалов или
         QC. Исходное принятие и его время останутся в истории.
         Снятие после начала работ запрещено.</p>
-      {(queue.releasable??[]).length===0?
+      {(queue.releasable??[]).filter(a=>withinOrder(a.workOrderId)).length===0?
         <p>Принятых назначений без начала работ на этой странице нет.</p>:
         <div style={{maxWidth:'100%',overflowX:'auto'}}>
           <table>
@@ -384,7 +395,7 @@ export function AutoAssignments(){
             <thead><tr><th scope="col">Заказ-наряд</th>
               <th scope="col">Механик</th><th scope="col">Интервал</th>
               <th scope="col">Принято</th><th scope="col">Действие</th></tr></thead>
-            <tbody>{(queue.releasable??[]).map(a=><tr key={a.assignmentId}>
+            <tbody>{(queue.releasable??[]).filter(a=>withinOrder(a.workOrderId)).map(a=><tr key={a.assignmentId}>
               <th scope="row">{a.workOrderId}</th>
               <td>{a.mechanicId}</td>
               <td>{formatDate(a.startsAt)} — {formatDate(a.endsAt)}</td>
@@ -414,7 +425,7 @@ export function AutoAssignments(){
         <p role="alert">Более 100 действующих назначений: полный живой
           список недоступен без фильтра. Отзыв и освобождение остаются
           доступны в отдельных постраничных очередях.</p>:
-      queue.items.length===0
+      queue.items.filter(a=>withinOrder(a.workOrderId)).length===0
         ? <p>Для ваших прав действующих назначений нет.</p>
         : <div style={{maxWidth:'100%',overflowX:'auto'}}>
           <table>
@@ -422,7 +433,7 @@ export function AutoAssignments(){
             <thead><tr><th scope="col">Заказ-наряд</th>
               <th scope="col">Механик</th><th scope="col">Интервал</th>
               <th scope="col">Статус</th><th scope="col">Действия</th></tr></thead>
-            <tbody>{queue.items.map(a=><tr key={a.assignmentId}>
+            <tbody>{queue.items.filter(a=>withinOrder(a.workOrderId)).map(a=><tr key={a.assignmentId}>
               <th scope="row">{a.workOrderId}</th>
               <td>{a.mechanicId}</td>
               <td>{formatDate(a.startsAt)} — {formatDate(a.endsAt)}</td>
