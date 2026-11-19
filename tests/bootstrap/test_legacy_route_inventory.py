@@ -717,3 +717,23 @@ def test_root_anchored_or_tagged_server_keys_fail_closed_before_key_name():
             rows = scan_openapi_contract(contract, root)
             assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
             assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_yaml_document_separator_with_comment_cannot_hide_second_openapi_document():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n"
+            "--- # second document\n"
+            "  servers:\n  - url: https://api.example.com\n"
+            "  paths:\n    /robot:\n      get:\n        operationId: hiddenRobot\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
+        assert not any(r.get("operation_id") == "hiddenRobot" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
