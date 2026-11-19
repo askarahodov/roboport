@@ -148,6 +148,9 @@ def test_vehicle_customer_link_identity_and_verification_are_immutable():
                     "DELETE FROM auto_vehicle_customer_link WHERE id=%s",
                     (data["link_a"],),
                 )
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("TRUNCATE TABLE auto_vehicle_customer_link CASCADE")
 
         # Отозванную pending-связь нельзя впоследствии подтвердить.
         db.execute(
