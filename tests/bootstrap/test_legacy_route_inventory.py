@@ -774,3 +774,27 @@ def test_percent_encoded_path_keys_fail_closed_instead_of_hiding_legacy_segments
         assert any(r["unresolved"] and r["review"] == "path-key-percent-encoding-unreviewed" for r in rows)
         assert not any(r.get("operation_id") == "encodedRobot" for r in rows)
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_mapping_header_comments_require_whitespace_after_colon():
+    cases = (
+        ("info:\n", "info:#not-a-comment\n"),
+        ("servers:\n", "servers:#not-a-comment\n"),
+        ("paths:\n", "paths:#not-a-comment\n"),
+        ('  "/safe":\n', '  "/safe":#not-a-comment\n'),
+    )
+    for valid_header, malformed_header in cases:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = root / "contracts/openapi.yaml"
+            contract.parent.mkdir(parents=True)
+            source = (
+                "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+                "servers:\n- url: https://api.example.invalid\n"
+                "paths:\n  /safe:\n    get:\n      operationId: safe\n"
+            )
+            source = source.replace(valid_header, malformed_header, 1)
+            contract.write_text(source, encoding="utf-8")
+            rows = scan_openapi_contract(contract, root)
+            assert any(row["unresolved"] for row in rows), malformed_header
+            assert main(["--root", str(root), "--check"]) == 1

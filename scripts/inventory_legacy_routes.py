@@ -309,7 +309,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
         for line in lines
     )
     servers_indexes = [i for i, line in enumerate(lines)
-                       if re.match(r"^servers:\s*(?:#.*)?$", line)]
+                       if re.match(r"^servers:(?:[ \t]+(?:#.*)?)?$", line)]
     server_urls: list[str] = []
     servers_valid = (len(server_declarations) == 1
                      and server_declarations == servers_indexes
@@ -513,7 +513,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
 
         if indent == 2:
             path_match = re.match(
-                r"""^  (?:"([^"]*)"|'([^']*)'|(/[^:]+)):\s*(?:#.*)?$""", line
+                r"""^  (?:"([^"]*)"|'([^']*)'|(/[^:]+)):(?:[ \t]+(?:#.*)?)?$""", line
             )
             if path_match:
                 flush()
