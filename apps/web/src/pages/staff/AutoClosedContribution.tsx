@@ -68,7 +68,7 @@ function parse(raw:unknown,from:string,to:string):Report{
         k==='directCostMinor'||k==='syntheticDifferenceMinor')))
       throw Error('day');
     if(d.simulatedNetMinor!==d.approvedTotalMinor||
-      d.simulatedPaidMinor!-d.simulatedRefundedMinor!==d.simulatedNetMinor||
+      d.simulatedPaidMinor!-d.simulatedRefundedMinor!!==d.simulatedNetMinor||
       (d.incompleteOrderCount>0?d.syntheticDifferenceMinor!==null:
         (d.materialNetMinor===null||d.laborCostMinor===null||
          d.directCostMinor===null||d.syntheticDifferenceMinor===null||
@@ -109,7 +109,7 @@ function parse(raw:unknown,from:string,to:string):Report{
     }
     if(x.simulatedPaidMinor!==sum(cashIn)||
       x.simulatedRefundedMinor!==sum(cashOut)||
-      x.simulatedNetMinor!==x.simulatedPaidMinor!-x.simulatedRefundedMinor||
+      x.simulatedNetMinor!==x.simulatedPaidMinor!-x.simulatedRefundedMinor!||
       x.simulatedNetMinor!==x.approvedTotalMinor)throw Error('settlement');
     for(const labor of x.laborEntries){
       if(!labor||!uuid.test(labor.laborEntryId)||laborIds.has(labor.laborEntryId)||
