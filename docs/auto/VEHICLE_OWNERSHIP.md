@@ -220,7 +220,7 @@ PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_session_r
 PYTHONPATH=apps/api python -m pytest -q tests/bootstrap/test_auto_peer_throttle_policy.py tests/integration/test_pg_auto_peer_throttle.py
 ```
 
-Не используйте этот режим как обход HTTPS или как защиту публичного сервиса. Для production необходимы отдельно одобренная TLS/ingress архитектура, строгая аутентификация trusted peer, NAT/fairness политика, уровни лимитов, стратегия удаления сетевых счётчиков и юридическая проверка. Не смешивать `auto_peer_throttle` (операционный счётчик) с immutable evidence/receipt; автоматическая очистка из данной задачи не предусмотрена, миграционный `downgrade` разрешён только на disposable стенде. Gate #119 остаётся **закрытым**.
+Не используйте этот режим как обход HTTPS или как защиту публичного сервиса. Для production необходимы отдельно одобренная TLS/ingress архитектура, строгая аутентификация trusted peer, NAT/fairness политика, уровни лимитов, стратегия удаления сетевых счётчиков и юридическая проверка. Не смешивать `auto_peer_throttle` (операционный счётчик) с immutable evidence/receipt; автоматическая очистка из данной задачи не предусмотрена, миграционный `downgrade` разрешён только на disposable стенде. Gate #119 остаётся **открытым и блокирующим production**.
 
 ## Два независимых ADMIN для синтетической выдачи MANAGER (#163)
 
