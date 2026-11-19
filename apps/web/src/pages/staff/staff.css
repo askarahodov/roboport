@@ -32,3 +32,16 @@
 .crm-help a{font-size:.83rem;text-decoration:underline;justify-content:flex-start}
 .staff-help-links a:focus-visible,.staff-role-guides a:focus-visible,.crm-help a:focus-visible{outline:3px solid var(--rp-focus);outline-offset:2px}
 @media(max-width:500px){.staff-help-links,.staff-role-guides{display:grid;grid-template-columns:minmax(0,1fr)}}
+
+
+/* CRM Kanban: four scrollable stage columns without expanding the page at 390px. */
+.crm-kanban{display:grid;grid-auto-columns:minmax(min(82vw,18rem),1fr);grid-auto-flow:column;gap:.75rem;max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding:.25rem .1rem .75rem;scroll-snap-type:x proximity}
+.crm-kanban>section{min-width:0;max-width:100%;padding:.75rem;border:1px solid var(--rp-border);border-radius:.8rem;background:var(--rp-surface);scroll-snap-align:start}
+.crm-kanban article{display:grid;gap:.5rem;min-width:0;margin:.65rem 0;padding:.7rem;border:1px solid color-mix(in srgb,var(--rp-foreground) 18%,transparent);border-radius:.65rem;background:var(--rp-background)}
+.crm-kanban article p,.crm-kanban label{min-width:0;overflow-wrap:anywhere}
+.crm-kanban input:not([type=checkbox]),.crm-kanban select{box-sizing:border-box;width:100%;min-width:0;min-height:44px;padding:.55rem;border:1px solid var(--rp-border);border-radius:.55rem;color:var(--rp-foreground);background:var(--rp-surface)}
+.crm-kanban button{min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.crm-kanban fieldset{min-width:0;border:1px solid var(--rp-border);border-radius:.65rem;margin:.5rem 0;padding:.65rem}
+.crm-kanban fieldset label{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;margin:.35rem 0}
+.crm-kanban fieldset input:not([type=checkbox]){max-width:12rem}
+.crm-kanban fieldset input[type=checkbox]{width:1.15rem;height:1.15rem;flex:none}

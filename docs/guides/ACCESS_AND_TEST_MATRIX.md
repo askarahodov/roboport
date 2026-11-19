@@ -123,5 +123,6 @@ PG17 trigger проверяет последнюю согласованную с
 
 
 | Публичная заявка #442 | Только DEV loopback: anonymous challenge/offer/slot/submit без PII; CLIENT verified claim/withdraw; MANAGER+WAREHOUSE publish; INTAKE+WAREHOUSE staff fulfill; stock+CRM+outbox atomically | `test_pg_auto_public_booking_http.py`, `auto-public-booking.spec.ts`, полный 5/5 CI | Реальная CAPTCHA, уведомления, public ingress и legal #119 — blocked |
+| CRM Kanban / assignment / mock outbox #169 | PG17 append-only stage config and owner events, manager-only config/assignment, assigned-owner visibility, internal tasks follow current owner; consent snapshot gates inert mock only | `test_pg_auto_crm_workflow_http.py`, `auto-crm-kanban.spec.ts`, `auto-crm-consent-outbox.spec.ts`; API + Web + Browser + PostgreSQL CI | Legal consent, provider adapters, real SMS/email/calls and release #119 blocked |
 
 | Публичная заявка #442 | DEV loopback anonymous challenge/slot/request без VIN и ПДн; verified CLIENT claim/withdraw; MANAGER/WAREHOUSE publish; INTAKE/WAREHOUSE fulfill; atomic stock+CRM+outbox | `test_pg_auto_public_booking_http.py`, `auto-public-booking.spec.ts`, 5/5 CI | Реальная CAPTCHA, внешний ingress, legal consent, настоящие уведомления и #119 blocked |

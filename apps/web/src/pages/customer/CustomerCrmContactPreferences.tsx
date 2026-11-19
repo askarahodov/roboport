@@ -1,4 +1,5 @@
 import React from 'react';
+import { CustomerCrmServiceConsent } from './CustomerCrmServiceConsent';
 
 type Channel='CALL'|'EMAIL'|'SMS';
 type Flags=Record<Channel,boolean>;
@@ -120,5 +121,6 @@ export function CustomerCrmContactPreferences(){
       <button type="button" disabled={busy||pending!==null}
         onClick={()=>setRevision(n=>n+1)}>Обновить предпочтения связи</button>
     </>}
+    <CustomerCrmServiceConsent />
   </section>;
 }

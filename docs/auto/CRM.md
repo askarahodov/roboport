@@ -511,3 +511,36 @@ WorkOrder → **только синтетические** зачтённые п�
 Экран `/staff/auto-crm-outcomes`, полный алгоритм, роли, CSV и ограничения:
 [CRM_OUTCOMES.md](CRM_OUTCOMES.md). Нельзя интерпретировать этот
 показатель как реальную выручку или завершение #444/#119.
+
+
+## Настраиваемая доска филиала, назначения и инертный outbox (current-dev, #169)
+
+**Канбан:** откройте /staff/auto-crm-kanban, укажите UUID организации и филиала. MANAGER видит доску только своего филиала, INTAKE — только назначенные ему обращения. В каждой карточке выводятся лишь UUID обращения/подтверждённой связи/ответственного, источник и дата; ФИО, телефон, email, VIN и свободный текст не загружаются. Доска ограничена 200 карточками: если данных больше, сервер возвращает 409 BOARD_LIMIT, а не частичный результат.
+
+**Настройка этапов:** MANAGER может менять названия, порядок, включённость трёх конечных колонок (QUALIFIED, BOOKED, LOST) и допустимые коды причины отказа. NEW остаётся системным начальным этапом. Граф переходов не настраивается произвольно: PostgreSQL сохраняет исходные ограничения NEW→QUALIFIED/LOST, QUALIFIED→BOOKED/LOST; BOOKED требует уже существующий scoped Appointment. Конфигурация хранится append-only с optimistic expectedRevision; конкурентное или устаревшее сохранение получает 409. INTAKE может читать конфигурацию, но не менять её.
+
+**Назначение:** MANAGER может переназначить обращение только активному MANAGER/INTAKE своего tenant/branch. Каждое назначение — неизменяемое событие с actor, assignee, временем и request key. Текущий ответственный вычисляется по последнему событию, не переписывая исходного автора. INTAKE после переназначения теряет доступ к карточке; новый владелец получает доступ только при действующем филиальном grant. Внутренние задачи следуют за текущим ответственным, их история не переписывается.
+
+**Тестовое согласие и макет outbox:** в /account/settings появился отдельный выбор SERVICE_UPDATE по CALL/EMAIL/SMS. Он не заменяет предпочтения контактов, не является юридически проверенным согласием и не даёт права на маркетинг. При создании инертного макета все активные CLIENT-аккаунты одного клиента должны иметь действующее включённое согласие по выбранному каналу; частичный набор аккаунтов не допускается. Отзыв любого аккаунта немедленно подавляет последующие макеты и меняет статус прежней записи на SUPPRESSED. Повторное согласие не реактивирует старые mock-записи: snapshot должен совпадать с текущими событиями согласия.
+
+Mock outbox содержит только lead UUID, канал, фиксированный template code, actor, request key и snapshot UUID согласий. **Нет адресата, телефона, email, текста сообщения, сетевого вызова, провайдера, фонового worker или функции отправки.** sendAllowed=false и legalConsentVerified=false остаются постоянными. MOCK_ONLY означает только запись в локальный синтетический журнал; после отзыва статус становится SUPPRESSED.
+
+**Внутренние API (не включены в public OpenAPI):**
+
+- GET/POST /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/workflow
+- GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/kanban
+- POST /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/leads/{lead}/assignment
+- GET/POST /api/v1/dev/account/crm-contact-consent
+- GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/leads/{lead}/contact-consent
+- GET/POST /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/leads/{lead}/mock-messages
+
+**Миграция и откат:** Alembic 0132_auto_crm_workflow добавляет только append-only workflow config, assignment, consent и mock-outbox evidence; нет публичных маршрутов, реальных контактов, интеграций, платежей или production DDL grants. Downgrade fail-closed при наличии любой записи в новых таблицах: сначала нужен отдельный backup/restore и решение владельца. Обычный rollback приложения — revert PR, не удаление audit evidence.
+
+**Проверки:** tests/integration/test_pg_auto_crm_workflow_http.py — PostgreSQL 17/HTTPS, revision race, manager-only config, direct SQL tamper, owner reassignment, task ownership, branch scope, consent across multiple accounts, unsubscribe→SUPPRESSED и inert outbox. apps/web/e2e/auto-crm-kanban.spec.ts и apps/web/e2e/auto-crm-consent-outbox.spec.ts проверяют доску, клиентский выбор и отсутствие внешней отправки. Все сценарии остаются syntheticOnly=true, releaseAllowed=false; это не закрывает #119 и не является legal/production consent.
+
+
+### Конкурентность и откат миграции 0132
+
+Сохранение конфигурации филиала сначала получает отдельную транзакционную advisory-блокировку ключа organization/location, затем проверяет живую роль и proof. Это сериализует конкурирующие изменения до чтения ACL и не повышает уже удерживаемую FOR SHARE блокировку филиала до FOR UPDATE. Устаревшая версия после ожидания получает 409 STALE_REVISION. PostgreSQL-тест одновременно отправляет два обновления: одно фиксирует version=1, второе получает конфликт без 500/deadlock. Создание mock outbox использует согласованный порядок блокировок: lead FOR UPDATE, customer proof FOR SHARE, затем advisory lock согласия. Триггер БД повторно проверяет proof, но не повышает его SHARE до FOR UPDATE; поэтому разные обращения с общей customer link могут совместно удерживать proof, а consent snapshot сериализуется без lock-upgrade deadlock.
+
+Downgrade 0132 удаляет только пустые workflow/assignment/consent/outbox таблицы и восстанавливает исходную функцию guard_auto_crm_followup_task из миграции 0100 целиком, включая отдельную SERVICE_REVIEW ветку для BOOKED lead, origin_work_order_id, finished execution и последнего QC PASS. Нельзя откатывать её к более раннему упрощённому guard: после downgrade существующий послесервисный контроль должен продолжать работать.

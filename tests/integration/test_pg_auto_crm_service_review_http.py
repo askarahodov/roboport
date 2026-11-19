@@ -17,6 +17,7 @@ from roboport_api.auto_work_order_execution import (
 from roboport_api.auto_workshop_qc import record_work_order_qc
 from test_pg_auto_work_order_execution_http import fixture
 from test_pg_baseline import DSN
+from test_pg_auto_stock_service import grant
 
 
 def scope(org,loc,lead):
@@ -84,6 +85,15 @@ def test_post_service_review_full_manual_workflow_and_audit(monkeypatch):
     body=payload(order)
     assert http.post(path,json=body).status_code==403
     assert http.post(path,headers=headers,json=body).status_code==409
+    with psycopg.connect(DSN) as db:
+        grant(db,d["manager"],org,loc,"INTAKE")
+    manager_headers=auth(http,d,d["intake"])
+    reassigned=http.post(
+        scope(org,loc,lead)+"/assignment",headers=manager_headers,
+        json={"assigneeId":str(d["manager"]),"requestKey":str(uuid4())},
+    )
+    assert reassigned.status_code==201,reassigned.text
+    headers=manager_headers
     complete(d,org,loc,order,service)
 
     fresh=http.post(path,headers=headers,json=body)
@@ -91,7 +101,7 @@ def test_post_service_review_full_manual_workflow_and_audit(monkeypatch):
     task=fresh.json()
     assert task["taskCode"]=="SERVICE_REVIEW"
     assert task["originWorkOrderId"]==str(order)
-    assert task["status"]=="OPEN" and task["ownerId"]==str(d["intake"])
+    assert task["status"]=="OPEN" and task["ownerId"]==str(d["manager"])
     assert task["event"] is None
     replay=http.post(path,headers=headers,json=body)
     assert replay.status_code==200,replay.text

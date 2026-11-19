@@ -1,5 +1,6 @@
 import React from 'react';
 import { StaffCrmContactPreferences } from './StaffCrmContactPreferences';
+import { StaffCrmMockMessages } from './StaffCrmMockMessages';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Event={id:string;actorId:string;stageCode:'QUALIFIED'|'BOOKED'|'LOST';
@@ -454,6 +455,9 @@ export function AutoCrmLeads(){
         <p>Ответственный: {chosen.ownerId}. Источник: {leadSourceLabels[chosen.sourceCode]}.
           Текущий этап: {leadStatusLabels[chosen.status]}.</p>
         <StaffCrmContactPreferences key={scope+':'+selected} base={base} leadId={selected}
+          onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);
+            setStatus('denied');}}/>
+        <StaffCrmMockMessages key={'mock:'+scope+':'+selected} base={base} leadId={selected}
           onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);
             setStatus('denied');}}/>
         <ol>{chosen.events.map(e=><li key={e.id}>{leadStageLabels[e.stageCode]}
