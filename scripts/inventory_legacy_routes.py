@@ -231,7 +231,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                     quote = None
             elif char in "\"'":
                 quote = char
-            elif char == "#" and index > 0 and value[index - 1].isspace():
+            elif char == "#" and (index == 0 or value[index - 1].isspace()):
                 return value[:index].rstrip()
         return value.strip()
 
