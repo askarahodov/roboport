@@ -29,6 +29,7 @@ def test_workflow_config_assignment_kanban_and_reassigned_followup(monkeypatch):
     lead_id=created.json()["leadId"]
     detail=base+"/leads/"+lead_id
 
+    manager=session(http,d,d["manager"])
     initial=http.get(base+"/workflow",headers=manager)
     assert initial.status_code==200,initial.text
     assert initial.json()["canConfigure"] is True
