@@ -47,6 +47,25 @@ def test_vehicle_customer_link_identity_and_verification_are_immutable():
             (data["vehicle"],),
         ).fetchone() == (2,)
 
+        # Даже прямой INSERT не может создать уже подтверждённую или отозванную
+        # связь: любая новая запись обязана начинаться в состоянии PENDING.
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute(
+                    """INSERT INTO auto_vehicle_customer_link(
+                         id,vehicle_id,customer_id,verified_at,verified_by
+                       ) VALUES(%s,%s,%s,clock_timestamp(),%s)""",
+                    (uuid4(), data["vehicle"], data["customer_c"], data["reviewer"]),
+                )
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute(
+                    """INSERT INTO auto_vehicle_customer_link(
+                         id,vehicle_id,customer_id,revoked_at
+                       ) VALUES(%s,%s,%s,clock_timestamp())""",
+                    (uuid4(), data["vehicle"], data["customer_c"]),
+                )
+
         identity_updates = (
             (
                 "UPDATE auto_vehicle_customer_link SET id=%s WHERE id=%s",
