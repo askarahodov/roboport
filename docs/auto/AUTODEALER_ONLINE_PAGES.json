@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-18",
+  "checkedOn": "2026-11-19",
   "source": "AutoDealer Online public help (not desktop help)",
   "completeness": "PARTIAL: discovery from public Online help articles and indexed excerpts; complete navigation hierarchy, every nested instruction and interactive function are NOT yet independently verified",
   "records": [
@@ -281,8 +281,8 @@
       "status": "D_PARTIAL",
       "scenario": "Карточка SKU: номера, цена, состав и вложения",
       "gap": "Нет полноценной price version и состава комплектов/файлов",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-021",
@@ -393,8 +393,8 @@
       "status": "D_PARTIAL",
       "scenario": "XLSX шаблон, пробная загрузка, массовый import/export и validation",
       "gap": "Есть synthetic migration staging, но нет пользовательского XLSX roundtrip",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-029",
@@ -407,8 +407,8 @@
       "status": "PLANNED",
       "scenario": "Сопоставление клиентской потребности с поставщиком, частичный приход и статусы позиций",
       "gap": "Есть synthetic ledger, но нет связанного purchase order flow",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-030",
@@ -547,8 +547,8 @@
       "status": "PLANNED",
       "scenario": "Настраиваемые шаблоны ценников, печать штрихкода и товарных номеров",
       "gap": "Нет проверенной печати шаблонов, поддержки сканеров и поставляемых шаблонов",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-040",
@@ -575,8 +575,8 @@
       "status": "PLANNED",
       "scenario": "Разговоры с клиентами и история сообщений по каналам",
       "gap": "Нет production-провайдеров чата, согласий, фактической доставки и живой переписки",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-042",
@@ -589,8 +589,8 @@
       "status": "PLANNED",
       "scenario": "Мобильные роли, настройки, скачивание приложения и сценарии сотрудников",
       "gap": "Нет native iOS/Android приложений с действующей мобильной авторизацией и релизом",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-043",
