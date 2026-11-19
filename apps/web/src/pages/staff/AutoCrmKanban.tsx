@@ -85,9 +85,9 @@ export function AutoCrmKanban(){
   const base=uuid.test(org)&&uuid.test(loc)?
     '/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+'/locations/'+encodeURIComponent(loc)+'/crm':'';
 
-  async function load(){
+  async function load(options:{preserveMessage?:boolean}={}){
     if(!base)return;
-    setBusy(true);setMessage('');setStatus('loading');setBoard(null);setWorkflow(null);
+    setBusy(true);if(!options.preserveMessage)setMessage('');setStatus('loading');setBoard(null);setWorkflow(null);
     try{
       const [w,b]=await Promise.all([
         fetch(base+'/workflow',{credentials:'include',cache:'no-store'}),
@@ -149,7 +149,7 @@ export function AutoCrmKanban(){
     setPending(mutation);void submitMutation(mutation);
   }
 
-  React.useEffect(()=>{if(revision>0)void load();},[revision]);
+  React.useEffect(()=>{if(revision>0)void load({preserveMessage:true});},[revision]);
   const names:Record<StageCode,string>={NEW:'Новое',QUALIFIED:'Обработано',BOOKED:'Записан',LOST:'Отказ'};
   const availableTransitions=(item:Item)=>board?.columns.filter(c=>c.enabled&&c.allowedFrom.includes(item.stageCode))||[];
   return <section aria-label="Канбан обращений CRM (dev)">
