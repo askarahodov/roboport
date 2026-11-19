@@ -474,3 +474,95 @@ Light/Dark, keyboard, повреждённые суммы/403/409, отзыв п
 сохранённые смены/журнал работ не изменены. #448/#119 остаются OPEN:
 реальные первичные документы, организация оплаты труда и legal sign-off
 не реализованы этой сверкой.
+
+
+## Единая проверка закрытого ЗН: две независимые модели оплаты и прямые затраты (#448)
+
+**Статус: current-dev, только synthetic PostgreSQL 17, без реальной оплаты,
+прибыльности, фискализации или выдачи.** Руководитель открывает
+`/staff/auto-closed-order-ledgers`, указывает UUID своей организации
+и филиала и даты 1–31 календарный день **по локальной дате именно
+технического закрытия**, нажимает «Сверить закрытые ЗН и два реестра».
+В одном отчёте по каждому заказ-наряду видны:
+- утверждённая клиентом сумма из неизменяемого CLOSE preview,
+  постановка `POSTED`, подтверждение `CLIENT_ACK`, независимый
+  `QC PASS` и `CLOSED_TECHNICAL` с точным digest/UUID;
+- прямые **условные** материальные затраты, подтверждённые
+  receipt/lot/FIFO/serial provenance, и трудозатраты только по
+  независимой утверждённой ставке до завершения труда. При
+  пропущенной первичке стоимость и разница `null`, **никогда 0**;
+- два **разных, не складываемых** журнала:
+  `auto_order_demo_cash_event` (`SIM_PAYMENT/SIM_REFUND`,
+  нужен для технического закрытия) и
+  `auto_treasury_event` (условный `ADVANCE/PAYMENT/REFUND_*`,
+  `APPLY_ADVANCE`). Сводка отдельно показывает имитацию расчёта,
+  признанное в тестовой кассе `settled`, незачтённый аванс,
+  `treasuryDue = approvedTotal - settled`, `cashNet` и
+  `demoMinusTreasury = demoNet - settled`.
+  Важный пример: `CLOSED_TECHNICAL` с `SIM_PAYMENT=2500`
+  и **без событий новой кассы** → `demoNet=2500`,
+  `treasurySettled=0`, `treasuryDue=2500`, статус
+  `NO_TREASURY_EVENTS`, никакого доказательства фактического платежа.
+  При `ADVANCE=900` без зачёта `cashNet=900`,
+  `unappliedAdvance=900`, `settled=0`, `due=2500`.
+  При полном условном расчёте статус `SETTLED`, но это
+  **не реальная касса и не подтверждение юридической выдачи**.
+  `syntheticDifference = approvedTotal - directCost` не является
+  валовой прибылью, бухгалтерской маржой, KPI или payroll.
+
+### Точные источники и ограничение доступа
+
+Приватные HTTPS GET:
+`/api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/closed-order-ledger-reconciliation?fromDay=YYYY-MM-DD&toDay=YYYY-MM-DD`
+и `/closed-order-ledger-reconciliation/export` (те же параметры).
+`basis=CLOSED_TECHNICAL_TWO_SEPARATE_SIMULATED_SETTLEMENT_LEDGERS`,
+`realMoney=false`, `releaseAllowed=false`,
+`marginAvailable=false`, `payrollAvailable=false`.
+Все денежные поля в новом API — **строки целых копеек**
+(включая отрицательную условную разницу), клиент сверяет
+события и агрегаты через `BigInt`, не через числа с
+потерей точности. Не выдаются ФИО, VIN, контакты, причины платежей,
+документы прежнего владельца, банковские реквизиты или произвольные
+строки из БД. CSV 25 фиксированных колонок с уровнями
+`ORDER/TREASURY_EVENT/LABOR_SOURCE/MATERIAL_SOURCE`;
+одна агрегированная сумма на `ORDER`, первичные UUID на
+отдельных строках — нельзя складывать строки-источники повторно.
+
+Проверка доступа: только живой `MANAGER` своего филиала,
+`FINANCE:READ/PRICE_SALES/PRICE_PURCHASE`,
+`ESTIMATE:READ/PRICE_SALES`,
+`HANDOVER:READ/PRICE_SALES`,
+`SUPPLIER_ORDER:READ/PRICE_PURCHASE`, без history cutoff.
+Учитываются только истинные `CLOSED_TECHNICAL` с действующим
+owner proof, POSTED + CLIENT_ACK + независимым QC PASS.
+`REPEATABLE READ` одним snapshot на отчёт, закрытые документы
+и оба журнала; попытка доступа к устаревшему policy snapshot
+после публикации запрета приводит к `409` (org MVCC revision
+из #549), а не к устаревшему разрешению. Роль/филиал/сессия
+отозваны → `403`; неверный период/UUID → `422`;
+>200 нарядов или >500 treasury events / конфликт source digest
+или ревизии → `409`, без частичного CSV/JSON.
+CSV ограничен 1 MiB и **повторно авторизуется** — не экспорт
+старого browser snapshot. При любом отказе UI очищается.
+
+### Проверка и откат
+
+- PG17/HTTP: `tests/integration/test_pg_auto_closed_order_ledger_reconciliation_http.py`
+  — настоящий QC→тестовая касса с авансом, зачётом, возвратом
+  и частичной оплатой→POSTED→CLIENT_ACK→CLOSED_TECHNICAL;
+  точное сравнение primary source UUID/стоимости/остатка и CSV;
+  случаи отсутствующей кассы, незачтённого аванса,
+  отсутствующей ставки, BOLA, 403/409/422, expiry/revocation и лимит.
+- Browser E2E:
+  `apps/web/e2e/auto-closed-order-ledger-reconciliation.spec.ts`
+  — 390/1280, Light/Dark, keyboard, первичка, отрицательная
+  условная разница, несовпадающие два журнала,
+  испорченный итог/повтор UUID/403/409/422 и повторная
+  авторизация CSV.
+- UI и руководство: `apps/web/src/pages/staff/AutoClosedOrderLedgerReconciliation.tsx`,
+  `docs/guides/manager.md`.
+  **Откат:** revert read-only API + UI + tests/docs, без
+  миграций и изменений immutable payment, estimate, cost или
+  document events. #441/#448 остаются OPEN до заверенного
+  законодательства, первичных платёжных документов,
+  зарплатного учёта и #119 production gate.
