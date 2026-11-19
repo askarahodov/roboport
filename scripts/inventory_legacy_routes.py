@@ -523,6 +523,9 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 if "\\" in current_path:
                     unresolved_path(path_line, "path-key-contains-unsupported-escape", current_path)
                     current_path = None
+                elif "%" in current_path:
+                    unresolved_path(path_line, "path-key-percent-encoding-unreviewed", current_path)
+                    current_path = None
                 elif (not current_path.startswith("/") or "#" in current_path
                       or "?" in current_path or any(char.isspace() for char in current_path)):
                     unresolved_path(path_line, "path-key-is-not-an-absolute-path", current_path)

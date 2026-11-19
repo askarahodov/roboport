@@ -755,3 +755,22 @@ def test_openapi_webhooks_section_fails_closed_until_it_is_inventoried():
         assert any(r["unresolved"] and r["review"] == "webhooks-section-unreviewed" for r in rows)
         assert not any(r.get("operation_id") == "hiddenWebhook" for r in rows)
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_percent_encoded_path_keys_fail_closed_instead_of_hiding_legacy_segments():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            + r'  "/r%6fbot/devices":' + "\n"
+            + "    get:\n      operationId: encodedRobot\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["unresolved"] and r["review"] == "path-key-percent-encoding-unreviewed" for r in rows)
+        assert not any(r.get("operation_id") == "encodedRobot" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
