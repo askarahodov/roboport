@@ -44,8 +44,14 @@ def test_canceled_booking_and_revoked_link_do_not_create_appointment():
     with psycopg.connect(DSN) as db:
         org, loc, bay = _org_and_bay(db)
         booking = _book(db,org,loc,bay,'2032-02-01 08:00+00','2032-02-01 10:00+00')
-        db.execute("UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s,revoked_at=now() WHERE id=%s",
-                   (d["manager"],d["link"]))
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+            (d["manager"],d["link"]),
+        )
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+            (d["link"],),
+        )
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
                 db.execute("""INSERT INTO auto_appointment
