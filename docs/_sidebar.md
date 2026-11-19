@@ -31,6 +31,7 @@
 - **Разработчикам**
   - [Продукт и функции](/auto/PRODUCT.md)
   - [Архитектура и безопасность](/auto/ARCHITECTURE.md)
+  - [Модель данных автомобиля и связи клиентов](/auto/DATA_MODEL.md)
   - [Функциональная матрица](/auto/FUNCTIONAL_MATRIX.md)
   - [Постраничная сверка AutoDealer Online (частичная)](/auto/AUTODEALER_PAGE_AUDIT.md)
   - [89 требований полного функционального аналога (статус PARTIAL)](/auto/AUTODEALER_PARITY_ACCEPTANCE.md)
