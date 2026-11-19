@@ -289,3 +289,48 @@ def test_concurrent_workflow_config_updates_serialize_without_deadlock(monkeypat
         results=[future.result(timeout=20) for future in futures]
     assert sum(isinstance(result,dict) and result["version"]==1 for result in results)==1
     assert sum(result=="STALE_REVISION" for result in results)==1
+
+
+def test_parallel_mock_outbox_for_distinct_leads_sharing_proof_has_no_deadlock(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from roboport_api import auto_crm_consent
+
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    base=crm(org,loc)
+    intake=session(http,d,d["intake"])
+    first=http.post(base+"/leads",headers=intake,json=lead_payload(d))
+    assert first.status_code==201,first.text
+    intake=session(http,d,d["intake"])
+    second=http.post(base+"/leads",headers=intake,json=lead_payload(d))
+    assert second.status_code==201,second.text
+    first_lead=UUID(first.json()["leadId"])
+    second_lead=UUID(second.json()["leadId"])
+
+    with psycopg.connect(DSN) as db:
+        auto_crm_consent.change_customer_consent(
+            db,d["tokens"][d["client_a"]],"CALL",True,0,uuid4()
+        )
+
+    barrier=Barrier(2)
+    original=auto_crm_consent._account_users
+
+    def synchronized_account_users(conn,customer_id):
+        users=original(conn,customer_id)
+        barrier.wait(timeout=10)
+        return users
+
+    monkeypatch.setattr(auto_crm_consent,"_account_users",synchronized_account_users)
+    manager_token=d["tokens"][d["manager"]]
+
+    def create(lead_id):
+        with psycopg.connect(DSN) as db:
+            return auto_crm_consent.create_mock_message(
+                db,manager_token,org,loc,lead_id,uuid4(),"CALL","BOOKING_REMINDER"
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures=[pool.submit(create,lead) for lead in (first_lead,second_lead)]
+        results=[future.result(timeout=20) for future in futures]
+    assert all(result["status"]=="MOCK_ONLY" and result["sendAllowed"] is False
+               for result in results)
