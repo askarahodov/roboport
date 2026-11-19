@@ -18,7 +18,7 @@ from test_pg_auto_work_order_estimate_http import token
 from test_pg_baseline import DSN
 
 
-def setup(monkeypatch,*,rated=True,mode="traced"):
+def setup(monkeypatch,*,rated=True,mode="traced",before_cash=None):
     rate={}
     def before_labor(db,d,org,loc,order):
         grant(db,d["other"],org,loc,"MANAGER")
@@ -28,7 +28,7 @@ def setup(monkeypatch,*,rated=True,mode="traced"):
             approved=module.approve(db,d["tokens"][d["other"]],org,loc,ident,uuid4())
             rate.update(revisionId=str(ident),approvalId=approved["active"]["approvalId"],
                         version=1,rateMinorPerHour=2001)
-    d,org,loc,order,evidence,path,query=fixture(monkeypatch,mode,before_labor)
+    d,org,loc,order,evidence,path,query=fixture(monkeypatch,mode,before_labor,before_cash)
     root=path.split("/reports/")[0]
     return d,org,loc,order,evidence,root,query,rate
 
