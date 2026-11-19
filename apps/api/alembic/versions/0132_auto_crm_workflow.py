@@ -342,7 +342,7 @@ def upgrade():
           INTO lead_row
           FROM auto_crm_lead lead
           JOIN auto_vehicle_customer_link proof ON proof.id=lead.customer_link_id
-          WHERE lead.id=NEW.lead_id FOR UPDATE OF lead,proof;
+          WHERE lead.id=NEW.lead_id FOR UPDATE OF lead FOR SHARE OF proof;
         IF NOT FOUND OR lead_row.organization_id<>NEW.organization_id
            OR lead_row.location_id<>NEW.location_id
         THEN RAISE EXCEPTION 'CRM mock outbox scope mismatch'; END IF;
