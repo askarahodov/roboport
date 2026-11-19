@@ -118,3 +118,16 @@ TestClient-негативные проверки и OpenAPI-gate выше ост
 по-прежнему блокируют деструктивный decommission. Откат — revert этого
 статического валидатора и его CI/тестов; объекты БД, файлы и
 функционирующие маршруты не изменяются.
+
+
+## Инвентаризация исторического OpenAPI draft (#165, current-dev)
+
+Поскольку `contracts/openapi.yaml` — **исторический draft**, его нельзя выдавать за runtime-контракт или публиковать в клиентский SDK. Read-only сканер `scripts/inventory_legacy_routes.py` теперь включает все 43 статических path/method операции этого файла в общий JSON с `contract_status=historical-draft-not-runtime`, `operation_id`, источником и консервативной меткой legacy. Сканер не загружает YAML-теги, не разрешает ссылки, не импортирует приложение и не обращается к сети. Обязательный `--check` падает, если исчез раздел paths, путь/метод нельзя разобрать, нарушена уникальность path+method, исчезли draft title/version или placeholder `.invalid` server. Это защищает от случайной публикации старого draft, но **не** доказывает, что все operationId/SDK references удалены из внешних сборок, и не заменяет новый reviewed automotive OpenAPI #131.
+
+```bash
+python scripts/inventory_legacy_routes.py --legacy-only > /tmp/legacy-api-inventory.json
+python scripts/inventory_legacy_routes.py --check
+PYTHONPATH=apps/api python -m pytest -q tests/bootstrap/test_legacy_route_inventory.py
+```
+
+Изменение read-only и обратимо через revert скрипта/тестов/этого раздела. Контракт, API runtime, DDL, данные и миграции не изменяются; `dropAllowed=false`, `releaseAllowed=false`.
