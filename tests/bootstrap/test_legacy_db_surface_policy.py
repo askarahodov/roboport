@@ -30,3 +30,30 @@ def test_unclassified_is_not_automatically_safe_to_drop():
     assert classify("service_ticket") == "legacy-or-unclassified"
     assert classify("app_user") == "shared-review"
     assert classify("audit_event") == "legacy-or-unclassified"
+
+
+def test_automotive_identity_and_authority_relations_are_shared_review_not_legacy_drop_candidates():
+    for name in (
+        "app_user",
+        "local_credential",
+        "user_session",
+        "user_session_csrf_rotation",
+        "auth_login_throttle",
+        "role",
+        "user_role",
+        "customer",
+        "account_customer_link",
+        "oidc_identity",
+    ):
+        assert classify(name) == "shared-review"
+
+    for name in (
+        "robot_device",
+        "service_ticket",
+        "ticket_state_event",
+        "acl_entry",
+        "authorization_audit",
+        "attachment",
+        "catalog_model",
+    ):
+        assert classify(name) == "legacy-or-unclassified"

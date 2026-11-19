@@ -131,3 +131,43 @@ PYTHONPATH=apps/api python -m pytest -q tests/bootstrap/test_legacy_route_invent
 ```
 
 Изменение read-only и обратимо через revert скрипта/тестов/этого раздела. Контракт, API runtime, DDL, данные и миграции не изменяются; `dropAllowed=false`, `releaseAllowed=false`.
+
+
+## Source-level inventory исторических Alembic DDL (#165)
+
+В дополнение к metadata-only снимку PostgreSQL \`public\` выполнена статическая сверка исходников ранней схемы \`apps/api/alembic/versions/0001_core.py\`–\`0020_guest_proof.py\`. Это **20 ревизий legacy-era**, не те пустые файлы \`db/legacy_drafts/001–006.sql\` (они имеют нулевой размер и никогда не должны исполняться).
+
+Срез по SQL \`CREATE TABLE/FUNCTION/TRIGGER/INDEX\` в этих ревизиях:
+
+- **46 уникальных таблиц**;
+- **29 функций**, **40 пользовательских триггеров** (включая 10 экземпляров, создаваемых в циклах миграций), **8 индексов**;
+- несколько ревизий не создают таблиц, но меняют ограничения/поведение существующих объектов (например, quote race, estimate ACL и ticket event actor).
+
+| Revision | Создаваемые таблицы | Functions / triggers / indexes |
+|---|---|---:|
+| \`0001_core\` | \`customer\`, \`robot_device\`, \`service_ticket\`, \`ticket_state_event\`, \`audit_event\` | 2 / 2 / 1 |
+| \`0002_estimate_stock\` | \`estimate\`, \`estimate_line\`, \`stock_lot\` | 2 / 2 / 0 |
+| \`0003_idempotency\` | \`idempotency_request\` | 1 / 1 / 1 |
+| \`0004_approval\` | \`estimate_approval\` | 2 / 2 / 0 |
+| \`0005_quote_race\` | нет — изменение существующей модели | 1 / 1 / 0 |
+| \`0006_local_identity\` | \`app_user\`, \`local_credential\`, \`user_session\`, \`account_customer_link\` | 1 / 1 / 1 |
+| \`0007_auth_throttle\` | \`auth_login_throttle\` | 0 / 0 / 0 |
+| \`0008_authorization\` | \`role\`, \`user_role\`, \`acl_entry\`, \`authorization_audit\` | 1 / 1 / 2 |
+| \`0009_attachments\` | \`attachment\`, \`attachment_upload_dedupe\` | 1 / 1 / 1 |
+| \`0010_estimate_acl\` | нет — изменение ACL существующих объектов | 0 / 0 / 0 |
+| \`0011_ticket_transition_actor\` | нет — guard для существующего \`ticket_state_event\` | 1 / 1 / 0 |
+| \`0012_safety_review\` | \`ticket_safety_review\` | 1 / 1 / 0 |
+| \`0013_ticket_idempotency\` | \`ticket_mutation_receipt\` | 0 / 0 / 0 |
+| \`0014_estimate_decision\` | \`estimate_decision_receipt\`, \`estimate_staff_receipt\` | 1 / 2 / 0 |
+| \`0015_catalog\` | \`catalog_model\`, \`service_capability\`, \`capability_approval\`, \`part_compatibility\`, \`part_compatibility_approval\`, \`catalog_review_receipt\`, \`catalog_audit\` | 6 / 4 / 0 |
+| \`0016_inventory\` | \`inventory_part\`, \`stock_reservation\`, \`stock_movement\`, \`inventory_receipt\` | 3 / 2 / 0 |
+| \`0017_outbox\` | \`notification_outbox\`, \`synthetic_notification_delivery\` | 3 / 5 / 1 |
+| \`0018_customer_preferences\` | \`user_session_csrf_rotation\`, \`customer_notification_preference\`, \`customer_preference_audit\` | 1 / 1 / 0 |
+| \`0019_oidc_identity\` | \`oidc_identity\` | 1 / 1 / 0 |
+| \`0020_guest_proof\` | \`guest_ticket_claim\`, \`guest_intake_request\`, \`guest_intake_rate\`, \`guest_claim_audit\` | 1 / 2 / 1 |
+
+**Disposition пока не назначен автоматически.** Сверка текущего automotive runtime выявила общие зависимости ранней схемы: \`app_user\`, \`local_credential\`, \`user_session\`, \`user_session_csrf_rotation\`, \`auth_login_throttle\`, \`role\`, \`user_role\`, \`customer\`, \`account_customer_link\`, \`oidc_identity\`. Они классифицируются как \`shared-review\` в \`scripts/inspect_legacy_db_surface.py\`, поскольку используются auth/session, staff/organization authority, vehicle claim и OIDC flows (в частности \`auth_http.py\`, \`session_service.py\`, \`auto_manager_authority.py\`, \`auto_org_authority.py\`, \`auto_vehicle_claim.py\`, \`oidc_http.py\`). \`shared-review\` не означает «можно удалить» и не является финальным ownership approval. Остальные не-\`auto_*\` отношения остаются \`legacy-or-unclassified\`; это тоже не означает «можно удалить».
+
+Эта таблица фиксирует только статические DDL declarations в ревизиях 0001–0020. Она **не** доказывает, что live PostgreSQL содержит ровно тот же набор объектов, не описывает все последующие \`ALTER\` к legacy-таблицам, внешние схемы, grants, реальные row counts, object keys, владельцев, retention или legal basis. Для runtime-снимка остаётся обязательным одноразовый synthetic PG17 \`inspect_legacy_db_surface.py\`; для каждого реального объекта перед финальным decommission потребуется независимое решение \`retain / migrate / archive / remove\` с owner, evidence, backup/restore и rollback.
+
+До такого решения запрещены \`DROP\`/\`DELETE\` и production cutover. \`dropAllowed=false\`, \`releaseAllowed=false\`.

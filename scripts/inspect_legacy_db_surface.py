@@ -16,7 +16,22 @@ from psycopg.conninfo import conninfo_to_dict
 
 RELATION_KINDS = {"r": "table", "p": "partitioned_table", "v": "view",
                   "m": "materialized_view", "S": "sequence"}
-SHARED_RELATIONS = frozenset({"alembic_version", "app_user", "user_session"})
+# Relations confirmed as dependencies of the current automotive identity,
+# staff authorization, vehicle-claim and OIDC flows. "shared-review" is
+# deliberately not a drop-safe classification.
+SHARED_RELATIONS = frozenset({
+    "alembic_version",
+    "app_user",
+    "local_credential",
+    "user_session",
+    "user_session_csrf_rotation",
+    "auth_login_throttle",
+    "role",
+    "user_role",
+    "customer",
+    "account_customer_link",
+    "oidc_identity",
+})
 
 
 def connection_parameters(raw: str, synthetic_flag: str) -> tuple[str, str] | None:
