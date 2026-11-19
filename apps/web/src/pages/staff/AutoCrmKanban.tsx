@@ -151,6 +151,7 @@ export function AutoCrmKanban(){
 
   React.useEffect(()=>{if(revision>0)void load();},[revision]);
   const names:Record<StageCode,string>={NEW:'Новое',QUALIFIED:'Обработано',BOOKED:'Записан',LOST:'Отказ'};
+  const availableTransitions=(item:Item)=>board?.columns.filter(c=>c.enabled&&c.allowedFrom.includes(item.stageCode))||[];
   return <section aria-label="Канбан обращений CRM (dev)">
     <h1>Канбан обращений CRM (dev)</h1>
     <p>Только синтетический закрытый контур. Карточки не содержат ФИО,
@@ -209,14 +210,22 @@ export function AutoCrmKanban(){
             <button type="button" disabled={busy||pending!==null||!uuid.test(assignees[item.leadId]||'')}
               onClick={()=>void assign(item)}>Назначить</button>
             {!['BOOKED','LOST'].includes(item.stageCode)&&<button type="button"
-              disabled={busy||pending!==null} onClick={()=>{setEditLead(item.leadId);
-                setMoveStage(item.stageCode==='NEW'?'QUALIFIED':'BOOKED');}}>
+              disabled={busy||pending!==null||availableTransitions(item).length===0}
+              onClick={()=>{
+                const allowed=availableTransitions(item);
+                if(!allowed.length){setMessage('Для обращения нет доступных переходов.');return;}
+                setEditLead(item.leadId);setMoveStage(allowed[0].code);
+                setAppointment('');
+                const loss=allowed.find(c=>c.code==='LOST');
+                if(loss?.lossReasons.length)setReason(loss.lossReasons[0]);
+              }}>
               Изменить этап</button>}
+            {!['BOOKED','LOST'].includes(item.stageCode)&&availableTransitions(item).length===0&&
+              <p>Нет доступных переходов.</p>}
             {editLead===item.leadId&&<div>
               <label>Этап <select aria-label={'Новый этап '+item.leadId}
                 value={moveStage} onChange={e=>setMoveStage(e.target.value as StageCode)}>
-                {board.columns.filter(c=>c.enabled&&c.allowedFrom.includes(item.stageCode))
-                  .map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
+                {availableTransitions(item).map(c=><option key={c.code} value={c.code}>{c.label}</option>)}
               </select></label>
               {moveStage==='BOOKED'&&<label>UUID записи <input aria-label={'UUID записи '+item.leadId}
                 value={appointment} onChange={e=>setAppointment(e.target.value)}/></label>}

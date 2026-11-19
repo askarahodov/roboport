@@ -175,8 +175,43 @@ def upgrade():
         ) THEN RAISE EXCEPTION 'CRM follow-up customer proof unavailable'; END IF;
         SELECT stage_code INTO current_stage FROM auto_crm_lead_stage
           WHERE lead_id=NEW.lead_id ORDER BY created_at DESC,id DESC LIMIT 1;
-        IF current_stage IN ('BOOKED','LOST') THEN
-          RAISE EXCEPTION 'CRM follow-up requires active lead'; END IF;
+        IF NEW.origin_work_order_id IS NULL THEN
+          IF current_stage IN ('BOOKED','LOST') THEN
+            RAISE EXCEPTION 'CRM follow-up requires active lead';
+          END IF;
+        ELSE
+          IF NEW.task_code<>'SERVICE_REVIEW' OR current_stage IS DISTINCT FROM 'BOOKED'
+             OR NOT EXISTS (
+               SELECT 1 FROM auto_work_order w
+               JOIN auto_appointment a ON a.id=w.appointment_id
+               JOIN auto_work_order_execution e ON e.work_order_id=w.id
+               JOIN auto_work_order_execution_finish f ON f.execution_id=e.id
+               WHERE w.id=NEW.origin_work_order_id
+                 AND w.organization_id=lead_row.organization_id
+                 AND w.location_id=lead_row.location_id
+                 AND a.organization_id=w.organization_id
+                 AND a.location_id=w.location_id
+                 AND a.customer_link_id=lead_row.customer_link_id
+                 AND EXISTS(
+                   SELECT 1 FROM auto_crm_lead_stage stage
+                   WHERE stage.lead_id=NEW.lead_id AND stage.stage_code='BOOKED'
+                     AND stage.appointment_id=a.id
+                 )
+                 AND EXISTS(
+                   SELECT 1 FROM auto_work_order_qc_event qc
+                   WHERE qc.work_order_id=w.id AND qc.result='PASS'
+                     AND qc.created_at>=f.created_at
+                     AND NOT EXISTS(
+                       SELECT 1 FROM auto_work_order_qc_event newer
+                       WHERE newer.work_order_id=w.id
+                         AND (newer.created_at,newer.id)>(qc.created_at,qc.id)
+                     )
+                 )
+               FOR SHARE OF w,a,e,f
+             )
+          THEN RAISE EXCEPTION 'CRM service review requires finished QC-passed booked order';
+          END IF;
+        END IF;
         RETURN NEW;
       END $f$
     """)

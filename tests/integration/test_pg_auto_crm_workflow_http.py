@@ -89,6 +89,16 @@ def test_workflow_config_assignment_kanban_and_reassigned_followup(monkeypatch):
     assert manager_detail.json()["assignmentEvents"][0]["assigneeId"]==str(d["manager"])
 
     manager=session(http,d,d["manager"])
+    manager_inbox=http.get(base+"/inbox",headers=manager)
+    assert manager_inbox.status_code==200,manager_inbox.text
+    assert any(item["leadId"]==lead_id and item["taskId"]==task.json()["taskId"]
+               for item in manager_inbox.json()["items"])
+    intake=session(http,d,d["intake"])
+    intake_inbox=http.get(base+"/inbox",headers=intake)
+    assert intake_inbox.status_code==200,intake_inbox.text
+    assert all(item["leadId"]!=lead_id for item in intake_inbox.json()["items"])
+
+    manager=session(http,d,d["manager"])
     tasks=http.get(detail+"/tasks",headers=manager)
     assert tasks.status_code==200,tasks.text
     assert tasks.json()["items"][0]["ownerId"]==str(d["manager"])

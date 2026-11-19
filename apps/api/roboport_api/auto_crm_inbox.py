@@ -53,6 +53,11 @@ def list_inbox(conn,token,org,loc,cursor=None,mode="ALL"):
             """SELECT t.lead_id,t.id,t.due_at
                FROM auto_crm_followup_task t
                JOIN auto_crm_lead lead ON lead.id=t.lead_id
+               LEFT JOIN LATERAL(
+                 SELECT assignee_id FROM auto_crm_lead_assignment_event
+                 WHERE lead_id=lead.id
+                 ORDER BY created_at DESC,id DESC LIMIT 1
+               ) assignment ON TRUE
                JOIN auto_vehicle_customer_link proof
                  ON proof.id=lead.customer_link_id
                JOIN auto_vehicle_location_binding binding
@@ -66,7 +71,7 @@ def list_inbox(conn,token,org,loc,cursor=None,mode="ALL"):
                  ON organization.id=location.organization_id
                 AND organization.disabled_at IS NULL
                WHERE lead.organization_id=%s AND lead.location_id=%s
-                 AND (%s OR lead.owner_id=%s)
+                 AND (%s OR COALESCE(assignment.assignee_id,lead.owner_id)=%s)
                  AND proof.verified_at IS NOT NULL
                  AND proof.verified_by IS NOT NULL
                  AND proof.revoked_at IS NULL

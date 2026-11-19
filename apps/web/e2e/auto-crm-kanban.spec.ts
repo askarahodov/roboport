@@ -170,3 +170,42 @@ test('customer service consent is distinct from contact preference and never ena
   expect(enabled).toBe(true);
   await expect(section).toContainText('Юридическое подтверждение: отсутствует');
 });
+
+
+test('CRM Kanban selects the only enabled transition and does not request an appointment',async({page})=>{
+  const config=defaultConfig();
+  config.stages.find((s:any)=>s.code==='QUALIFIED')!.enabled=false;
+  config.stages.find((s:any)=>s.code==='BOOKED')!.enabled=false;
+  let savedStage:string|null=null;
+  await page.route(workflowUrl,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,version:1,canConfigure:true,config}),
+  }));
+  await page.route(boardUrl,route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,version:1,canConfigure:true,
+      columns:columns(config),items:[item('NEW')],limit:200}),
+  }));
+  await page.route(leadUrl,route=>{
+    if(route.request().method()==='GET')return route.fulfill({
+      status:200,contentType:'application/json',body:'{"syntheticOnly":true,"items":[]}',
+    });
+    const body=route.request().postDataJSON();
+    savedStage=body.stageCode;
+    expect(body.appointmentId).toBeNull();
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({replayed:false,syntheticOnly:true,status:savedStage})});
+  });
+  await csrf(page);
+  await page.goto('/staff/auto-crm-kanban');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByRole('button',{name:'Загрузить канбан'}).click();
+  await page.getByRole('button',{name:'Изменить этап'}).click();
+  const select=page.getByLabel('Новый этап '+lead);
+  await expect(select).toHaveValue('LOST');
+  await expect(page.getByLabel('UUID записи '+lead)).toHaveCount(0);
+  await page.getByRole('button',{name:'Сохранить этап'}).click();
+  await expect(page.getByText('Этап обращения обновлён.')).toBeVisible();
+  expect(savedStage).toBe('LOST');
+});
