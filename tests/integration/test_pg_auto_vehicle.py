@@ -78,7 +78,7 @@ def test_customer_vehicle_links_require_valid_owners_and_allow_revocation():
             "SELECT verified_at, verified_by FROM auto_vehicle_customer_link WHERE id=%s",
             (first_link,),
         ).fetchone() == (None, None)
-        with pytest.raises(psycopg.errors.CheckViolation):
+        with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
                 db.execute(
                     "UPDATE auto_vehicle_customer_link SET verified_at=now() WHERE id=%s",
