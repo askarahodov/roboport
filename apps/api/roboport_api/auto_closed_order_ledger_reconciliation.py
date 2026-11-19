@@ -49,12 +49,44 @@ def _sources(cost: dict) -> dict:
         })
     for group in cost["materialGroups"]:
         source = group["source"]
+        # FIFO/serial valuation has MULTIPLE primary receipt/valuation legs:
+        # the single group.source is intentionally None. Never discard
+        # fifoSlices and then claim the resulting proven costs lack evidence.
+        slices = []
+        for part in group["fifoSlices"]:
+            if (part["action"] not in ("ISSUE", "RETURN")
+                or type(part["quantity"]) is not int
+                or not 1 <= part["quantity"] <= 10**9
+                or type(part["unitNetMinor"]) is not int
+                or not 0 <= part["unitNetMinor"] <= 10**9):
+                raise Conflict()
+            slices.append({
+                "stockEventId": str(UUID(part["stockEventId"])),
+                "lotMovementId": str(UUID(part["lotMovementId"])),
+                "originalIssueId": str(UUID(part["originalIssueId"])),
+                "receiptId": str(UUID(part["receiptId"])),
+                "acceptanceId": str(UUID(part["acceptanceId"])),
+                "valuationId": str(UUID(part["valuationId"])),
+                "action": part["action"],
+                "quantity": part["quantity"],
+                "unitNetMinor": part["unitNetMinor"],
+                "serialId": str(UUID(part["serialId"])) if part.get("serialId") else None,
+                "serialApprovalId": str(UUID(part["serialApprovalId"])) if part.get("serialApprovalId") else None,
+                "sourceLocationId": str(UUID(part["sourceLocationId"])) if part.get("sourceLocationId") else None,
+            })
+        if group["status"] in ("FIFO_TRACED", "SERIAL_TRACED"):
+            if (not slices or source is not None or
+                sum(x["quantity"] * x["unitNetMinor"] *
+                    (1 if x["action"] == "ISSUE" else -1)
+                    for x in slices) != group["materialNetMinor"]):
+                raise Conflict()
         lots.append({
             "lotId": str(UUID(group["lotId"])) if group["lotId"] else None,
             "skuId": str(UUID(group["skuId"])),
             "status": group["status"],
             "receiptId": str(UUID(source["receiptId"])) if source and source.get("receiptId") else None,
             "valuationId": str(UUID(source["valuationId"])) if source and source.get("valuationId") else None,
+            "fifoSlices": slices,
         })
     return {"labor": labor, "lots": lots}
 
@@ -212,37 +244,59 @@ def _csv(data: dict) -> str:
         "Разница двух реестров, коп.", "Событие UUID", "Счёт UUID",
         "Вид события", "Сумма события, коп.", "День события",
         "Труд UUID", "Утверждение ставки UUID", "Партия UUID",
-        "Оценка UUID", "Только синтетические данные"))
+        "Оценка UUID", "Только синтетические данные",
+        "Приход UUID", "Приёмка UUID", "Движение партии UUID",
+        "Исходная выдача UUID", "Серийная деталь UUID",
+        "Утверждение происхождения UUID", "Филиал-источник UUID",
+        "Складское событие UUID", "Количество", "Цена единицы, коп.",
+        "Действие"))
+    def emit(*cells):
+        if len(cells) > 36:
+            raise Conflict()
+        writer.writerow((*cells, *[""] * (36 - len(cells))))
+
     for row in data["items"]:
         key = str(UUID(row["workOrderId"]))
         revision = str(UUID(row["revisionId"]))
         base = (key, row["closedDay"], str(UUID(row["closedEventId"])), revision)
-        writer.writerow((
+        emit(
             "ORDER", *base, row["costStatus"], row["ledgerStatus"],
             row["approvedTotalMinor"], row["directCostMinor"] or "",
             row["syntheticDifferenceMinor"] if row["syntheticDifferenceMinor"] is not None else "",
             row["demoNetMinor"], row["treasurySettledMinor"],
             row["unappliedAdvanceMinor"], row["treasuryDueMinor"],
             row["demoMinusTreasuryMinor"], *[""]*9,
-            "SIM_ONLY_NOT_REAL_MONEY"))
+            "SIM_ONLY_NOT_REAL_MONEY")
         for event in row["treasuryEvents"]:
             if event["kind"] not in _KINDS:
                 raise Conflict()
-            writer.writerow((
+            emit(
                 "TREASURY_EVENT", *base, "", "", *[""]*8,
                 str(UUID(event["eventId"])), str(UUID(event["accountId"])),
                 event["kind"], event["amountMinor"], event["businessDay"],
-                *[""]*4, "SIM_ONLY_NOT_REAL_MONEY"))
+                *[""]*4, "SIM_ONLY_NOT_REAL_MONEY")
         for entry in row["costEvidence"]["labor"]:
-            writer.writerow((
+            emit(
                 "LABOR_SOURCE", *base, entry["status"], "", *[""]*8,
                 *[""]*5, entry["laborEntryId"], entry["approvalId"] or "",
-                "", "", "SIM_ONLY_NOT_REAL_MONEY"))
+                "", "", "SIM_ONLY_NOT_REAL_MONEY")
         for lot in row["costEvidence"]["lots"]:
-            writer.writerow((
+            emit(
                 "MATERIAL_SOURCE", *base, lot["status"], "", *[""]*8,
                 *[""]*5, "", "", lot["lotId"] or "",
-                lot["valuationId"] or "", "SIM_ONLY_NOT_REAL_MONEY"))
+                lot["valuationId"] or "", "SIM_ONLY_NOT_REAL_MONEY")
+            for part in lot["fifoSlices"]:
+                # Every FIFO or serial provenance leg has a separately
+                # verifiable receipt/acceptance/valuation/movement UUID.
+                emit(
+                    "FIFO_SLICE", *base, lot["status"], "", *[""]*8,
+                    *[""]*5, "", "", lot["lotId"] or "",
+                    part["valuationId"], "SIM_ONLY_NOT_REAL_MONEY",
+                    part["receiptId"], part["acceptanceId"],
+                    part["lotMovementId"], part["originalIssueId"],
+                    part["serialId"] or "", part["serialApprovalId"] or "",
+                    part["sourceLocationId"] or "", part["stockEventId"],
+                    part["quantity"], part["unitNetMinor"], part["action"])
     content = ("\ufeff" + out.getvalue()).encode("utf-8")
     if len(content) > MAX_CSV_BYTES:
         raise Conflict()
