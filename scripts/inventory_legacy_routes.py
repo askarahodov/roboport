@@ -10,6 +10,7 @@ import ast
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 LEGACY = re.compile(r"(?:robot|ticket|catalog|request-demo|guest|device)", re.I)
 ROUTE = re.compile(r"<Route\b[^>]*\bpath\s*=\s*[\"']([^\"']+)[\"']", re.S)
@@ -226,8 +227,18 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                     if (m := re.match(r"^  version:\s*(.+)$", line))), "")
     servers = [m.group(1).strip().strip("\"'") for line in lines
                if (m := re.match(r"^- url:\s*(.+)$", line))]
+    def placeholder_server(url: str) -> bool:
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return False
+        return (parsed.scheme == "https" and parsed.hostname is not None
+                and parsed.hostname.endswith(".invalid")
+                and parsed.username is None and parsed.password is None
+                and not parsed.query and not parsed.fragment)
+
     safe_draft = ("draft" in title.lower() and version.lower().endswith("-draft")
-                  and bool(servers) and all(url.endswith(".invalid") for url in servers))
+                  and bool(servers) and all(placeholder_server(url) for url in servers))
     rows: list[dict[str, object]] = []
     if not safe_draft:
         rows.append({

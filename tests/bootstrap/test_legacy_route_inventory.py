@@ -311,6 +311,16 @@ def test_historical_openapi_contract_must_remain_non_publishable(capsys):
         report = capsys.readouterr().out
         assert '"historicalOpenApiDraftSafe": false' in report
 
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.com/path.invalid\n"
+            "paths:\n  /api/v1/robot/devices:\n    get:\n      operationId: listRobotDevices\n",
+            encoding="utf-8",
+        )
+        assert main(["--root", str(root), "--check"]) == 1
+        report = capsys.readouterr().out
+        assert '"historicalOpenApiDraftSafe": false' in report
+
 
 def test_real_historical_openapi_draft_is_included_in_inventory():
     root = Path(__file__).resolve().parents[2]
