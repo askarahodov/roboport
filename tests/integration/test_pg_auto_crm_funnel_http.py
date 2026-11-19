@@ -26,10 +26,14 @@ def new_link(db,d,loc):
         (vehicle,),
     )
     db.execute(
-        """INSERT INTO auto_vehicle_customer_link
-           (id,vehicle_id,customer_id,verified_at,verified_by)
-           VALUES(%s,%s,%s,now(),%s)""",
-        (link,vehicle,d["ca"],d["manager"]),
+        """INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id)
+           VALUES(%s,%s,%s)""",
+        (link,vehicle,d["ca"]),
+    )
+    db.execute(
+        """UPDATE auto_vehicle_customer_link
+           SET verified_at=now(),verified_by=%s WHERE id=%s""",
+        (d["manager"],link),
     )
     db.execute(
         """INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id)
