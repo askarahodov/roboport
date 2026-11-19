@@ -93,7 +93,12 @@ def _shift_comparison(conn: psycopg.Connection, org: UUID, loc: UUID,
         } for x in labor
     }
     for shift_id,actor,first,last in rows:
-        seconds = int((min(last,end)-max(first,start)).total_seconds())
+        # psycopg may return *both* timestamps with one ZoneInfo. Python
+        # subtracts those datetimes as wall time across a DST transition;
+        # normalize to UTC before clipping and subtracting actual elapsed time.
+        first_utc=first.astimezone(timezone.utc)
+        last_utc=last.astimezone(timezone.utc)
+        seconds = int((min(last_utc,end)-max(first_utc,start)).total_seconds())
         if seconds<=0:
             raise ProductivityInvalid("SHIFT_INTEGRITY")
         person=str(actor)
