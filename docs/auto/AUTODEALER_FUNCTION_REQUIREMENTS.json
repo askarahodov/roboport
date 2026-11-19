@@ -1048,6 +1048,17 @@
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
       "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-096",
+      "pageId": "ADP-054",
+      "matrixId": "D04",
+      "ownerIssue": 169,
+      "capability": "Интеграция UIS IP-телефонии и webhook событий",
+      "acceptance": "Настроить API-доступ UIS, доверенные IP-адреса, внутренние номера и соответствие сотрудникам; принимать HTTP POST события входящего/исходящего звонка, ответа, завершения плеча и записи разговора, связывая payload по callSessionId/legId с контактом, сотрудником, направлением, номерами и записью разговора.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
     }
   ]
 }
