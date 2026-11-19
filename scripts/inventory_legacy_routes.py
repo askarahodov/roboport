@@ -10,6 +10,7 @@ import ast
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 LEGACY = re.compile(r"(?:robot|ticket|catalog|request-demo|guest|device)", re.I)
 ROUTE = re.compile(r"<Route\b[^>]*\bpath\s*=\s*[\"']([^\"']+)[\"']", re.S)
@@ -210,6 +211,121 @@ def scan_python(path: Path, root: Path) -> list[dict[str, object]]:
     return results
 
 
+
+def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
+    """Inventory the historical OpenAPI draft without treating it as runtime API.
+
+    Parse only top-level path/method/operationId indentation. Never load YAML
+    tags, resolve references, import application code, or follow server URLs.
+    """
+    if not path.is_file():
+        return []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    title = next((m.group(1).strip() for line in lines
+                  if (m := re.match(r"^  title:\s*(.+)$", line))), "")
+    version = next((m.group(1).strip().strip("\"'") for line in lines
+                    if (m := re.match(r"^  version:\s*(.+)$", line))), "")
+    servers = [m.group(1).strip().strip("\"'") for line in lines
+               if (m := re.match(r"^- url:\s*(.+)$", line))]
+    def placeholder_server(url: str) -> bool:
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return False
+        return (parsed.scheme == "https" and parsed.hostname is not None
+                and parsed.hostname.endswith(".invalid")
+                and parsed.username is None and parsed.password is None
+                and not parsed.query and not parsed.fragment)
+
+    safe_draft = ("draft" in title.lower() and version.lower().endswith("-draft")
+                  and bool(servers) and all(placeholder_server(url) for url in servers))
+    rows: list[dict[str, object]] = []
+    if not safe_draft:
+        rows.append({
+            "source": str(path.relative_to(root)), "line": 1,
+            "kind": "historical-openapi-control", "method": None,
+            "path": "contracts/openapi.yaml", "legacy_candidate": True,
+            "schema_hidden": None, "unresolved": True,
+            "review": "draft-marker-or-placeholder-server-missing",
+        })
+    start = next((i for i, line in enumerate(lines) if line == "paths:"), None)
+    if start is None:
+        rows.append({
+            "source": str(path.relative_to(root)), "line": 1,
+            "kind": "historical-openapi-control", "method": None,
+            "path": "<paths-section-missing>", "legacy_candidate": True,
+            "schema_hidden": None, "unresolved": True,
+            "review": "paths-section-missing",
+        })
+        return rows
+    current_path: str | None = None
+    path_line = 0
+    methods: list[tuple[str, str | None, int]] = []
+
+    def flush() -> None:
+        nonlocal methods
+        if current_path is None:
+            return
+        if not methods:
+            rows.append({
+                "source": str(path.relative_to(root)), "line": path_line,
+                "kind": "historical-openapi-path", "method": None,
+                "path": current_path, "legacy_candidate": True,
+                "schema_hidden": None, "unresolved": True,
+                "review": "path-has-no-recognized-method",
+            })
+        for method, operation_id, line_no in methods:
+            rows.append({
+                "source": str(path.relative_to(root)), "line": line_no,
+                "kind": "historical-openapi-draft", "method": method,
+                "path": current_path,
+                "legacy_candidate": bool(LEGACY.search(current_path)),
+                "schema_hidden": None, "unresolved": operation_id is None,
+                "operation_id": operation_id,
+                "contract_status": "historical-draft-not-runtime",
+                "review": "operation-id-missing" if operation_id is None else "manual-disposition-required",
+            })
+        methods = []
+
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line and not line.startswith(" "):
+            break
+        path_match = re.match(r"^  (/[^:]+):\s*$", line)
+        if path_match:
+            flush()
+            current_path = path_match.group(1).strip("\"'")
+            path_line = index + 1
+            continue
+        method_match = re.match(r"^    (get|post|put|patch|delete|options|head|trace):\s*$", line)
+        if method_match and current_path is not None:
+            methods.append((method_match.group(1).upper(), None, index + 1))
+            continue
+        operation_match = re.match(r"^      operationId:\s*([^\s#]+)", line)
+        if operation_match and methods:
+            method, _, line_no = methods[-1]
+            methods[-1] = (method, operation_match.group(1).strip("\"'"), line_no)
+    flush()
+    if not any(row["kind"] == "historical-openapi-draft" for row in rows):
+        rows.append({
+            "source": str(path.relative_to(root)), "line": start + 1,
+            "kind": "historical-openapi-control", "method": None,
+            "path": "<no-operation-paths>", "legacy_candidate": True,
+            "schema_hidden": None, "unresolved": True,
+            "review": "no-operation-paths",
+        })
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        if row["kind"] != "historical-openapi-draft":
+            continue
+        key = (str(row["path"]), str(row["method"]))
+        if key in seen:
+            row["unresolved"] = True
+            row["review"] = "duplicate-path-method"
+        seen.add(key)
+    return rows
+
+
 def inventory(root: Path) -> list[dict[str, object]]:
     rows = []
     api = root / "apps/api/roboport_api"
@@ -228,6 +344,7 @@ def inventory(root: Path) -> list[dict[str, object]]:
                     "legacy_candidate": bool(LEGACY.search(url)),
                     "schema_hidden": None, "review": "manual-required",
                 })
+    rows.extend(scan_openapi_contract(root / "contracts/openapi.yaml", root))
     return sorted(rows, key=lambda r: (str(r["source"]), int(r["line"]), str(r["kind"]), str(r["path"])))
 
 
@@ -246,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({
             "source": "static-only", "apiPathsResolved": not unresolved,
             "routeCount": len(rows),
+            "historicalOpenApiPaths": sum(r["kind"] == "historical-openapi-draft" for r in rows),
+            "historicalOpenApiDraftSafe": not any(r["kind"] == "historical-openapi-control" or r["kind"] == "historical-openapi-path" or (r["kind"] == "historical-openapi-draft" and r["unresolved"]) for r in rows),
             "unresolved": [{"source": r["source"], "line": r["line"]}
                            for r in unresolved],
         }, ensure_ascii=False))

@@ -2,7 +2,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from scripts.inventory_legacy_routes import inventory, main, scan_python
+from scripts.inventory_legacy_routes import inventory, main, scan_openapi_contract, scan_python
 
 
 def test_api_route_metadata_and_hidden_decorator():
@@ -266,3 +266,85 @@ def test_factory_decorator_cannot_disappear_from_route_inventory():
         assert len(rows) == 1
         assert rows[0]["unresolved"] is True
         assert rows[0]["legacy_candidate"] is True
+
+
+def test_historical_openapi_draft_paths_are_inventoried_without_runtime_claims():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "openapi: 3.1.2\n"
+            "info:\n  title: Example API (draft, synthetic only)\n"
+            "  version: 1.2.3-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            "  /api/v1/robot/devices:\n"
+            "    get:\n      operationId: listRobotDevices\n"
+            "  /api/v1/auto/vehicles/{vehicleId}:\n"
+            "    get:\n      operationId: getVehicle\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert [(r["method"], r["path"], r["operation_id"]) for r in rows] == [
+            ("GET", "/api/v1/robot/devices", "listRobotDevices"),
+            ("GET", "/api/v1/auto/vehicles/{vehicleId}", "getVehicle"),
+        ]
+        assert rows[0]["legacy_candidate"] is True
+        assert rows[1]["legacy_candidate"] is False
+        assert all(r["contract_status"] == "historical-draft-not-runtime" for r in rows)
+        assert all(not r["unresolved"] for r in rows)
+
+
+def test_historical_openapi_contract_must_remain_non_publishable(capsys):
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "openapi: 3.1.2\ninfo:\n  title: Example API\n  version: 1.2.3\n"
+            "servers:\n- url: https://api.example.com\n"
+            "paths:\n  /api/v1/robot/devices:\n    get:\n      operationId: listRobotDevices\n",
+            encoding="utf-8",
+        )
+        assert main(["--root", str(root), "--check"]) == 1
+        report = capsys.readouterr().out
+        assert '"historicalOpenApiDraftSafe": false' in report
+
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.com/path.invalid\n"
+            "paths:\n  /api/v1/robot/devices:\n    get:\n      operationId: listRobotDevices\n",
+            encoding="utf-8",
+        )
+        assert main(["--root", str(root), "--check"]) == 1
+        report = capsys.readouterr().out
+        assert '"historicalOpenApiDraftSafe": false' in report
+
+
+def test_real_historical_openapi_draft_is_included_in_inventory():
+    root = Path(__file__).resolve().parents[2]
+    rows = scan_openapi_contract(root / "contracts/openapi.yaml", root)
+    operations = [r for r in rows if r["kind"] == "historical-openapi-draft"]
+    assert len(operations) == 46
+    assert any(r["path"] == "/api/v1/customer/devices/{deviceId}" for r in operations)
+    assert all(r["contract_status"] == "historical-draft-not-runtime" for r in operations)
+    assert not any(r["unresolved"] for r in rows)
+
+
+def test_missing_openapi_operation_id_fails_closed():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /api/v1/robot/devices:\n    get:\n      summary: no operation id\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["review"] == "operation-id-missing"
+        assert main(["--root", str(root), "--check"]) == 1
