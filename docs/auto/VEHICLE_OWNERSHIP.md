@@ -243,6 +243,7 @@ PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_manager_b
 
 Миграция `0133_auto_vehicle_link_guard` закрепляет инварианты `auto_vehicle_customer_link` для **любого** SQL-клиента, а не только HTTP-маршрутов:
 
+- INSERT допускается только в исходном состоянии PENDING; `verified_at`, `verified_by` и `revoked_at` должны быть NULL;
 - `id`, `vehicle_id`, `customer_id`, `linked_at` после INSERT неизменяемы;
 - `verified_at` и `verified_by` переходят из пары NULL в заполненную пару только один раз; смена проверяющего, времени или очистка запрещены;
 - отозванную связь нельзя подтвердить; после заполнения `revoked_at` его нельзя очистить или заменить;
