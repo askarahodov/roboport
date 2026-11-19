@@ -69,7 +69,9 @@ function parse(raw:unknown,from:string,to:string):Report{
       throw Error('day');
     if(d.simulatedNetMinor!==d.approvedTotalMinor||
       d.simulatedPaidMinor!-d.simulatedRefundedMinor!!==d.simulatedNetMinor||
-      (d.incompleteOrderCount>0?d.syntheticDifferenceMinor!==null:
+      (d.incompleteOrderCount>0?
+        [d.materialNetMinor,d.laborCostMinor,d.directCostMinor,
+         d.syntheticDifferenceMinor].some(v=>v!==null):
         (d.materialNetMinor===null||d.laborCostMinor===null||
          d.directCostMinor===null||d.syntheticDifferenceMinor===null||
          d.approvedTotalMinor!-d.directCostMinor!==d.syntheticDifferenceMinor||
@@ -148,7 +150,11 @@ function parse(raw:unknown,from:string,to:string):Report{
     for(const key of MONEY){
       if(key==='materialNetMinor'||key==='laborCostMinor'||
         key==='directCostMinor'||key==='syntheticDifferenceMinor'){
-        d[key]=d[key]===null||x[key]===null?null:d[key]!+x[key]!;
+        // An incomplete order invalidates *all* day-level cost totals,
+        // including an individually traceable material amount. The
+        // server must never publish a partial cost as period profit.
+        d[key]=!complete||d[key]===null||x[key]===null
+          ?null:d[key]!+x[key]!;
       }else{d[key]=d[key]!+x[key]!;}
     }
   }
