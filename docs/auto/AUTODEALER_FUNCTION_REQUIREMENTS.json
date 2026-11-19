@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-18",
+  "checkedOn": "2026-11-19",
   "source": "https://autodealer.ru/online/help/",
   "completeness": "PARTIAL: reviewed or search-indexed public articles; NOT exhaustive navigation and NOT a statement of implementation readiness",
   "requirements": [
@@ -222,7 +222,7 @@
       "acceptance": "Создать номенклатуру с номерами, единицей измерения и корректной категорией цены; исключить дубликаты.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-021",
@@ -310,7 +310,7 @@
       "acceptance": "Импортировать файл с проверкой колонок, неверных данных, dry-run, идемпотентностью и экспортом без CSV/XLSX-инъекций.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-029",
@@ -321,7 +321,7 @@
       "acceptance": "Создать потребность клиента, сформировать заказ поставщику и сверить частичный приход/отмену по позициям.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-030",
@@ -431,7 +431,7 @@
       "acceptance": "Выбрать шаблон, формат номера/штрихкода и распечатать ценники по выбранным товарам с проверкой макета.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-040",
@@ -453,7 +453,7 @@
       "acceptance": "Получить и отправить разрешённое сообщение клиента через подключённого провайдера с opt-out, audit и повторной доставкой.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-042",
@@ -464,7 +464,7 @@
       "acceptance": "Войти в самостоятельное приложение и выполнить разрешённую операцию без обхода tenant/branch ACL.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-043",
@@ -772,7 +772,7 @@
       "acceptance": "Неверный файл/колонка/формула/ссылка на внешнее значение приводит к нулю записей и отчёту без ПДн.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-071",
@@ -783,7 +783,7 @@
       "acceptance": "Частичный приход обновляет остатки и статус позиции, повтор того же документа не создаёт дополнительных партий.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-072",
@@ -926,7 +926,7 @@
       "acceptance": "Маркетинговые уведомления требуют отдельного разрешения, opt-out и ответа провайдера; служебные сообщения не подменяются рассылкой.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-085",
