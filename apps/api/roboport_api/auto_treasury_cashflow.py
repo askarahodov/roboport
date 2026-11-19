@@ -177,6 +177,10 @@ def _csv_export(data: dict) -> str:
             raise TreasuryConflict("CSV_INTEGRITY")
         if kind not in ("CASH_SIM", "BANK_SIM"):
             raise TreasuryConflict("CSV_INTEGRITY")
+        # ASCII account codes may begin with '-' under the existing DB
+        # constraint. Prefix that otherwise formula-like cell with an
+        # apostrophe so spreadsheet software treats the code as text.
+        csv_code = ("'" + code) if code.startswith(("-", "+", "=", "@")) else code
         account_id = str(UUID(account["accountId"]))
         for day in account["days"]:
             close_id = str(UUID(day["closeId"])) if day["closeId"] else ""
@@ -190,7 +194,7 @@ def _csv_export(data: dict) -> str:
                     event_id = ""
                 writer.writerow((
                     base[0], "ACCOUNT_EVENT" if event else "ACCOUNT_DAY",
-                    base[1], base[2], base[3],
+                    base[1], csv_code, base[3],
                     event_id, event["kind"] if event else "",
                     event["cashFlow"] if event else "",
                     event["amountMinor"] if event else "",
