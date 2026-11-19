@@ -348,3 +348,73 @@ def test_missing_openapi_operation_id_fails_closed():
         assert rows[0]["unresolved"] is True
         assert rows[0]["review"] == "operation-id-missing"
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_server_inventory_rejects_live_url_after_description_field():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n"
+            "- url: https://api.example.invalid\n"
+            "- description: live server\n"
+            "  url: https://api.example.com\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_quoted_paths_and_commented_methods_are_inventoried_and_unknown_keys_fail_closed():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            "  /safe:\n"
+            "    get:\n      operationId: safe\n"
+            '  "/api/v1/robot/devices":\n'
+            "    post: # comment after method key\n"
+            "      operationId: listRobotDevices\n"
+            "  /safe-two:\n"
+            "    get : # malformed method key\n"
+            "      operationId: must-not-attach-to-previous-method\n"
+            "    get:\n      operationId: safeTwo\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        operations = [r for r in rows if r["kind"] == "historical-openapi-draft"]
+        assert any(r["path"] == "/api/v1/robot/devices" and
+                   r["method"] == "POST" and
+                   r["operation_id"] == "listRobotDevices" for r in operations)
+        assert not any(r["operation_id"] == "must-not-attach-to-previous-method" for r in operations)
+        assert any(r["unresolved"] and r["review"] == "malformed-method-key" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_unrecognized_quoted_path_key_resets_current_path_instead_of_inheriting_previous():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            "  /safe:\n"
+            "    get:\n      operationId: safe\n"
+            '  "not-an-absolute-path":\n'
+            "    post:\n      operationId: hiddenLegacy\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["review"] == "path-key-is-not-an-absolute-path" and r["unresolved"] for r in rows)
+        assert not any(r.get("operation_id") == "hiddenLegacy" and r["path"] == "/safe" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
