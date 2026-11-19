@@ -73,8 +73,11 @@ def test_full_qc_closed_order_sim_settlement_material_labor_contribution_csv(mon
     assert all(len(r)==16 for r in rows)
     assert rows[0][0]=="День"
     assert len(rows)==1+1+1+len(events)+len(row["laborEntries"])+sum(
-        len(g["movements"]) for g in row["materialGroups"])
-    assert {r[1] for r in rows[1:]}=={"DAY","ORDER","SIM_CASH","LABOR","STOCK"}
+        1+len(g["movements"]) for g in row["materialGroups"])
+    assert {r[1] for r in rows[1:]}=={
+        "DAY","ORDER","SIM_CASH","LABOR","MATERIAL_GROUP","STOCK"}
+    assert next(r for r in rows if r[1]=="MATERIAL_GROUP")[8]=="1250"
+    assert all(r[8]=="" for r in rows if r[1]=="STOCK")
     assert {r[3] for r in rows[1:] if r[1]=="SIM_CASH"}==dbids
     assert next(r for r in rows if r[1]=="ORDER")[11]=="-251"
     assert str(d["client_a"]) not in export.text
@@ -168,3 +171,39 @@ def test_empty_close_period_is_zero_not_margin_or_payroll(monkeypatch):
     assert len(obj["days"])==2
     assert all(x["orderCount"]==0 for x in obj["days"])
     assert obj["realMoney"] is False and obj["marginAvailable"] is False
+
+
+def test_csv_fifo_issue_return_material_cost_only_on_group_not_each_move():
+    """Net group = 100, issue 200 and return 100; never repeat 100 twice."""
+    order=str(uuid4())
+    event1,event2=str(uuid4()),str(uuid4())
+    lot=str(uuid4())
+    result={"days":[],"items":[{
+        "closedDay":"2026-11-19","workOrderId":order,
+        "closedEventId":str(uuid4()),"status":"COMPLETE",
+        "approvedTotalMinor":250,"simulatedPaidMinor":250,
+        "simulatedRefundedMinor":0,
+        "materialNetMinor":100,"laborCostMinor":50,
+        "directCostMinor":150,"syntheticDifferenceMinor":100,
+        "estimateRevisionId":str(uuid4()),"cashEvents":[],"laborEntries":[],
+        "materialGroups":[{
+            "skuId":str(uuid4()),"lotId":lot,"status":"TRACED",
+            "materialNetMinor":100,"netQuantity":1,
+            "source":{"valuationId":str(uuid4())},
+            "movements":[
+                {"stockEventId":event1,"action":"ISSUE","quantity":2},
+                {"stockEventId":event2,"action":"RETURN","quantity":1},
+            ]
+        }]
+    }]}
+    rows=list(csv.reader(StringIO(module._csv(result).decode("utf-8").lstrip("\ufeff")),
+                         delimiter=";"))
+    assert len(rows)==5
+    groups=[r for r in rows if r[1]=="MATERIAL_GROUP"]
+    stock=[r for r in rows if r[1]=="STOCK"]
+    assert len(groups)==1 and groups[0][8]=="100"
+    assert len(stock)==2
+    assert [r[12:14] for r in stock]==[["ISSUE","2"],["RETURN","1"]]
+    assert [r[3] for r in stock]==[event1,event2]
+    assert all(r[8]=="" for r in stock)
+    assert all(r[14]==lot for r in stock)
