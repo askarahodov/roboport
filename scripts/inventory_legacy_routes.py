@@ -273,12 +273,17 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                            if re.match(r"""^(?:servers|"servers"|'servers')\s*:""", line)]
     merge_declarations = [i for i, line in enumerate(lines)
                           if re.match(r"^<<\s*:", line)]
+    unsupported_root_mapping = any(
+        re.match(r"""^(?:"[^"]*"|'[^']*'|<<)\s*:""", line)
+        for line in lines
+    )
     servers_indexes = [i for i, line in enumerate(lines)
                        if re.match(r"^servers:\s*(?:#.*)?$", line)]
     server_urls: list[str] = []
     servers_valid = (len(server_declarations) == 1
                      and server_declarations == servers_indexes
-                     and not merge_declarations)
+                     and not merge_declarations
+                     and not unsupported_root_mapping)
     server_entries = 0
     sequence_indent: int | None = None
     entry_indent: int | None = None
@@ -375,17 +380,38 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             "review": "draft-marker-or-server-inventory-invalid",
         })
 
-    paths_indexes = [i for i, line in enumerate(lines)
-                     if re.match(r"^paths:\s*(?:#.*)?$", line)]
-    if not paths_indexes:
+    if unsupported_root_mapping:
         rows.append({
             "source": str(path.relative_to(root)), "line": 1,
             "kind": "historical-openapi-control", "method": None,
-            "path": "<paths-section-missing>", "legacy_candidate": True,
+            "path": "contracts/openapi.yaml", "legacy_candidate": True,
             "schema_hidden": None, "unresolved": True,
-            "review": "paths-section-missing",
+            "review": "unsupported-root-yaml-key",
         })
-        return rows
+
+    path_declarations = [
+        (i, m.group(1)) for i, line in enumerate(lines)
+        if (m := re.match(r"^paths\s*:(.*)$", line))
+    ]
+    paths_indexes = [
+        i for i, tail in path_declarations
+        if not without_comment(tail).strip()
+    ]
+    if len(path_declarations) != 1 or len(paths_indexes) != 1:
+        review = (
+            "paths-section-missing" if not path_declarations
+            else "paths-section-duplicate" if len(path_declarations) > 1
+            else "paths-section-unsupported-value"
+        )
+        rows.append({
+            "source": str(path.relative_to(root)), "line": 1,
+            "kind": "historical-openapi-control", "method": None,
+            "path": "<paths-section-unresolved>", "legacy_candidate": True,
+            "schema_hidden": None, "unresolved": True,
+            "review": review,
+        })
+        if not paths_indexes:
+            return rows
 
     current_path: str | None = None
     path_line = 0
@@ -545,8 +571,14 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 else:
                     current_method["operation_id"] = operation_id
                 continue
+            if key == "callbacks":
+                # Callback Objects contain nested Path Items and can hide their
+                # own server overrides; they are outside this bounded parser.
+                unresolved_path(index + 1, "operation-callbacks-unreviewed", current_path or "<unresolved-path>")
+                current_method = None
+                continue
             if key in {"tags", "summary", "description", "externalDocs", "parameters",
-                       "requestBody", "responses", "callbacks", "deprecated", "security"} or key.startswith("x-"):
+                       "requestBody", "responses", "deprecated", "security"} or key.startswith("x-"):
                 continue
             unresolved_path(index + 1, "unrecognized-operation-key", current_path or "<unresolved-path>")
             current_method = None

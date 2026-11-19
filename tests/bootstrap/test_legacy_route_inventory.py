@@ -585,3 +585,62 @@ def test_servers_sequence_marker_requires_separator_after_dash():
         rows = scan_openapi_contract(contract, root)
         assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_operation_callbacks_fail_closed_because_nested_path_items_can_override_servers():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n"
+            "    get:\n      operationId: safe\n"
+            "      callbacks:\n"
+            "        onEvent:\n"
+            "          '{$request.body#/callbackUrl}':\n"
+            "            post:\n"
+            "              servers:\n"
+            "                - url: https://api.example.com\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["unresolved"] and r["review"] == "operation-callbacks-unreviewed" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_root_escaped_servers_key_cannot_shadow_the_placeholder_server():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n"
+            + r'"\\u0073ervers":' + "\n"
+            + "- url: https://api.example.com\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_root_paths_anchor_duplicate_cannot_hide_additional_operations():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n"
+            "paths: &extra\n  /robot:\n    get:\n      operationId: hiddenRobot\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["unresolved"] and r["review"] == "paths-section-duplicate" for r in rows)
+        assert not any(r.get("operation_id") == "hiddenRobot" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
