@@ -269,10 +269,10 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 "kind": "historical-openapi-draft", "method": method,
                 "path": current_path,
                 "legacy_candidate": bool(LEGACY.search(current_path)),
-                "schema_hidden": None, "unresolved": False,
+                "schema_hidden": None, "unresolved": operation_id is None,
                 "operation_id": operation_id,
                 "contract_status": "historical-draft-not-runtime",
-                "review": "manual-disposition-required",
+                "review": "operation-id-missing" if operation_id is None else "manual-disposition-required",
             })
         methods = []
 

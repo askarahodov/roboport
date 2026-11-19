@@ -320,3 +320,21 @@ def test_real_historical_openapi_draft_is_included_in_inventory():
     assert any(r["path"] == "/api/v1/customer/devices/{deviceId}" for r in operations)
     assert all(r["contract_status"] == "historical-draft-not-runtime" for r in operations)
     assert not any(r["unresolved"] for r in rows)
+
+
+def test_missing_openapi_operation_id_fails_closed():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /api/v1/robot/devices:\n    get:\n      summary: no operation id\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["review"] == "operation-id-missing"
+        assert main(["--root", str(root), "--check"]) == 1
