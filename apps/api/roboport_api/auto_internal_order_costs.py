@@ -173,7 +173,7 @@ def _load_labor(conn, ids, org, loc):
     """, (ids,org,loc,MAX_LABOR+1)).fetchall()
 
 
-def cost_report(conn, token, org, loc, from_day, to_day):
+def cost_report(conn, token, org, loc, from_day, to_day, *, include_base=False):
     with conn.transaction():
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         _authority(conn,token,org,loc)
@@ -227,7 +227,7 @@ def cost_report(conn, token, org, loc, from_day, to_day):
         def sum_complete(key):
             values=[row[key] for row in items]
             return _bounded(sum(values)) if all(v is not None for v in values) else None
-        return {
+        result = {
             "syntheticOnly":True,"realMoney":False,"releaseAllowed":False,
             "marginAvailable":False,"payrollAvailable":False,"currency":"RUB",
             "basis":BASIS,"timeZone":base["timeZone"],"fromDay":from_day,"toDay":to_day,
@@ -239,7 +239,10 @@ def cost_report(conn, token, org, loc, from_day, to_day):
                            "directCostMinor","syntheticDifferenceMinor")}},
             "items":items,
         }
-
+        # Private composition path: expose the exact validated closure
+        # primary sources from this *same* REPEATABLE READ snapshot. Existing
+        # public dev report and CSV response remain byte-for-byte compatible.
+        return (result, base) if include_base else result
 
 def _csv(data):
     out=StringIO(newline="")
