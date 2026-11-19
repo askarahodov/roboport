@@ -23,6 +23,7 @@ def test_workflow_config_assignment_kanban_and_reassigned_followup(monkeypatch):
     base=crm(org,loc)
     intake=session(http,d,d["intake"])
     manager=session(http,d,d["manager"])
+    intake=session(http,d,d["intake"])
     created=http.post(base+"/leads",headers=intake,json=lead_payload(d))
     assert created.status_code==201,created.text
     lead_id=created.json()["leadId"]

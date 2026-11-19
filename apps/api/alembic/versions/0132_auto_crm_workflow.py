@@ -50,7 +50,7 @@ def upgrade():
             AND g.user_id=NEW.actor_id AND g.role_code='MANAGER'
             AND (g.location_id IS NULL OR g.location_id=NEW.location_id)
             AND g.revoked_at IS NULL
-            AND (g.expires_at IS NULL OR g.expires_at>now())
+            
           FOR SHARE OF g,u
         ) THEN RAISE EXCEPTION 'CRM workflow requires live MANAGER'; END IF;
         SELECT count(*),count(DISTINCT item->>'code')
@@ -234,7 +234,7 @@ def upgrade():
           WHERE g.organization_id=NEW.organization_id AND g.user_id=NEW.actor_id
             AND g.role_code='MANAGER'
             AND (g.location_id IS NULL OR g.location_id=NEW.location_id)
-            AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
+            AND g.revoked_at IS NULL 
           FOR SHARE OF g,u
         ) THEN RAISE EXCEPTION 'CRM assignment requires live MANAGER'; END IF;
         IF NOT EXISTS(
@@ -243,7 +243,7 @@ def upgrade():
           WHERE g.organization_id=NEW.organization_id AND g.user_id=NEW.assignee_id
             AND g.role_code IN ('MANAGER','INTAKE')
             AND (g.location_id IS NULL OR g.location_id=NEW.location_id)
-            AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
+            AND g.revoked_at IS NULL 
           FOR SHARE OF g,u
         ) THEN RAISE EXCEPTION 'CRM assignee grant unavailable'; END IF;
         IF NOT EXISTS(
@@ -352,7 +352,7 @@ def upgrade():
           WHERE g.organization_id=NEW.organization_id AND g.user_id=NEW.actor_id
             AND g.role_code IN ('MANAGER','INTAKE')
             AND (g.location_id IS NULL OR g.location_id=NEW.location_id)
-            AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
+            AND g.revoked_at IS NULL 
           FOR SHARE OF g,u
         ) THEN RAISE EXCEPTION 'CRM mock outbox requires live staff grant'; END IF;
         IF NOT EXISTS(
