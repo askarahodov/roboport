@@ -15,12 +15,15 @@ def _requirements():
     return json.loads(REQUIREMENTS.read_text(encoding="utf-8"))
 
 
-def test_49_public_pages_and_all_89_acceptance_criteria_are_traced():
+def test_all_public_pages_and_acceptance_criteria_are_traced():
     pages = _pages()
     checks = _requirements()
-    assert len(pages["records"]) == 49
-    assert len(checks["requirements"]) == 89
-    assert len({r["pageId"] for r in checks["requirements"]}) == 49
+    # Discovery is additive: fail if baseline coverage is lost, not when new
+    # independently sourced pages and acceptance criteria are recorded.
+    assert len(pages["records"]) >= 49
+    assert len(checks["requirements"]) >= 89
+    assert len({r["id"] for r in pages["records"]}) == len(pages["records"])
+    assert len({r["pageId"] for r in checks["requirements"]}) == len(pages["records"])
     assert not validate(pages, MATRIX.read_text(encoding="utf-8"))
     assert not validate_requirements(checks, pages)
     assert "PARTIAL" in pages["completeness"]
@@ -31,9 +34,14 @@ def test_49_public_pages_and_all_89_acceptance_criteria_are_traced():
 
 def test_old_source_dates_are_preserved_and_future_or_stale_dates_fail_closed():
     pages = _pages()
-    old = [x for x in pages["records"] if x["checkedOn"] == "2026-11-06"]
-    new = [x for x in pages["records"] if x["checkedOn"] == "2026-11-18"]
-    assert len(old) == 30 and len(new) == 19
+    rows = {x["id"]: x for x in pages["records"]}
+    # A source inspection changes the date only for that source, so count-based
+    # assertions would punish legitimate re-verification of older articles.
+    assert rows["ADP-001"]["checkedOn"] == "2026-11-06"
+    assert rows["ADP-049"]["checkedOn"] == "2026-11-18"
+    assert rows["ADP-020"]["checkedOn"] == "2026-11-19"
+    assert rows["ADP-050"]["checkedOn"] == "2026-11-19"
+    assert len({x["checkedOn"] for x in rows.values()}) >= 3
     for value in ("2025-01-01", "2026-12-01", "invalid"):
         altered = copy.deepcopy(pages)
         altered["records"][0]["checkedOn"] = value
