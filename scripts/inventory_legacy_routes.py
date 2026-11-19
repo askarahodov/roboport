@@ -279,6 +279,8 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 continue
             field = re.match(r"^  ([A-Za-z][\w-]*):(?:[ \t]+(.*))?$", line)
             if not field:
+                if line.startswith("  ") and not line.startswith("   "):
+                    info_valid = False
                 continue
             key, raw_value = field.group(1), field.group(2) or ""
             if key == "title":
@@ -298,7 +300,15 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
     merge_declarations = [i for i, line in enumerate(lines)
                           if re.match(r"^<<\s*:", line)]
     unsupported_root_mapping = any(
-        re.match(r"""^(?:"[^"]*"|'[^']*'|<<)\s*:""", line)
+        line.strip()
+        and not line.lstrip().startswith("#")
+        and (
+            line.startswith("\t")
+            or (
+                not line.startswith(" ")
+                and not re.match(r"^[A-Za-z][\w-]*\s*:", line)
+            )
+        )
         for line in lines
     )
     servers_indexes = [i for i, line in enumerate(lines)
@@ -504,7 +514,8 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 if "\\" in current_path:
                     unresolved_path(path_line, "path-key-contains-unsupported-escape", current_path)
                     current_path = None
-                elif not current_path.startswith("/") or "#" in current_path:
+                elif (not current_path.startswith("/") or "#" in current_path
+                      or "?" in current_path or any(char.isspace() for char in current_path)):
                     unresolved_path(path_line, "path-key-is-not-an-absolute-path", current_path)
                     current_path = None
                 elif current_path in seen_paths:

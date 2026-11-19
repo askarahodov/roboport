@@ -661,3 +661,40 @@ def test_draft_title_and_version_must_be_fields_of_the_single_root_info_object()
         rows = scan_openapi_contract(contract, root)
         assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_root_explicit_yaml_key_syntax_cannot_hide_a_second_servers_section():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n"
+            "? servers\n"
+            ":\n  - url: https://api.example.com\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["unresolved"] and r["kind"] == "historical-openapi-control" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_path_keys_with_whitespace_or_query_are_not_reported_as_safe_routes():
+    for path_key in ('  "/safe ":\n', '  "/safe?mode=all":\n'):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = root / "contracts/openapi.yaml"
+            contract.parent.mkdir(parents=True)
+            contract.write_text(
+                "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+                "servers:\n- url: https://api.example.invalid\n"
+                "paths:\n" + path_key
+                + "    get:\n      operationId: notSafe\n",
+                encoding="utf-8",
+            )
+            rows = scan_openapi_contract(contract, root)
+            assert any(r["unresolved"] and r["review"] == "path-key-is-not-an-absolute-path" for r in rows)
+            assert not any(r.get("operation_id") == "notSafe" for r in rows)
+            assert main(["--root", str(root), "--check"]) == 1
