@@ -189,7 +189,7 @@
       "acceptance": "Создать товар с безопасными идентификаторами, производителем и ценой; корректно отобразить документные и складские связи.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-018",
@@ -211,7 +211,7 @@
       "acceptance": "Рассчитать начисление по исполнителю из документально подтверждённой работы и действовавшей версии тарифов.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-020",
@@ -233,7 +233,7 @@
       "acceptance": "Показать начислено, выдано и задолженность на начало/конец периода и провести документ выплаты без двойного списания.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-022",
@@ -277,7 +277,7 @@
       "acceptance": "Пересчитать фактические остатки по складу и партии, записать утверждённые расхождения атомарно и сохранить audit.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-026",
@@ -288,7 +288,7 @@
       "acceptance": "Создать рабочий этап, настроить разрешённые переходы и причины, проверить изменение сделки через контролируемое действие.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-027",
@@ -387,7 +387,7 @@
       "acceptance": "Создать пользователя, выдать ограниченные права, проверить negative ACL на двух компаниях и моментальный отзыв.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-036",
@@ -706,7 +706,7 @@
       "acceptance": "Пересчитать цены группы от категории или приходной цены с проверкой округления, прав и истории изменений.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-065",
@@ -728,7 +728,7 @@
       "acceptance": "Фактическое начисление, выдача и остаток долга сотрудника создают атомарный документ и остаются сверяемыми.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-067",
@@ -750,7 +750,7 @@
       "acceptance": "Разрешить перемещение только в заданные этапы и с допустимой причиной; отклонённый переход не меняет историю.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-069",
@@ -761,7 +761,7 @@
       "acceptance": "Настроенный дедлайн переносит карточку ровно один раз, не обходя запретные стадии и послеоперационный аудит.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-070",
@@ -882,7 +882,7 @@
       "acceptance": "При блокировке пользователя все ранее выданные сессии и токены немедленно перестают давать доступ.",
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
-      "sourceEvidence": "search_excerpt"
+      "sourceEvidence": "page"
     },
     {
       "id": "ADF-081",
