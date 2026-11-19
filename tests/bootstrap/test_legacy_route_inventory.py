@@ -793,6 +793,9 @@ def test_mapping_header_comments_require_whitespace_after_colon():
                 "servers:\n- url: https://api.example.invalid\n"
                 "paths:\n  /safe:\n    get:\n      operationId: safe\n"
             )
+            if valid_header.startswith('  "'):
+                source = source.replace("  /safe:\n", valid_header, 1)
+            assert valid_header in source
             source = source.replace(valid_header, malformed_header, 1)
             contract.write_text(source, encoding="utf-8")
             rows = scan_openapi_contract(contract, root)
