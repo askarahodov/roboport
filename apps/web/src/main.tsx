@@ -11,6 +11,7 @@ import { AutoBayOccupancy } from './pages/staff/AutoBayOccupancy';
 import { AutoDemoFinanceReport } from './pages/staff/AutoDemoFinanceReport';
 import { AutoTreasury } from './pages/staff/AutoTreasury';
 import { AutoTreasuryCashbook } from './pages/staff/AutoTreasuryCashbook';
+import { AutoBranchCashflow } from './pages/staff/AutoBranchCashflow';
 import { AutoPublicBooking } from './pages/shared/AutoPublicBooking';
 import { AutoCrmLeads } from './pages/staff/AutoCrmLeads';
 import { AutoCrmFunnel } from './pages/staff/AutoCrmFunnel';
@@ -81,6 +82,7 @@ function App() {
         <NavLink to="/staff/auto-demo-finance-report" end>Тестовая финсверка (dev)</NavLink>
         <NavLink to="/staff/auto-treasury" end>Тестовая касса (dev)</NavLink>
         <NavLink to="/staff/auto-treasury-cashbook" end>Кассовая книга (dev)</NavLink>
+        <NavLink to="/staff/auto-branch-cashflow" end>ДДС филиала (dev)</NavLink>
         <NavLink to="/staff/auto-crm-leads" end>Обращения CRM (dev)</NavLink>
         <NavLink to="/staff/auto-crm-funnel" end>Воронка CRM (dev)</NavLink>
         <NavLink to="/staff/auto-crm-outcomes" end>CRM → закрытие (dev)</NavLink>
@@ -154,6 +156,7 @@ function App() {
       <Route path="/staff/auto-demo-finance-report" element={<AutoDemoFinanceReport />} />
       <Route path="/staff/auto-treasury" element={<AutoTreasury />} />
       <Route path="/staff/auto-treasury-cashbook" element={<AutoTreasuryCashbook />} />
+      <Route path="/staff/auto-branch-cashflow" element={<AutoBranchCashflow />} />
       <Route path="/book-dev" element={<AutoPublicBooking mode="public" />} />
       <Route path="/account/auto-public-booking" element={<AutoPublicBooking mode="client" />} />
       <Route path="/staff/auto-public-booking" element={<AutoPublicBooking mode="staff" />} />
