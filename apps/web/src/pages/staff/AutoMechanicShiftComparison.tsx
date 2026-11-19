@@ -160,7 +160,8 @@ export function AutoMechanicShiftComparison(){
     }finally{if(exporting.current===control)setBusy(false);}
   }
   const data=report?.shiftComparison;
-  return <section aria-label="Сопоставление смен и закрытых работ (dev)">
+  return <section aria-label="Сопоставление смен и закрытых работ (dev)"
+    style={{width:'100%',minWidth:0,overflowWrap:'anywhere'}}> 
     <h1>Смены и проверенная выработка механиков</h1>
     <p>Синтетическая сверка: действующие смены в локальном периоде и
       минуты работ, попавших в технически закрытые заказ-наряды по дате закрытия.
@@ -190,12 +191,14 @@ export function AutoMechanicShiftComparison(){
         часы смен: {(data.summary.scheduledSeconds/3600).toFixed(2)};
         подтверждённый труд: {data.summary.recordedMinutes} минут.
         Филиальная зона: {report.timeZone}.</p>
-      <div className="table-scroll"><table aria-label="Сопоставление смен и труда">
+      <div className="table-scroll" role="region" aria-label="Прокручиваемая таблица сверки"
+        tabIndex={0} style={{width:'100%',maxWidth:'100%',minWidth:0,overflowX:'auto'}}>
+        <table aria-label="Сопоставление смен и труда">
         <thead><tr><th>Механик UUID</th><th>Действующих смен</th>
           <th>Часы смен</th><th>Труд по закрытиям, минут</th>
           <th>Отношение, %</th><th>Ограничение</th></tr></thead>
         <tbody>{data.items.map(x=><tr key={x.mechanicId}>
-          <td><code>{x.mechanicId}</code></td><td>{x.shiftCount}</td>
+          <td><code style={{overflowWrap:'anywhere',wordBreak:'break-all'}}>{x.mechanicId}</code></td><td>{x.shiftCount}</td>
           <td>{(x.scheduledSeconds/3600).toFixed(2)}</td>
           <td>{x.recordedMinutes}</td>
           <td>{x.recordedToScheduledBasisPoints===null?'—':
@@ -206,8 +209,9 @@ export function AutoMechanicShiftComparison(){
       {data.items.length===0&&<p>За выбранный период нет действующих смен или
         технически закрытого труда.</p>}
       {data.items.map(x=><details key={x.mechanicId}>
-        <summary>Источники смен: <code>{x.mechanicId}</code></summary>
-        <ul>{x.shifts.map(y=><li key={y.shiftId}><code>{y.shiftId}</code> ·
+        <summary style={{overflowWrap:'anywhere'}}>Источники смен: <code style={{wordBreak:'break-all'}}>{x.mechanicId}</code></summary>
+        <ul>{x.shifts.map(y=><li key={y.shiftId} style={{minWidth:0,overflowWrap:'anywhere'}}>
+          <code style={{wordBreak:'break-all'}}>{y.shiftId}</code> ·
           {y.startsAt} — {y.endsAt}: {y.overlapSeconds} секунд пересечения</li>)}</ul>
       </details>)}
       <button type="button" disabled={busy} onClick={()=>void download()}>
