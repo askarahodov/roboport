@@ -875,3 +875,25 @@ def test_operation_id_plain_scalar_continuation_fails_closed():
         assert any(r["unresolved"] and
                    r["review"] == "unsupported-operation-id-continuation" for r in rows)
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_method_key_with_comment_only_value_is_a_valid_empty_mapping():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            "  /safe:\n"
+            "    post: # comment after method key\n"
+            "      operationId: safePost\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        operation = next(r for r in rows if r.get("operation_id") == "safePost")
+        assert operation["method"] == "POST"
+        assert operation["path"] == "/safe"
+        assert operation["unresolved"] is False
+        assert main(["--root", str(root), "--check"]) == 0

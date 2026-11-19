@@ -226,6 +226,10 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
     def without_comment(value: str) -> str:
         stripped = value.lstrip()
         offset = len(value) - len(stripped)
+        # A leading # is a YAML comment, not a plain scalar. This matters
+        # for empty path-item/method values such as "post: # explanation".
+        if stripped.startswith("#"):
+            return ""
         if stripped[:1] in {"'", '"'}:
             quote = stripped[0]
             closing = next((i for i in range(offset + 1, len(value))
