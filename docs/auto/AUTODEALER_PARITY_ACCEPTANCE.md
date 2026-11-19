@@ -100,21 +100,30 @@
 | ADF-010 | Мобильная запись | Сотрудник выполняет запись и изменение услуг со смартфона с действительной мобильной авторизацией и отзывом устройства. | [ADP-010](https://autodealer.ru/online/help/zapis-na-remont/zapis-v-mobilnom-prilozhenii.html) | E03 / [#118](https://github.com/askarahodov/roboport/issues/118) |
 | ADF-042 | Мобильное приложение сотрудника | Войти в самостоятельное приложение и выполнить разрешённую операцию без обхода tenant/branch ACL. | [ADP-042](https://autodealer.ru/online/help/mobilnoe-prilozhenie/prilozhenie-avtodiler-onlain.html) | E03 / [#118](https://github.com/askarahodov/roboport/issues/118) |
 
-## Настройки (5 критериев)
+## Настройки (6 критериев)
 
 | Критерий | Действие | Acceptance (что должно реально работать) | Источник | Матрица / Issue |
 |---|---|---|---|---|
 | ADF-033 | Общие настройки СТО | Сохранить настройки таймзоны, рабочего графика и нормочаса с проверкой применимости к записи и документам. | [ADP-033](https://autodealer.ru/online/help/nastroiki/obshchie-nastroiki.html) | A06 / [#107](https://github.com/askarahodov/roboport/issues/107) |
 | ADF-049 | Настройки модулей | Проверить на всех ролях доступность пользовательских настроек и сообщений, их сохранение и применение. | [ADP-049](https://autodealer.ru/online/help/nastroiki/index.html) | E01 / [#107](https://github.com/askarahodov/roboport/issues/107) |
 | ADF-078 | Обязательные поля перед проведением | При включении обязательных полей менеджер/исполнитель/пробег/причина проверять их на сервере, а не только в UI. | [ADP-033](https://autodealer.ru/online/help/nastroiki/obshchie-nastroiki.html) | A06 / [#107](https://github.com/askarahodov/roboport/issues/107) |
-| ADF-079 | Правила автостадий CRM | Настроить автосоздание или пропуск сделки по звонку/сообщению и направлять сделки по типам документов в заданные стадии; исключённые категории не создают сделок. | [ADP-033](https://autodealer.ru/online/help/nastroiki/obshchie-nastroiki.html) | A06 / [#107](https://github.com/askarahodov/roboport/issues/107) |
-| ADF-095 | Исключение телефонных номеров из CRM учета | Добавить номер в список исключений: входящий вызов остаётся видимым как определитель номера, но не создаёт запись в журнале звонков, всплывающее уведомление или CRM-сделку. | [ADP-033](https://autodealer.ru/online/help/nastroiki/obshchie-nastroiki.html) | A06 / [#107](https://github.com/askarahodov/roboport/issues/107) |
+| ADF-079 | Правила автостадий CRM | Настроить автосоздание или пропуск сделки по звонку/сообщению и направлять сделки по типам документов в заданные стадии; исключённые категории не создают сделок. | [ADP-033](https://autodealer.ru/online/help/nastroiki/obshchie-nastroiki.html) | D13 / [#107](https://github.com/askarahodov/roboport/issues/107) |
+| ADF-095 | Исключение телефонных номеров из CRM учета | Добавить номер в список исключений: входящий вызов остаётся видимым как определитель номера, но не создаёт запись в журнале звонков, всплывающее уведомление или CRM-сделку. | [ADP-033](https://autodealer.ru/online/help/nastroiki/obshchie-nastroiki.html) | D13 / [#107](https://github.com/askarahodov/roboport/issues/107) |
+
+| ADF-118 | Навигация по настройкам и шаблонам сообщений | В разделе Управление > Настройки доступны категории Общие настройки и Шаблоны сообщений; пользователь может перейти к отдельным инструкциям и управлению шаблонами, содержание страницы шаблонов требует дополнительной проверки. | [ADP-049](https://autodealer.ru/online/help/nastroiki/index.html) | D13 / [#107](https://github.com/askarahodov/roboport/issues/107) |
 
 ## Обзор (1 критериев)
 
 | Критерий | Действие | Acceptance (что должно реально работать) | Источник | Матрица / Issue |
 |---|---|---|---|---|
 | ADF-001 | Браузерная работа предприятия | Развернуть отдельную тестовую организацию и показать полный цикл входа и доступа к рабочему месту в браузере без установки desktop-клиента. | [ADP-001](https://autodealer.ru/online/help/o-programme.html) | A04 / [#107](https://github.com/askarahodov/roboport/issues/107) |
+
+## Начало работы (2 критерия)
+
+| ID | Возможность | Критерий приёмки | Источник | Матрица / issue |
+|---|---|---|---|---|
+| ADF-116 | Регистрация и первичная настройка аккаунта | Выбрать регион Россия/Казахстан, зарегистрироваться по email/телефону/имени, принять обработку персональных данных и публичную оферту; входить по email/паролю или связанной OAuth-учётной записи, затем создать демо-базу и пройти первичную подготовку. | [ADP-074](https://autodealer.ru/online/help/registratciia-v-programme.html) | E05 / [#166](https://github.com/askarahodov/roboport/issues/166) |
+| ADF-117 | Безопасное удаление демоданных и назначение Owner | Удаление демоданных доступно только Owner, удаляет все документы и настройки без восстановления и требует повторного входа; после очистки назначить администратора/Owner, тип предприятия, город и часовой пояс. Необратимость должна быть явно подтверждена пользователю. | [ADP-075](https://autodealer.ru/online/help/nachalo-raboty-s-sistemoi/udalenie-demodannykh.-nastroika-akkaunta.html) | E05 / [#166](https://github.com/askarahodov/roboport/issues/166) |
 
 ## Отчёты (7 критериев)
 
