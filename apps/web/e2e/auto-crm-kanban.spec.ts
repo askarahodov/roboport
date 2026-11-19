@@ -82,7 +82,7 @@ test('CRM Kanban configures stage labels, assigns a lead and moves it with CSRF'
   await page.getByRole('textbox',{name:'Название LOST'}).fill('Не состоялось');
   await page.getByRole('button',{name:'Сохранить конфигурацию этапов'}).click();
   await expect(page.getByText('Конфигурация этапов сохранена.')).toBeVisible();
-  await expect(page.getByText('Не состоялось',{exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:/^Не состоялось \(\d+\)$/})).toBeVisible();
 
   await page.getByRole('textbox',{name:'Ответственный '+lead}).fill(manager);
   await page.getByRole('button',{name:'Назначить'}).click();
