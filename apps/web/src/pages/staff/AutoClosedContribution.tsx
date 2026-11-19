@@ -96,7 +96,9 @@ function parse(raw:unknown,from:string,to:string):Report{
       !['COMPLETE','INCOMPLETE'].includes(x.status)||
       !MONEY.every(k=>money(x[k],k==='materialNetMinor'||k==='laborCostMinor'||
         k==='directCostMinor'||k==='syntheticDifferenceMinor'))||
-      !Array.isArray(x.cashEvents)||x.cashEvents.length===0||
+      !Array.isArray(x.cashEvents)||
+      (x.cashEvents.length===0 && (x.approvedTotalMinor!==0||
+       x.simulatedPaidMinor!==0||x.simulatedRefundedMinor!==0))||
       !Array.isArray(x.laborEntries)||!Array.isArray(x.materialGroups))
       throw Error('order');
     ids.add(x.workOrderId);
