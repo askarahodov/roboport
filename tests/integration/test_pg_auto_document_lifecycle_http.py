@@ -28,7 +28,7 @@ from test_pg_auto_stock_service import grant
 from test_pg_baseline import DSN
 
 
-def ready(monkeypatch,*,with_photo=False,with_refund=False,material_setup=None):
+def ready(monkeypatch,*,with_photo=False,with_refund=False,material_setup=None,before_cash=None):
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
     monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
@@ -67,6 +67,10 @@ def ready(monkeypatch,*,with_photo=False,with_refund=False,material_setup=None):
         finish_execution(db,d["tokens"][d["manager"]],org,loc,order,uuid4())
         record_work_order_qc(db,d["tokens"][d["other"]],org,loc,order,
                              request_key=uuid4(),result="PASS",finding_code="NONE")
+        # Optional integration hook: exercise the *independent* treasury
+        # before CLOSED_TECHNICAL makes further treasury writes impossible.
+        if before_cash is not None:
+            before_cash(db,d,org,loc,order)
         simulate_cash(db,d["tokens"][d["intake"]],org,loc,order,
                       request_key=uuid4(),kind="SIM_PAYMENT",amount_minor=2500)
         if with_refund:
