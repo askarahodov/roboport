@@ -52,12 +52,23 @@ test('service consent is separate, revisioned and never permits external sending
   await expect(section).toContainText('не юридически подтверждённое согласие');
   await expect(section.getByLabel('Звонок')).not.toBeChecked();
   await section.getByLabel('Звонок').check();
+  const firstSave=page.waitForResponse(response=>
+    response.url().endsWith('/api/v1/dev/account/crm-contact-consent')&&
+    response.request().method()==='POST');
   await section.getByRole('button',{name:'Сохранить тестовый выбор: Звонок'}).click();
+  const firstSaveResponse=await firstSave;
+  expect(firstSaveResponse.status()).toBe(201);
   await expect(section.getByLabel('Звонок')).toBeChecked();
+  await expect(section).toContainText('Тестовый выбор записан. Реальная отправка остаётся выключенной.');
   await expect(section).toContainText('Юридическое подтверждение: отсутствует. Отправка: запрещена.');
   expect(enabled).toBe(true);
   await section.getByLabel('Звонок').uncheck();
+  const revokeSave=page.waitForResponse(response=>
+    response.url().endsWith('/api/v1/dev/account/crm-contact-consent')&&
+    response.request().method()==='POST');
   await section.getByRole('button',{name:'Сохранить тестовый выбор: Звонок'}).click();
+  const revokeSaveResponse=await revokeSave;
+  expect(revokeSaveResponse.status()).toBe(201);
   await expect(section.getByLabel('Звонок')).not.toBeChecked();
   expect(enabled).toBe(false);
 });
