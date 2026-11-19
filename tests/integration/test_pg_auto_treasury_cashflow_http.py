@@ -13,6 +13,8 @@ from roboport_api import auto_treasury_cashflow as module
 from roboport_api.auto_treasury import (
     TreasuryConflict, record_event,
 )
+from roboport_api.auto_document_access import publish_policy
+from test_pg_auto_document_access_http import admin
 from roboport_api.main import app
 from test_pg_auto_treasury_http import (
     prepare, create, event, complete_qc, local_day, session,
@@ -27,7 +29,7 @@ def test_full_branch_cashflow_two_accounts_reconciled_events_and_csv(monkeypatch
     assert opened.status_code==201,opened.text
     cash=UUID(opened.json()["accountId"])
     bank_resp=http.post(base+"/accounts",headers=manager,json={
-        "requestKey":str(uuid4()),"code":"BANK-01",
+        "requestKey":str(uuid4()),"code":"-BANK-01",
         "label":"Тестовый счёт 02","kind":"BANK_SIM",
     })
     assert bank_resp.status_code==201,bank_resp.text
@@ -106,6 +108,7 @@ def test_full_branch_cashflow_two_accounts_reconciled_events_and_csv(monkeypatch
     assert {row[1] for row in records[1:]}=={"BRANCH","ACCOUNT_EVENT","ACCOUNT_DAY"}
     assert {row[5] for row in records if row[5]}==event_ids
     assert sum(row[6]=="APPLY_ADVANCE" for row in records)==1
+    assert "'-BANK-01" in exported.text  # accepted code, no CSV formula.
     assert str(order) not in exported.text
     assert "Тестовый акт оплаты" not in exported.text
     assert str(d["client_a"]) not in exported.text
@@ -192,3 +195,65 @@ def test_cashflow_snapshot_revocation_conflict_maps_to_409(monkeypatch,error):
         assert response.headers["content-type"].startswith("application/json")
         assert "REPORT_CONFLICT" in response.text
         assert "text/csv" not in response.headers["content-type"]
+
+
+def test_finance_deny_published_after_reader_snapshot_is_never_stale(monkeypatch):
+    """Real PG interleaving: new policy commits after the RR snapshot.
+
+    Without the org tuple's MVCC revision on policy publication, a reader
+    reuses its old snapshot after org FOR SHARE and returns leaked data.
+    With the revision it must fail 409 before any result/CSV can be sent;
+    subsequent fresh requests see the effective DENY (403).
+    """
+    d,org,loc,order,service,http,base,manager=prepare(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    target_token=d["tokens"][d["intake"]]
+    publisher_token=d["tokens"][d["other"]]
+    original=module._staff
+    published=False
+    def interleaved_staff(conn,token,scope_org,scope_loc,roles):
+        nonlocal published
+        if not published:
+            # Make the REPEATABLE READ transaction take its first snapshot
+            # before the new DENY exists, exactly as session lookup can.
+            conn.execute("SELECT 1")
+            with psycopg.connect(DSN) as writer:
+                update=publish_policy(writer,publisher_token,org,
+                    request_key=uuid4(),role="MANAGER",loc=loc,
+                    user=d["intake"],document="FINANCE",
+                    cap="READ",allowed=False,not_before=None)
+                assert update["replayed"] is False
+            published=True
+        return original(conn,token,scope_org,scope_loc,roles)
+    monkeypatch.setattr(module,"_staff",interleaved_staff)
+    http.cookies.set("rp_session",target_token)
+    uri=base+"/cashflow"
+    query={"fromDay":"2026-11-18","toDay":"2026-11-18"}
+    race=http.get(uri,params=query)
+    assert published is True
+    assert race.status_code==409,race.text
+    assert "REPORT_CONFLICT" in race.text
+    assert "text/csv" not in race.headers.get("content-type","")
+    monkeypatch.setattr(module,"_staff",original)
+    assert http.get(uri,params=query).status_code==403
+    assert http.get(uri+"/export",params=query).status_code==403
+
+
+def test_spreadsheet_safe_negative_prefix_for_valid_account_code():
+    """Dash is allowed by schema; it must never be CSV's first cell char."""
+    account=str(uuid4())
+    empty={"localDay":"2026-11-19","openingMinor":"0",
+           "incomingMinor":"0","outgoingMinor":"0",
+           "internalAppliedMinor":"0","closingMinor":"0",
+           "closeId":None,"events":[]}
+    result={"days":[],"accounts":[{
+        "accountId":account,"accountCode":"-1-1",
+        "accountKind":"CASH_SIM","days":[empty],
+    }]}
+    rows=list(csv.reader(StringIO(module._csv_export(result).lstrip("\ufeff")),
+                         delimiter=";"))
+    assert rows[1][1]=="ACCOUNT_DAY"
+    assert rows[1][2]==account
+    assert rows[1][3]=="'-1-1"
+    assert rows[1][3][0]!="-"  # Excel must see text, not a formula.
