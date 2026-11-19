@@ -7,6 +7,7 @@ This is NEVER real revenue, accounting margin, payroll, or a vehicle release.
 """
 from __future__ import annotations
 import csv
+import re
 from datetime import date, timedelta
 from io import StringIO
 from uuid import UUID
@@ -196,7 +197,7 @@ def _csv(data):
     """Fixed identifiers, statuses and numbers only; never names or comments."""
     out = StringIO(newline="")
     writer = csv.writer(out,delimiter=";",lineterminator="\r\n")
-    writer.writerow(("День","Уровень","Заказ UUID","Событие UUID",
+    writer.writerow(("День","Уровень","Заказ UUID","Источник UUID",
                      "Статус","Согласовано коп.","Оплачено SIM коп.",
                      "Возврат SIM коп.","Материалы коп.","Труд коп.",
                      "Прямые затраты коп.","Разница SIM коп.",
@@ -235,15 +236,27 @@ def _csv(data):
                   qty=e["actualMinutes"],
                   revision=e["source"]["approvalId"] if e["source"] else "")
         for g in row["materialGroups"]:
-            # One CSV row per immutable source move; no untrusted SKU text.
+            # Net cost belongs to a MATERIAL GROUP, not to each ISSUE/RETURN:
+            # repeating the group sum on stock rows would misstate a
+            # receipt 2 units / return 1 unit as two full group costs.
+            if (not re.fullmatch(r"[A-Z_]{2,40}",g["status"])
+                or type(g["netQuantity"]) is not int
+                or type(g["materialNetMinor"]) not in (int,type(None))):
+                raise Conflict()
+            group_id = str(UUID(g["lotId"] or g["skuId"]))
+            valuation = str(UUID(g["source"]["valuationId"])) if g["source"] else ""
+            write(row["closedDay"],"MATERIAL_GROUP",row["workOrderId"],
+                  group_id,g["status"],material=g["materialNetMinor"],
+                  source="NET_GROUP_COST",qty=g["netQuantity"],revision=valuation)
+            # Source move rows explain quantity and direction ONLY.
+            # Cost is deliberately blank, not a guessed per-move valuation.
             for movement in g["movements"]:
                 if movement["action"] not in ("ISSUE","RETURN"):
                     raise Conflict()
                 write(row["closedDay"],"STOCK",row["workOrderId"],
-                      movement["stockEventId"],g["status"],
-                      material=g["materialNetMinor"],source=movement["action"],
-                      qty=movement["quantity"],
-                      revision=g["source"]["valuationId"] if g["source"] else "")
+                      str(UUID(movement["stockEventId"])),g["status"],
+                      source=movement["action"],qty=movement["quantity"],
+                      revision=group_id)
     body=("\ufeff"+out.getvalue()).encode("utf-8")
     if len(body)>MAX_CSV_BYTES:
         raise Conflict()
