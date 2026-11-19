@@ -184,3 +184,33 @@ test('448: CSV fresh ACL check, denied and conflict invalidate rendered data',as
     await expect(page.getByLabel('Результаты сверки закрытых заказ-нарядов')).toBeVisible();
   }
 });
+
+
+test('448: бесплатный закрытый ЗН с нулевым расчётом не требует SIM_PAYMENT',async({page})=>{
+  await page.route(api,route=>{
+    const p=new URL(route.request().url()).searchParams;
+    const data=report(p.get('fromDay')??'',p.get('toDay')??'',true);
+    data.summary.approvedTotalMinor=0;
+    data.summary.simulatedPaidMinor=0;
+    data.summary.simulatedNetMinor=0;
+    data.summary.simCashEventCount=0;
+    data.days[0].approvedTotalMinor=0;
+    data.days[0].simulatedPaidMinor=0;
+    data.days[0].simulatedNetMinor=0;
+    data.days[0].simCashEventCount=0;
+    data.items[0].approvedTotalMinor=0;
+    data.items[0].simulatedPaidMinor=0;
+    data.items[0].simulatedNetMinor=0;
+    data.items[0].cashEvents=[];
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify(data)});
+  });
+  await page.goto('/staff/auto-closed-contribution');await fill(page);
+  await page.getByRole('button',{name:'Сверить закрытые заказ-наряды'}).click();
+  const results=page.getByLabel('Результаты сверки закрытых заказ-нарядов');
+  await expect(results.getByRole('status')).toContainText('согласовано: 0,00 RUB');
+  await expect(results.getByRole('status')).toContainText('условная разница: Не определено');
+  const order=results.locator('details').filter({has:page.locator('summary',{hasText:work})}).first();
+  await order.locator('summary').first().click();
+  await expect(order).toContainText('Источники условных платежей: 0');
+});
