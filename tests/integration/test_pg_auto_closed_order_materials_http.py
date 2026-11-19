@@ -28,7 +28,7 @@ from test_pg_auto_stock_lot_work_order_return import ret
 from test_pg_baseline import DSN
 
 
-def fixture(monkeypatch,mode="traced",before_labor=None):
+def fixture(monkeypatch,mode="traced",before_labor=None,before_cash=None):
     evidence={}
     def setup(db,d,org,loc,order):
         item=sku(db,org,loc)
@@ -111,7 +111,7 @@ def fixture(monkeypatch,mode="traced",before_labor=None):
                 work_stock(db,d,org,loc,order,item,"ISSUE",1)
             evidence.update(issue=ident,returned=returned)
         return consume
-    d,org,loc,order,act,preview=ready(monkeypatch,material_setup=setup)
+    d,org,loc,order,act,preview=ready(monkeypatch,material_setup=setup,before_cash=before_cash)
     with psycopg.connect(DSN) as db:
         for action,actor in (("POSTED",d["intake"]),("CLIENT_ACK",d["client_a"]),
                              ("CLOSED_TECHNICAL",d["intake"])):
