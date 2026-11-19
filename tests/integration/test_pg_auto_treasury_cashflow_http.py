@@ -106,7 +106,7 @@ def test_full_branch_cashflow_two_accounts_reconciled_events_and_csv(monkeypatch
     assert all(len(row)==16 for row in records)
     assert len(records)==1+3+6+4  # header + 3 branch days + 6 events + 4 empty account days
     assert {row[1] for row in records[1:]}=={"BRANCH","ACCOUNT_EVENT","ACCOUNT_DAY"}
-    assert {row[5] for row in records if row[5]}==event_ids
+    assert {row[5] for row in records[1:] if row[5]}==event_ids
     assert sum(row[6]=="APPLY_ADVANCE" for row in records)==1
     assert "'-BANK-01" in exported.text  # accepted code, no CSV formula.
     assert str(order) not in exported.text
