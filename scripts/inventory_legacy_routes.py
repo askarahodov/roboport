@@ -300,8 +300,10 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
     merge_declarations = [i for i, line in enumerate(lines)
                           if re.match(r"^<<\s*:", line)]
     unsupported_root_mapping = any(
-        re.match(
-            r"""^(?:\s*\?|:\s*|(?:"[^"]*"|'[^']*'|<<|\*[^:]+|![^\s]+|&[^:]+)\s*:)""",
+        line.strip() in {"---", "..."}
+        or line.startswith("%")
+        or re.match(
+            r"""^(?:\s*\?|[:&!*]|(?:"[^"]*"|'[^']*'|<<))""",
             line,
         )
         for line in lines
