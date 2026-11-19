@@ -333,3 +333,17 @@ synthetic UUID двух счетов и первичных событий.
 duplicated UUID, 403/409/422 и отдельный denied CSV.
 Снимки только browser evidence, **не** golden baseline
 и не независимое WCAG/design/financial approval #92/#76/#119.
+
+
+## Candidate evidence полного мостового отчёта по закрытым ЗН (#448)
+
+Playwright `apps/web/e2e/auto-closed-contribution.spec.ts`
+сохраняет `closed-contribution-390-light.png` и
+`closed-contribution-1280-dark.png` после раскрытия
+синтетических immutable UUID платежа, времени, ставки,
+складской оценки и физического движения.
+Тесты включают keyboard, no-overflow, неполный источник,
+403/409/422, и новую авторизацию перед CSV.
+Это не утверждённые golden baselines и не
+manual WCAG/independent QA или finance sign-off
+#92/#76/#119.
