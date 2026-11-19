@@ -418,3 +418,109 @@ def test_unrecognized_quoted_path_key_resets_current_path_instead_of_inheriting_
         assert any(r["review"] == "path-key-is-not-an-absolute-path" and r["unresolved"] for r in rows)
         assert not any(r.get("operation_id") == "hiddenLegacy" and r["path"] == "/safe" for r in rows)
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_server_inventory_rejects_nested_url_inside_description_object():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n"
+            "- description:\n"
+            "    url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_quoted_path_escape_sequences_fail_closed_without_misclassifying_legacy_paths():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            + r'  "/\q":' + "\n"
+            + "    get:\n      operationId: invalidEscape\n"
+            + r'  "/\u0072obot":' + "\n"
+            + "    get:\n      operationId: encodedRobot\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert sum(r.get("review") == "path-key-contains-unsupported-escape" for r in rows) == 2
+        assert not any(r.get("operation_id") in {"invalidEscape", "encodedRobot"} for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_openapi_method_keys_are_case_sensitive():
+    for method in ("GET", "Get"):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = root / "contracts/openapi.yaml"
+            contract.parent.mkdir(parents=True)
+            contract.write_text(
+                "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+                "servers:\n- url: https://api.example.invalid\n"
+                "paths:\n  /safe:\n"
+                f"    {method}:\n"
+                "      operationId: shouldNotBeResolved\n",
+                encoding="utf-8",
+            )
+            rows = scan_openapi_contract(contract, root)
+            assert any(r["unresolved"] and r["review"] == "unrecognized-path-item-key" for r in rows)
+            assert not any(r.get("operation_id") == "shouldNotBeResolved" for r in rows)
+            assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_path_item_and_operation_level_server_overrides_fail_closed():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            "  /path-server:\n"
+            "    servers:\n"
+            "      - url: https://api.example.com\n"
+            "    get:\n      operationId: pathServer\n"
+            "  /operation-server:\n"
+            "    get:\n"
+            "      servers:\n"
+            "        - url: https://api.example.com\n"
+            "      operationId: operationServer\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        reviews = {r["review"] for r in rows if r["unresolved"]}
+        assert "path-item-server-override-unreviewed" in reviews
+        assert "operation-server-override-unreviewed" in reviews
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_inline_method_mapping_is_not_silently_ignored_or_attached_to_another_method():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n"
+            "    get: {operationId: inlineOperation}\n"
+            "    post:\n      operationId: validOperation\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["unresolved"] and r["review"] == "unsupported-inline-method-value" for r in rows)
+        assert any(r.get("operation_id") == "validOperation" for r in rows)
+        assert not any(r.get("operation_id") == "inlineOperation" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1

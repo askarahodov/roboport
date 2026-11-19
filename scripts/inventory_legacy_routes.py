@@ -215,77 +215,130 @@ def scan_python(path: Path, root: Path) -> list[dict[str, object]]:
 def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
     """Conservatively inventory the historical OpenAPI draft without loading YAML.
 
-    Only the small YAML subset used by this checked-in draft is interpreted.
-    Any unrecognized server/path/method structure becomes unresolved so a
+    Only a deliberately small YAML subset is interpreted. Unsupported nesting,
+    escapes, overrides, aliases and malformed mappings become unresolved so a
     partial parse can never be reported as a safe inventory.
     """
     if not path.is_file():
         return []
     lines = path.read_text(encoding="utf-8").splitlines()
 
-    def scalar(value: str) -> str:
-        value = value.split(" #", 1)[0].strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            return value[1:-1]
-        return value
+    def without_comment(value: str) -> str:
+        quote: str | None = None
+        for index, char in enumerate(value):
+            if quote is not None:
+                if char == quote:
+                    quote = None
+            elif char in "\"'":
+                quote = char
+            elif char == "#" and (index == 0 or value[index - 1].isspace()):
+                return value[:index].rstrip()
+        return value.strip()
 
-    title = next((scalar(m.group(1)) for line in lines
-                  if (m := re.match(r"^  title:\s*(.+)$", line))), "")
-    version = next((scalar(m.group(1)) for line in lines
-                    if (m := re.match(r"^  version:\s*(.+)$", line))), "")
+    def string_scalar(value: str) -> str | None:
+        """Read only plain/quoted YAML strings; reject other scalar types and escapes."""
+        raw = without_comment(value).strip()
+        if not raw:
+            return None
+        if raw[0] in "\"'":
+            quote = raw[0]
+            if len(raw) < 2 or raw[-1] != quote:
+                return None
+            inner = raw[1:-1]
+            # Escapes and embedded quote escaping are deliberately unsupported.
+            if "\\" in inner or quote in inner:
+                return None
+            return inner
+        if (raw[0] in "[{|>&*!" or raw in {
+                "~", "null", "Null", "NULL", "true", "True", "TRUE",
+                "false", "False", "FALSE",
+            } or re.fullmatch(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", raw)
+                or re.search(r":(?:\s|$)", raw)
+                or re.match(r"^[-?]\s", raw)):
+            return None
+        return raw
 
-    # Parse every server list item as a mapping, regardless of key order.
-    # Unsupported YAML constructs are rejected instead of guessed.
-    servers_index = next((i for i, line in enumerate(lines)
-                          if re.match(r"^servers:\s*(?:#.*)?$", line)), None)
+    title_raw = next((m.group(1) for line in lines
+                      if (m := re.match(r"^  title:\s*(.*)$", line))), "")
+    version_raw = next((m.group(1) for line in lines
+                        if (m := re.match(r"^  version:\s*(.*)$", line))), "")
+    title = string_scalar(title_raw)
+    version = string_scalar(version_raw)
+
+    # Parse every root server list item as a mapping. Child fields must be
+    # exactly two spaces deeper than their list item; nested YAML is unsupported.
+    servers_indexes = [i for i, line in enumerate(lines)
+                       if re.match(r"^servers:\s*(?:#.*)?$", line)]
     server_urls: list[str] = []
-    servers_valid = servers_index is not None
+    servers_valid = len(servers_indexes) == 1
     server_entries = 0
+    sequence_indent: int | None = None
+    entry_indent: int | None = None
     entry_fields: dict[str, str] | None = None
     entry_valid = True
 
+    def add_server_field(key: str, raw_value: str | None) -> None:
+        nonlocal entry_valid
+        if entry_fields is None or key not in {"url", "description"} or key in entry_fields:
+            entry_valid = False
+            return
+        value = string_scalar(raw_value or "")
+        if value is None:
+            entry_valid = False
+            return
+        entry_fields[key] = value
+
     def finish_server_entry() -> None:
-        nonlocal entry_fields, entry_valid, servers_valid
+        nonlocal entry_fields, entry_valid, entry_indent, servers_valid
         if entry_fields is None:
             return
-        if not entry_valid or set(entry_fields) - {"url", "description"} or "url" not in entry_fields:
+        if (not entry_valid or set(entry_fields) - {"url", "description"}
+                or "url" not in entry_fields):
             servers_valid = False
         else:
             server_urls.append(entry_fields["url"])
         entry_fields = None
+        entry_indent = None
         entry_valid = True
 
-    if servers_index is not None:
+    if servers_valid:
+        servers_index = servers_indexes[0]
         for line in lines[servers_index + 1:]:
             if re.match(r"^[A-Za-z][\w-]*:\s*(?:#.*)?$", line):
                 break
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
-            item = re.match(r"^\s*-\s*(.*)$", line)
+            item = re.match(r"^( *)(?:-\s*(.*))$", line)
             if item:
                 finish_server_entry()
+                item_indent = len(item.group(1))
+                if sequence_indent is None:
+                    sequence_indent = item_indent
+                elif item_indent != sequence_indent:
+                    servers_valid = False
                 server_entries += 1
+                entry_indent = item_indent
                 entry_fields = {}
-                remainder = item.group(1).strip()
+                remainder = (item.group(2) or "").strip()
                 if remainder:
-                    field = re.match(r"^([A-Za-z][\w-]*):\s*(.*?)\s*(?:#.*)?$", remainder)
-                    if not field:
-                        entry_valid = False
+                    field = re.match(r"^([A-Za-z][\w-]*):(?:[ \t]+(.*))?$", remainder)
+                    if field:
+                        add_server_field(field.group(1), field.group(2))
                     else:
-                        entry_fields[field.group(1)] = scalar(field.group(2))
+                        entry_valid = False
                 continue
-            child = re.match(r"^\s+([A-Za-z][\w-]*):\s*(.*?)\s*(?:#.*)?$", line)
-            if child and entry_fields is not None:
-                key, value = child.group(1), scalar(child.group(2))
-                if key in entry_fields:
+            if entry_fields is not None and entry_indent is not None:
+                child_pattern = rf"^ {{{entry_indent + 2}}}([A-Za-z][\w-]*):(?:[ \t]+(.*))?$"
+                child = re.match(child_pattern, line)
+                if child:
+                    add_server_field(child.group(1), child.group(2))
+                else:
+                    servers_valid = False
                     entry_valid = False
-                entry_fields[key] = value
             else:
                 servers_valid = False
-                if entry_fields is not None:
-                    entry_valid = False
         finish_server_entry()
-    if server_entries == 0 or not server_urls:
+    if server_entries == 0 or not server_urls or len(server_urls) != server_entries:
         servers_valid = False
 
     def placeholder_server(url: str) -> bool:
@@ -298,9 +351,9 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 and parsed.username is None and parsed.password is None
                 and not parsed.query and not parsed.fragment)
 
-    safe_draft = ("draft" in title.lower() and version.lower().endswith("-draft")
-                  and servers_valid and len(server_urls) == server_entries
-                  and all(placeholder_server(url) for url in server_urls))
+    safe_draft = (title is not None and "draft" in title.lower()
+                  and version is not None and version.lower().endswith("-draft")
+                  and servers_valid and all(placeholder_server(url) for url in server_urls))
 
     rows: list[dict[str, object]] = []
     if not safe_draft:
@@ -312,8 +365,9 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             "review": "draft-marker-or-server-inventory-invalid",
         })
 
-    start = next((i for i, line in enumerate(lines) if line == "paths:"), None)
-    if start is None:
+    paths_indexes = [i for i, line in enumerate(lines)
+                     if re.match(r"^paths:\s*(?:#.*)?$", line)]
+    if not paths_indexes:
         rows.append({
             "source": str(path.relative_to(root)), "line": 1,
             "kind": "historical-openapi-control", "method": None,
@@ -338,6 +392,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
     def flush() -> None:
         nonlocal methods
         if current_path is None:
+            methods = []
             return
         if not methods:
             unresolved_path(path_line, "path-has-no-recognized-method", current_path)
@@ -355,66 +410,117 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             })
         methods = []
 
+    if len(paths_indexes) > 1:
+        unresolved_path(paths_indexes[1] + 1, "duplicate-paths-section", "<paths-section-duplicate>")
+
     current_method: dict[str, object] | None = None
-    for index in range(start + 1, len(lines)):
+    seen_paths: set[str] = set()
+    for index in range(paths_indexes[0] + 1, len(lines)):
         line = lines[index]
         if line and not line.startswith((" ", "\t", "#")):
             break
         if not line.strip() or line.lstrip().startswith("#"):
             continue
 
-        # Path-item keys are exactly two spaces deep. Quoted keys and comments
-        # are supported; every other mapping key is an explicit parse failure.
-        path_match = re.match(r"""^  (?:"([^"]+)"|'([^']+)'|(/[^:]+)):\s*(?:#.*)?$""", line)
-        if path_match:
-            flush()
+        indent = len(line) - len(line.lstrip(" "))
+        if "\t" in line[:indent] or "\t" in line:
+            unresolved_path(index + 1, "tabs-in-path-section", current_path or "<unresolved-path>")
             current_method = None
-            current_path = next(group for group in path_match.groups() if group is not None)
-            path_line = index + 1
-            if not current_path.startswith("/"):
-                unresolved_path(path_line, "path-key-is-not-an-absolute-path", current_path)
-                current_path = None
             continue
-        if re.match(r"^  \S.*:\s*(?:#.*)?$", line):
+        if indent % 2:
+            unresolved_path(index + 1, "invalid-path-section-indentation", current_path or "<unresolved-path>")
+            current_method = None
+            continue
+
+        if indent == 2:
+            path_match = re.match(
+                r"""^  (?:"([^"]*)"|'([^']*)'|(/[^:]+)):\s*(?:#.*)?$""", line
+            )
+            if path_match:
+                flush()
+                current_method = None
+                current_path = next(group for group in path_match.groups() if group is not None)
+                path_line = index + 1
+                if "\\" in current_path:
+                    unresolved_path(path_line, "path-key-contains-unsupported-escape", current_path)
+                    current_path = None
+                elif not current_path.startswith("/") or "#" in current_path:
+                    unresolved_path(path_line, "path-key-is-not-an-absolute-path", current_path)
+                    current_path = None
+                elif current_path in seen_paths:
+                    unresolved_path(path_line, "duplicate-path-key", current_path)
+                if current_path is not None:
+                    seen_paths.add(current_path)
+                continue
             flush()
             current_path = None
             current_method = None
             unresolved_path(index + 1, "unrecognized-path-key")
             continue
 
-        method_key = re.match(r"^    ([A-Za-z_$][\w$-]*):\s*(?:#.*)?$", line)
-        if method_key and current_path is not None:
-            key = method_key.group(1).lower()
+        if indent == 4:
+            if current_path is None:
+                unresolved_path(index + 1, "path-item-without-path")
+                current_method = None
+                continue
+            malformed_method = re.match(r"^    [A-Za-z_$][\w$-]*\s+:", line)
+            if malformed_method:
+                unresolved_path(index + 1, "malformed-method-key", current_path)
+                current_method = None
+                continue
+            method_key = re.match(r"^    ([A-Za-z_$][\w$-]*):(?:[ \t]+(.*))?$", line)
+            if not method_key:
+                unresolved_path(index + 1, "malformed-path-item-key", current_path)
+                current_method = None
+                continue
+            key = method_key.group(1)
+            value = without_comment(method_key.group(2) or "").strip()
             if key in {"get", "post", "put", "patch", "delete", "options", "head", "trace"}:
-                methods.append({"method": key.upper(), "operation_id": None, "line": index + 1})
-                current_method = methods[-1]
-            elif key not in {"parameters", "servers", "summary", "description", "$ref"} and not key.startswith("x-"):
+                if value:
+                    unresolved_path(index + 1, "unsupported-inline-method-value", current_path)
+                    current_method = None
+                else:
+                    methods.append({"method": key.upper(), "operation_id": None, "line": index + 1})
+                    current_method = methods[-1]
+            elif key in {"servers", "$ref"}:
+                unresolved_path(
+                    index + 1,
+                    "path-item-server-override-unreviewed" if key == "servers" else "path-item-reference-unreviewed",
+                    current_path,
+                )
+                current_method = None
+            elif key in {"parameters", "summary", "description"} or key.startswith("x-"):
+                current_method = None
+            else:
                 unresolved_path(index + 1, "unrecognized-path-item-key", current_path)
                 current_method = None
-            else:
+            continue
+
+        if indent == 6:
+            operation_match = re.match(r"^      operationId:(?:[ \t]+(.*))?$", line)
+            if operation_match:
+                operation_id = string_scalar(operation_match.group(1) or "")
+                if current_method is None or current_method["operation_id"] is not None or operation_id is None:
+                    unresolved_path(index + 1, "invalid-or-duplicate-operation-id", current_path or "<unresolved-path>")
+                else:
+                    current_method["operation_id"] = operation_id
+                continue
+            if re.match(r"^      operationId\b", line):
+                unresolved_path(index + 1, "malformed-operation-id", current_path or "<unresolved-path>")
                 current_method = None
-            continue
-        if re.match(r"^    [A-Za-z][\w-]*\s+:", line) and current_path is not None:
-            unresolved_path(index + 1, "malformed-method-key", current_path)
-            current_method = None
-            continue
-        if re.match(r"^    \S.*:\s*(?:#.*)?$", line) and current_path is not None:
-            unresolved_path(index + 1, "unrecognized-path-item-key", current_path)
-            current_method = None
-            continue
-
-        operation_match = re.match(r"^      operationId:\s*([^\s#]+)\s*(?:#.*)?$", line)
-        if operation_match:
-            if current_method is None or current_method["operation_id"] is not None:
-                unresolved_path(index + 1, "operation-id-without-current-method", current_path or "<unresolved-path>")
-            else:
-                current_method["operation_id"] = scalar(operation_match.group(1))
-            continue
-
+                continue
+            if re.match(r"^      servers\s*:", line):
+                unresolved_path(index + 1, "operation-server-override-unreviewed", current_path or "<unresolved-path>")
+                current_method = None
+                continue
+            if re.match(r"^      \$ref\s*:", line):
+                unresolved_path(index + 1, "operation-reference-unreviewed", current_path or "<unresolved-path>")
+                current_method = None
+                continue
 
     flush()
     if not any(row["kind"] == "historical-openapi-draft" for row in rows):
-        unresolved_path(start + 1, "no-operation-paths")
+        unresolved_path(paths_indexes[0] + 1, "no-operation-paths")
     seen: set[tuple[str, str]] = set()
     seen_operation_ids: set[str] = set()
     for row in rows:
