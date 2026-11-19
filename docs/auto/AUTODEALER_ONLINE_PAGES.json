@@ -239,8 +239,8 @@
       "status": "D_PARTIAL",
       "scenario": "Карточки SKU, массовые изменения цен, аналоги и экспорт",
       "gap": "Нет bulk pricing, полноценного каталога аналогов и XLSX roundtrip",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-018",
@@ -267,8 +267,8 @@
       "status": "PLANNED",
       "scenario": "Реестр начислений и правки по периодам",
       "gap": "Нет payroll, юридического основания, формул и ролей",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-020",
@@ -295,8 +295,8 @@
       "status": "PLANNED",
       "scenario": "Суммы к начислению, тарифная/окладная части и задолженность",
       "gap": "Synthetic labor actual_minutes не подтверждает payroll",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-022",
@@ -351,8 +351,8 @@
       "status": "D_PARTIAL",
       "scenario": "Комиссия, фактические остатки, приход/списание расхождений",
       "gap": "Есть synthetic stocktake, нет утвержденного комиссионного документа",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-026",
@@ -365,8 +365,8 @@
       "status": "D_PARTIAL",
       "scenario": "Настраиваемые стадии, причины переходов, ответственный, дедлайны, канбан/список",
       "gap": "Есть синтетические leads/stage; нет configurable kanban, оплаты и бизнес-стадий",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-027",
@@ -491,8 +491,8 @@
       "status": "D_PARTIAL",
       "scenario": "Создание пользователей и настройка прав/ролей",
       "gap": "Технические гранты не равны завершённому lifecycle сотрудника, учётной записи и production IAM",
-      "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     },
     {
       "id": "ADP-036",
