@@ -140,6 +140,8 @@ export function AutoMechanicShiftComparison(){
       if([401,403,404].includes(response.status)){
         setReport(null);setStatus('denied');return;
       }
+      if(response.status===409){setReport(null);setStatus('limit');return;}
+      if(response.status===422){setReport(null);setStatus('invalid');return;}
       if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='text/csv')
         throw Error('HTTP');
       const blob=await response.blob();
@@ -151,7 +153,10 @@ export function AutoMechanicShiftComparison(){
         document.body.appendChild(anchor);anchor.click();anchor.remove();
       }finally{URL.revokeObjectURL(address);}
     }catch{
-      if(!control.signal.aborted)setExportError('Не удалось экспортировать сверку; обновите права и данные.');
+      if(!control.signal.aborted){
+        setReport(null);setStatus('error');
+        setExportError('Не удалось экспортировать сверку; обновите права и данные.');
+      }
     }finally{if(exporting.current===control)setBusy(false);}
   }
   const data=report?.shiftComparison;
