@@ -66,11 +66,25 @@ def upgrade():
       BEFORE DELETE ON auto_vehicle_customer_link
       FOR EACH ROW EXECUTE FUNCTION reject_audit_mutation()
     """)
+    op.execute("""
+      CREATE FUNCTION reject_auto_vehicle_customer_link_truncate()
+      RETURNS trigger LANGUAGE plpgsql AS $body$
+      BEGIN
+        RAISE EXCEPTION 'auto vehicle customer link truncate forbidden';
+      END $body$
+    """)
+    op.execute("""
+      CREATE TRIGGER auto_vehicle_customer_link_no_truncate
+      BEFORE TRUNCATE ON auto_vehicle_customer_link
+      FOR EACH STATEMENT EXECUTE FUNCTION reject_auto_vehicle_customer_link_truncate()
+    """)
 
 
 def downgrade():
     # Только disposable PostgreSQL: откат снимает защитные триггеры,
     # но не меняет и не удаляет строки автомобильных связей.
+    op.execute("DROP TRIGGER auto_vehicle_customer_link_no_truncate ON auto_vehicle_customer_link")
+    op.execute("DROP FUNCTION reject_auto_vehicle_customer_link_truncate()")
     op.execute("DROP TRIGGER auto_vehicle_customer_link_no_delete ON auto_vehicle_customer_link")
     op.execute("DROP TRIGGER auto_vehicle_customer_link_guard ON auto_vehicle_customer_link")
     op.execute("DROP FUNCTION guard_auto_vehicle_customer_link()")
