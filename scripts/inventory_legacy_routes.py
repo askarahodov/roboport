@@ -507,6 +507,10 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             continue
 
         if indent == 6:
+            # Sequence members of already-recognized operation properties
+            # (tags, parameters, x-extensions) share this indentation.
+            if re.match(r"^      -(?:[ \\t]+|$)", line):
+                continue
             operation_key = re.match(
                 r"""^      (?:"([^"]*)"|'([^']*)'|([A-Za-z_$][\w$-]*|<<)):(?:[ \t]+(.*))?$""",
                 line,
