@@ -231,9 +231,16 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                     quote = None
             elif char in "\"'":
                 quote = char
-            elif char == "#" and (index == 0 or value[index - 1].isspace()):
+            elif char == "#" and index > 0 and value[index - 1].isspace():
                 return value[:index].rstrip()
         return value.strip()
+
+    def empty_mapping_tail(value: str) -> bool:
+        # A YAML comment after a mapping colon needs separation whitespace.
+        # key:#text is not an empty mapping value.
+        return value == "" or (
+            value[0] in " \t" and not without_comment(value).strip()
+        )
 
     def string_scalar(value: str) -> str | None:
         """Read only plain/quoted YAML strings; reject other scalar types and escapes."""
@@ -263,7 +270,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
         if (m := re.match(r"^info\s*:(.*)$", line))
     ]
     info_indexes = [
-        i for i, tail in info_declarations if not without_comment(tail).strip()
+        i for i, tail in info_declarations if empty_mapping_tail(tail)
     ]
     info_valid = len(info_declarations) == 1 and len(info_indexes) == 1
     title_values: list[str | None] = []
@@ -437,8 +444,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
         if (m := re.match(r"^paths\s*:(.*)$", line))
     ]
     paths_indexes = [
-        i for i, tail in path_declarations
-        if not without_comment(tail).strip()
+        i for i, tail in path_declarations if empty_mapping_tail(tail)
     ]
     if len(path_declarations) != 1 or len(paths_indexes) != 1:
         review = (
