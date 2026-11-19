@@ -44,7 +44,7 @@ function payload(fromDay:string,toDay:string,empty=false){
       labor:[{laborEntryId:labor,status:'TRACED',approvalId:approval,
         rateRevisionId:revision}],
       lots:[{lotId:lot,skuId:sku,status:'TRACED',receiptId:receipt,
-        valuationId:valuation}],
+        valuationId:valuation,fifoSlices:[]}],
     },
   };
   const summary={
@@ -181,4 +181,42 @@ test('448: CSV только после повторной авторизации
     exportStatus=200;await load.click();
     await expect(page.getByLabel('Сверка закрытых заказов')).toBeVisible();
   }
+});
+
+
+test('448: подтверждённая FIFO/serial стоимость раскрывает первичные распределения',async({page})=>{
+  await page.route(api,route=>{
+    const params=new URL(route.request().url()).searchParams;
+    const data=payload(params.get('fromDay')??'',params.get('toDay')??'');
+    const lotGroup=data.items[0].costEvidence.lots[0];
+    const source=lotGroup as typeof lotGroup & {
+      fifoSlices:{stockEventId:string;lotMovementId:string;originalIssueId:string;
+        receiptId:string;acceptanceId:string;valuationId:string;
+        action:'ISSUE'|'RETURN';quantity:number;unitNetMinor:number;
+        serialId:string|null;serialApprovalId:string|null;sourceLocationId:string|null}[];
+    };
+    source.status='FIFO_TRACED';
+    source.receiptId=null as unknown as string;
+    source.valuationId=null as unknown as string;
+    source.fifoSlices=[
+      {stockEventId:'12121212-1212-4121-8121-121212121212',
+        lotMovementId:'13131313-1313-4131-8131-131313131313',
+        originalIssueId:'14141414-1414-4141-8141-141414141414',
+        receiptId:receipt,acceptanceId:'15151515-1515-4151-8151-151515151515',
+        valuationId:valuation,action:'ISSUE',quantity:1,unitNetMinor:1250,
+        serialId:null,serialApprovalId:null,sourceLocationId:null},
+    ];
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
+  });
+  await page.goto('/staff/auto-closed-order-ledgers');
+  await scope(page);
+  await page.getByRole('button',{name:'Сверить закрытые ЗН и два реестра'}).click();
+  const result=page.getByLabel('Сверка закрытых заказов');
+  await expect(result).toBeVisible();
+  await result.locator('details').first().locator('summary').first().click();
+  await result.getByText('Доказательства материалов и труда').click();
+  await expect(result).toContainText('по первичным FIFO/serial-срезам');
+  await expect(result).toContainText('12121212-1212-4121-8121-121212121212');
+  await expect(result).toContainText(valuation);
+  await expect(result).toContainText(receipt);
 });
