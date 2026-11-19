@@ -10,9 +10,13 @@ type Kind='ADVANCE'|'PAYMENT'|'APPLY_ADVANCE'|'REFUND_ADVANCE'|'REFUND_PAYMENT';
 type Status='NO_TREASURY_EVENTS'|'PARTIAL'|'SETTLED';
 type LedgerEvent={eventId:string;accountId:string;revisionId:string;kind:Kind;
   amountMinor:string;businessDay:string};
+type FifoSlice={stockEventId:string;lotMovementId:string;originalIssueId:string;
+  receiptId:string;acceptanceId:string;valuationId:string;
+  action:'ISSUE'|'RETURN';quantity:number;unitNetMinor:number;
+  serialId:string|null;serialApprovalId:string|null;sourceLocationId:string|null};
 type CostEvidence={labor:{laborEntryId:string;status:string;approvalId:string|null;
   rateRevisionId:string|null}[];lots:{lotId:string|null;skuId:string;status:string;
-  receiptId:string|null;valuationId:string|null}[]};
+  receiptId:string|null;valuationId:string|null;fifoSlices:FifoSlice[]}[]};
 type Order={workOrderId:string;closedDay:string;closedEventId:string;previewId:string;
   previewDigest:string;revisionId:string;approvedTotalMinor:string;
   directCostMinor:string|null;syntheticDifferenceMinor:string|null;
@@ -125,7 +129,27 @@ function parse(raw:unknown,from:string,to:string):Report{
     for(const item of x.costEvidence.lots){
       if(!isUuid(item.skuId)||(item.lotId!==null&&!isUuid(item.lotId))||
         (item.receiptId!==null&&!isUuid(item.receiptId))||
-        (item.valuationId!==null&&!isUuid(item.valuationId)))throw Error('material');
+        (item.valuationId!==null&&!isUuid(item.valuationId))||
+        !Array.isArray(item.fifoSlices)||item.fifoSlices.length>5000)
+        throw Error('material');
+      if(['FIFO_TRACED','SERIAL_TRACED'].includes(item.status)&&
+         (!item.fifoSlices.length||item.receiptId!==null||item.valuationId!==null))
+        throw Error('missing fifo provenance');
+      for(const slice of item.fifoSlices){
+        if(!slice||![slice.stockEventId,slice.lotMovementId,
+            slice.originalIssueId,slice.receiptId,slice.acceptanceId,
+            slice.valuationId].every(isUuid)||
+          !['ISSUE','RETURN'].includes(slice.action)||
+          !Number.isSafeInteger(slice.quantity)||slice.quantity<1||
+          slice.quantity>1e9||!Number.isSafeInteger(slice.unitNetMinor)||
+          slice.unitNetMinor<0||slice.unitNetMinor>1e9||
+          (slice.serialId!==null&&!isUuid(slice.serialId))||
+          (slice.serialApprovalId!==null&&!isUuid(slice.serialApprovalId))||
+          (slice.sourceLocationId!==null&&!isUuid(slice.sourceLocationId))||
+          (item.status==='SERIAL_TRACED'&&
+            (!isUuid(slice.serialId)||!isUuid(slice.serialApprovalId))))
+          throw Error('invalid slice');
+      }
     }
   }
   if(r.summary.costCompleteCount!==costComplete||
@@ -284,7 +308,26 @@ export function AutoClosedOrderLedgerReconciliation(){
               style={{overflowWrap:'anywhere'}}>
             Материал: <code style={{wordBreak:'break-all'}}>{e.skuId}</code> ·
             {e.status}; партия: {e.lotId??'не доказана'},
-            оценка: {e.valuationId??'не доказана'}.
+            оценка: {e.valuationId??(
+              e.fifoSlices.length?'по первичным FIFO/serial-срезам':'не доказана')}.
+            {e.fifoSlices.length>0&&<ul aria-label="Доказательства распределения стоимости">
+              {e.fifoSlices.map((part,j)=><li key={part.stockEventId+':'+j}
+                  style={{overflowWrap:'anywhere',minWidth:0}}>
+                {part.action==='ISSUE'?'Выдача':'Возврат'} {part.quantity} шт.
+                × {cash(String(part.unitNetMinor))}.
+                Приход: <code style={{wordBreak:'break-all'}}>{part.receiptId}</code>;
+                приёмка: <code style={{wordBreak:'break-all'}}>{part.acceptanceId}</code>;
+                оценка: <code style={{wordBreak:'break-all'}}>{part.valuationId}</code>;
+                складское событие: <code style={{wordBreak:'break-all'}}>{part.stockEventId}</code>;
+                движение партии: <code style={{wordBreak:'break-all'}}>{part.lotMovementId}</code>;
+                исходная выдача: <code style={{wordBreak:'break-all'}}>{part.originalIssueId}</code>.
+                {part.serialId&&<> Серийный номер UUID:
+                  <code style={{wordBreak:'break-all'}}>{part.serialId}</code>;
+                  утверждение происхождения:
+                  <code style={{wordBreak:'break-all'}}>{part.serialApprovalId}</code>;
+                  филиал-источник: {part.sourceLocationId??'отсутствует'}.</>}
+              </li>)}
+            </ul>}
           </li>)}</ul>
         </details>
       </details>)}
