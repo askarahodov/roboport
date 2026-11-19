@@ -577,7 +577,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 unresolved_path(index + 1, "malformed-method-key", current_path)
                 current_method = None
                 continue
-            method_key = re.match(r"^    ([A-Za-z_$][\w$-]*):(?:[ \t]+(.*))?$", line)
+            method_key = re.match(r"^    ([A-Za-z_$][\w$-]*):([ \t]+.*)?$", line)
             if not method_key:
                 unresolved_path(index + 1, "malformed-path-item-key", current_path)
                 current_method = None
@@ -611,7 +611,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             if re.match(r"^      -(?:[ \\t]+|$)", line):
                 continue
             operation_key = re.match(
-                r"""^      (?:"([^"]*)"|'([^']*)'|([A-Za-z_$][\w$-]*|<<)):(?:[ \t]+(.*))?$""",
+                r"""^      (?:"([^"]*)"|'([^']*)'|([A-Za-z_$][\w$-]*|<<)):(?:([ \t]+.*))?$""",
                 line,
             )
             if operation_key is None:
