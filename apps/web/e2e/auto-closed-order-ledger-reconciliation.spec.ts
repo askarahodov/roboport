@@ -79,7 +79,7 @@ test('448: закрытый ЗН, два независимых журнала, 
   const root=page.getByLabel('Сверка закрытых ЗН с двумя реестрами (dev)');
   await expect(root.getByRole('heading',{name:'Закрытые ЗН: первичка, условные расчёты и прямые затраты'}))
     .toBeVisible();
-  await expect(root).toContainText('не реальных платежей');
+  await expect(root).toContainText('ни реальных платежей');
   const button=root.getByRole('button',{name:'Сверить закрытые ЗН и два реестра'});
   await expect(button).toBeDisabled();
   await scope(page);
