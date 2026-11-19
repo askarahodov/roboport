@@ -53,27 +53,61 @@ def _literal(node: ast.AST | None, constants: dict[str, str] | None = None) -> s
 
 
 def _module_strings(tree: ast.Module) -> dict[str, str]:
-    """Only top-level immutable-looking assignments (not imports or calls).
+    """Only safe top-level constants, never mutable or ambiguous bindings.
 
-    This is intentionally conservative: reassignments to non-literals are
-    invalidated rather than accidentally retaining the old route prefix.
+    A final assignment is not the value observed when an earlier route
+    decorator ran. Once re-bound, a name must remain unresolved for the
+    entire scan, including when the replacement is another string literal.
     """
     names: dict[str, str] = {}
+    seen: set[str] = set()
+    unsafe: set[str] = set()
+
+    def bind(name: str, value: str | None) -> None:
+        if name in seen:
+            unsafe.add(name)
+        seen.add(name)
+        if name in unsafe or value is None:
+            names.pop(name, None)
+        else:
+            names[name] = value
+
+    def invalidate(name: str) -> None:
+        unsafe.add(name)
+        seen.add(name)
+        names.pop(name, None)
+
     for node in tree.body:
         if isinstance(node, ast.Assign):
             value = _literal(node.value, names)
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    if value is None:
-                        names.pop(target.id, None)
-                    else:
-                        names[target.id] = value
+                    bind(target.id, value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            value = _literal(node.value, names)
-            if value is None:
-                names.pop(node.target.id, None)
-            else:
-                names[node.target.id] = value
+            bind(node.target.id, _literal(node.value, names))
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            invalidate(node.target.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # Definitions also bind global names, even when not strings.
+            if node.name in seen:
+                invalidate(node.name)
+        elif isinstance(node, (ast.If, ast.For, ast.While, ast.Try, ast.With, ast.Match)):
+            # Conditional module-level writes have unknown execution order.
+            # Conservatively invalidate their targets, but do not walk into
+            # function/class bodies which have an independent local scope.
+            pending = [node]
+            while pending:
+                item = pending.pop()
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                     ast.ClassDef, ast.Lambda)):
+                    continue
+                if isinstance(item, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                    targets = (item.targets if isinstance(item, ast.Assign)
+                               else [item.target])
+                    for target in targets:
+                        if isinstance(target, ast.Name):
+                            invalidate(target.id)
+                pending.extend(ast.iter_child_nodes(item))
     return names
 
 
@@ -85,17 +119,22 @@ def _router_settings(tree: ast.Module, constants: dict[str, str]) -> dict[str, t
     """Resolve APIRouter prefix plus its include_in_schema default."""
     routers: dict[str, tuple[str | None, bool]] = {}
     for node in tree.body:
-        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+        if isinstance(node, ast.Assign):
+            value, targets = node.value, node.targets
+        elif isinstance(node, ast.AnnAssign):
+            value, targets = node.value, [node.target]
+        else:
             continue
-        constructor = node.value.func
+        if not isinstance(value, ast.Call):
+            continue
+        constructor = value.func
         if not isinstance(constructor, ast.Name) or constructor.id not in {"APIRouter", "FastAPI"}:
             continue
-        prefix_node = _keyword(node.value, "prefix")
+        prefix_node = _keyword(value, "prefix")
         prefix = _literal(prefix_node, constants) if prefix_node is not None else ""
-        hidden = isinstance(_keyword(node.value, "include_in_schema"), ast.Constant) and (
-            _keyword(node.value, "include_in_schema").value is False
-        )
-        for target in node.targets:
+        schema_node = _keyword(value, "include_in_schema")
+        hidden = isinstance(schema_node, ast.Constant) and schema_node.value is False
+        for target in targets:
             if isinstance(target, ast.Name):
                 routers[target.id] = (prefix, hidden)
     return routers
@@ -112,7 +151,9 @@ def scan_python(path: Path, root: Path) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
 
     def record(owner: str, call: ast.Call, method: str, line: int) -> None:
-        prefix, inherited_hidden = routers.get(owner, ("", False))
+        # An imported/factory router is not proof of an empty prefix.
+        # Treat unknown owners as unresolved, not as a trusted root router.
+        prefix, inherited_hidden = routers.get(owner, (None, False))
         part = _literal(_route_arguments(call), constants)
         resolved = prefix is not None and part is not None
         full_path = prefix + part if resolved else "<unresolved>"
@@ -141,8 +182,12 @@ def scan_python(path: Path, root: Path) -> list[dict[str, object]]:
         # Also inventory imperative registrations. They must not bypass the
         # static cutover check just because they have no route decorator.
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and
-            node.func.attr == "add_api_route" and isinstance(node.func.value, ast.Name)):
-            record(node.func.value.id, node, "API_ROUTE", node.lineno)
+            node.func.attr == "add_api_route"):
+            # A factory return or attribute receiver is still a possible
+            # route registration. Its effective prefix cannot be proved.
+            owner = (node.func.value.id if isinstance(node.func.value, ast.Name)
+                     else "<unresolved-router-owner>")
+            record(owner, node, "API_ROUTE", node.lineno)
     return results
 
 

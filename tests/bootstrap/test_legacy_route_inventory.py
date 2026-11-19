@@ -122,3 +122,77 @@ def test_repository_routes_with_named_prefix_are_included():
         "/reports/closed-order-ledger-reconciliation/export",
     }
     assert all(r["schema_hidden"] and not r["unresolved"] for r in rows)
+
+
+
+def test_second_static_assignment_is_not_mistaken_for_route_time_value():
+    """A post-decorator reassignment cannot rewrite the historical URL."""
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "route.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev/tickets"\n'
+            'router = APIRouter()\n'
+            '@router.get(PREFIX)\n'
+            'def old(): pass\n'
+            'PREFIX = "/api/v1/dev/auto/vehicles"\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["legacy_candidate"] is True
+
+
+def test_conditional_module_reassignment_does_not_hide_legacy_route():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "route.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev/tickets"\n'
+            'if condition:\n'
+            '    PREFIX = "/api/v1/dev/auto/vehicles"\n'
+            'router = APIRouter()\n'
+            '@router.get(PREFIX)\n'
+            'def old(): pass\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["review"] == "path-unresolved"
+
+
+
+def test_unknown_router_owner_and_annotated_dynamic_prefix_fail_closed():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "routes.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'router: APIRouter = APIRouter(prefix=get_prefix())\n'
+            '@router.get("/export")\n'
+            'def export(): pass\n'
+            'get_router().add_api_route(get_path(), handler)\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 2
+        assert all(row["unresolved"] and row["legacy_candidate"] for row in rows)
+        assert [row["method"] for row in rows] == ["GET", "API_ROUTE"]
+
+
+def test_unknown_imported_router_is_not_assumed_to_have_empty_prefix():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "routes.py"
+        file.write_text(
+            'from unknown import router\n'
+            '@router.get("/safe-looking-path")\n'
+            'def export(): pass\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert rows[0]["path"] == "<unresolved>"
+        assert rows[0]["review"] == "path-unresolved"
