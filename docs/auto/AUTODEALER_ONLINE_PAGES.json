@@ -745,6 +745,20 @@
       "gap": "Нет реестра кампаний и доказуемой атрибуции звонка/сделки к рекламному номеру и периоду; для фактической атрибуции требуется разрешённый телефонный провайдер",
       "evidence": "search_excerpt",
       "checkedOn": "2026-11-19"
+    },
+    {
+      "id": "ADP-054",
+      "url": "https://autodealer.ru/online/help/integratcii/zvonki/uis.html",
+      "title": "UIS",
+      "section": "Интеграции",
+      "matrixId": "D04",
+      "priority": "M3",
+      "issue": 169,
+      "status": "PLANNED",
+      "scenario": "Интеграция IP-телефонии UIS: API-enabled тариф, виртуальная АТС, Call API, ключ API, allowlist IP, внутренние номера сотрудников и их привязка к пользователям; HTTP POST события входящего/исходящего звонка, ответа, завершения и записи разговора с callSessionId/legId, контактами, сотрудником, номерами и ссылкой/длительностью записи",
+      "gap": "Нет реального UIS adapter, безопасного secret lifecycle, webhook authentication/idempotency, call event model, employee extension mapping и защищённого хранения recording links",
+      "evidence": "page",
+      "checkedOn": "2026-11-19"
     }
   ]
 }
