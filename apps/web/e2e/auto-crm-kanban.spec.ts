@@ -208,4 +208,9 @@ test('CRM Kanban selects the only enabled transition and does not request an app
   await page.getByRole('button',{name:'Сохранить этап'}).click();
   await expect(page.getByText('Этап обращения обновлён.')).toBeVisible();
   expect(savedStage).toBe('LOST');
+
+  config.stages.forEach((stage:any)=>{stage.enabled=false;});
+  await page.getByRole('button',{name:'Загрузить канбан'}).click();
+  await expect(page.getByText('Нет доступных переходов.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Изменить этап'})).toBeDisabled();
 });
