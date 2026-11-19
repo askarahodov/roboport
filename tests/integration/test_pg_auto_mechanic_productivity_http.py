@@ -297,6 +297,36 @@ def test_manager_shift_labor_comparison_real_pg_sources_revoke_and_csv(monkeypat
     assert http.get(base+"/export",params=query).status_code==403
 
 
+def test_postgres_berlin_shift_elapsed_hours_at_both_dst_boundaries(monkeypatch):
+    """A real PG session in Europe/Berlin returns same-zone Python datetimes.
+
+    March shift 01–04 = 2 elapsed hours; October shift 01–04 = 4.
+    Wall-clock subtraction would incorrectly return 3 for both.
+    """
+    d,org,loc,order=_close(monkeypatch)
+    zone=ZoneInfo("Europe/Berlin")
+    cases=(("2026-03-29",7200),("2026-10-25",14400))
+    with psycopg.connect(DSN) as db:
+        db.execute("SET TIME ZONE 'Europe/Berlin'")
+        for day,_ in cases:
+            local=datetime.fromisoformat(day)
+            start=datetime(local.year,local.month,local.day,1,0,tzinfo=zone)
+            end=datetime(local.year,local.month,local.day,4,0,tzinfo=zone)
+            db.execute("""INSERT INTO auto_staff_shift
+               (id,organization_id,location_id,user_id,starts_at,ends_at)
+               VALUES(%s,%s,%s,%s,%s,%s)""",
+               (uuid4(),org,loc,d["manager"],start,end))
+        for day,expected in cases:
+            start,end=_period(day,day,zone)
+            comparison=productivity._shift_comparison(db,org,loc,start,end,[])
+            assert comparison["summary"]["shiftCount"]==1
+            assert comparison["summary"]["scheduledSeconds"]==expected
+            row=comparison["items"][0]
+            assert row["scheduledSeconds"]==expected
+            assert row["shifts"][0]["overlapSeconds"]==expected
+            assert row["recordedToScheduledBasisPoints"]==0
+
+
 def test_shift_comparison_daylight_saving_range_and_csv_contract():
     """Midnight DST days differ from fixed 24h; export never carries names."""
     berlin=ZoneInfo("Europe/Berlin")
