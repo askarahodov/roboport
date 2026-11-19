@@ -474,3 +474,94 @@ Light/Dark, keyboard, повреждённые суммы/403/409, отзыв п
 сохранённые смены/журнал работ не изменены. #448/#119 остаются OPEN:
 реальные первичные документы, организация оплаты труда и legal sign-off
 не реализованы этой сверкой.
+
+
+## Единый мост «закрытый ЗН → SIM-расчёт → прямые затраты» (#448, current-dev)
+
+**Сценарий руководителя:** `/staff/auto-closed-contribution` →
+UUID синтетической организации/филиала → даты закрытия 1–31 день
+локального календаря → **«Сверить закрытые заказ-наряды»**.
+Экран показывает доказанные технически закрытые `CLOSED_TECHNICAL`
+заказы с независимым QC PASS, непротиворечивой `POSTED` /
+`CLIENT_ACK` версией, точной ревизией согласованной сметы
+и условными `SIM_PAYMENT/SIM_REFUND` из **того же закрытого
+снимка**. Каждая строка может быть раскрыта до UUID закрывающего
+события, оценки партии/склада, операции ISSUE/RETURN, записи
+рабочего времени, подписанной (в dev смысле: независимо
+одобренной) расчётной внутренней ставки и каждого условного
+денежного события.
+
+**Первичный источник и единый снимок:**
+`auto_closed_contribution.report` вызывает
+`auto_internal_order_costs.cost_report(include_base=True)`.
+Это возвращает **одним PostgreSQL REPEATABLE READ чтением**
+уже верифицированные расходы и приватную сверку закрытия
+`auto_closed_order_report.report` без второго подключения или
+новой транзакции. Сохраняются существующие ограничения
+MANAGER филиала, FINANCE READ / PRICE_SALES / PRICE_PURCHASE,
+ESTIMATE / HANDOVER, SUPPLIER_ORDER READ / PRICE_PURCHASE,
+живые owner-link и сессия/роль, отсутствие history cutoff.
+Сервер повторно связывает одинаковые `workOrderId`,
+`closedEventId`, `previewId`, `previewDigest` и
+`approvedTotalMinor`, проверяет точные суммы каждой
+`SIM_PAYMENT`/`SIM_REFUND`, не допускает повторов UUID
+платежей, записей труда и складских событий.
+
+**Формула, не являющаяся бухгалтерской прибылью:**
+`simulatedNetMinor=simulatedPaidMinor-simulatedRefundedMinor`
+равно согласованной сумме для технически закрытого ЗН.
+`directCostMinor=materialNetMinor+laborCostMinor`;
+`syntheticDifferenceMinor=approvedTotalMinor-directCostMinor`,
+включая **отрицательные** результаты.
+Если нет доказательства стоимости хотя бы одного материала,
+живого механика или заранее одобренной ставки труда —
+`status=INCOMPLETE`, `directCostMinor=null`,
+`syntheticDifferenceMinor=null`.
+Любой INCOMPLETE в день делает *весь дневной и периодный*
+итог затрат/разницы `null`, а не частичной «прибылью».
+Согласованный объём и подтверждённые SIM-платежи показываются
+отдельно. `marginAvailable=false`, `payrollAvailable=false`,
+`realMoney=false`, `releaseAllowed=false` всегда.
+Сюда **не** включаются движения третьего независимого
+`auto_treasury_event` (#445), безвалютный `CHARGE/CREDIT`,
+реальные платежи, НДС, overhead, фискальные документы или
+начисление зарплаты. Утверждение внутренней ставки — не
+юридическая подпись и не договор с работником.
+
+**Контракт (private dev HTTPS):**
+`GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/closed-contribution?fromDay=YYYY-MM-DD&toDay=YYYY-MM-DD`
+и `.../closed-contribution/export` с теми же параметрами.
+`basis=CLOSED_TECHNICAL_QC_POSTED_SIM_SETTLEMENT_AND_PROVEN_DIRECT_COSTS`.
+Ответ: `summary`, `days`, `items`; строка содержит
+все immutable UUID источников с фиксированными суммами в копейках,
+без ФИО, VIN, свободного текста и данных банковских счетов.
+CSV — UTF-8 BOM, 16 фиксированных полей, уровни `DAY/ORDER/
+SIM_CASH/LABOR/STOCK`, повторно читает PostgreSQL и
+авторизует сессию перед выгрузкой, размер не более 1 MiB.
+Сложение `closing` остатков по дням не производится.
+Неверная дата/UUID → 422, отсутствие права/чужой tenant/
+отозванная роль/history cutoff → 403, конфликт снимка/
+неподтверждённая первичка/лимит источников → 409
+**без частичного отчёта или CSV**.
+UI стирает предыдущие результаты и при неудавшейся загрузке,
+и при ошибке повторной авторизации CSV.
+
+**Проверки:** `tests/integration/test_pg_auto_closed_contribution_http.py`
+(настоящая PG17 последовательность сметы → акт/проведение →
+QC/закрытие → SIM оплата → подтверждённый приход/склад →
+нормо-записи труда; точный отрицательный результат, CSV,
+отзыв FINANCE, отсутствие ставки/стоимости, чужой филиал,
+невалидный период, 409) и
+`apps/web/e2e/auto-closed-contribution.spec.ts`
+(390/1280, Light/Dark, keyboard, доказательства UUID,
+неопределённый итог, отказ CSV 403/409, повреждённые данные).
+Публикуемые скриншоты только candidate, не manual
+design/financial signoff #92/#76.
+
+**Откат:** revert нового read-only private API/UI/tests/docs
+и вспомогательного приватного `include_base` возвращаемого
+значения расчёта внутренних затрат; **без** Alembic,
+новых таблиц, изменения существующих immutable событий
+или контрактов старых отчётов. Выпуск в production,
+реальная прибыль и payroll остаются закрытыми до #119
+и полного исходного scope #448.
