@@ -49,7 +49,7 @@ test('service consent is separate, revisioned and never permits external sending
   });
   await page.goto('/account/settings');
   const section=page.getByLabel('Тестовое согласие на сервисные уведомления CRM');
-  await expect(section).toContainText('не является юридически');
+  await expect(section).toContainText('не юридически подтверждённое согласие');
   await expect(section.getByLabel('Звонок')).not.toBeChecked();
   await section.getByLabel('Звонок').check();
   await section.getByRole('button',{name:'Сохранить тестовый выбор: Звонок'}).click();
@@ -70,7 +70,7 @@ test('staff creates an inert mock once with same-key retry and suppresses it aft
     if(route.request().method()==='GET')return route.fulfill({
       status:200,contentType:'application/json',
       body:JSON.stringify({syntheticOnly:true,nextCursor:null,items:[{
-        leadId:lead,customerLinkId:link,ownerId:owner,sourceCode:'WEB',
+        syntheticOnly:true,leadId:lead,customerLinkId:link,ownerId:owner,sourceCode:'WEB',
         status:'NEW',createdAt:'2030-01-01T10:00:00Z',events:[],
       }]}),
     });
