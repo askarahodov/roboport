@@ -419,6 +419,18 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             "schema_hidden": None, "unresolved": True,
             "review": "unsupported-root-yaml-key",
         })
+    webhooks_declarations = [
+        i for i, line in enumerate(lines)
+        if re.match(r"^webhooks\s*:", line)
+    ]
+    if webhooks_declarations:
+        rows.append({
+            "source": str(path.relative_to(root)), "line": webhooks_declarations[0] + 1,
+            "kind": "historical-openapi-control", "method": None,
+            "path": "<webhooks-section-unreviewed>", "legacy_candidate": True,
+            "schema_hidden": None, "unresolved": True,
+            "review": "webhooks-section-unreviewed",
+        })
 
     path_declarations = [
         (i, m.group(1)) for i, line in enumerate(lines)
