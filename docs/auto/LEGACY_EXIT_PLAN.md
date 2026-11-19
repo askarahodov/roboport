@@ -79,3 +79,42 @@ PYTHONPATH=apps/api python -m pytest -q tests/integration  # disposable PostgreS
 В Docker/uvicorn допустима только рабочая точка входа `roboport_api.main:app`; тестовый архив не должен импортироваться ею. Пять обязательных CI jobs должны пройти как на PR, так и после merge. Revert изменений HTTP не затрагивает данные. Отдельного production-rollback этот checkpoint не заменяет.
 
 См. [архив](LEGACY_ARCHIVE.md), [продукт](PRODUCT.md) и [архитектуру](ARCHITECTURE.md).
+
+## Полная статическая инвентаризация HTTP-маршрутов с CI-gate (#165)
+
+**Проблема и решение:** старый read-only сканер `scripts/inventory_legacy_routes.py`
+перечислял только `@router.get("/literal")` и пропускал реальные пути
+вида `PREFIX + "/export"`. Это могло скрыть восстановленный legacy URL
+при инвентаризации. Проверяемая версия собирает пути из безопасных
+**статических** строковых констант модуля, конкатенаций и literal f-string,
+учитывает `APIRouter(prefix=...)`, унаследованное
+`include_in_schema=False` и императивные `add_api_route`.
+Ни код приложения, ни SQL, ни переменные окружения при сканировании
+не выполняются и не читаются.
+
+```bash
+python scripts/inventory_legacy_routes.py --legacy-only > /tmp/legacy-http-paths.json
+python scripts/inventory_legacy_routes.py --check
+PYTHONPATH=apps/api python -m pytest -q tests/bootstrap/test_legacy_route_inventory.py
+```
+
+`--check` выполняется **на каждом PR и на main в обязательном docs job**.
+Если выражение пути/префикса не может быть достоверно вычислено статически,
+сборка FAIL: возвращается список только `source`/`line`, без дампа
+содержимого кода, cookie или данных. Непонятный маршрут **не исчезает**
+из JSON-инвентаризации: это `unresolved=true`,
+`review=path-unresolved`. Проверять новые правила разрешения путей
+нужно только тестами, никогда `eval`/импортом произвольного модуля.
+Поля `legacy_candidate` — консервативный сигнал на ручной анализ,
+включающий старые unmounted Python-модули, а не доказательство, что
+путь обслуживается рабочим ASGI.
+
+**Граница готовности:** статический список не доказывает монтирование,
+доступность или отсутствие обхода авторизации. Отдельные runtime
+TestClient-негативные проверки и OpenAPI-gate выше остаются обязательны.
+Это закрывает *дефект полноты технического route inventory*, но **не**
+закрывает #165: legacy SQL/attachment retention, настоящее восстановление
+и миграция архивов, одобренные права на данные, #119 и production cutover
+по-прежнему блокируют деструктивный decommission. Откат — revert этого
+статического валидатора и его CI/тестов; объекты БД, файлы и
+функционирующие маршруты не изменяются.

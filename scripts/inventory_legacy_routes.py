@@ -17,43 +17,132 @@ NAV = re.compile(r"<NavLink\b[^>]*\bto\s*=\s*[\"']([^\"']+)[\"']", re.S)
 METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "api_route"}
 
 
-def _literal(node: ast.AST | None) -> str | None:
-    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+MAX_STATIC_PATH = 4096
+
+
+def _literal(node: ast.AST | None, constants: dict[str, str] | None = None) -> str | None:
+    """Resolve only statically proven strings; never execute application code.
+
+    FastAPI routes frequently use PREFIX + "/export" instead of literals.
+    An unknown expression must be reported, never silently skipped.
+    """
+    names = constants or {}
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value if len(node.value) <= MAX_STATIC_PATH else None
+    if isinstance(node, ast.Name):
+        return names.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _literal(node.left, names), _literal(node.right, names)
+        if left is not None and right is not None and len(left) + len(right) <= MAX_STATIC_PATH:
+            return left + right
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for part in node.values:
+            if isinstance(part, ast.FormattedValue):
+                if part.conversion not in (-1, 115) or part.format_spec is not None:
+                    return None
+                value = _literal(part.value, names)
+            else:
+                value = _literal(part, names)
+            if value is None:
+                return None
+            parts.append(value)
+        joined = "".join(parts)
+        return joined if len(joined) <= MAX_STATIC_PATH else None
+    return None
+
+
+def _module_strings(tree: ast.Module) -> dict[str, str]:
+    """Only top-level immutable-looking assignments (not imports or calls).
+
+    This is intentionally conservative: reassignments to non-literals are
+    invalidated rather than accidentally retaining the old route prefix.
+    """
+    names: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            value = _literal(node.value, names)
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    if value is None:
+                        names.pop(target.id, None)
+                    else:
+                        names[target.id] = value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            value = _literal(node.value, names)
+            if value is None:
+                names.pop(node.target.id, None)
+            else:
+                names[node.target.id] = value
+    return names
+
+
+def _keyword(call: ast.Call, name: str) -> ast.AST | None:
+    return next((item.value for item in call.keywords if item.arg == name), None)
+
+
+def _router_settings(tree: ast.Module, constants: dict[str, str]) -> dict[str, tuple[str | None, bool]]:
+    """Resolve APIRouter prefix plus its include_in_schema default."""
+    routers: dict[str, tuple[str | None, bool]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        constructor = node.value.func
+        if not isinstance(constructor, ast.Name) or constructor.id not in {"APIRouter", "FastAPI"}:
+            continue
+        prefix_node = _keyword(node.value, "prefix")
+        prefix = _literal(prefix_node, constants) if prefix_node is not None else ""
+        hidden = isinstance(_keyword(node.value, "include_in_schema"), ast.Constant) and (
+            _keyword(node.value, "include_in_schema").value is False
+        )
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                routers[target.id] = (prefix, hidden)
+    return routers
+
+
+def _route_arguments(call: ast.Call) -> ast.AST | None:
+    return call.args[0] if call.args else _keyword(call, "path")
 
 
 def scan_python(path: Path, root: Path) -> list[dict[str, object]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    prefixes = {}
-    results = []
+    constants = _module_strings(tree)
+    routers = _router_settings(tree, constants)
+    results: list[dict[str, object]] = []
+
+    def record(owner: str, call: ast.Call, method: str, line: int) -> None:
+        prefix, inherited_hidden = routers.get(owner, ("", False))
+        part = _literal(_route_arguments(call), constants)
+        resolved = prefix is not None and part is not None
+        full_path = prefix + part if resolved else "<unresolved>"
+        decorator_hidden = _keyword(call, "include_in_schema")
+        hidden = inherited_hidden or (
+            isinstance(decorator_hidden, ast.Constant) and decorator_hidden.value is False
+        )
+        results.append({
+            "source": str(path.relative_to(root)), "line": line,
+            "kind": "api", "method": method,
+            "path": full_path, "legacy_candidate": bool(LEGACY.search(full_path)) if resolved else True,
+            "schema_hidden": hidden, "unresolved": not resolved,
+            "review": "path-unresolved" if not resolved else "manual-required",
+        })
+
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-            if isinstance(node.value.func, ast.Name) and node.value.func.id == "APIRouter":
-                prefix = next((_literal(k.value) for k in node.value.keywords if k.arg == "prefix"), None)
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        prefixes[target.id] = prefix or ""
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for decorator in node.decorator_list:
-            if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Attribute):
-                continue
-            owner = decorator.func.value
-            if not isinstance(owner, ast.Name) or decorator.func.attr not in METHODS:
-                continue
-            path_part = _literal(decorator.args[0]) if decorator.args else None
-            if path_part is None:
-                continue
-            full_path = prefixes.get(owner.id, "") + path_part
-            hidden = any(k.arg == "include_in_schema" and isinstance(k.value, ast.Constant)
-                         and k.value.value is False for k in decorator.keywords)
-            results.append({
-                "source": str(path.relative_to(root)), "line": node.lineno,
-                "kind": "api", "method": decorator.func.attr.upper(),
-                "path": full_path, "legacy_candidate": bool(LEGACY.search(full_path)),
-                "schema_hidden": hidden,
-                "review": "manual-required",
-            })
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                if (not isinstance(decorator, ast.Call) or
+                    not isinstance(decorator.func, ast.Attribute) or
+                    not isinstance(decorator.func.value, ast.Name) or
+                    decorator.func.attr not in METHODS):
+                    continue
+                record(decorator.func.value.id, decorator,
+                       decorator.func.attr.upper(), node.lineno)
+        # Also inventory imperative registrations. They must not bypass the
+        # static cutover check just because they have no route decorator.
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and
+            node.func.attr == "add_api_route" and isinstance(node.func.value, ast.Name)):
+            record(node.func.value.id, node, "API_ROUTE", node.lineno)
     return results
 
 
@@ -78,12 +167,25 @@ def inventory(root: Path) -> list[dict[str, object]]:
     return sorted(rows, key=lambda r: (str(r["source"]), int(r["line"]), str(r["kind"]), str(r["path"])))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--legacy-only", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--check", action="store_true",
+                        help="Fail closed if any Python API path cannot be resolved")
+    args = parser.parse_args(argv)
     rows = inventory(args.root.resolve())
+    unresolved = [row for row in rows if row.get("unresolved")]
+    if args.check:
+        # CI should see paths needing manual inspection, not a false clean
+        # inventory; no full source expressions or application data logged.
+        print(json.dumps({
+            "source": "static-only", "apiPathsResolved": not unresolved,
+            "routeCount": len(rows),
+            "unresolved": [{"source": r["source"], "line": r["line"]}
+                           for r in unresolved],
+        }, ensure_ascii=False))
+        return 1 if unresolved else 0
     if args.legacy_only:
         rows = [row for row in rows if row["legacy_candidate"]]
     print(json.dumps({"source": "static-only", "routes": rows, "count": len(rows)},
