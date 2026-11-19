@@ -293,7 +293,7 @@ def test_concurrent_workflow_config_updates_serialize_without_deadlock(monkeypat
 
 def test_parallel_mock_outbox_for_distinct_leads_sharing_proof_has_no_deadlock(monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
-    from threading import Barrier
+    from threading import Barrier,Lock
     from roboport_api import auto_crm_consent
 
     d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
@@ -313,11 +313,17 @@ def test_parallel_mock_outbox_for_distinct_leads_sharing_proof_has_no_deadlock(m
         )
 
     barrier=Barrier(2)
+    seen_connections=set()
+    seen_lock=Lock()
     original=auto_crm_consent._account_users
 
     def synchronized_account_users(conn,customer_id):
         users=original(conn,customer_id)
-        barrier.wait(timeout=10)
+        with seen_lock:
+            first_call=id(conn) not in seen_connections
+            seen_connections.add(id(conn))
+        if first_call:
+            barrier.wait(timeout=10)
         return users
 
     monkeypatch.setattr(auto_crm_consent,"_account_users",synchronized_account_users)
