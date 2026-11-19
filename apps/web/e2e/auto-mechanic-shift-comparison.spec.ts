@@ -104,14 +104,14 @@ test('448: повреждённые суммы, 409, 403 и смена фили�
 });
 
 test('448: экспорт ещё раз проверяет ACL и отказывается после отзыва',async({page})=>{
-  let denied=false;
+  let exportStatus:200|403|409|422=200;
   await page.route(api,route=>{
     const p=new URL(route.request().url()).searchParams;
     return route.fulfill({status:200,contentType:'application/json',
       body:JSON.stringify(report(p.get('fromDay')??'',p.get('toDay')??''))});
   });
-  await page.route(exportApi,route=>route.fulfill(denied?
-    {status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'}:
+  await page.route(exportApi,route=>route.fulfill(exportStatus!==200?
+    {status:exportStatus,contentType:'application/json',body:'{"code":"DENIED_OR_CONFLICT"}'}:
     {status:200,contentType:'text/csv; charset=utf-8',
       body:'\ufeffМеханик UUID;Уровень\r\n'+worker+';MECHANIC\r\n'}));
   await page.goto('/staff/auto-mechanic-shifts');
@@ -121,8 +121,15 @@ test('448: экспорт ещё раз проверяет ACL и отказыв
   const download=page.waitForEvent('download');
   await results.getByRole('button',{name:'Скачать сверку CSV'}).click();
   expect((await download).suggestedFilename()).toBe('auto-mechanic-shift-comparison.csv');
-  denied=true;
-  await results.getByRole('button',{name:'Скачать сверку CSV'}).click();
-  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
-  await expect(page.getByLabel('Результаты сверки смен')).toHaveCount(0);
+  for(const [code,text] of [[409,'Конфликт'],[422,'Неверный период'],[403,'Доступ запрещён']] as const){
+    exportStatus=code;
+    await results.getByRole('button',{name:'Скачать сверку CSV'}).click();
+    await expect(page.getByRole('alert')).toContainText(text);
+    await expect(page.getByLabel('Результаты сверки смен')).toHaveCount(0);
+    exportStatus=200;
+    if(code!==403){
+      await page.getByRole('button',{name:'Сопоставить смены и труд'}).click();
+      await expect(page.getByLabel('Результаты сверки смен')).toBeVisible();
+    }
+  }
 });
