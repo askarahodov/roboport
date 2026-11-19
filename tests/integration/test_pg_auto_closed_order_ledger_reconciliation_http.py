@@ -97,7 +97,7 @@ def test_closed_order_two_independent_ledgers_full_settlement_and_sources(monkey
     assert out.headers["x-content-type-options"]=="nosniff"
     assert out.headers["content-type"].startswith("text/csv")
     records=list(csv.reader(StringIO(out.text.lstrip("\ufeff")),delimiter=";"))
-    assert all(len(record)==25 for record in records)
+    assert all(len(record)==36 for record in records)
     assert len(records)==9
     assert [x[0] for x in records[1:]].count("ORDER")==1
     assert [x[0] for x in records[1:]].count("TREASURY_EVENT")==5
@@ -200,3 +200,53 @@ def test_corrupt_extra_treasury_source_does_not_leak_partial_result(monkeypatch)
             assert "text/csv" not in res.headers["content-type"]
     finally:
         module.MAX_LEDGER_EVENTS=original
+
+
+
+@pytest.mark.parametrize("mode", ["fifo", "serial"])
+def test_fifo_and_serial_primary_receipts_remain_traceable_in_report_and_csv(monkeypatch,mode):
+    """An audited valued FIFO/serial lot has no single group.source.
+
+    Every allocation leg must survive the projection instead of being
+    mislabeled as 'not proven' by the UI and disappearing from the CSV.
+    """
+    d,org,loc,order,evidence,root,query,rate=setup(monkeypatch,mode=mode)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    token(http,d,d["intake"])
+    path=_path(root)
+    report=http.get(path,params=query)
+    assert report.status_code==200,report.text
+    body=report.json()
+    row=body["items"][0]
+    assert row["costStatus"]=="COMPLETE"
+    group=row["costEvidence"]["lots"][0]
+    assert group["status"] == ("FIFO_TRACED" if mode=="fifo" else "SERIAL_TRACED")
+    assert group["receiptId"] is None and group["valuationId"] is None
+    parts=group["fifoSlices"]
+    assert parts and all(part["valuationId"] and part["receiptId"]
+                         and part["acceptanceId"] and part["stockEventId"]
+                         and part["originalIssueId"] and part["lotMovementId"]
+                         for part in parts)
+    assert sum(part["quantity"]*part["unitNetMinor"]*
+               (1 if part["action"]=="ISSUE" else -1) for part in parts)==(
+        5750 if mode=="fifo" else int(row["directCostMinor"])-1501
+    )
+    if mode=="serial":
+        assert all(part["serialId"] and part["serialApprovalId"]
+                   and part["sourceLocationId"] for part in parts)
+    out=http.get(path+"/export",params=query)
+    assert out.status_code==200,out.text
+    csv_rows=list(csv.reader(StringIO(out.text.lstrip("\ufeff")),delimiter=";"))
+    assert all(len(record)==36 for record in csv_rows)
+    slices=[record for record in csv_rows[1:] if record[0]=="FIFO_SLICE"]
+    assert len(slices)==len(parts)
+    assert {record[23] for record in slices}=={part["valuationId"] for part in parts}
+    assert {record[25] for record in slices}=={part["receiptId"] for part in parts}
+    assert {record[26] for record in slices}=={part["acceptanceId"] for part in parts}
+    assert {record[27] for record in slices}=={part["lotMovementId"] for part in parts}
+    assert {record[28] for record in slices}=={part["originalIssueId"] for part in parts}
+    assert {record[32] for record in slices}=={part["stockEventId"] for part in parts}
+    if mode=="serial":
+        assert {record[29] for record in slices}=={part["serialId"] for part in parts}
+        assert {record[30] for record in slices}=={part["serialApprovalId"] for part in parts}
+
