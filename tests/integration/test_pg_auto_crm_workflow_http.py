@@ -302,7 +302,9 @@ def test_parallel_mock_outbox_for_distinct_leads_sharing_proof_has_no_deadlock(m
     first=http.post(base+"/leads",headers=intake,json=lead_payload(d))
     assert first.status_code==201,first.text
     intake=session(http,d,d["intake"])
-    second=http.post(base+"/leads",headers=intake,json=lead_payload(d))
+    second_payload=lead_payload(d)
+    second_payload["sourceCode"]="PHONE"
+    second=http.post(base+"/leads",headers=intake,json=second_payload)
     assert second.status_code==201,second.text
     first_lead=UUID(first.json()["leadId"])
     second_lead=UUID(second.json()["leadId"])
