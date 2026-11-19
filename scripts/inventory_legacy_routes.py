@@ -267,10 +267,18 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
 
     # Parse every root server list item as a mapping. Child fields must be
     # exactly two spaces deeper than their list item; nested YAML is unsupported.
+    # Count every root-level spelling of the reserved key, including quoted
+    # keys and anchored/inline values. A merge key can inject servers too.
+    server_declarations = [i for i, line in enumerate(lines)
+                           if re.match(r"""^(?:servers|"servers"|'servers')\s*:""", line)]
+    merge_declarations = [i for i, line in enumerate(lines)
+                          if re.match(r"^<<\s*:", line)]
     servers_indexes = [i for i, line in enumerate(lines)
                        if re.match(r"^servers:\s*(?:#.*)?$", line)]
     server_urls: list[str] = []
-    servers_valid = len(servers_indexes) == 1
+    servers_valid = (len(server_declarations) == 1
+                     and server_declarations == servers_indexes
+                     and not merge_declarations)
     server_entries = 0
     sequence_indent: int | None = None
     entry_indent: int | None = None
@@ -308,7 +316,9 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 break
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
-            item = re.match(r"^( *)(?:-\s*(.*))$", line)
+            # YAML sequence markers require whitespace (or end of line).
+            # "-url:" is a mapping key, not a list item.
+            item = re.match(r"^( *)-(?:[ \t]+(.*))?$", line)
             if item:
                 finish_server_entry()
                 item_indent = len(item.group(1))
@@ -497,26 +507,46 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             continue
 
         if indent == 6:
-            operation_match = re.match(r"^      operationId:(?:[ \t]+(.*))?$", line)
-            if operation_match:
-                operation_id = string_scalar(operation_match.group(1) or "")
+            operation_key = re.match(
+                r"""^      (?:"([^"]*)"|'([^']*)'|([A-Za-z_$][\w$-]*|<<)):(?:[ \t]+(.*))?$""",
+                line,
+            )
+            if operation_key is None:
+                unresolved_path(index + 1, "malformed-operation-key", current_path or "<unresolved-path>")
+                current_method = None
+                continue
+            quoted_key = operation_key.group(1) is not None or operation_key.group(2) is not None
+            key = operation_key.group(1) or operation_key.group(2) or operation_key.group(3)
+            value = operation_key.group(4) or ""
+            if quoted_key:
+                unresolved_path(index + 1, "quoted-operation-key-unreviewed", current_path or "<unresolved-path>")
+                current_method = None
+                continue
+            if key == "<<":
+                unresolved_path(index + 1, "operation-merge-key-unreviewed", current_path or "<unresolved-path>")
+                current_method = None
+                continue
+            if key == "servers":
+                unresolved_path(index + 1, "operation-server-override-unreviewed", current_path or "<unresolved-path>")
+                current_method = None
+                continue
+            if key == "$ref":
+                unresolved_path(index + 1, "operation-reference-unreviewed", current_path or "<unresolved-path>")
+                current_method = None
+                continue
+            if key == "operationId":
+                operation_id = string_scalar(value)
                 if current_method is None or current_method["operation_id"] is not None or operation_id is None:
                     unresolved_path(index + 1, "invalid-or-duplicate-operation-id", current_path or "<unresolved-path>")
                 else:
                     current_method["operation_id"] = operation_id
                 continue
-            if re.match(r"^      operationId\b", line):
-                unresolved_path(index + 1, "malformed-operation-id", current_path or "<unresolved-path>")
-                current_method = None
+            if key in {"tags", "summary", "description", "externalDocs", "parameters",
+                       "requestBody", "responses", "callbacks", "deprecated", "security"} or key.startswith("x-"):
                 continue
-            if re.match(r"^      servers\s*:", line):
-                unresolved_path(index + 1, "operation-server-override-unreviewed", current_path or "<unresolved-path>")
-                current_method = None
-                continue
-            if re.match(r"^      \$ref\s*:", line):
-                unresolved_path(index + 1, "operation-reference-unreviewed", current_path or "<unresolved-path>")
-                current_method = None
-                continue
+            unresolved_path(index + 1, "unrecognized-operation-key", current_path or "<unresolved-path>")
+            current_method = None
+            continue
 
     flush()
     if not any(row["kind"] == "historical-openapi-draft" for row in rows):

@@ -524,3 +524,64 @@ def test_inline_method_mapping_is_not_silently_ignored_or_attached_to_another_me
         assert any(r.get("operation_id") == "validOperation" for r in rows)
         assert not any(r.get("operation_id") == "inlineOperation" for r in rows)
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_operation_quoted_and_merge_keys_cannot_hide_server_overrides():
+    for key_line in (
+        '      "servers": [{url: https://api.example.com}]',
+        r'      "\u0073ervers": [{url: https://api.example.com}]',
+        "      <<: {servers: [{url: https://api.example.com}]}",
+    ):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = root / "contracts/openapi.yaml"
+            contract.parent.mkdir(parents=True)
+            contract.write_text(
+                "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+                "servers:\n- url: https://api.example.invalid\n"
+                "paths:\n  /safe:\n"
+                "    get:\n      operationId: safe\n"
+                + key_line + "\n",
+                encoding="utf-8",
+            )
+            rows = scan_openapi_contract(contract, root)
+            assert any(r["unresolved"] for r in rows)
+            assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_root_servers_anchor_and_quoted_override_are_rejected_even_after_paths():
+    for extra in (
+        "servers: &live\n- url: https://api.example.com\n",
+        '"servers":\n- url: https://api.example.com\n',
+        "<<: {servers: [{url: https://api.example.com}]}\n",
+    ):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = root / "contracts/openapi.yaml"
+            contract.parent.mkdir(parents=True)
+            contract.write_text(
+                "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+                "servers:\n- url: https://api.example.invalid\n"
+                "paths:\n  /safe:\n    get:\n      operationId: safe\n"
+                + extra,
+                encoding="utf-8",
+            )
+            rows = scan_openapi_contract(contract, root)
+            assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
+            assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_servers_sequence_marker_requires_separator_after_dash():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n-url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
