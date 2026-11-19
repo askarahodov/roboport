@@ -81,6 +81,21 @@ def publish_policy(conn,token,org,*,request_key,role,loc,user,
                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,(uuid4(),request_key,org,loc,role,user,
                       document,cap,allowed,not_before,actor))
+                # Force a new MVCC version of the same org row on EVERY new
+                # policy publication. An older REPEATABLE READ reader that
+                # established its snapshot from session/role checks before
+                # waiting for this org's FOR UPDATE must fail with 40001
+                # instead of reading the previous policy after commit.
+                #
+                # The immutable identity guard permits this no-op assignment:
+                # disabled_at is unchanged, but PostgreSQL still creates a
+                # fresh row version. Org FOR SHARE readers serialize against
+                # this publication in a way an append-only policy INSERT
+                # alone cannot guarantee.
+                conn.execute("""
+                  UPDATE auto_organization SET disabled_at=disabled_at
+                  WHERE id=%s
+                """,(org,))
                 conn.execute("SELECT set_config('roboport.policy_actor','',true)")
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation,psycopg.errors.ForeignKeyViolation):
