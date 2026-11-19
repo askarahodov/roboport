@@ -260,3 +260,28 @@ def test_synthetic_service_consent_gates_inert_outbox_and_unsubscribe(monkeypatc
         with pytest.raises(psycopg.errors.RaiseException):
             with db.transaction():
                 db.execute("DELETE FROM auto_crm_mock_outbox WHERE lead_id=%s",(lead_id,))
+
+
+def test_concurrent_workflow_config_updates_serialize_without_deadlock(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    manager_token=d["tokens"][d["manager"]]
+    with psycopg.connect(DSN) as db:
+        current=auto_crm_workflow.get_workflow_config(db,manager_token,org,loc)
+    config=current["config"]
+    barrier=Barrier(2)
+
+    def update(key):
+        try:
+            with psycopg.connect(DSN) as db:
+                barrier.wait(timeout=10)
+                return auto_crm_workflow.set_workflow_config(
+                    db,manager_token,org,loc,0,key,config
+                )
+        except auto_crm_workflow.LeadConflict as exc:
+            return str(exc)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures=[pool.submit(update,uuid4()) for _ in range(2)]
+        results=[future.result(timeout=20) for future in futures]
+    assert sum(isinstance(result,dict) and result["version"]==1 for result in results)==1
+    assert sum(result=="STALE_REVISION" for result in results)==1

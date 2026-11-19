@@ -537,3 +537,10 @@ Mock outbox содержит только lead UUID, канал, фиксиро�
 **Миграция и откат:** Alembic 0132_auto_crm_workflow добавляет только append-only workflow config, assignment, consent и mock-outbox evidence; нет публичных маршрутов, реальных контактов, интеграций, платежей или production DDL grants. Downgrade fail-closed при наличии любой записи в новых таблицах: сначала нужен отдельный backup/restore и решение владельца. Обычный rollback приложения — revert PR, не удаление audit evidence.
 
 **Проверки:** tests/integration/test_pg_auto_crm_workflow_http.py — PostgreSQL 17/HTTPS, revision race, manager-only config, direct SQL tamper, owner reassignment, task ownership, branch scope, consent across multiple accounts, unsubscribe→SUPPRESSED и inert outbox. apps/web/e2e/auto-crm-kanban.spec.ts и apps/web/e2e/auto-crm-consent-outbox.spec.ts проверяют доску, клиентский выбор и отсутствие внешней отправки. Все сценарии остаются syntheticOnly=true, releaseAllowed=false; это не закрывает #119 и не является legal/production consent.
+
+
+### Конкурентность и откат миграции 0132
+
+Сохранение конфигурации филиала сначала получает отдельную транзакционную advisory-блокировку ключа organization/location, затем проверяет живую роль и proof. Это сериализует конкурирующие изменения до чтения ACL и не повышает уже удерживаемую FOR SHARE блокировку филиала до FOR UPDATE. Устаревшая версия после ожидания получает 409 STALE_REVISION. PostgreSQL-тест одновременно отправляет два обновления: одно фиксирует version=1, второе получает конфликт без 500/deadlock.
+
+Downgrade 0132 удаляет только пустые workflow/assignment/consent/outbox таблицы и восстанавливает исходную функцию guard_auto_crm_followup_task из миграции 0100 целиком, включая отдельную SERVICE_REVIEW ветку для BOOKED lead, origin_work_order_id, finished execution и последнего QC PASS. Нельзя откатывать её к более раннему упрощённому guard: после downgrade существующий послесервисный контроль должен продолжать работать.

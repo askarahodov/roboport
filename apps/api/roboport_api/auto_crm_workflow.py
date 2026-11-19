@@ -87,13 +87,17 @@ def set_workflow_config(conn,token,org,loc,expected_revision,request_key,config)
         raise LeadDenied("INVALID_INPUT")
     normalized=_validate_config(config)
     with conn.transaction():
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s,10103))",
+            (f"crm-workflow-config:{org}:{loc}",),
+        )
         actor,manager=_authority(conn,token,org,loc)
         if not manager:
             raise LeadDenied("FORBIDDEN")
         conn.execute("""
           SELECT id FROM auto_service_location
           WHERE id=%s AND organization_id=%s AND disabled_at IS NULL
-          FOR UPDATE
+          FOR SHARE
         """,(loc,org))
         existing=conn.execute("""
           SELECT organization_id,location_id,actor_id,config
