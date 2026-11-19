@@ -21,6 +21,7 @@ from .auto_internal_order_costs import router as auto_internal_order_costs_route
 from .auto_serial_receipt_provenance import router as auto_serial_receipt_provenance_router
 from .auto_treasury_http import router as auto_treasury_router
 from .auto_treasury_cashbook import router as auto_treasury_cashbook_router
+from .auto_treasury_cashflow import router as auto_treasury_cashflow_router
 from .auto_crm_leads_http import router as auto_crm_leads_router
 from .auto_crm_followups_http import router as auto_crm_followups_router
 from .auto_crm_inbox_http import router as auto_crm_inbox_router
@@ -81,6 +82,7 @@ app.include_router(auto_internal_order_costs_router)
 app.include_router(auto_serial_receipt_provenance_router)
 app.include_router(auto_treasury_router)
 app.include_router(auto_treasury_cashbook_router)
+app.include_router(auto_treasury_cashflow_router)
 app.include_router(auto_crm_leads_router)
 app.include_router(auto_crm_followups_router)
 app.include_router(auto_crm_inbox_router)
