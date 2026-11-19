@@ -1059,6 +1059,215 @@
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
       "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-097",
+      "pageId": "ADP-055",
+      "matrixId": "D03",
+      "ownerIssue": 169,
+      "capability": "Навигация по каталогу интеграций",
+      "acceptance": "В меню Управление > Интеграции доступны категории Звонки, Чаты, Кассы, Сканер штрихкода и ТехноВектор; каждая категория ведёт к отдельным инструкциям подключения сторонних сервисов.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-098",
+      "pageId": "ADP-056",
+      "matrixId": "D04",
+      "ownerIssue": 169,
+      "capability": "Категория интеграций телефонии",
+      "acceptance": "В каталоге интеграций существует отдельная категория Звонки; её дочерние инструкции должны быть доступны из общего меню, а содержание самой страницы-категории требует повторной проверки из-за cache miss.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-099",
+      "pageId": "ADP-057",
+      "matrixId": "D06",
+      "ownerIssue": 170,
+      "capability": "Каталог кассовых интеграций",
+      "acceptance": "Категория Кассы содержит отдельные инструкции для Кассового модуля, дисплеев QR-кодов и re:Kassa; пользователь должен выбирать нужный способ подключения по типу оборудования/региона.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-100",
+      "pageId": "ADP-058",
+      "matrixId": "C10",
+      "ownerIssue": 168,
+      "capability": "Каталог функций сканера штрихкода",
+      "acceptance": "Сканер позволяет искать товары, работы и документы по коду, заполнять штрихкод, создавать номенклатуру и работать с маркированными товарами; все поддержанные операции должны быть доступны из складских сценариев.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-101",
+      "pageId": "ADP-059",
+      "matrixId": "C10",
+      "ownerIssue": 168,
+      "capability": "Подключение физического сканера",
+      "acceptance": "Поддержать USB/Bluetooth в режиме клавиатурной эмуляции и COM/RS-232 для DataMatrix, привязку устройства к браузеру и несколько сканеров без смешивания их событий.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-102",
+      "pageId": "ADP-060",
+      "matrixId": "C10",
+      "ownerIssue": 168,
+      "capability": "Сканирование в складских документах",
+      "acceptance": "Сканирование должно находить товары, работы и документы, заполнять штрихкод, позволять создать номенклатуру из каталога аналогов и добавлять позиции в приходную накладную и заказ-наряд, включая DataMatrix-коды.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-103",
+      "pageId": "ADP-061",
+      "matrixId": "B03",
+      "ownerIssue": 167,
+      "capability": "Интеграция со стендами ТехноВектор",
+      "acceptance": "Подключить несколько стендов через Кассовый модуль с адресом/портом/токеном; из заказ-наряда отправлять клиента и автомобиль, получать отчёт стенда и сохранять его в программе и истории клиента.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-104",
+      "pageId": "ADP-062",
+      "matrixId": "D03",
+      "ownerIssue": 169,
+      "capability": "Интеграция Telegram через Wazzup",
+      "acceptance": "Поддержать описанное подключение Telegram Personal (не Bot) через Wazzup, постоянное подключение телефона, API-ключ, назначение ролей сотрудников и управление шаблонами/историей сообщений; актуальность способа подключения подтвердить по свежей версии.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-105",
+      "pageId": "ADP-063",
+      "matrixId": "D03",
+      "ownerIssue": 169,
+      "capability": "Интеграция чата Авито",
+      "acceptance": "Подключить канал Авито через Wazzup и API-ключ, назначить роли сотрудников; входящее сообщение создаёт CRM-сделку, клиент определяется по Avito ID, а история переписки отображается в ленте сделки.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-106",
+      "pageId": "ADP-064",
+      "matrixId": "D03",
+      "ownerIssue": 169,
+      "capability": "Интеграция WhatsApp для сервисных сообщений",
+      "acceptance": "Подключить обычный WhatsApp через Wazzup, назначить роли сотрудников, передавать фото/документы и отправлять сервисное уведомление об окончании работ при закрытии заказ-наряда; массовые рекламные рассылки не поддерживать.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-107",
+      "pageId": "ADP-065",
+      "matrixId": "D03",
+      "ownerIssue": 169,
+      "capability": "Интеграция Viber",
+      "acceptance": "Подключить Viber через Wazzup, синхронизировать последние три диалога, назначить роли сотрудников и поддержать текст, эмодзи, голосовые сообщения, шаблоны и файлы.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-108",
+      "pageId": "ADP-066",
+      "matrixId": "D03",
+      "ownerIssue": 169,
+      "capability": "Интеграция сообщества ВКонтакте",
+      "acceptance": "Подключить сообщество ВКонтакте через Wazzup с API-ключом и назначением ролей сотрудников; входящие сообщения сообщества должны поступать в общий раздел Чаты.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-109",
+      "pageId": "ADP-067",
+      "matrixId": "D06",
+      "ownerIssue": 170,
+      "capability": "Интеграция облачной кассы re:Kassa",
+      "acceptance": "Для ТОО/ИП в Казахстане создать и зарегистрировать кассу в ОФД, получить ЗНК/ID/token, активировать её и подключить АвтоДилер через одноразовый пароль и предприятие; успешное соединение подтверждается статусом Подключено.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-110",
+      "pageId": "ADP-068",
+      "matrixId": "D04",
+      "ownerIssue": 169,
+      "capability": "Интеграция IP-телефонии Новофон",
+      "acceptance": "Подключить виртуальную АТС по API Key/Secret, allowlist IP и внутренним номерам сотрудников; включить события webhook и связать уведомления о звонках с сотрудниками/клиентами без хранения постоянных ключей в коде.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-111",
+      "pageId": "ADP-069",
+      "matrixId": "D04",
+      "ownerIssue": 169,
+      "capability": "Интеграция IP-телефонии МегаФон",
+      "acceptance": "Подключить виртуальную АТС, настроить CRM-интеграцию и домен, использовать tenant-specific ключи авторизации и привязать сотрудников к внутренним номерам; опубликованный статический пример ключа не использовать.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-112",
+      "pageId": "ADP-070",
+      "matrixId": "D04",
+      "ownerIssue": 169,
+      "capability": "Интеграция IP-телефонии Телфин",
+      "acceptance": "Подключить виртуальную АТС, настроить сотрудников/очереди, часовой пояс и запись разговоров, зарегистрировать Trusted-приложение с App ID/App Secret и назначить ответственных сотрудников.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-113",
+      "pageId": "ADP-071",
+      "matrixId": "D04",
+      "ownerIssue": 169,
+      "capability": "Интеграция IP-телефонии Билайн",
+      "acceptance": "Подключить облачную АТС, включить API, создать токен, настроить абонентов и внутренние номера, затем добавить сотрудников в АвтоДилер; токен хранить как секрет конкретного предприятия.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-114",
+      "pageId": "ADP-072",
+      "matrixId": "D04",
+      "ownerIssue": 169,
+      "capability": "Интеграция IP-телефонии Zadarma",
+      "acceptance": "Подключить API Key/Secret, создать виртуальную АТС, включить запись разговоров, назначить внутренние номера и сотрудников, а доступ к записям ограничить правами пользователя.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-115",
+      "pageId": "ADP-073",
+      "matrixId": "D04",
+      "ownerIssue": 169,
+      "capability": "Интеграция IP-телефонии Mango Office",
+      "acceptance": "Подключить API connector, настроить код АТС и ключ подписи, разрешить доступ к записям, указать внешний URL, назначить сотрудников и их внутренние номера для входящих/исходящих звонков.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
     }
   ]
 }
