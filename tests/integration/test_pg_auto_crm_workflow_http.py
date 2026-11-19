@@ -263,6 +263,10 @@ def test_synthetic_service_consent_gates_inert_outbox_and_unsubscribe(monkeypatc
 
 
 def test_concurrent_workflow_config_updates_serialize_without_deadlock(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from roboport_api import auto_crm_workflow
+
     d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
     manager_token=d["tokens"][d["manager"]]
     with psycopg.connect(DSN) as db:
