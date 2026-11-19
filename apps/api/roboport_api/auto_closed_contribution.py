@@ -88,7 +88,12 @@ def report(conn, token, org, loc, from_day, to_day):
         if bucket is None:
             raise Conflict()
         cash = closed_row["cashEvents"]
-        if len(cash) == 0:
+        # A zero-price approved/closed WorkOrder may lawfully have no
+        # SIM_PAYMENT at all. Its actual settlement still reconciles 0=0.
+        # Reject absent events only when any monetary snapshot is nonzero.
+        if not cash and any(closed_row[key] != 0 for key in (
+            "approvedTotalMinor","simulatedPaidMinor","simulatedRefundedMinor"
+        )):
             raise Conflict()
         for event in cash:
             event_id = event["id"]
