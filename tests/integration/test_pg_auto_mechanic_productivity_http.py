@@ -1,5 +1,5 @@
 """PG17/HTTPS end-to-end: approved execution -> independent QC -> sealed close -> labor report."""
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from uuid import uuid4, UUID
 from zoneinfo import ZoneInfo
 from io import StringIO
@@ -219,3 +219,121 @@ def test_report_only_after_technical_close_and_with_source_order(monkeypatch):
             intake_act_id=UUID(act["id"]),intake_digest=act["sha256"])
     assert count()==1
     assert http.get(path+"/export",params=period).status_code==200
+
+
+def test_manager_shift_labor_comparison_real_pg_sources_revoke_and_csv(monkeypatch):
+    """A complete synthetic user journey: closed QC labor, idle shift, audit CSV."""
+    d,org,loc,order=_close(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    base=report_path(org,loc)+"/shift-comparison"
+    with psycopg.connect(DSN) as db:
+        zone=ZoneInfo(db.execute(
+            "SELECT timezone_name FROM auto_service_location WHERE id=%s", (loc,)
+        ).fetchone()[0])
+        day=datetime.now(zone).date()
+        first=datetime.combine(day,time(10,0),tzinfo=zone)
+        last=datetime.combine(day,time(12,0),tzinfo=zone)
+        shift_work,shift_idle=uuid4(),uuid4()
+        for shift,actor,lo,hi in (
+            (shift_work,d["manager"],first,last),
+            (shift_idle,d["other"],first,last),
+        ):
+            db.execute("""INSERT INTO auto_staff_shift
+               (id,organization_id,location_id,user_id,starts_at,ends_at)
+               VALUES(%s,%s,%s,%s,%s,%s)""",(shift,org,loc,actor,lo,hi))
+    query={"fromDay":day.isoformat(),"toDay":day.isoformat()}
+    assert http.get(base,params=query).status_code==403
+    http.cookies.set("rp_session",d["tokens"][d["client_a"]])
+    assert http.get(base,params=query).status_code==403
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    res=http.get(base,params=query)
+    assert res.status_code==200,res.text
+    assert res.headers["cache-control"]=="no-store"
+    data=res.json()
+    assert data["summary"]["actualMinutes"]==45
+    comp=data["shiftComparison"]
+    assert comp["basis"]=="ACTIVE_SHIFTS_VS_CLOSED_TECHNICAL_LABOR"
+    assert comp["isAttendance"] is False and comp["isPayroll"] is False
+    assert comp["summary"]=={
+        "mechanicCount":2,"shiftedMechanicCount":2,"shiftCount":2,
+        "scheduledSeconds":14400,"recordedMinutes":45,
+    }
+    people={x["mechanicId"]:x for x in comp["items"]}
+    worker=people[str(d["manager"])]
+    assert worker["status"]=="COMPARABLE"
+    assert worker["recordedMinutes"]==45
+    assert worker["scheduledSeconds"]==7200
+    assert worker["recordedToScheduledBasisPoints"]==3750
+    assert worker["shifts"][0]["shiftId"]==str(shift_work)
+    idle=people[str(d["other"])]
+    assert idle["status"]=="NO_CLOSED_LABOR"
+    assert idle["recordedMinutes"]==0
+    assert idle["recordedToScheduledBasisPoints"]==0
+    assert idle["shifts"][0]["shiftId"]==str(shift_idle)
+    csv_response=http.get(base+"/export",params=query)
+    assert csv_response.status_code==200
+    assert csv_response.headers["x-content-type-options"]=="nosniff"
+    rows=list(csv.reader(StringIO(csv_response.text.lstrip("\ufeff")),delimiter=";"))
+    assert len(rows)==5 and all(len(r)==10 for r in rows)
+    assert [row[1] for row in rows[1:]].count("SHIFT")==2
+    assert str(shift_work) in csv_response.text
+    assert str(order) not in csv_response.text
+    assert http.get(base.replace(str(loc),str(uuid4())),params=query).status_code==403
+    assert http.get(base,params={"fromDay":"2026-02-31","toDay":day.isoformat()}).status_code==422
+    monkeypatch.setattr(productivity,"MAX_SHIFT_ROWS",0)
+    assert http.get(base,params=query).status_code==409
+    assert http.get(base+"/export",params=query).status_code==409
+    monkeypatch.setattr(productivity,"MAX_SHIFT_ROWS",500)
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_staff_shift SET canceled_at=now() WHERE id=%s",(shift_idle,))
+    after=http.get(base,params=query).json()["shiftComparison"]
+    assert after["summary"]["shiftedMechanicCount"]==1
+    assert str(d["other"]) not in [x["mechanicId"] for x in after["items"]]
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+            WHERE organization_id=%s AND user_id=%s AND role_code='MANAGER'
+              AND revoked_at IS NULL""",(org,d["intake"]))
+    assert http.get(base,params=query).status_code==403
+    assert http.get(base+"/export",params=query).status_code==403
+
+
+def test_postgres_berlin_shift_elapsed_hours_at_both_dst_boundaries(monkeypatch):
+    """A real PG session in Europe/Berlin returns same-zone Python datetimes.
+
+    March shift 01–04 = 2 elapsed hours; October shift 01–04 = 4.
+    Wall-clock subtraction would incorrectly return 3 for both.
+    """
+    d,org,loc,order=_close(monkeypatch)
+    zone=ZoneInfo("Europe/Berlin")
+    cases=(("2026-03-29",7200),("2026-10-25",14400))
+    with psycopg.connect(DSN) as db:
+        db.execute("SET TIME ZONE 'Europe/Berlin'")
+        for day,_ in cases:
+            local=datetime.fromisoformat(day)
+            start=datetime(local.year,local.month,local.day,1,0,tzinfo=zone)
+            end=datetime(local.year,local.month,local.day,4,0,tzinfo=zone)
+            db.execute("""INSERT INTO auto_staff_shift
+               (id,organization_id,location_id,user_id,starts_at,ends_at)
+               VALUES(%s,%s,%s,%s,%s,%s)""",
+               (uuid4(),org,loc,d["manager"],start,end))
+        for day,expected in cases:
+            start,end=_period(day,day,zone)
+            comparison=productivity._shift_comparison(db,org,loc,start,end,[])
+            assert comparison["summary"]["shiftCount"]==1
+            assert comparison["summary"]["scheduledSeconds"]==expected
+            row=comparison["items"][0]
+            assert row["scheduledSeconds"]==expected
+            assert row["shifts"][0]["overlapSeconds"]==expected
+            assert row["recordedToScheduledBasisPoints"]==0
+
+
+def test_shift_comparison_daylight_saving_range_and_csv_contract():
+    """Midnight DST days differ from fixed 24h; export never carries names."""
+    berlin=ZoneInfo("Europe/Berlin")
+    assert (_period("2026-03-29","2026-03-29",berlin)[1]-
+            _period("2026-03-29","2026-03-29",berlin)[0]).total_seconds()==23*3600
+    assert (_period("2026-10-25","2026-10-25",berlin)[1]-
+            _period("2026-10-25","2026-10-25",berlin)[0]).total_seconds()==25*3600
+    assert productivity._csv_shift_comparison({
+        "shiftComparison":{"items":[]}
+    }).startswith("\ufeffМеханик UUID;")

@@ -23,6 +23,7 @@ from .auto_vehicle_claim_http import _request_dsn, _response
 router = APIRouter(include_in_schema=False)
 PREFIX = "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/reports/mechanic-productivity"
 MAX_LABOR_ENTRIES = 500
+MAX_SHIFT_ROWS = 500
 BASIS = "CLOSED_TECHNICAL_LOCAL_DAY_QC_PASS_LABOR_SOURCES"
 
 
@@ -56,8 +57,89 @@ def _period(first_raw: str, last_raw: str, zone: ZoneInfo):
     return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
 
 
+def _shift_comparison(conn: psycopg.Connection, org: UUID, loc: UUID,
+                      start: datetime, end: datetime, labor: list[dict]) -> dict:
+    """Compare active scheduled shift seconds with QC-closed labor minutes.
+
+    This is NOT attendance, pay or worker efficiency. Dates represent the
+    shift window and separately the technical closure date. No names, VIN
+    or customer information leave the server. A bound of 500 prevents silent
+    truncation and exploding per-user source lists.
+    """
+    rows = conn.execute("""
+        SELECT sh.id, sh.user_id, sh.starts_at, sh.ends_at
+        FROM auto_staff_shift sh
+        JOIN app_user staff ON staff.id=sh.user_id AND staff.status='ACTIVE'
+        JOIN LATERAL (
+            SELECT g.id FROM auto_organization_role_grant g
+            WHERE g.organization_id=sh.organization_id AND g.user_id=sh.user_id
+              AND g.role_code='MECHANIC' AND g.revoked_at IS NULL
+              AND (g.location_id=sh.location_id OR g.location_id IS NULL)
+            ORDER BY g.id LIMIT 1 FOR SHARE OF g
+        ) active_mechanic ON TRUE
+        WHERE sh.organization_id=%s AND sh.location_id=%s
+          AND sh.canceled_at IS NULL
+          AND sh.starts_at < %s AND sh.ends_at > %s
+        ORDER BY sh.user_id,sh.starts_at,sh.id
+        LIMIT %s
+        FOR SHARE OF sh,staff
+    """, (org,loc,end,start,MAX_SHIFT_ROWS+1)).fetchall()
+    if len(rows)>MAX_SHIFT_ROWS:
+        raise ProductivityLimit("REPORT_LIMIT")
+    by_employee: dict[str,dict] = {
+        x["mechanicId"]: {
+            "mechanicId":x["mechanicId"], "recordedMinutes":x["actualMinutes"],
+            "scheduledSeconds":0, "shifts":[],
+        } for x in labor
+    }
+    for shift_id,actor,first,last in rows:
+        # psycopg may return *both* timestamps with one ZoneInfo. Python
+        # subtracts those datetimes as wall time across a DST transition;
+        # normalize to UTC before clipping and subtracting actual elapsed time.
+        first_utc=first.astimezone(timezone.utc)
+        last_utc=last.astimezone(timezone.utc)
+        seconds = int((min(last_utc,end)-max(first_utc,start)).total_seconds())
+        if seconds<=0:
+            raise ProductivityInvalid("SHIFT_INTEGRITY")
+        person=str(actor)
+        row=by_employee.setdefault(person,{
+            "mechanicId":person,"recordedMinutes":0,
+            "scheduledSeconds":0,"shifts":[],
+        })
+        row["scheduledSeconds"]+=seconds
+        row["shifts"].append({
+            "shiftId":str(shift_id),"startsAt":first.isoformat(),
+            "endsAt":last.isoformat(),"overlapSeconds":seconds,
+        })
+    items=[]
+    for row in by_employee.values():
+        seconds=row["scheduledSeconds"]
+        minutes=row["recordedMinutes"]
+        row["shiftCount"]=len(row["shifts"])
+        row["recordedToScheduledBasisPoints"]=(
+            (minutes*60*10000+seconds//2)//seconds if seconds else None)
+        row["status"]=("NO_ACTIVE_SHIFT" if not seconds else
+                        "NO_CLOSED_LABOR" if not minutes else "COMPARABLE")
+        items.append(row)
+    items.sort(key=lambda x:x["mechanicId"])
+    return {
+        "basis":"ACTIVE_SHIFTS_VS_CLOSED_TECHNICAL_LABOR",
+        "isAttendance":False,"isPayroll":False,"isEfficiencyScore":False,
+        "limitedToShifts":MAX_SHIFT_ROWS,
+        "summary":{
+            "mechanicCount":len(items),
+            "shiftedMechanicCount":sum(bool(x["shiftCount"]) for x in items),
+            "shiftCount":len(rows),
+            "scheduledSeconds":sum(x["scheduledSeconds"] for x in items),
+            "recordedMinutes":sum(x["recordedMinutes"] for x in items),
+        },
+        "items":items,
+    }
+
+
 def mechanic_productivity(conn: psycopg.Connection, token: str, org: UUID,
-                          loc: UUID, from_day: str, to_day: str) -> dict:
+                          loc: UUID, from_day: str, to_day: str,
+                          *, with_shifts: bool = False) -> dict:
     if type(org) is not UUID or type(loc) is not UUID:
         raise ProductivityInvalid("INVALID_SCOPE")
     with conn.transaction():
@@ -73,6 +155,10 @@ def mechanic_productivity(conn: psycopg.Connection, token: str, org: UUID,
                 conn, token, org, loc, ("MANAGER", "WAREHOUSE"), "HANDOVER", "READ")
         except DocumentPolicyDenied:
             raise ProductivityDenied("FORBIDDEN") from None
+        # A historical cutoff cannot safely produce a branch-wide shift
+        # comparison. Reject instead of reporting a partial staffing total.
+        if with_shifts and cutoff is not None:
+            raise ProductivityDenied("HISTORY_RESTRICTED")
         location = conn.execute("""
             SELECT timezone_name FROM auto_service_location
             WHERE id=%s AND organization_id=%s AND disabled_at IS NULL
@@ -198,7 +284,7 @@ def mechanic_productivity(conn: psycopg.Connection, token: str, org: UUID,
                 order["serviceIds"] = [row["serviceId"] for row in order["laborEntries"]]
             items.append(employee)
         items.sort(key=lambda row:(-row["actualMinutes"],row["mechanicId"]))
-        return {
+        result = {
             "syntheticOnly":True,"realMoney":False,
             "payrollAvailable":False,"releaseAllowed":False,
             "basis":BASIS,"periodBasis":"CLOSED_TECHNICAL_LOCAL_DAY",
@@ -212,6 +298,10 @@ def mechanic_productivity(conn: psycopg.Connection, token: str, org: UUID,
             },
             "items":items,
         }
+        if with_shifts:
+            result["shiftComparison"]=_shift_comparison(
+                conn,org,loc,start,end,items)
+        return result
 
 
 def _csv_export(report: dict) -> str:
@@ -235,7 +325,7 @@ def _csv_export(report: dict) -> str:
 
 
 def _run(request: Request, org_id: str, loc_id: str,
-         from_day: str, to_day: str):
+         from_day: str, to_day: str, *, with_shifts: bool = False):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
@@ -247,7 +337,7 @@ def _run(request: Request, org_id: str, loc_id: str,
         with psycopg.connect(dsn) as conn:
             return mechanic_productivity(
                 conn, request.cookies.get("rp_session", ""),
-                org, loc, from_day, to_day)
+                org, loc, from_day, to_day, with_shifts=with_shifts)
     except ProductivityDenied:
         return _response(request, 403, "FORBIDDEN")
     except ProductivityInvalid:
@@ -281,4 +371,51 @@ def export_mechanic_productivity(org_id: str, loc_id: str, request: Request,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
                  "Content-Disposition":
                      'attachment; filename="auto-mechanic-productivity.csv"'},
+    )
+
+
+def _csv_shift_comparison(report: dict) -> str:
+    """Machine-readable source IDs, safe enums and nonnegative numeric fields."""
+    output=StringIO(newline="")
+    writer=csv.writer(output,delimiter=";",lineterminator="\r\n")
+    writer.writerow(("Механик UUID","Уровень","Смена UUID","Начало смены UTC/offset",
+                     "Конец смены UTC/offset","Пересечение, секунд",
+                     "Всего смен, секунд","Труд по техзакрытиям, минут",
+                     "Отношение, базисные пункты","Ограничение"))
+    for item in report["shiftComparison"]["items"]:
+        summary=(item["mechanicId"],"MECHANIC","","","", "",
+                 item["scheduledSeconds"],item["recordedMinutes"],
+                 item["recordedToScheduledBasisPoints"] if item["recordedToScheduledBasisPoints"] is not None else "",
+                 item["status"])
+        writer.writerow(summary)
+        for shift in item["shifts"]:
+            writer.writerow((item["mechanicId"],"SHIFT",shift["shiftId"],
+                             shift["startsAt"],shift["endsAt"],
+                             shift["overlapSeconds"],"","","","SYNTHETIC_NOT_PAYROLL"))
+    return "\ufeff"+output.getvalue()
+
+
+@router.get(PREFIX + "/shift-comparison")
+def get_shift_comparison(org_id: str, loc_id: str, request: Request,
+                         fromDay: str, toDay: str):
+    # Same one-snapshot verified-labor and active-shift read, with strict
+    # effective MANAGER scope and no historical cutoff.
+    result=_run(request,org_id,loc_id,fromDay,toDay,with_shifts=True)
+    if isinstance(result,JSONResponse):
+        return result
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@router.get(PREFIX + "/shift-comparison/export")
+def export_shift_comparison(org_id: str, loc_id: str, request: Request,
+                            fromDay: str, toDay: str):
+    # Full reauthorization on each export; no client-supplied totals.
+    result=_run(request,org_id,loc_id,fromDay,toDay,with_shifts=True)
+    if isinstance(result,JSONResponse):
+        return result
+    return Response(
+        content=_csv_shift_comparison(result), media_type="text/csv; charset=utf-8",
+        headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+                 "Content-Disposition":
+                     'attachment; filename="auto-mechanic-shift-comparison.csv"'},
     )

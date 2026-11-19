@@ -311,3 +311,13 @@ replay, `accepted-release-390-page3.png` — третья
 проверяется отдельно в настоящем PG17/HTTPS тесте.
 Это кандидаты visual evidence без ПДн, не
 golden baseline/WCAG AA или release approval #92/#76/#119.
+
+
+## Candidate-снимки сопоставления смен и труда (#448)
+
+`apps/web/e2e/auto-mechanic-shift-comparison.spec.ts` создаёт
+`shift-comparison-390-light.png` и `shift-comparison-1280-dark.png`
+из фиксированных synthetic UUID, с отдельным механиком без закрытых
+работ; проверяет keyboard, 403/409, испорченный API-итог, смену филиала
+и повторную авторизацию CSV. Эти PNG — **candidate evidence**,
+не утверждённые эталоны и не независимая приёмка по #92/#76.
