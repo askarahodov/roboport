@@ -365,7 +365,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             # "-url:" is a mapping key, not a list item.
             # Restrict inline sequence entries to one separator space.
             # Wider separators change the YAML indentation of the mapping key.
-            item = re.match(r"^( *)-(?: (.*))?$", line)
+            item = re.match(r"^( *)-(?: ([A-Za-z][\w-]*:.*))?$", line)
             if item:
                 finish_server_entry()
                 item_indent = len(item.group(1))
