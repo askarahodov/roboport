@@ -2,7 +2,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from scripts.inventory_legacy_routes import inventory, scan_python
+from scripts.inventory_legacy_routes import inventory, main, scan_python
 
 
 def test_api_route_metadata_and_hidden_decorator():
@@ -53,3 +53,216 @@ def test_invalid_python_syntax_is_not_silently_ignored():
         import pytest
         with pytest.raises(SyntaxError):
             scan_python(path, root)
+
+
+
+def test_constant_routes_prefix_composition_and_router_visibility():
+    """Real auto modules use PREFIX + "/export"; do not silently omit them."""
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source = root / "example.py"
+        source.write_text(
+            'from fastapi import APIRouter\n'
+            'ROOT = "/api/v1/dev/auto"\n'
+            'PREFIX: str = ROOT + "/organizations/{org_id}"\n'
+            'router = APIRouter(prefix=PREFIX, include_in_schema=False)\n'
+            '@router.get("/reports")\n'
+            'def report(): pass\n'
+            '@router.get(path="/reports" + "/export")\n'
+            'def export(): pass\n'
+            '@router.api_route(path=f"{ROOT}/check")\n'
+            'def other(): pass\n'
+            'router.add_api_route("/manual", lambda: None)\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(source, root)
+        assert [r["path"] for r in rows] == [
+            "/api/v1/dev/auto/organizations/{org_id}/reports",
+            "/api/v1/dev/auto/organizations/{org_id}/reports/export",
+            "/api/v1/dev/auto/organizations/{org_id}/api/v1/dev/auto/check",
+            "/api/v1/dev/auto/organizations/{org_id}/manual",
+        ]
+        assert all(r["schema_hidden"] and not r["unresolved"] for r in rows)
+
+
+def test_dynamic_or_reassigned_route_cannot_pass_strict_inventory(capsys):
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        api = root / "apps/api/roboport_api"
+        api.mkdir(parents=True)
+        (api / "dynamic.py").write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev"\n'
+            'PREFIX = get_prefix()\n'
+            'router = APIRouter(prefix=PREFIX)\n'
+            '@router.get("/test")\n'
+            'def test(): pass\n',
+            encoding="utf-8",
+        )
+        rows = inventory(root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["legacy_candidate"] is True
+        assert rows[0]["review"] == "path-unresolved"
+        assert main(["--root", str(root), "--check"]) == 1
+        report = capsys.readouterr().out
+        assert '"apiPathsResolved": false' in report
+        assert "get_prefix" not in report
+
+
+def test_repository_routes_with_named_prefix_are_included():
+    """Protect real customer-facing reports from disappearing from the audit."""
+    root = Path(__file__).resolve().parents[2]
+    source = root / "apps/api/roboport_api/auto_closed_order_ledger_reconciliation.py"
+    rows = scan_python(source, root)
+    assert {r["path"] for r in rows} == {
+        "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}"
+        "/reports/closed-order-ledger-reconciliation",
+        "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}"
+        "/reports/closed-order-ledger-reconciliation/export",
+    }
+    assert all(r["schema_hidden"] and not r["unresolved"] for r in rows)
+
+
+
+def test_second_static_assignment_is_not_mistaken_for_route_time_value():
+    """A post-decorator reassignment cannot rewrite the historical URL."""
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "route.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev/tickets"\n'
+            'router = APIRouter()\n'
+            '@router.get(PREFIX)\n'
+            'def old(): pass\n'
+            'PREFIX = "/api/v1/dev/auto/vehicles"\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["legacy_candidate"] is True
+
+
+def test_conditional_module_reassignment_does_not_hide_legacy_route():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "route.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev/tickets"\n'
+            'if condition:\n'
+            '    PREFIX = "/api/v1/dev/auto/vehicles"\n'
+            'router = APIRouter()\n'
+            '@router.get(PREFIX)\n'
+            'def old(): pass\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["review"] == "path-unresolved"
+
+
+
+def test_unknown_router_owner_and_annotated_dynamic_prefix_fail_closed():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "routes.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'router: APIRouter = APIRouter(prefix=get_prefix())\n'
+            '@router.get("/export")\n'
+            'def export(): pass\n'
+            'get_router().add_api_route(get_path(), handler)\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 2
+        assert all(row["unresolved"] and row["legacy_candidate"] for row in rows)
+        assert [row["method"] for row in rows] == ["GET", "API_ROUTE"]
+
+
+def test_unknown_imported_router_is_not_assumed_to_have_empty_prefix():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "routes.py"
+        file.write_text(
+            'from unknown import router\n'
+            '@router.get("/safe-looking-path")\n'
+            'def export(): pass\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert rows[0]["path"] == "<unresolved>"
+        assert rows[0]["review"] == "path-unresolved"
+
+
+
+def test_nested_function_local_prefix_does_not_resolve_to_module_constant():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "shadow.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev/auto"\n'
+            'router = APIRouter()\n'
+            'def mount(PREFIX):\n'
+            '    @router.get(PREFIX + "/export")\n'
+            '    def handler(): pass\n'
+            'mount("/api/v1/dev/tickets")\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["path"] == "<unresolved>"
+        assert rows[0]["legacy_candidate"] is True
+
+
+def test_dynamic_kwargs_router_settings_are_unresolved():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "dynamic_kwargs.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'router = APIRouter(**get_router_settings())\n'
+            '@router.get("/export")\n'
+            'def handler(): pass\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["review"] == "path-unresolved"
+
+
+def test_local_imperative_registration_is_unresolved():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "registration.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev/auto"\n'
+            'router = APIRouter()\n'
+            'def mount(PREFIX):\n'
+            '    router.add_api_route(PREFIX + "/export", handler)\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+
+
+
+def test_factory_decorator_cannot_disappear_from_route_inventory():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "factory.py"
+        file.write_text(
+            '@get_router().get("/api/v1/dev/tickets")\n'
+            'def old(): pass\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["legacy_candidate"] is True
