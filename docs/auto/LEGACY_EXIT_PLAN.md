@@ -140,7 +140,7 @@ PYTHONPATH=apps/api python -m pytest -q tests/bootstrap/test_legacy_route_invent
 Срез по SQL \`CREATE TABLE/FUNCTION/TRIGGER/INDEX\` в этих ревизиях:
 
 - **46 уникальных таблиц**;
-- **29 функций**, **30 пользовательских триггеров**, **8 индексов**;
+- **29 функций**, **40 пользовательских триггеров** (включая 10 экземпляров, создаваемых в циклах миграций), **8 индексов**;
 - несколько ревизий не создают таблиц, но меняют ограничения/поведение существующих объектов (например, quote race, estimate ACL и ticket event actor).
 
 | Revision | Создаваемые таблицы | Functions / triggers / indexes |
