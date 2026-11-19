@@ -394,6 +394,10 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             else:
                 current_method = None
             continue
+        if re.match(r"^    [A-Za-z][\w-]*\s+:", line) and current_path is not None:
+            unresolved_path(index + 1, "malformed-method-key", current_path)
+            current_method = None
+            continue
         if re.match(r"^    \S.*:\s*(?:#.*)?$", line) and current_path is not None:
             unresolved_path(index + 1, "unrecognized-path-item-key", current_path)
             current_method = None
@@ -406,11 +410,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             else:
                 current_method["operation_id"] = scalar(operation_match.group(1))
             continue
-        # A method-shaped key with trailing comments/spacing must not be
-        # silently attached to the preceding operation.
-        if re.match(r"^    [A-Za-z_$][\w$-]*\s+:", line) and current_path is not None:
-            unresolved_path(index + 1, "malformed-method-key", current_path)
-            current_method = None
+
 
     flush()
     if not any(row["kind"] == "historical-openapi-draft" for row in rows):
