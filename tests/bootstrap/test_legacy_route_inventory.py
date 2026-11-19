@@ -196,3 +196,73 @@ def test_unknown_imported_router_is_not_assumed_to_have_empty_prefix():
         rows = scan_python(file, root)
         assert rows[0]["path"] == "<unresolved>"
         assert rows[0]["review"] == "path-unresolved"
+
+
+
+def test_nested_function_local_prefix_does_not_resolve_to_module_constant():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "shadow.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev/auto"\n'
+            'router = APIRouter()\n'
+            'def mount(PREFIX):\n'
+            '    @router.get(PREFIX + "/export")\n'
+            '    def handler(): pass\n'
+            'mount("/api/v1/dev/tickets")\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["path"] == "<unresolved>"
+        assert rows[0]["legacy_candidate"] is True
+
+
+def test_dynamic_kwargs_router_settings_are_unresolved():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "dynamic_kwargs.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'router = APIRouter(**get_router_settings())\n'
+            '@router.get("/export")\n'
+            'def handler(): pass\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["review"] == "path-unresolved"
+
+
+def test_local_imperative_registration_is_unresolved():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "registration.py"
+        file.write_text(
+            'from fastapi import APIRouter\n'
+            'PREFIX = "/api/v1/dev/auto"\n'
+            'router = APIRouter()\n'
+            'def mount(PREFIX):\n'
+            '    router.add_api_route(PREFIX + "/export", handler)\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+
+
+
+def test_factory_decorator_cannot_disappear_from_route_inventory():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        file = root / "factory.py"
+        file.write_text(
+            '@get_router().get("/api/v1/dev/tickets")\n'
+            'def old(): pass\n',
+            encoding="utf-8",
+        )
+        rows = scan_python(file, root)
+        assert len(rows) == 1
+        assert rows[0]["unresolved"] is True
+        assert rows[0]["legacy_candidate"] is True

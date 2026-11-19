@@ -131,7 +131,11 @@ def _router_settings(tree: ast.Module, constants: dict[str, str]) -> dict[str, t
         if not isinstance(constructor, ast.Name) or constructor.id not in {"APIRouter", "FastAPI"}:
             continue
         prefix_node = _keyword(value, "prefix")
-        prefix = _literal(prefix_node, constants) if prefix_node is not None else ""
+        # A **kwargs expansion can supply an implicit, mutable prefix.
+        # It is not evidence that the effective router prefix is empty.
+        unknown_kwargs = any(item.arg is None for item in value.keywords)
+        prefix = (None if unknown_kwargs else
+                  _literal(prefix_node, constants) if prefix_node is not None else "")
         schema_node = _keyword(value, "include_in_schema")
         hidden = isinstance(schema_node, ast.Constant) and schema_node.value is False
         for target in targets:
@@ -149,13 +153,26 @@ def scan_python(path: Path, root: Path) -> list[dict[str, object]]:
     constants = _module_strings(tree)
     routers = _router_settings(tree, constants)
     results: list[dict[str, object]] = []
+    parents = {id(child): parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
 
-    def record(owner: str, call: ast.Call, method: str, line: int) -> None:
+    def nested_scope(node: ast.AST) -> bool:
+        """A function/class-local route may shadow a module-level PREFIX."""
+        parent = parents.get(id(node))
+        while parent is not None and parent is not tree:
+            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.ClassDef, ast.Lambda)):
+                return True
+            parent = parents.get(id(parent))
+        return False
+
+    def record(owner: str, call: ast.Call, method: str, line: int,
+               *, local_scope: bool = False) -> None:
         # An imported/factory router is not proof of an empty prefix.
         # Treat unknown owners as unresolved, not as a trusted root router.
         prefix, inherited_hidden = routers.get(owner, (None, False))
         part = _literal(_route_arguments(call), constants)
-        resolved = prefix is not None and part is not None
+        resolved = not local_scope and prefix is not None and part is not None
         full_path = prefix + part if resolved else "<unresolved>"
         decorator_hidden = _keyword(call, "include_in_schema")
         hidden = inherited_hidden or (
@@ -174,11 +191,12 @@ def scan_python(path: Path, root: Path) -> list[dict[str, object]]:
             for decorator in node.decorator_list:
                 if (not isinstance(decorator, ast.Call) or
                     not isinstance(decorator.func, ast.Attribute) or
-                    not isinstance(decorator.func.value, ast.Name) or
                     decorator.func.attr not in METHODS):
                     continue
-                record(decorator.func.value.id, decorator,
-                       decorator.func.attr.upper(), node.lineno)
+                owner = (decorator.func.value.id if isinstance(decorator.func.value, ast.Name)
+                         else "<unresolved-router-owner>")
+                record(owner, decorator, decorator.func.attr.upper(), node.lineno,
+                       local_scope=nested_scope(node))
         # Also inventory imperative registrations. They must not bypass the
         # static cutover check just because they have no route decorator.
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and
@@ -187,7 +205,8 @@ def scan_python(path: Path, root: Path) -> list[dict[str, object]]:
             # route registration. Its effective prefix cannot be proved.
             owner = (node.func.value.id if isinstance(node.func.value, ast.Name)
                      else "<unresolved-router-owner>")
-            record(owner, node, "API_ROUTE", node.lineno)
+            record(owner, node, "API_ROUTE", node.lineno,
+                   local_scope=nested_scope(node))
     return results
 
 
