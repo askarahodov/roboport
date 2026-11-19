@@ -50,11 +50,24 @@ def _proof(conn,org,loc,link):
 
 
 def _lead(conn,org,loc,lead_id,actor,manager):
-    row=conn.execute(
-        """SELECT id,customer_link_id,owner_id,source_code,request_key,created_at
-           FROM auto_crm_lead
+    conn.execute(
+        """SELECT id FROM auto_crm_lead
            WHERE id=%s AND organization_id=%s AND location_id=%s
            FOR SHARE""",
+        (lead_id,org,loc),
+    )
+    # A separate statement after the lead lock sees an assignment committed
+    # while this request waited for the row lock.
+    row=conn.execute(
+        """SELECT lead.id,lead.customer_link_id,
+                  COALESCE(assignment.assignee_id,lead.owner_id) AS owner_id,
+                  lead.source_code,lead.request_key,lead.created_at
+           FROM auto_crm_lead lead
+           LEFT JOIN LATERAL(
+             SELECT assignee_id FROM auto_crm_lead_assignment_event
+             WHERE lead_id=lead.id ORDER BY created_at DESC,id DESC LIMIT 1
+           ) assignment ON TRUE
+           WHERE lead.id=%s AND lead.organization_id=%s AND lead.location_id=%s""",
         (lead_id,org,loc),
     ).fetchone()
     if row is None or (not manager and row[2]!=actor) or not _proof(conn,org,loc,row[1]):
@@ -71,6 +84,14 @@ def _state(conn,lead):
     ).fetchall()
     if len(events)>=100:
         raise LeadConflict("EVENT_LIMIT")
+    assignments=conn.execute(
+        """SELECT id,actor_id,assignee_id,created_at
+           FROM auto_crm_lead_assignment_event
+           WHERE lead_id=%s ORDER BY created_at,id LIMIT 50""",
+        (lead[0],),
+    ).fetchall()
+    if len(assignments)>=50:
+        raise LeadConflict("ASSIGNMENT_EVENT_LIMIT")
     return {
         "leadId":str(lead[0]),"customerLinkId":str(lead[1]),
         "ownerId":str(lead[2]),"sourceCode":lead[3],
@@ -81,6 +102,10 @@ def _state(conn,lead):
             "reasonCode":reason,"appointmentId":str(appointment) if appointment else None,
             "createdAt":stamp.isoformat(),
         } for i,actor,stage,reason,appointment,key,stamp in events],
+        "assignmentEvents":[{
+            "id":str(i),"actorId":str(actor),"assigneeId":str(assignee),
+            "createdAt":stamp.isoformat(),
+        } for i,actor,assignee,stamp in assignments],
     }
 
 
@@ -199,11 +224,16 @@ def list_leads(conn,token,org,loc,cursor=None):
         # Proof and tenant checks must precede LIMIT, not merely filter
         # an already truncated page in Python.
         rows=conn.execute(
-            """SELECT lead.id,lead.customer_link_id,lead.owner_id,
+            """SELECT lead.id,lead.customer_link_id,
+                      COALESCE(assignment.assignee_id,lead.owner_id) AS owner_id,
                       lead.source_code,lead.request_key,lead.created_at
                FROM auto_crm_lead lead
+               LEFT JOIN LATERAL(
+                 SELECT assignee_id FROM auto_crm_lead_assignment_event
+                 WHERE lead_id=lead.id ORDER BY created_at DESC,id DESC LIMIT 1
+               ) assignment ON TRUE
                WHERE lead.organization_id=%s AND lead.location_id=%s
-                 AND (%s OR lead.owner_id=%s)
+                 AND (%s OR COALESCE(assignment.assignee_id,lead.owner_id)=%s)
                  AND (%s::timestamptz IS NULL OR
                       (lead.created_at,lead.id)<(%s::timestamptz,%s::uuid))
                  AND EXISTS (

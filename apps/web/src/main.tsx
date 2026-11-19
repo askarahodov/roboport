@@ -16,6 +16,7 @@ import { AutoClosedContribution } from './pages/staff/AutoClosedContribution';
 import { AutoClosedOrderLedgerReconciliation } from './pages/staff/AutoClosedOrderLedgerReconciliation';
 import { AutoPublicBooking } from './pages/shared/AutoPublicBooking';
 import { AutoCrmLeads } from './pages/staff/AutoCrmLeads';
+import { AutoCrmKanban } from './pages/staff/AutoCrmKanban';
 import { AutoCrmFunnel } from './pages/staff/AutoCrmFunnel';
 import { AutoCrmOutcomes } from './pages/staff/AutoCrmOutcomes';
 import { AutoMechanicProductivity } from './pages/staff/AutoMechanicProductivity';
@@ -88,6 +89,7 @@ function App() {
         <NavLink to="/staff/auto-closed-contribution" end>Закрытые ЗН и затраты (dev)</NavLink>
         <NavLink to="/staff/auto-closed-order-ledgers" end>Закрытые ЗН и реестры (dev)</NavLink>
         <NavLink to="/staff/auto-crm-leads" end>Обращения CRM (dev)</NavLink>
+        <NavLink to="/staff/auto-crm-kanban" end>Канбан CRM (dev)</NavLink>
         <NavLink to="/staff/auto-crm-funnel" end>Воронка CRM (dev)</NavLink>
         <NavLink to="/staff/auto-crm-outcomes" end>CRM → закрытие (dev)</NavLink>
         <NavLink to="/staff/auto-mechanic-productivity" end>Выработка механиков (dev)</NavLink>
@@ -167,6 +169,7 @@ function App() {
       <Route path="/account/auto-public-booking" element={<AutoPublicBooking mode="client" />} />
       <Route path="/staff/auto-public-booking" element={<AutoPublicBooking mode="staff" />} />
       <Route path="/staff/auto-crm-leads" element={<AutoCrmLeads />} />
+      <Route path="/staff/auto-crm-kanban" element={<AutoCrmKanban />} />
       <Route path="/staff/auto-crm-funnel" element={<AutoCrmFunnel />} />
       <Route path="/staff/auto-crm-outcomes" element={<AutoCrmOutcomes />} />
       <Route path="/staff/auto-mechanic-productivity" element={<AutoMechanicProductivity />} />

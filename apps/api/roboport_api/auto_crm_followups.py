@@ -16,9 +16,14 @@ ACTIONS=("DONE","CANCELED")
 
 def _task(conn,lead_id,task_id):
     row=conn.execute(
-        """SELECT t.id,t.owner_id,t.creator_id,t.task_code,t.due_at,
-                  t.created_at,e.id,e.actor_id,e.action,e.created_at,t.origin_work_order_id
+        """SELECT t.id,COALESCE(assignment.assignee_id,t.owner_id),t.creator_id,
+                  t.task_code,t.due_at,t.created_at,e.id,e.actor_id,e.action,
+                  e.created_at,t.origin_work_order_id
            FROM auto_crm_followup_task t
+           LEFT JOIN LATERAL(
+             SELECT assignee_id FROM auto_crm_lead_assignment_event
+             WHERE lead_id=t.lead_id ORDER BY created_at DESC,id DESC LIMIT 1
+           ) assignment ON TRUE
            LEFT JOIN auto_crm_followup_event e ON e.task_id=t.id
            WHERE t.id=%s AND t.lead_id=%s FOR SHARE OF t""",
         (task_id,lead_id),
