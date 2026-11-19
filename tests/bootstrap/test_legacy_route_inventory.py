@@ -801,3 +801,39 @@ def test_mapping_header_comments_require_whitespace_after_colon():
             rows = scan_openapi_contract(contract, root)
             assert any(row["unresolved"] for row in rows), malformed_header
             assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_server_sequence_ends_before_root_scalar_or_inline_value():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "openapi: 3.1.2\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r.get("operation_id") == "safe" and not r["unresolved"] for r in rows)
+        assert not any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
+        assert main(["--root", str(root), "--check"]) == 0
+
+
+def test_server_list_rejects_multiple_spaces_after_sequence_marker():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n"
+            "-  description: placeholder\n"
+            "  url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1

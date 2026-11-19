@@ -355,13 +355,17 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
     if servers_valid:
         servers_index = servers_indexes[0]
         for line in lines[servers_index + 1:]:
-            if re.match(r"^[A-Za-z][\w-]*:\s*(?:#.*)?$", line):
+            # Any next root mapping key ends the servers sequence, even
+            # when its value is scalar or inline (for example openapi: 3.1.2).
+            if re.match(r"^[A-Za-z][\w-]*\s*:", line):
                 break
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
             # YAML sequence markers require whitespace (or end of line).
             # "-url:" is a mapping key, not a list item.
-            item = re.match(r"^( *)-(?:[ \t]+(.*))?$", line)
+            # Restrict inline sequence entries to one separator space.
+            # Wider separators change the YAML indentation of the mapping key.
+            item = re.match(r"^( *)-(?: (.*))?$", line)
             if item:
                 finish_server_entry()
                 item_indent = len(item.group(1))
