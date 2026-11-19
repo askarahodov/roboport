@@ -10,7 +10,7 @@ from test_pg_baseline import DSN
 def _seed(conn):
     vehicle, other_vehicle = uuid4(), uuid4()
     customer_a, customer_b, customer_c = uuid4(), uuid4(), uuid4()
-    reviewer = uuid4()
+    reviewer, other_reviewer = uuid4(), uuid4()
     link_a, link_b = uuid4(), uuid4()
 
     conn.execute(
@@ -24,8 +24,11 @@ def _seed(conn):
         (vehicle, other_vehicle),
     )
     conn.execute(
-        "INSERT INTO app_user(id,normalized_login) VALUES(%s,%s)",
-        (reviewer, "vehicle-link-reviewer-" + reviewer.hex),
+        "INSERT INTO app_user(id,normalized_login) VALUES(%s,%s),(%s,%s)",
+        (
+            reviewer, "vehicle-link-reviewer-" + reviewer.hex,
+            other_reviewer, "vehicle-link-reviewer-" + other_reviewer.hex,
+        ),
     )
     conn.execute(
         """INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id)
@@ -87,7 +90,7 @@ def test_vehicle_customer_link_identity_and_verification_are_immutable():
             ),
             (
                 "UPDATE auto_vehicle_customer_link SET verified_by=%s WHERE id=%s",
-                (data["reviewer"], data["link_a"]),
+                (data["other_reviewer"], data["link_a"]),
             ),
             ("UPDATE auto_vehicle_customer_link SET verified_by=NULL WHERE id=%s", (data["link_a"],)),
         )
