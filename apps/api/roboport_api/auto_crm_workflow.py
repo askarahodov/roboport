@@ -153,7 +153,7 @@ def assign_lead(conn,token,org,loc,lead_id,assignee_id,request_key):
             AND g.role_code IN ('MANAGER','INTAKE')
             AND (g.location_id IS NULL OR g.location_id=%s)
             AND g.revoked_at IS NULL
-            AND (g.expires_at IS NULL OR g.expires_at>now())
+
           FOR SHARE OF g,u
         """,(org,assignee_id,loc)).fetchone():
             raise LeadDenied("FORBIDDEN")
