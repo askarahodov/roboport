@@ -897,3 +897,20 @@ def test_method_key_with_comment_only_value_is_a_valid_empty_mapping():
         assert operation["path"] == "/safe"
         assert operation["unresolved"] is False
         assert main(["--root", str(root), "--check"]) == 0
+
+
+def test_comment_only_operation_id_is_missing_and_fails_closed():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: # no identifier\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["review"] == "operation-id-missing" and r["unresolved"] for r in rows)
+        assert not any(r.get("operation_id") == "# no identifier" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
