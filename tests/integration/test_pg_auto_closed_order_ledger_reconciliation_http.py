@@ -233,7 +233,11 @@ def test_fifo_and_serial_primary_receipts_remain_traceable_in_report_and_csv(mon
     )
     if mode=="serial":
         assert all(part["serialId"] and part["serialApprovalId"]
-                   and part["sourceLocationId"] for part in parts)
+                   for part in parts)
+        # A local serial source needs no interbranch sourceLocationId.
+        # That UUID is present only if material travelled between branches.
+        assert all(part["sourceLocationId"] is None or
+                   UUID(part["sourceLocationId"]) for part in parts)
     out=http.get(path+"/export",params=query)
     assert out.status_code==200,out.text
     csv_rows=list(csv.reader(StringIO(out.text.lstrip("\ufeff")),delimiter=";"))
