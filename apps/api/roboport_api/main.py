@@ -18,6 +18,7 @@ from .auto_demo_finance_report import router as auto_demo_finance_report_router
 from .auto_closed_order_report import router as auto_closed_order_report_router
 from .auto_closed_order_materials import router as auto_closed_order_materials_router
 from .auto_internal_order_costs import router as auto_internal_order_costs_router
+from .auto_closed_contribution import router as auto_closed_contribution_router
 from .auto_closed_order_ledger_reconciliation import router as auto_closed_order_ledger_reconciliation_router
 from .auto_serial_receipt_provenance import router as auto_serial_receipt_provenance_router
 from .auto_treasury_http import router as auto_treasury_router
@@ -80,6 +81,7 @@ app.include_router(auto_demo_finance_report_router)
 app.include_router(auto_closed_order_report_router)
 app.include_router(auto_closed_order_materials_router)
 app.include_router(auto_internal_order_costs_router)
+app.include_router(auto_closed_contribution_router)
 app.include_router(auto_closed_order_ledger_reconciliation_router)
 app.include_router(auto_serial_receipt_provenance_router)
 app.include_router(auto_treasury_router)
