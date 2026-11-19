@@ -333,3 +333,16 @@ synthetic UUID двух счетов и первичных событий.
 duplicated UUID, 403/409/422 и отдельный denied CSV.
 Снимки только browser evidence, **не** golden baseline
 и не независимое WCAG/design/financial approval #92/#76/#119.
+
+
+## Кандидатные визуальные доказательства двух независимых реестров (#448)
+
+`apps/web/e2e/auto-closed-order-ledger-reconciliation.spec.ts`
+сохраняет `closed-ledgers-390-light.png` и
+`closed-ledgers-1280-dark.png` из синтетических фиксированных
+UUID/отрицательной условной разницы; проверяет раскрытие
+источников и отсутствие overflow на 390/1280, keyboard,
+403/409/422, повреждённые агрегаты, дубли UUID и отказ CSV
+после отзыва права. Это **не утверждённые golden PNG**,
+не юридический/e-sign/финансовый документ и не независимая
+приёмка #92/#76/#119.
