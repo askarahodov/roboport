@@ -619,7 +619,7 @@ def test_root_escaped_servers_key_cannot_shadow_the_placeholder_server():
             "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
             "servers:\n- url: https://api.example.invalid\n"
             "paths:\n  /safe:\n    get:\n      operationId: safe\n"
-            + r'"\\u0073ervers":' + "\n"
+            + r'"\u0073ervers":' + "\n"
             + "- url: https://api.example.com\n",
             encoding="utf-8",
         )
@@ -643,4 +643,21 @@ def test_root_paths_anchor_duplicate_cannot_hide_additional_operations():
         rows = scan_openapi_contract(contract, root)
         assert any(r["unresolved"] and r["review"] == "paths-section-duplicate" for r in rows)
         assert not any(r.get("operation_id") == "hiddenRobot" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_draft_title_and_version_must_be_fields_of_the_single_root_info_object():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  description: title and version intentionally absent\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n  /safe:\n    get:\n      operationId: safe\n"
+            "components:\n  title: Fake draft title\n  version: 1.0-draft\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
         assert main(["--root", str(root), "--check"]) == 1

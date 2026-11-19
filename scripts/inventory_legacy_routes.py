@@ -258,12 +258,36 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             return None
         return raw
 
-    title_raw = next((m.group(1) for line in lines
-                      if (m := re.match(r"^  title:\s*(.*)$", line))), "")
-    version_raw = next((m.group(1) for line in lines
-                        if (m := re.match(r"^  version:\s*(.*)$", line))), "")
-    title = string_scalar(title_raw)
-    version = string_scalar(version_raw)
+    info_declarations = [
+        (i, m.group(1)) for i, line in enumerate(lines)
+        if (m := re.match(r"^info\s*:(.*)$", line))
+    ]
+    info_indexes = [
+        i for i, tail in info_declarations if not without_comment(tail).strip()
+    ]
+    info_valid = len(info_declarations) == 1 and len(info_indexes) == 1
+    title_values: list[str | None] = []
+    version_values: list[str | None] = []
+    if info_valid:
+        for line in lines[info_indexes[0] + 1:]:
+            if line and not line.startswith((" ", "\t", "#")):
+                break
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if re.match(r"""^  (?:"[^"]*"|'[^']*'|<<)\s*:""", line):
+                info_valid = False
+                continue
+            field = re.match(r"^  ([A-Za-z][\w-]*):(?:[ \t]+(.*))?$", line)
+            if not field:
+                continue
+            key, raw_value = field.group(1), field.group(2) or ""
+            if key == "title":
+                title_values.append(string_scalar(raw_value))
+            elif key == "version":
+                version_values.append(string_scalar(raw_value))
+    info_valid = info_valid and len(title_values) == 1 and len(version_values) == 1
+    title = title_values[0] if len(title_values) == 1 else None
+    version = version_values[0] if len(version_values) == 1 else None
 
     # Parse every root server list item as a mapping. Child fields must be
     # exactly two spaces deeper than their list item; nested YAML is unsupported.
@@ -366,7 +390,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                 and parsed.username is None and parsed.password is None
                 and not parsed.query and not parsed.fragment)
 
-    safe_draft = (title is not None and "draft" in title.lower()
+    safe_draft = (info_valid and title is not None and "draft" in title.lower()
                   and version is not None and version.lower().endswith("-draft")
                   and servers_valid and all(placeholder_server(url) for url in server_urls))
 
