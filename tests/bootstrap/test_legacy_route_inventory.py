@@ -837,3 +837,41 @@ def test_server_list_rejects_multiple_spaces_after_sequence_marker():
         rows = scan_openapi_contract(contract, root)
         assert any(r["kind"] == "historical-openapi-control" and r["unresolved"] for r in rows)
         assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_duplicate_operation_ids_strip_comments_from_plain_scalars_with_quotes():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            "  /one:\n    get:\n      operationId: shared' # first\n"
+            "  /two:\n    get:\n      operationId: shared' # second\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["unresolved"] and r["review"] == "duplicate-operation-id" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1
+
+
+def test_operation_id_plain_scalar_continuation_fails_closed():
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        contract = root / "contracts/openapi.yaml"
+        contract.parent.mkdir(parents=True)
+        contract.write_text(
+            "info:\n  title: Example API (draft)\n  version: 1.0-draft\n"
+            "servers:\n- url: https://api.example.invalid\n"
+            "paths:\n"
+            "  /one:\n    get:\n      operationId: shared\n"
+            "        suffix\n"
+            "  /two:\n    get:\n      operationId: shared suffix\n",
+            encoding="utf-8",
+        )
+        rows = scan_openapi_contract(contract, root)
+        assert any(r["unresolved"] and
+                   r["review"] == "unsupported-operation-id-continuation" for r in rows)
+        assert main(["--root", str(root), "--check"]) == 1

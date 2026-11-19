@@ -224,15 +224,20 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
     lines = path.read_text(encoding="utf-8").splitlines()
 
     def without_comment(value: str) -> str:
-        quote: str | None = None
+        stripped = value.lstrip()
+        offset = len(value) - len(stripped)
+        if stripped[:1] in {"'", '"'}:
+            quote = stripped[0]
+            closing = next((i for i in range(offset + 1, len(value))
+                            if value[i] == quote), None)
+            if closing is not None:
+                for index in range(closing + 1, len(value)):
+                    if value[index] == "#" and index > 0 and value[index - 1].isspace():
+                        return value[:index].strip()
+                return value.strip()
         for index, char in enumerate(value):
-            if quote is not None:
-                if char == quote:
-                    quote = None
-            elif char in "\"'":
-                quote = char
-            elif char == "#" and (index == 0 or value[index - 1].isspace()):
-                return value[:index].rstrip()
+            if char == "#" and index > 0 and value[index - 1].isspace():
+                return value[:index].strip()
         return value.strip()
 
     def empty_mapping_tail(value: str) -> bool:
@@ -503,6 +508,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
         unresolved_path(paths_indexes[1] + 1, "duplicate-paths-section", "<paths-section-duplicate>")
 
     current_method: dict[str, object] | None = None
+    operation_id_line_active = False
     seen_paths: set[str] = set()
     for index in range(paths_indexes[0] + 1, len(lines)):
         line = lines[index]
@@ -512,6 +518,12 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
             continue
 
         indent = len(line) - len(line.lstrip(" "))
+        if operation_id_line_active:
+            if (indent >= 8 and
+                    not re.match(r"^ {8,}[A-Za-z][\w-]*\s*:", line)):
+                unresolved_path(index + 1, "unsupported-operation-id-continuation",
+                                current_path or "<unresolved-path>")
+            operation_id_line_active = False
         if "\t" in line[:indent] or "\t" in line:
             unresolved_path(index + 1, "tabs-in-path-section", current_path or "<unresolved-path>")
             current_method = None
@@ -627,6 +639,7 @@ def scan_openapi_contract(path: Path, root: Path) -> list[dict[str, object]]:
                     unresolved_path(index + 1, "invalid-or-duplicate-operation-id", current_path or "<unresolved-path>")
                 else:
                     current_method["operation_id"] = operation_id
+                    operation_id_line_active = True
                 continue
             if key == "callbacks":
                 # Callback Objects contain nested Path Items and can hide their
