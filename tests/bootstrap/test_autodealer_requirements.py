@@ -24,8 +24,8 @@ def test_all_public_pages_and_acceptance_criteria_are_traced():
     assert len(checks["requirements"]) >= 89
     assert len({r["id"] for r in pages["records"]}) == len(pages["records"])
     assert len({r["pageId"] for r in checks["requirements"]}) == len(pages["records"])
-    required_page_ids = {f"ADP-{n:03d}" for n in range(55, 74)}
-    required_requirement_ids = {f"ADF-{n:03d}" for n in range(97, 116)}
+    required_page_ids = {f"ADP-{n:03d}" for n in range(55, 76)}
+    required_requirement_ids = {f"ADF-{n:03d}" for n in range(97, 119)}
     assert required_page_ids <= {x["id"] for x in pages["records"]}
     assert required_requirement_ids <= {x["id"] for x in checks["requirements"]}
     assert not validate(pages, MATRIX.read_text(encoding="utf-8"))
