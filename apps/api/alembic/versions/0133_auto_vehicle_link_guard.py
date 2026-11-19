@@ -19,6 +19,14 @@ def upgrade():
       CREATE FUNCTION guard_auto_vehicle_customer_link()
       RETURNS trigger LANGUAGE plpgsql AS $body$
       BEGIN
+        IF TG_OP = 'INSERT' THEN
+          IF NEW.verified_at IS NOT NULL OR NEW.verified_by IS NOT NULL
+             OR NEW.revoked_at IS NOT NULL THEN
+            RAISE EXCEPTION 'new auto vehicle customer link must start pending';
+          END IF;
+          RETURN NEW;
+        END IF;
+
         IF (NEW.id, NEW.vehicle_id, NEW.customer_id, NEW.linked_at)
            IS DISTINCT FROM
            (OLD.id, OLD.vehicle_id, OLD.customer_id, OLD.linked_at) THEN
@@ -50,7 +58,7 @@ def upgrade():
     """)
     op.execute("""
       CREATE TRIGGER auto_vehicle_customer_link_guard
-      BEFORE UPDATE ON auto_vehicle_customer_link
+      BEFORE INSERT OR UPDATE ON auto_vehicle_customer_link
       FOR EACH ROW EXECUTE FUNCTION guard_auto_vehicle_customer_link()
     """)
     op.execute("""
