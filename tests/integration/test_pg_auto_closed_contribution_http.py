@@ -3,6 +3,7 @@ from io import StringIO
 from uuid import UUID,uuid4
 import csv
 import psycopg
+import pytest
 from fastapi.testclient import TestClient
 from roboport_api.main import app
 from roboport_api import auto_closed_contribution as module
@@ -207,3 +208,57 @@ def test_csv_fifo_issue_return_material_cost_only_on_group_not_each_move():
     assert [r[3] for r in stock]==[event1,event2]
     assert all(r[8]=="" for r in stock)
     assert all(r[14]==lot for r in stock)
+
+
+def test_zero_price_closed_order_without_sim_cash_is_not_a_409(monkeypatch):
+    """Exact verified zero settlement needs no fabricated payment event.
+
+    Pure composition regression. Authorization and immutable DB close
+    validations are owned by the PG17-backed cost/closure components.
+    """
+    order=str(uuid4());closing=str(uuid4());preview=str(uuid4())
+    day="2026-11-19"
+    common={
+        "fromDay":day,"toDay":day,"timeZone":"Europe/Berlin",
+        "realMoney":False,"marginAvailable":False,"releaseAllowed":False,
+    }
+    cost={**common,
+        "summary":{"orderCount":1,"completeOrderCount":0,"laborEntryCount":0},
+        "items":[{
+            "workOrderId":order,"closedDay":day,"closedEventId":closing,
+            "previewId":preview,"previewDigest":"a"*64,
+            "approvedTotalMinor":0,"materialNetMinor":0,
+            "laborCostMinor":None,"directCostMinor":None,
+            "syntheticDifferenceMinor":None,"status":"INCOMPLETE",
+            "laborEntries":[],"materialGroups":[],
+        }],
+    }
+    closed={**common,
+        "summary":{"cashEventCount":0,"approvedTotalMinor":0,
+                   "simulatedPaidMinor":0,"simulatedRefundedMinor":0},
+        "items":[{
+            "workOrderId":order,"closedDay":day,"closedEventId":closing,
+            "previewId":preview,"previewDigest":"a"*64,
+            "approvedTotalMinor":0,"simulatedPaidMinor":0,
+            "simulatedRefundedMinor":0,"cashEvents":[],
+            "postedEventId":str(uuid4()),"ackEventId":str(uuid4()),
+            "estimateRevisionId":str(uuid4()),
+        }],
+    }
+    monkeypatch.setattr(module,"cost_report",
+                        lambda *args,**kwargs:(cost,closed))
+    result=module.report(None,"synthetic",uuid4(),uuid4(),day,day)
+    assert result["summary"]["orderCount"]==1
+    assert result["summary"]["simCashEventCount"]==0
+    assert result["summary"]["approvedTotalMinor"]==0
+    assert result["summary"]["simulatedNetMinor"]==0
+    assert result["summary"]["syntheticDifferenceMinor"] is None
+    assert result["items"][0]["cashEvents"]==[]
+    rows=list(csv.reader(StringIO(module._csv(result).decode("utf-8").lstrip("\ufeff")),
+                         delimiter=";"))
+    assert len(rows)==3 and {r[1] for r in rows[1:]}=={"DAY","ORDER"}
+    # Nonzero settlement with missing events must fail closed even when
+    # a mocked upstream bypasses its own verification.
+    closed["items"][0]["simulatedPaidMinor"]=1
+    with pytest.raises(module.Conflict):
+        module.report(None,"synthetic",uuid4(),uuid4(),day,day)
