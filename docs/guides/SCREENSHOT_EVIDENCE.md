@@ -321,3 +321,15 @@ golden baseline/WCAG AA или release approval #92/#76/#119.
 работ; проверяет keyboard, 403/409, испорченный API-итог, смену филиала
 и повторную авторизацию CSV. Эти PNG — **candidate evidence**,
 не утверждённые эталоны и не независимая приёмка по #92/#76.
+
+
+## Candidate-снимки сверяемого ДДС филиала (#445)
+
+`apps/web/e2e/auto-branch-cashflow.spec.ts` сохраняет
+`branch-cashflow-390-light.png` и
+`branch-cashflow-1280-dark.png` с фиксированными
+synthetic UUID двух счетов и первичных событий.
+Проверены keyboard, overflow, malformed financial totals,
+duplicated UUID, 403/409/422 и отдельный denied CSV.
+Снимки только browser evidence, **не** golden baseline
+и не независимое WCAG/design/financial approval #92/#76/#119.
