@@ -33,11 +33,11 @@ const states:Record<Stage,readonly string[]>={
   services:['EMPTY','SELECTED'],
   inspection:['MISSING','RECORDED'],
   intakeAct:['MISSING','AWAITING_CLIENT','ACKNOWLEDGED','DISPUTED'],
-  estimate:['MISSING','AWAITING_CLIENT','APPROVED','DECLINED'],
+  estimate:['MISSING','AWAITING_CLIENT','APPROVED','DECLINED','RESTRICTED'],
   execution:['NOT_STARTED','IN_PROGRESS','FINISHED'],
   quality:['NOT_CHECKED','PASS','FAIL'],
   technicalDocuments:['DRAFT','PREVIEW_SEALED','POSTED',
-    'CLIENT_ACKNOWLEDGED','CLIENT_DISPUTED','CLOSED_TECHNICAL'],
+    'CLIENT_ACKNOWLEDGED','CLIENT_DISPUTED','CLOSED_TECHNICAL','RESTRICTED'],
 };
 const stateNames:Record<string,string>={
   EMPTY:'Нет услуг',SELECTED:'Выбраны услуги',MISSING:'Не создан',
