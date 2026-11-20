@@ -69,7 +69,7 @@ def upgrade():
           OR
           (status='EXPIRED' AND accepted_by IS NULL AND accepted_grant_id IS NULL
             AND accepted_at IS NULL AND revoked_at IS NULL AND expired_at IS NOT NULL)
-        ),
+        )
       )
     """)
     op.execute("""
