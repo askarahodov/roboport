@@ -14,6 +14,7 @@ import psycopg
 from .session_lookup import session_subject
 from .auto_location_scope import location_scope_allows
 from .auto_manager_authority import manager_assignment
+from .auto_vehicle_org_scope import organization_vehicle_role_allows
 from .auto_proof_throttle import consume_attempt
 from .auto_claim_retry import lookup as retry_lookup, remember as retry_remember, AutoClaimRetryConflict
 
@@ -29,8 +30,18 @@ def _role_scoped(
     actor = session_subject(conn, token, for_mutation=True)
     if actor is None:
         raise VehicleClaimRejected("unauthorized")
-    # Сериализация успешной авторизации с отзывом роли/назначения:
-    # concurrent UPDATE revoked_at ждёт завершения защищённой операции.
+    # Для закреплённого за организацией автомобиля полномочие определяется
+    # только активной ролью этой организации и точным филиалом привязки.
+    # Глобальная user_role и legacy object grants не могут заменить tenant grant.
+    organization_granted = organization_vehicle_role_allows(
+        conn, token, role, vehicle,
+    )
+    if organization_granted is not None:
+        if not organization_granted:
+            raise VehicleClaimRejected("scope denied")
+        return actor
+
+    # Незакреплённые legacy fixtures сохраняют прежний изолированный dev-контракт.
     if role == "MANAGER":
         granted = manager_assignment(conn, actor, vehicle)
     else:
