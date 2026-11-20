@@ -56,6 +56,13 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
         headers=headers,
     )
     assert invalid.status_code == 422, invalid.text
+    # ZoneInfo and PostgreSQL both know aliases such as CET, but the
+    # existing location guard intentionally accepts only UTC or IANA paths.
+    alias = client.post(
+        root + "/locations", json={"code": branch_code, "timeZone": "CET"},
+        headers=headers,
+    )
+    assert alias.status_code == 422, alias.text
 
     created = client.post(
         root + "/locations",
