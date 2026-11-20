@@ -120,37 +120,12 @@ def upgrade():
       END $fn$
     """)
 
-    # A branch cannot be retired while it still owns active operational
-    # resources, assignments, vehicle bindings or future bookings.
-    op.execute("""
-      CREATE FUNCTION guard_auto_location_deactivation()
-      RETURNS trigger LANGUAGE plpgsql AS $fn$
-      BEGIN
-        IF OLD.disabled_at IS NULL AND NEW.disabled_at IS NOT NULL THEN
-          IF EXISTS (SELECT 1 FROM auto_work_bay
-                     WHERE location_id=OLD.id AND disabled_at IS NULL)
-             OR EXISTS (SELECT 1 FROM auto_staff_shift
-                        WHERE location_id=OLD.id AND canceled_at IS NULL)
-             OR EXISTS (SELECT 1 FROM auto_bay_booking
-                        WHERE location_id=OLD.id AND canceled_at IS NULL
-                          AND ends_at>clock_timestamp())
-             OR EXISTS (SELECT 1 FROM auto_organization_role_grant
-                        WHERE location_id=OLD.id AND revoked_at IS NULL)
-             OR EXISTS (SELECT 1 FROM auto_location_role_grant
-                        WHERE location_id=OLD.id AND revoked_at IS NULL)
-             OR EXISTS (SELECT 1 FROM auto_vehicle_location_binding
-                        WHERE location_id=OLD.id) THEN
-            RAISE EXCEPTION 'location still owns active workshop resources';
-          END IF;
-        END IF;
-        RETURN NEW;
-      END $fn$
-    """)
-    op.execute("""
-      CREATE TRIGGER auto_location_deactivation_guard
-      BEFORE UPDATE OF disabled_at ON auto_service_location
-      FOR EACH ROW EXECUTE FUNCTION guard_auto_location_deactivation()
-    """)
+    # Branch retirement is validated by the ADMIN service while it holds
+    # FOR UPDATE on auto_service_location. Every branch-scoped INSERT guard
+    # takes FOR SHARE on that same row: creation either commits before the
+    # service checks dependencies, or observes the disabled branch afterward.
+    # Keep cross-table policy in one service so conflicts map to stable 409s;
+    # do not duplicate the policy in a trigger.
 
     # Lock branch rows on staff-grant inserts so branch deactivation cannot
     # race with a new organization-scoped assignment.
@@ -265,8 +240,6 @@ def downgrade():
       BEFORE UPDATE ON auto_location_role_grant
       FOR EACH ROW EXECUTE FUNCTION guard_auto_location_role_grant()
     """)
-    op.execute("DROP TRIGGER auto_location_deactivation_guard ON auto_service_location")
-    op.execute("DROP FUNCTION guard_auto_location_deactivation()")
     op.execute("""
       DO $body$
       BEGIN
