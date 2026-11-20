@@ -114,7 +114,7 @@ export function AutoStaffAdmin() {
     return () => controller.abort();
   }, [organization, refresh, validOrg]);
 
-  async function loadInvitations() {
+  const loadInvitations = React.useCallback(async () => {
     if (!validOrg) return;
     const currentOrg=organization.trim();
     setInvitations([]);setInviteState('loading');
@@ -140,12 +140,12 @@ export function AutoStaffAdmin() {
         }))throw new Error();
       setInvitations(body.items as StaffInvitation[]);setInviteState('ready');
     }catch{if(organizationRef.current===currentOrg)setInviteState('error');}
-  }
+  },[organization,validOrg]);
 
   React.useEffect(()=>{
     if(validOrg&&state==='ready')void loadInvitations();
     else if(!validOrg){setInvitations([]);setInviteState('idle');}
-  },[organization,state,refresh,validOrg]);
+  },[loadInvitations,state,validOrg]);
 
   async function createInvitation(event:React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
