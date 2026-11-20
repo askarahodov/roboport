@@ -171,7 +171,7 @@ def list_intake(conn: psycopg.Connection, token: str,
                     AND EXISTS (
                       SELECT 1 FROM auto_organization_role_grant g
                       WHERE g.organization_id=l.organization_id
-                        AND g.location_id IS NOT DISTINCT FROM l.id
+                        AND (g.location_id IS NULL OR g.location_id=l.id)
                         AND g.user_id=a.user_id AND g.role_code='INTAKE'
                         AND g.revoked_at IS NULL
                     ))
