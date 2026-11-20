@@ -61,51 +61,46 @@ def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
     url = f"/api/v1/dev/auto/organizations/{org_a}/staff-invitations"
     payload = {
         "targetLogin": logins[data["intake"]],
-        "role": "INTAKE",
+        "role": "CASHIER",
         "locationId": str(location),
         "expiresInDays": 7,
     }
 
+    # Session and CSRF are both required; ADMIN is never assignable by invite.
+    assert TestClient(app, base_url="https://127.0.0.1").post(
+        url, json=payload, headers=_headers(data, data["manager"])
+    ).status_code == 403
     assert admin.post(url, json=payload).status_code == 403
-    assert admin.post(url, json=payload, headers=_headers(data, data["manager"])).status_code == 201
-    created = admin.post(url, json=payload, headers=_headers(data, data["manager"]))
-    assert created.status_code == 409
-    # The first request above succeeded; its token is obtained from a separate,
-    # valid invite below so no plaintext token is retained in a test log.
-    first = admin.get(url)
-    assert first.status_code == 200
-    assert first.json()["items"] == []
     assert admin.post(url, json={**payload, "role": "ADMIN"},
                       headers=_headers(data, data["manager"])).status_code == 422
 
-    # Revoke the first invitation after reading its digest from the database:
-    # the service never exposes a stored plaintext token or a listable secret.
-    with psycopg.connect(DSN) as db:
-        row = db.execute(
-            """SELECT id,token_hash FROM auto_org_staff_invitation
-               WHERE organization_id=%s AND target_user_id=%s""",
-            (org_a, data["intake"]),
-        ).fetchone()
-    assert row is not None
-    invitation_id, token_hash = row
-    assert len(token_hash.strip()) == 64
-    assert admin.get(url).json()["items"][0]["status"] == "PENDING"
-    assert "token" not in admin.get(url).json()["items"][0]
-
-    # A new invitation is created for another role and returned once to the admin.
-    payload2 = {**payload, "role": "CASHIER"}
-    created = admin.post(url, json=payload2, headers=_headers(data, data["manager"]))
+    created = admin.post(url, json=payload, headers=_headers(data, data["manager"]))
     assert created.status_code == 201, created.text
     assert created.headers["cache-control"] == "no-store"
     invite = created.json()
     secret = invite["token"]
     assert len(secret) == 43
-    assert hashlib.sha256(secret.encode("ascii")).hexdigest() == (
-        psycopg.connect(DSN).__enter__().execute(
+    assert invite["targetLogin"] == logins[data["intake"]]
+    assert invite["role"] == "CASHIER"
+    assert admin.post(url, json=payload,
+                      headers=_headers(data, data["manager"])).status_code == 409
+
+    # The plaintext secret is not stored or returned by list/audit endpoints.
+    with psycopg.connect(DSN) as db:
+        token_hash = db.execute(
             "SELECT token_hash FROM auto_org_staff_invitation WHERE id=%s",
             (invite["invitationId"],),
         ).fetchone()[0].strip()
-    )
+    assert token_hash == hashlib.sha256(secret.encode("ascii")).hexdigest()
+    assert token_hash != secret
+    listed = admin.get(url)
+    assert listed.status_code == 200
+    assert len(listed.json()["items"]) == 1
+    assert listed.json()["items"][0]["status"] == "PENDING"
+    assert "token" not in listed.json()["items"][0]
+    assert admin.get(
+        f"/api/v1/dev/auto/organizations/{org_b}/staff-invitations"
+    ).status_code == 403
 
     # A different authenticated account cannot consume the token.
     wrong = wrong_user.post(
@@ -127,9 +122,7 @@ def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
     )
     assert replay.status_code == 409
 
-    listed = admin.get(url)
-    assert listed.status_code == 200
-    accepted_row = next(x for x in listed.json()["items"]
+    accepted_row = next(x for x in admin.get(url).json()["items"]
                         if x["invitationId"] == invite["invitationId"])
     assert accepted_row["status"] == "ACCEPTED"
     assert accepted_row["grantId"] == accepted.json()["grantId"]
@@ -197,6 +190,11 @@ def test_invitation_revoke_expiry_and_branch_retirement_blocker(monkeypatch):
         headers=_headers(data, data["other"]),
     )
     assert rejected.status_code == 409
+
+    # Once the invitation is revoked, the otherwise empty branch can be retired.
+    disabled = admin.post(disable, headers=headers)
+    assert disabled.status_code == 200
+    assert disabled.json()["status"] == "DISABLED"
 
     # Expired tokens transition once to EXPIRED and can never grant authority.
     expired_token = "Z" * 43
