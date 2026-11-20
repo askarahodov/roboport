@@ -97,6 +97,9 @@ def upgrade():
           RAISE EXCEPTION 'staff invitation history deletion forbidden';
         END IF;
         IF TG_OP='INSERT' THEN
+          IF NEW.status<>'PENDING' OR NEW.created_by=NEW.target_user_id THEN
+            RAISE EXCEPTION 'staff invitation must start pending for another account';
+          END IF;
           PERFORM 1 FROM auto_organization
             WHERE id=NEW.organization_id AND disabled_at IS NULL FOR SHARE;
           IF NOT FOUND THEN RAISE EXCEPTION 'organization unavailable'; END IF;
@@ -130,6 +133,7 @@ def upgrade():
         IF NEW.status='ACCEPTED' THEN
           IF NEW.accepted_by IS DISTINCT FROM OLD.target_user_id
              OR NEW.accepted_grant_id IS NULL OR NEW.accepted_at IS NULL
+             OR NEW.accepted_at<OLD.created_at OR NEW.accepted_at>OLD.expires_at
              OR NOT EXISTS (
                SELECT 1 FROM auto_organization_role_grant g
                WHERE g.id=NEW.accepted_grant_id
@@ -145,7 +149,7 @@ def upgrade():
             RAISE EXCEPTION 'staff invitation revocation timestamp required';
           END IF;
         ELSIF NEW.status='EXPIRED' THEN
-          IF NEW.expired_at IS NULL THEN
+          IF NEW.expired_at IS NULL OR NEW.expired_at<OLD.expires_at THEN
             RAISE EXCEPTION 'staff invitation expiry timestamp required';
           END IF;
         END IF;
