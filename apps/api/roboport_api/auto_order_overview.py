@@ -3,7 +3,7 @@ from uuid import UUID
 import hashlib
 import psycopg
 from .auto_order_customer_read import get_order_customer_summary
-from .auto_order_stock_read import list_work_order_stock
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 from .auto_stock_service import AutoStockDenied
 from .keyset_cursor import encode_cursor, decode_cursor
 
@@ -36,11 +36,22 @@ def get_order_overview(conn: psycopg.Connection, token: str,
             raise AutoStockDenied("INVALID_INPUT") from exc
 
     with conn.transaction():
+        # This projection combines two independently protected domains:
+        # intake/customer identity and warehouse movement history. Enforce both
+        # document policies before reading either domain, including empty pages.
+        try:
+            require_document_access(
+                conn, token, organization_id, location_id,
+                ("INTAKE", "MANAGER"), "INTAKE_ACT", "READ", order=order_id,
+            )
+            require_document_access(
+                conn, token, organization_id, location_id,
+                ("WAREHOUSE", "MANAGER"), "SUPPLIER_ORDER", "READ", order=order_id,
+            )
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         customer = get_order_customer_summary(conn, token, organization_id,
                                               location_id, order_id)
-        # Require both domain permissions for every page, even an empty one.
-        list_work_order_stock(conn, token, organization_id, location_id,
-                              order_id, limit=1)
         predicate = ""
         params = [organization_id, location_id, order_id]
         if position is not None:
