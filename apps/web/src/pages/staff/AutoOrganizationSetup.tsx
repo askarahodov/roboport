@@ -105,10 +105,14 @@ export function AutoOrganizationSetup() {
   },[organization]);
 
   async function execute(path:string,payload:unknown,success:string) {
-    if(busy||!validOrg)return;
+    const operationOrg=organization.trim();
+    if(busy||!uuid.test(operationOrg))return;
     setBusy(true);setMessage('');
     try {
-      const response=await post(root+path,payload);
+      const response=await post('/api/v1/dev/auto/organizations/'+
+        encodeURIComponent(operationOrg)+path,payload);
+      // Не позволяем запоздалому ответу организации A очистить экран B.
+      if(orgRef.current!==operationOrg)return;
       if(!response.ok){
         setMessage(response.status===409?'409 — операция конфликтует с активными записями, сменами или назначениями.'
           :[401,403,404].includes(response.status)?'403 — нет полномочий ADMIN этой организации.'
@@ -119,12 +123,12 @@ export function AutoOrganizationSetup() {
       }
       setMessage(success);
       setConfirm(null);
-      await refresh();
+      await refresh(operationOrg);
     }catch{
-      setMessage('Ошибка соединения. Проверьте локальный стенд и сессию.');
+      if(orgRef.current===operationOrg)
+        setMessage('Ошибка соединения. Проверьте локальный стенд и сессию.');
     }finally{setBusy(false);}
   }
-
   const activeLocations=data?.locations.filter(x=>!x.disabled)??[];
   const locationLabel=(id:string)=>data?.locations.find(x=>x.locationId===id)?.code??id;
   const iso=(value:string,branchId?:string)=>{
@@ -143,10 +147,10 @@ export function AutoOrganizationSetup() {
     </div>
     <div className="form-grid">
       <label>UUID организации
-        <input aria-label="UUID организации" value={organization}
+        <input aria-label="UUID организации" value={organization} disabled={busy}
           onChange={e=>setOrganization(e.target.value)} placeholder="00000000-0000-4000-8000-000000000000"/>
       </label>
-      <button type="button" disabled={!validOrg||state==='loading'} onClick={()=>void refresh()}>
+      <button type="button" disabled={!validOrg||state==='loading'||busy} onClick={()=>void refresh()}>
         Обновить структуру</button>
     </div>
     {state==='loading'&&<p role="status">Загружаем организацию…</p>}
