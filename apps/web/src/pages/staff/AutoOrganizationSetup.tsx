@@ -127,7 +127,12 @@ export function AutoOrganizationSetup() {
 
   const activeLocations=data?.locations.filter(x=>!x.disabled)??[];
   const locationLabel=(id:string)=>data?.locations.find(x=>x.locationId===id)?.code??id;
-  const iso=(value:string)=>Number.isFinite(Date.parse(value))?new Date(value).toLocaleString('ru-RU'):'—';
+  const iso=(value:string,branchId?:string)=>{
+    if(!Number.isFinite(Date.parse(value)))return '—';
+    const zone=branchId?data?.locations.find(x=>x.locationId===branchId)?.timeZone:undefined;
+    return new Intl.DateTimeFormat('ru-RU',{...(zone?{timeZone:zone}:{}),
+      dateStyle:'short',timeStyle:'short'}).format(new Date(value));
+  };
 
   return <section className="ui-page crm-workspace" aria-label="Управление организацией и филиалами">
     <div className="crm-heading">
@@ -164,7 +169,7 @@ export function AutoOrganizationSetup() {
         </form>
         <div className="table-scroll" role="region" aria-label="Список филиалов" tabIndex={0}>
           <table><thead><tr><th>Код</th><th>Часовой пояс</th><th>UUID</th><th>Состояние</th><th>Действие</th></tr></thead>
-            <tbody>{data.locations.map(x=><tr key={x.locationId}>
+            <tbody>{data.locations.length===0&&<tr><td colSpan={5}>Филиалы ещё не созданы.</td></tr>}{data.locations.map(x=><tr key={x.locationId}>
               <td>{x.code}</td><td>{x.timeZone}</td><td><code>{x.locationId}</code></td>
               <td>{x.disabled?'Отключён':'Активен'}</td>
               <td>{!x.disabled&&(confirm?.kind==='location'&&confirm.id===x.locationId?
@@ -194,7 +199,7 @@ export function AutoOrganizationSetup() {
         </form>
         <div className="table-scroll" role="region" aria-label="Список рабочих постов" tabIndex={0}>
           <table><thead><tr><th>Филиал</th><th>Код поста</th><th>UUID</th><th>Состояние</th><th>Действие</th></tr></thead>
-            <tbody>{data.bays.map(x=><tr key={x.bayId}>
+            <tbody>{data.bays.length===0&&<tr><td colSpan={5}>Рабочих постов пока нет.</td></tr>}{data.bays.map(x=><tr key={x.bayId}>
               <td>{locationLabel(x.locationId)}</td><td>{x.code}</td><td><code>{x.bayId}</code></td>
               <td>{x.disabled?'Отключён':'Активен'}</td>
               <td>{!x.disabled&&(confirm?.kind==='bay'&&confirm.id===x.bayId?
@@ -234,9 +239,9 @@ export function AutoOrganizationSetup() {
         </form>
         <div className="table-scroll" role="region" aria-label="Список смен" tabIndex={0}>
           <table><thead><tr><th>Филиал</th><th>Сотрудник UUID</th><th>Начало</th><th>Окончание</th><th>Состояние</th><th>Действие</th></tr></thead>
-            <tbody>{data.shifts.map(x=><tr key={x.shiftId}>
+            <tbody>{data.shifts.length===0&&<tr><td colSpan={6}>Смены ещё не назначены.</td></tr>}{data.shifts.map(x=><tr key={x.shiftId}>
               <td>{locationLabel(x.locationId)}</td><td><code>{x.userId}</code></td>
-              <td>{iso(x.startsAt)}</td><td>{iso(x.endsAt)}</td>
+              <td>{iso(x.startsAt,x.locationId)}</td><td>{iso(x.endsAt,x.locationId)}</td>
               <td>{x.canceled?'Отменена':'Активна'}</td>
               <td>{!x.canceled&&(confirm?.kind==='shift'&&confirm.id===x.shiftId?
                 <><button type="button" disabled={busy} onClick={()=>void execute('/locations/'+x.locationId+'/shifts/'+x.shiftId+'/cancel',undefined,'Смена отменена.')}>Подтвердить отмену</button>
