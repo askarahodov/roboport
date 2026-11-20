@@ -196,7 +196,7 @@ def csrf_bootstrap(request: Request):
 
 @router.get("/api/v1/dev/staff/access")
 def staff_access(request: Request):
-    """Only active scoped staff roles; no customer identity or PII in response."""
+    """Вернуть активные legacy/org роли и собственные scopes без данных клиентов."""
     dsn=_dsn(request)
     if dsn is None:
         return _error(request,403)
