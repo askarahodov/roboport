@@ -203,13 +203,13 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
             ("UPDATE auto_staff_shift SET canceled_at=now() WHERE id=%s", (shift,), "shift"),
             ("UPDATE auto_work_bay SET disabled_at=now() WHERE id=%s", (bay,), "bay"),
         ):
-            with db.transaction():
-                try:
+            try:
+                with db.transaction():
                     db.execute(sql, params)
-                except psycopg.errors.RaiseException:
-                    pass
-                else:
-                    raise AssertionError(f"database guard accepted unsafe {label} change")
+            except psycopg.errors.RaiseException:
+                pass
+            else:
+                raise AssertionError(f"database guard accepted unsafe {label} change")
 
     cancel_blocked = client.post(
         f"{root}/locations/{location}/shifts/{shift}/cancel", headers=headers,
@@ -293,25 +293,25 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
             """SELECT id FROM auto_workshop_admin_action
                WHERE organization_id=%s LIMIT 1""", (organization,),
         ).fetchone()[0]
-        with db.transaction():
-            try:
+        try:
+            with db.transaction():
                 db.execute(
                     "UPDATE auto_workshop_admin_action SET action='SHIFT_CREATED' WHERE id=%s",
                     (event,),
                 )
-            except psycopg.errors.RaiseException:
-                pass
-            else:
-                raise AssertionError("workshop admin audit accepted UPDATE")
-        with db.transaction():
-            try:
+        except psycopg.errors.RaiseException:
+            pass
+        else:
+            raise AssertionError("workshop admin audit accepted UPDATE")
+        try:
+            with db.transaction():
                 db.execute(
                     "DELETE FROM auto_workshop_admin_action WHERE id=%s", (event,),
                 )
-            except psycopg.errors.RaiseException:
-                pass
-            else:
-                raise AssertionError("workshop admin audit accepted DELETE")
+        except psycopg.errors.RaiseException:
+            pass
+        else:
+            raise AssertionError("workshop admin audit accepted DELETE")
     with psycopg.connect(DSN) as db:
         db.execute(
             """UPDATE auto_organization_role_grant SET revoked_at=now()
