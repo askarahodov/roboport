@@ -1,7 +1,7 @@
-"""Делегирование только INTAKE, только на конкретную машину, только действующим MANAGER.
+"""Legacy-делегирование INTAKE на конкретную машину для незакреплённых fixtures.
 
-Начальный MANAGER object scope остаётся исключительно в синтетических fixture.
-Никакого ADMIN override, полномочий MANAGER и истории чужих заказов.
+Для tenant-bound автомобилей полномочие задаётся организационной ролью филиала;
+per-vehicle экран не может заменить или отозвать такой grant.
 """
 from uuid import UUID, uuid4
 
@@ -11,6 +11,7 @@ from .auto_vehicle_claim import VehicleClaimRejected
 from .session_lookup import session_subject
 from .auto_location_scope import location_scope_allows
 from .auto_manager_authority import manager_assignment
+from .auto_vehicle_org_scope import organization_vehicle_role_allows
 from .auto_create_idempotency import existing, remember, AutoIdempotencyConflict
 
 
@@ -25,7 +26,19 @@ def _manager(
     actor = session_subject(conn, token, for_mutation=for_mutation)
     if actor is None:
         raise VehicleClaimRejected("not authenticated")
-    # FOR SHARE сериализует отзыв роли/объектного назначения относительно мутации.
+    # Для автомобиля организации проверяется только tenant grant на его филиал.
+    # Старые глобальные роли не заменяют полномочие организации.
+    organization_granted = organization_vehicle_role_allows(
+        conn, token, "MANAGER", vehicle_id,
+    )
+    if organization_granted is not None:
+        if not organization_granted:
+            raise VehicleClaimRejected("no active organization manager grant")
+        # В tenant-bound модели полномочие задаётся филиальным grant;
+        # отдельное per-vehicle делегирование не может менять его эффект.
+        raise VehicleClaimRejected("organization staff is managed at branch scope")
+
+    # Совместимость только для незакреплённых legacy fixtures.
     granted = manager_assignment(conn, actor, vehicle_id)
     if not granted or not location_scope_allows(conn, actor, "MANAGER", vehicle_id):
         raise VehicleClaimRejected("no active manager assignment")
@@ -45,7 +58,7 @@ def _record(conn: psycopg.Connection, ident: UUID, vehicle: UUID,
 def grant_intake(conn: psycopg.Connection, token: str,
                  vehicle_id: UUID, target_id: UUID,
                  idempotency_key: str | None = None) -> UUID:
-    """Сериалицовать создание для vehicle и не позволить эскалацию до MANAGER."""
+    """Сериализовать legacy-назначение INTAKE и не допустить эскалацию до MANAGER."""
     if not isinstance(vehicle_id, UUID) or not isinstance(target_id, UUID):
         raise VehicleClaimRejected("bad UUID")
     with conn.transaction():
@@ -139,11 +152,24 @@ def list_intake(conn: psycopg.Connection, token: str,
         rows = conn.execute(
             """SELECT a.id,a.user_id FROM auto_vehicle_staff_assignment a
                JOIN app_user u ON u.id=a.user_id AND u.status='ACTIVE'
-               JOIN user_role ur ON ur.user_id=a.user_id AND ur.role_code='INTAKE'
+               LEFT JOIN user_role ur ON ur.user_id=a.user_id AND ur.role_code='INTAKE'
                   AND ur.revoked_at IS NULL
                   AND (ur.expires_at IS NULL OR ur.expires_at>now())
+               LEFT JOIN auto_vehicle_location_binding b ON b.vehicle_id=a.vehicle_id
+               LEFT JOIN auto_service_location l ON l.id=b.location_id
                WHERE a.vehicle_id=%s AND a.role_code='INTAKE'
-                  AND a.revoked_at IS NULL
+                 AND a.revoked_at IS NULL
+                 AND (
+                   (l.organization_id IS NOT NULL AND l.disabled_at IS NULL
+                    AND EXISTS (
+                      SELECT 1 FROM auto_organization_role_grant g
+                      WHERE g.organization_id=l.organization_id
+                        AND (g.location_id IS NULL OR g.location_id=l.id)
+                        AND g.user_id=a.user_id AND g.role_code='INTAKE'
+                        AND g.revoked_at IS NULL
+                    ))
+                   OR (l.organization_id IS NULL AND ur.user_id IS NOT NULL)
+                 )
                ORDER BY a.id LIMIT 50""", (vehicle_id,),
         ).fetchall()
         # UUID видны только явно назначенному MANAGER, без email и ФИО.

@@ -27,7 +27,12 @@ def test_staff_access_denies_anonymous_and_unassigned(monkeypatch):
         def __exit__(self,*args): return False
         def execute(self,sql,params):
             assert "revoked_at IS NULL" in sql
-            assert "expires_at IS NULL" in sql
+            if "FROM user_role" in sql:
+                assert "expires_at IS NULL" in sql
+            elif "FROM auto_organization_role_grant" in sql:
+                assert "organization_id" in sql
+            else:
+                raise AssertionError("unexpected staff access query")
             return self
         def fetchall(self): return []
     monkeypatch.setattr(auth_http.psycopg,"connect",lambda *args,**kwargs:Conn())
@@ -43,17 +48,26 @@ def test_staff_access_returns_only_live_roles(monkeypatch):
     monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
     monkeypatch.setenv("ROBOport_DATABASE_URL", "postgresql://127.0.0.1:5432/demo")
     class Conn:
+        def __init__(self): self.rows=[]
         def __enter__(self): return self
         def __exit__(self,*args): return False
         def execute(self,sql,params):
-            assert "role_code IN" in sql
-            assert "CLIENT" not in sql
+            if "FROM user_role" in sql:
+                assert "role_code IN" in sql
+                assert "CLIENT" not in sql
+                assert "expires_at IS NULL" in sql
+                self.rows=[("STOCK",)]
+            elif "FROM auto_organization_role_grant" in sql:
+                assert "revoked_at IS NULL" in sql
+                self.rows=[]
+            else:
+                raise AssertionError("unexpected staff access query")
             return self
-        def fetchall(self): return [("STOCK",)]
+        def fetchall(self): return self.rows
     monkeypatch.setattr(auth_http.psycopg,"connect",lambda *args,**kwargs:Conn())
     monkeypatch.setattr(auth_http,"session_subject",lambda conn,token:"test-user")
     response=TestClient(app,base_url="https://127.0.0.1").get(
         "/api/v1/dev/staff/access",cookies={"rp_session":"synthetic"})
     assert response.status_code==200
-    assert response.json()=={"roles":["STOCK"]}
+    assert response.json()=={"roles":["STOCK"],"legacyRoles":["STOCK"],"organizationScopes":[]}
     assert response.headers["Cache-Control"]=="no-store"

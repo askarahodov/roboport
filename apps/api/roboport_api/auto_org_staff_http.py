@@ -1,6 +1,6 @@
-"""Closed, loopback-only organization staff endpoints for synthetic PG17.
+"""Закрытые loopback-маршруты управления персоналом для synthetic PG17.
 
-No ADMIN bootstrap endpoint. No real personnel or public production access.
+Нет HTTP-bootstrap для ADMIN, доступа к реальным сотрудникам или production.
 """
 from uuid import UUID
 from datetime import datetime
@@ -11,7 +11,12 @@ from pydantic import BaseModel, ConfigDict, ValidationError, Field, StrictBool
 
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
-from .auto_org_staff import grant_staff, revoke_staff, list_staff, list_staff_audit, OrgStaffDenied, OrgStaffConflict
+from .auto_org_staff import (
+    grant_staff, revoke_staff, list_staff, list_staff_audit,
+    create_staff_invitation, list_staff_invitations, revoke_staff_invitation,
+    accept_staff_invitation, list_staff_invitation_audit,
+    OrgStaffDenied, OrgStaffConflict,
+)
 
 from .auto_document_access import (
     publish_policy,list_policies,preview_employee_document_access,DocumentPolicyDenied,
@@ -108,6 +113,142 @@ def get_staff_audit(org_id: str, request: Request, limit: int = 100):
         except OrgStaffDenied:
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(content={"items": events}, headers={"Cache-Control": "no-store"})
+
+
+
+class StaffInvitationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    targetLogin: str = Field(min_length=3, max_length=128)
+    role: str = Field(pattern="^(MANAGER|INTAKE|MECHANIC|WAREHOUSE|CASHIER)$")
+    locationId: UUID | None = None
+    expiresInDays: int = Field(default=7, strict=True, ge=1, le=30)
+
+
+class StaffInvitationAcceptBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=40, max_length=64, pattern="^[A-Za-z0-9_-]+$")
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/staff-invitations")
+async def create_staff_invite(org_id: str, request: Request):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        organization = UUID(org_id)
+        body = StaffInvitationBody.model_validate(await request.json())
+    except (ValueError, ValidationError, TypeError, UnicodeDecodeError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request, db):
+            return _response(request, 403, "FORBIDDEN")
+        try:
+            result = create_staff_invitation(
+                db, request.cookies.get("rp_session", ""), organization,
+                body.targetLogin, body.role, body.locationId,
+                expires_days=body.expiresInDays,
+            )
+        except OrgStaffDenied:
+            return _response(request, 403, "FORBIDDEN")
+        except OrgStaffConflict:
+            return _response(request, 409, "CONFLICT")
+    # Непрозрачный токен возвращается только один раз и не хранится в открытом виде.
+    return JSONResponse(status_code=201, content=result,
+                        headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/staff-invitations")
+def get_staff_invitations(org_id: str, request: Request, limit: int = 100):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        organization = UUID(org_id)
+    except (TypeError, ValueError):
+        return _response(request, 422, "INVALID_INPUT")
+    if not 1 <= limit <= 100:
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            items = list_staff_invitations(
+                db, request.cookies.get("rp_session", ""), organization, limit=limit
+            )
+        except OrgStaffDenied:
+            return _response(request, 403, "FORBIDDEN")
+    return JSONResponse(content={"items": items},
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/staff-invitations/{invitation_id}/revoke")
+def remove_staff_invitation(org_id: str, invitation_id: str, request: Request):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        organization, ident = UUID(org_id), UUID(invitation_id)
+    except (TypeError, ValueError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request, db):
+            return _response(request, 403, "FORBIDDEN")
+        try:
+            result = revoke_staff_invitation(
+                db, request.cookies.get("rp_session", ""), organization, ident
+            )
+        except OrgStaffDenied:
+            return _response(request, 403, "FORBIDDEN")
+    return JSONResponse(content={"status": result},
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/staff-invitations/audit")
+def get_staff_invitation_audit(org_id: str, request: Request, limit: int = 100):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        organization = UUID(org_id)
+    except (TypeError, ValueError):
+        return _response(request, 422, "INVALID_INPUT")
+    if not 1 <= limit <= 100:
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            events = list_staff_invitation_audit(
+                db, request.cookies.get("rp_session", ""), organization, limit=limit
+            )
+        except OrgStaffDenied:
+            return _response(request, 403, "FORBIDDEN")
+    return JSONResponse(content={"items": events},
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/v1/dev/auto/staff-invitations/accept")
+async def accept_staff_invite(request: Request):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    try:
+        body = StaffInvitationAcceptBody.model_validate(await request.json())
+    except (ValueError, ValidationError, TypeError, UnicodeDecodeError):
+        return _response(request, 422, "INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request, db):
+            return _response(request, 403, "FORBIDDEN")
+        try:
+            result = accept_staff_invitation(
+                db, request.cookies.get("rp_session", ""), body.token
+            )
+        except OrgStaffDenied:
+            return _response(request, 403, "FORBIDDEN")
+        except OrgStaffConflict:
+            return _response(request, 409, "CONFLICT")
+    if result["status"] == "EXPIRED":
+        return _response(request, 410, "INVITATION_EXPIRED")
+    if result["status"] != "ACCEPTED":
+        return _response(request, 409, result["status"])
+    return JSONResponse(status_code=201, content=result,
+                        headers={"Cache-Control": "no-store"})
 
 
 class PolicyBody(BaseModel):

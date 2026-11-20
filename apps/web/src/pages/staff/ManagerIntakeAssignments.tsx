@@ -110,9 +110,10 @@ export function ManagerIntakeAssignments() {
 
   return <section className="auto-intake-delegation" aria-label="Назначения приёмщиков (dev)">
     <h4>Делегирование приёмщика (dev)</h4>
-    <p>Действующий менеджер может назначить или отозвать только INTAKE
-      на **уже назначенный ему автомобиль**. Полномочия MANAGER,
-      филиалы и реальные сотрудники здесь не настраиваются.</p>
+    <p>Только legacy synthetic fixtures без организации: действующий менеджер
+      может назначить или отозвать INTAKE на уже назначенный ему автомобиль.
+      Для автомобиля организации полномочие задаётся grant филиала в
+      «Организации и филиалы»; этот экран не может его заменить или отозвать.</p>
     <form onSubmit={e => { void grant(e); }} aria-label="Выдать доступ приёмщику">
       <FormField id="auto-delegation-vehicle" label="UUID автомобиля для назначения">
         <input id="auto-delegation-vehicle" autoComplete="off" required

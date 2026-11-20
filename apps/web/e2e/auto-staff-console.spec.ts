@@ -173,8 +173,8 @@ test('ADMIN sees tenant-scoped grant and revoke audit and clears data on tenant 
   });
   await page.goto('/staff/auto-admin');
   await page.getByRole('textbox', {name:'UUID организации'}).fill(org);
-  await expect(page.getByRole('button', {name:'Показать журнал'})).toBeVisible();
-  await page.getByRole('button', {name:'Показать журнал'}).click();
+  await expect(page.getByRole('button', {name:'Показать журнал',exact:true})).toBeVisible();
+  await page.getByRole('button', {name:'Показать журнал',exact:true}).click();
   const audit = page.getByRole('region', {name:'Журнал действий сотрудников'});
   await expect(audit.locator('li').filter({hasText:'Назначение'})).toBeVisible();
   await expect(audit.locator('li').filter({hasText:'Отзыв'})).toBeVisible();
@@ -196,10 +196,10 @@ test('ADMIN audit rejects remote 403 and malformed rows without showing identifi
   });
   await page.goto('/staff/auto-admin');
   await page.getByRole('textbox', {name:'UUID организации'}).fill(org);
-  await page.getByRole('button', {name:'Показать журнал'}).click();
+  await page.getByRole('button', {name:'Показать журнал',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Доступ к журналу запрещён');
   malformed = true;
-  await page.getByRole('button', {name:'Показать журнал'}).click();
+  await page.getByRole('button', {name:'Показать журнал',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить журнал');
   await expect(page.getByText('private')).toHaveCount(0);
 });

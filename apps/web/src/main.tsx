@@ -6,6 +6,7 @@ import { CustomerAccount } from './pages/customer/CustomerAccount';
 import { CustomerLogin } from './pages/customer/CustomerLogin';
 import { StaffPortal } from './pages/staff/StaffPortal';
 import { AutoStaffAdmin } from './pages/staff/AutoStaffAdmin';
+import { AutoStaffInvitationAccept } from './pages/staff/AutoStaffInvitationAccept';
 import { AutoOrganizationSetup } from './pages/staff/AutoOrganizationSetup';
 import { AutoCalendar } from './pages/staff/AutoCalendar';
 import { AutoBayOccupancy } from './pages/staff/AutoBayOccupancy';
@@ -159,6 +160,7 @@ function App() {
       <Route path="/account/login" element={<CustomerLogin />} />
       <Route path="/account/*" element={<CustomerAccount />} />
       <Route path="/staff/auto-admin" element={<AutoStaffAdmin />} />
+      <Route path="/staff/auto-invitation" element={<AutoStaffInvitationAccept />} />
       <Route path="/staff/auto-setup" element={<AutoOrganizationSetup />} />
       <Route path="/staff/auto-calendar" element={<AutoCalendar />} />
       <Route path="/staff/auto-bay-occupancy" element={<AutoBayOccupancy />} />

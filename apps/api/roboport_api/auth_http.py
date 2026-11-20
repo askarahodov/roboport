@@ -196,7 +196,7 @@ def csrf_bootstrap(request: Request):
 
 @router.get("/api/v1/dev/staff/access")
 def staff_access(request: Request):
-    """Only active scoped staff roles; no customer identity or PII in response."""
+    """Вернуть активные legacy/org роли и собственные scopes без данных клиентов."""
     dsn=_dsn(request)
     if dsn is None:
         return _error(request,403)
@@ -204,7 +204,7 @@ def staff_access(request: Request):
         actor=session_subject(conn,request.cookies.get("rp_session",""))
         if actor is None:
             return _error(request,401)
-        rows=conn.execute("""
+        legacy_rows=conn.execute("""
             SELECT DISTINCT role_code FROM user_role
             WHERE user_id=%s AND role_code IN
               ('INTAKE','ENGINEER','STOCK','MANAGER','FINANCE','AUDITOR')
@@ -212,10 +212,36 @@ def staff_access(request: Request):
               AND (expires_at IS NULL OR expires_at>now())
             ORDER BY role_code
         """,(actor,)).fetchall()
-    if not rows:
+        organization_rows=conn.execute("""
+            SELECT DISTINCT g.organization_id,g.location_id,g.role_code
+            FROM auto_organization_role_grant g
+            JOIN auto_organization o ON o.id=g.organization_id
+            LEFT JOIN auto_service_location l ON l.id=g.location_id
+            WHERE g.user_id=%s AND g.revoked_at IS NULL
+              AND o.disabled_at IS NULL
+              AND (g.location_id IS NULL OR
+                   (l.id=g.location_id AND l.organization_id=o.id
+                    AND l.disabled_at IS NULL))
+            ORDER BY g.organization_id,g.location_id,g.role_code
+        """,(actor,)).fetchall()
+    legacy_roles=[role for (role,) in legacy_rows]
+    role_map={"MECHANIC":"ENGINEER","WAREHOUSE":"STOCK","CASHIER":"FINANCE"}
+    organization_scopes=[
+        {"organizationId":str(organization_id),
+         "locationId":str(location_id) if location_id else None,
+         "role":role}
+        for organization_id,location_id,role in organization_rows
+    ]
+    roles=sorted(set(legacy_roles)|{
+        role_map.get(role,role) for _,_,role in organization_rows
+    })
+    if not roles:
         return _error(request,403)
-    return JSONResponse(content={"roles":[role for (role,) in rows]},
-                        headers={"Cache-Control":"no-store"})
+    return JSONResponse(content={
+        "roles":roles,
+        "legacyRoles":legacy_roles,
+        "organizationScopes":organization_scopes,
+    },headers={"Cache-Control":"no-store"})
 
 
 @router.get("/api/v1/dev/staff/queue")

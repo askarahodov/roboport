@@ -33,10 +33,11 @@ function fields(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Внешний UI не управляет назначениями: право INTAKE/MANAGER и object scope проверяет сервер. */
-export function StaffAutoClaims({ roles }: { roles: string[] }) {
+/** UI показывает операции по роли; сервер проверяет tenant, филиал и актуальную связь. */
+export function StaffAutoClaims({ roles, legacyRoles = [] }: { roles: string[]; legacyRoles?: string[] }) {
   const intake = roles.includes('INTAKE');
   const manager = roles.includes('MANAGER');
+  const legacyManager = legacyRoles.includes('MANAGER');
   const [vehicleId, setVehicleId] = React.useState('');
   const [customerId, setCustomerId] = React.useState('');
   const [linkId, setLinkId] = React.useState('');
@@ -153,9 +154,10 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
   return <Card>
     <section className="auto-claim-panel" aria-label="Автомобильные привязки (dev)">
       <h3>Привязка автомобиля (dev)</h3>
-      <p>Только синтетические данные и HTTPS loopback. Сервер дополнительно проверяет
-        действующую роль и назначение на конкретный автомобиль. Владение не
-        подтверждается автоматически после создания связи.</p>
+      <p>Только синтетические данные и HTTPS loopback. Для автомобиля организации сервер
+        проверяет активную роль в организации и филиал неизменяемой привязки; старые
+        незакреплённые fixtures используют прежнее объектное назначение. Создание связи
+        не подтверждает владение автоматически.</p>
       {intake && <div className="auto-claim-forms">
         <form onSubmit={e => { e.preventDefault(); createLink(); }}
           aria-label="Создание ожидающей связи">
@@ -230,7 +232,7 @@ export function StaffAutoClaims({ roles }: { roles: string[] }) {
           </Button>
         </form>
       </div>}
-      {manager && <ManagerIntakeAssignments />}
+      {legacyManager && <ManagerIntakeAssignments />}
       {outcome && <p role={outcome.type === 'error' ? 'alert' : 'status'}>{outcome.message}</p>}
     </section>
   </Card>;

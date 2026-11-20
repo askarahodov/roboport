@@ -220,9 +220,9 @@ def disable_location(conn: psycopg.Connection, token: str,
             raise WorkshopAdminDenied("branch unavailable")
         if row[1] is not None:
             return "ALREADY_DISABLED"
-        # This FOR UPDATE lock serializes retirement with branch-scoped
-        # INSERT guards taking FOR SHARE; after waiting, the checks below see
-        # every create that committed first, while later creates see disabled_at.
+        # FOR UPDATE сериализует отключение с филиальными INSERT-guard,
+        # которые берут FOR SHARE: после ожидания проверка видит уже
+        # зафиксированные создания, а последующие INSERT увидят disabled_at.
         active = conn.execute(
             """SELECT
               EXISTS(SELECT 1 FROM auto_work_bay
@@ -237,12 +237,15 @@ def disable_location(conn: psycopg.Connection, token: str,
               OR EXISTS(SELECT 1 FROM auto_location_role_grant
                         WHERE location_id=%s AND revoked_at IS NULL)
               OR EXISTS(SELECT 1 FROM auto_vehicle_location_binding
-                        WHERE location_id=%s)""",
-            (location, location, location, location, location, location),
+                        WHERE location_id=%s)
+              OR EXISTS(SELECT 1 FROM auto_org_staff_invitation
+                        WHERE location_id=%s AND status='PENDING'
+                          AND expires_at>clock_timestamp())""",
+            (location, location, location, location, location, location, location),
         ).fetchone()[0]
         if active:
             raise WorkshopAdminConflict(
-                "disable bays, cancel shifts, revoke branch grants and transfer vehicles first"
+                "revoke pending invitations, disable bays, cancel shifts, revoke branch grants and transfer vehicles first"
             )
         try:
             with conn.transaction():

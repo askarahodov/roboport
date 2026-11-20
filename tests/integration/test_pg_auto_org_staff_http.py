@@ -85,3 +85,76 @@ def test_dev_staff_http_is_disabled_without_flag(monkeypatch):
     path = f"/api/v1/dev/auto/organizations/{uuid4()}/staff"
     assert client.post(path, json={"userId": str(uuid4()), "role": "INTAKE"}).status_code == 404
     assert client.get(f"{path}/audit").status_code == 404
+
+
+def test_staff_access_includes_only_active_organization_grants_for_invited_users(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d = _scenario()
+    organization, location = uuid4(), uuid4()
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "INSERT INTO auto_organization(id,code,display_name) VALUES(%s,%s,'Synthetic')",
+            (organization, "ORG_" + organization.hex[:10].upper()),
+        )
+        db.execute(
+            """INSERT INTO auto_service_location(id,code,organization_id)
+               VALUES(%s,%s,%s)""",
+            (location, "LOC_" + location.hex[:10].upper(), organization),
+        )
+        for user, role in (
+            (d["intake"], "INTAKE"),
+            (d["manager"], "MANAGER"),
+            (d["other"], "MECHANIC"),
+        ):
+            db.execute(
+                """INSERT INTO auto_organization_role_grant
+                   (id,organization_id,location_id,user_id,role_code)
+                   VALUES(%s,%s,%s,%s,%s)""",
+                (uuid4(), organization, location, user, role),
+            )
+            db.execute(
+                "UPDATE user_role SET revoked_at=now() WHERE user_id=%s",
+                (user,),
+            )
+        for role in ("WAREHOUSE", "CASHIER"):
+            db.execute(
+                """INSERT INTO auto_organization_role_grant
+                   (id,organization_id,user_id,role_code)
+                   VALUES(%s,%s,%s,%s)""",
+                (uuid4(), organization, d["other"], role),
+            )
+
+    client = TestClient(app, base_url="https://127.0.0.1")
+    client.cookies.set("rp_session", d["tokens"][d["intake"]])
+    intake_access = client.get("/api/v1/dev/staff/access")
+    assert intake_access.status_code == 200, intake_access.text
+    assert intake_access.json()["roles"] == ["INTAKE"]
+    assert intake_access.json()["legacyRoles"] == []
+    assert intake_access.json()["organizationScopes"] == [{
+        "organizationId": str(organization),
+        "locationId": str(location),
+        "role": "INTAKE",
+    }]
+
+    client.cookies.set("rp_session", d["tokens"][d["other"]])
+    mapped = client.get("/api/v1/dev/staff/access")
+    assert mapped.status_code == 200, mapped.text
+    assert mapped.json()["roles"] == ["ENGINEER", "FINANCE", "STOCK"]
+    assert mapped.json()["legacyRoles"] == []
+    assert {scope["role"] for scope in mapped.json()["organizationScopes"]} == {
+        "MECHANIC", "WAREHOUSE", "CASHIER",
+    }
+
+    client.cookies.set("rp_session", d["tokens"][d["manager"]])
+    manager_access = client.get("/api/v1/dev/staff/access")
+    assert manager_access.status_code == 200
+    assert manager_access.json()["roles"] == ["MANAGER"]
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """UPDATE auto_organization_role_grant SET revoked_at=now()
+               WHERE organization_id=%s AND user_id=%s AND role_code='MANAGER'""",
+            (organization, d["manager"]),
+        )
+    assert client.get("/api/v1/dev/staff/access").status_code == 403

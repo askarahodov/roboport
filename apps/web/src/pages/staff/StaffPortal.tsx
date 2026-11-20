@@ -4,10 +4,12 @@ import { StaffAutoClaims } from './StaffAutoClaims';
 import { Alert, Skeleton, Badge, Button } from '../../ui';
 import './staff.css';
 
-type Role = 'INTAKE' | 'ENGINEER' | 'STOCK' | 'MANAGER' | 'FINANCE' | 'AUDITOR';
+type Role = 'ADMIN' | 'INTAKE' | 'ENGINEER' | 'STOCK' | 'MANAGER' | 'FINANCE' | 'AUDITOR';
+type OrganizationScope = { organizationId: string; locationId: string | null; role: string };
 
 // Role-specific help reflects real dev scopes; docs links never carry credentials.
 const staffGuides: { role: Role; title: string; path: string }[] = [
+  {role:'ADMIN', title:'Администратор организации', path:'administrator'},
   {role:'INTAKE', title:'Мастер-приёмщик', path:'intake'},
   {role:'ENGINEER', title:'Механик и диагност', path:'mechanic'},
   {role:'STOCK', title:'Кладовщик и закупщик', path:'warehouse'},
@@ -40,7 +42,7 @@ const sectionGuide: Record<string,string> = {
 };
 const helpUrl = (path: string) => '/docs/#/guides/' + path;
 const sections: { to: string; label: string; roles: Role[] }[] = [
-  { to: '/staff/auto-admin', label: 'Организации и филиалы (dev)', roles: ['MANAGER'] },
+  { to: '/staff/auto-admin', label: 'Организации и филиалы (dev)', roles: ['ADMIN'] },
   { to: '/staff/auto-calendar', label: 'Календарь записи (dev)', roles: ['INTAKE','MANAGER'] },
   { to: '/staff/auto-bay-occupancy', label: 'Загрузка постов (dev)', roles: ['INTAKE','MANAGER'] },
   { to: '/staff/auto-crm-leads', label: 'Обращения CRM (dev)', roles: ['INTAKE','MANAGER'] },
@@ -77,11 +79,13 @@ const sections: { to: string; label: string; roles: Role[] }[] = [
 export function StaffPortal() {
   const [state, setState] = React.useState<'loading'|'ready'|'login'|'forbidden'|'error'>('loading');
   const [roles, setRoles] = React.useState<Role[]>([]);
+  const [legacyRoles, setLegacyRoles] = React.useState<Role[]>([]);
+  const [organizationScopes, setOrganizationScopes] = React.useState<OrganizationScope[]>([]);
   const [attempt, setAttempt] = React.useState(0);
 
   React.useEffect(() => {
     const controller = new AbortController();
-    setState('loading');setRoles([]);
+    setState('loading');setRoles([]);setLegacyRoles([]);setOrganizationScopes([]);
     (async () => {
       try {
         const res = await fetch('/api/v1/dev/staff/access', {
@@ -92,13 +96,33 @@ export function StaffPortal() {
         if (res.status === 403 || res.status === 404) { setState('forbidden'); return; }
         if (!res.ok) throw new Error('access unavailable');
         const body: unknown = await res.json();
-        const permitted: Role[] = ['INTAKE','ENGINEER','STOCK','MANAGER','FINANCE','AUDITOR'];
+        const permitted: Role[] = ['ADMIN','INTAKE','ENGINEER','STOCK','MANAGER','FINANCE','AUDITOR'];
         if (!body || typeof body !== 'object' || !('roles' in body) ||
             !Array.isArray(body.roles) ||
             !body.roles.every((role: unknown) => typeof role === 'string' && permitted.includes(role as Role))) {
           throw new Error('invalid access response');
         }
-        if (!controller.signal.aborted) { setRoles(body.roles as Role[]); setState('ready'); }
+        const legacy = 'legacyRoles' in body ? body.legacyRoles : body.roles;
+        const scopes = 'organizationScopes' in body ? body.organizationScopes : [];
+        if (!Array.isArray(legacy) ||
+            !legacy.every((role: unknown) => typeof role === 'string' && permitted.includes(role as Role)) ||
+            !Array.isArray(scopes) ||
+            !scopes.every((scope: unknown) => {
+              if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return false;
+              const item = scope as Record<string, unknown>;
+              return typeof item.organizationId === 'string' &&
+                (item.locationId === null || typeof item.locationId === 'string') &&
+                typeof item.role === 'string' &&
+                ['ADMIN','MANAGER','INTAKE','MECHANIC','WAREHOUSE','CASHIER'].includes(item.role);
+            })) {
+          throw new Error('invalid access scopes');
+        }
+        if (!controller.signal.aborted) {
+          setRoles(body.roles as Role[]);
+          setLegacyRoles(legacy as Role[]);
+          setOrganizationScopes(scopes as OrganizationScope[]);
+          setState('ready');
+        }
       } catch {
         if (!controller.signal.aborted) setState('error');
       }
@@ -139,13 +163,17 @@ export function StaffPortal() {
       <div className="crm-main">
         <h2>Автомобильные операции</h2>
         <p>Роли: {roles.join(' · ') || 'нет назначенных ролей'}. Интерфейс не заменяет серверные проверки прав.</p>
+        {organizationScopes.length > 0 && <p aria-label="Организационные полномочия">Организационные полномочия: {organizationScopes.map(scope =>
+          scope.role + ' · ' + scope.organizationId + ' · ' + (scope.locationId ?? 'Все филиалы')
+        ).join('; ')}.</p>}
         <nav aria-label="Руководства моих ролей" className="staff-role-guides">
           {staffGuides.filter(guide => roles.includes(guide.role)).map(guide=>
             <a key={guide.role} href={helpUrl(guide.path)}>{guide.title}</a>)}
           {roles.includes('MANAGER') && <a href={helpUrl('administrator')}>Организации и назначения</a>}
         </nav>
         {allowed.length === 0 && <Alert>Для этой роли пока нет доступных автомобильных разделов.</Alert>}
-        {roles.some(r => r === 'INTAKE' || r === 'MANAGER') && <StaffAutoClaims roles={roles} />}
+        {roles.some(r => r === 'INTAKE' || r === 'MANAGER') &&
+          <StaffAutoClaims roles={roles} legacyRoles={legacyRoles} />}
       </div>
     </div>}
   </section>;
