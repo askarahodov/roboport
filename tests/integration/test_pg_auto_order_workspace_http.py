@@ -7,6 +7,7 @@ from roboport_api.auto_order_workspace import read_order_workspace
 from roboport_api.auto_stock_service import AutoStockDenied
 from test_pg_baseline import DSN
 from test_pg_auto_work_order_register_http import setup
+from roboport_api.auto_document_access import publish_policy
 
 
 def test_workspace_reads_actual_stages_not_price_or_personal_data(monkeypatch):
@@ -22,8 +23,8 @@ def test_workspace_reads_actual_stages_not_price_or_personal_data(monkeypatch):
     assert response.headers["x-content-type-options"]=="nosniff"
     expected={
         "services":"EMPTY","inspection":"MISSING","intakeAct":"MISSING",
-        "estimate":"MISSING","execution":"NOT_STARTED","quality":"NOT_CHECKED",
-        "technicalDocuments":"DRAFT",
+        "estimate":"RESTRICTED","execution":"NOT_STARTED","quality":"NOT_CHECKED",
+        "technicalDocuments":"RESTRICTED",
     }
     payload=response.json()
     assert payload=={
@@ -90,3 +91,31 @@ def test_workspace_direct_service_requires_authenticated_identities():
         read_order_workspace(None,"",uuid4(),uuid4(),uuid4())
     with pytest.raises(AutoStockDenied,match="FORBIDDEN"):
         read_order_workspace(None,"test",uuid4(),uuid4(),"not uuid")
+
+
+def test_workspace_redacts_estimate_and_handover_policy_denials(monkeypatch):
+    d,org,loc,_,_,orders,client,_=setup(monkeypatch,count=1)
+    order=orders[0]
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,%s,%s,'MANAGER')""",(uuid4(),org,loc,d["manager"]))
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,NULL,%s,'ADMIN')""",(uuid4(),org,d["manager"]))
+        admin=d["tokens"][d["manager"]]
+        for document in ("ESTIMATE","HANDOVER"):
+            publish_policy(
+                db,admin,org,request_key=uuid4(),role="MANAGER",
+                loc=loc,user=None,document=document,cap="READ",
+                allowed=False,not_before=None,
+            )
+    client.cookies.set("rp_session",d["tokens"][d["manager"]])
+    path=(f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+          f"/orders/{order}/workspace")
+    response=client.get(path)
+    assert response.status_code==200,response.text
+    assert response.json()["steps"]["estimate"]=="RESTRICTED"
+    assert response.json()["steps"]["technicalDocuments"]=="RESTRICTED"
+    assert response.json()["steps"]["intakeAct"]=="MISSING"
+    assert response.json()["releaseAllowed"] is False
