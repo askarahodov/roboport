@@ -11,6 +11,7 @@ from test_pg_auto_order_customer_read import prepare
 from test_pg_auto_stock_ledger import sku, record
 from test_pg_auto_stock_service import grant
 from test_pg_auto_work_order_stock import act
+from roboport_api.auto_document_access import publish_policy
 
 
 def test_overview_requires_both_grants_and_rechecks_revocation(monkeypatch):
@@ -103,3 +104,27 @@ def test_overview_pagination_tenant_binding_and_revocation(monkeypatch):
 def test_overview_rejects_invalid_cursor_before_db():
     with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
         get_order_overview(None, "session", uuid4(), uuid4(), uuid4(), cursor="not-a-signed-cursor")
+
+
+def test_combined_order_overview_requires_both_document_policies(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d,org,loc,order,_,_=prepare()
+    with psycopg.connect(DSN) as db:
+        item=sku(db,org,loc)
+        record(db,item,"RECEIPT",2)
+        grant(db,d["intake"],org,loc)
+        act(db,d,org,loc,order,item,"RESERVE",1)
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,NULL,%s,'ADMIN')""",(uuid4(),org,d["manager"]))
+        publish_policy(
+            db,d["tokens"][d["manager"]],org,request_key=uuid4(),
+            role="WAREHOUSE",loc=loc,user=None,document="SUPPLIER_ORDER",
+            cap="READ",allowed=False,not_before=None,
+        )
+    client=TestClient(app,base_url="https://127.0.0.1")
+    client.cookies.set("rp_session",d["tokens"][d["intake"]])
+    path=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/overview"
+    assert client.get(path).status_code==403
