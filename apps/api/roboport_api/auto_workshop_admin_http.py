@@ -119,7 +119,7 @@ async def post_location(org_id: str, request: Request):
         try:
             ident = create_location(
                 db, request.cookies.get("rp_session", ""), organization,
-                body.code, body.timeZone,
+                body.code, body.timeZone, request.headers.get('idempotency-key'),
             )
         except WorkshopAdminDenied:
             return _denied(request)
@@ -173,7 +173,7 @@ async def post_bay(org_id: str, location_id: str, request: Request):
         try:
             ident = create_bay(
                 db, request.cookies.get("rp_session", ""), organization,
-                location, body.code,
+                location, body.code, request.headers.get('idempotency-key'),
             )
         except WorkshopAdminDenied:
             return _denied(request)
@@ -228,6 +228,7 @@ async def post_shift(org_id: str, location_id: str, request: Request):
             ident = create_shift(
                 db, request.cookies.get("rp_session", ""), organization,
                 location, body.userId, body.startsAt, body.endsAt,
+                request.headers.get('idempotency-key'),
             )
         except WorkshopAdminDenied:
             return _denied(request)
