@@ -1,0 +1,251 @@
+"""PG17: one-time organization staff invitations, acceptance, revocation and audit."""
+from datetime import datetime, timedelta, timezone
+import hashlib
+from uuid import uuid4
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from roboport_api.main import app
+from test_pg_auto_vehicle_claim_http import _scenario
+from test_pg_baseline import DSN
+
+
+def _setup(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    data = _scenario()
+    org_a, org_b, location = uuid4(), uuid4(), uuid4()
+    with psycopg.connect(DSN) as db:
+        for org in (org_a, org_b):
+            db.execute(
+                "INSERT INTO auto_organization(id,code,display_name) VALUES(%s,%s,'Synthetic')",
+                (org, "ORG_" + org.hex[:10].upper()),
+            )
+        db.execute(
+            "INSERT INTO auto_service_location(id,code,organization_id) VALUES(%s,%s,%s)",
+            (location, "LOC_" + location.hex[:10].upper(), org_a),
+        )
+        db.execute(
+            """INSERT INTO auto_organization_role_grant
+               (id,organization_id,user_id,role_code) VALUES(%s,%s,%s,'ADMIN')""",
+            (uuid4(), org_a, data["manager"]),
+        )
+        logins = dict(db.execute(
+            "SELECT id,normalized_login FROM app_user WHERE id=ANY(%s)",
+            ([data["intake"], data["other"]],),
+        ).fetchall())
+    return data, org_a, org_b, location, logins
+
+
+def _client(data, user):
+    client = TestClient(app, base_url="https://127.0.0.1")
+    client.cookies.set("rp_session", data["tokens"][user])
+    return client
+
+
+def _headers(data, user):
+    return {
+        "Origin": "https://127.0.0.1",
+        "X-CSRF-Token": data["csrf"][user],
+    }
+
+
+def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
+    data, org_a, org_b, location, logins = _setup(monkeypatch)
+    admin = _client(data, data["manager"])
+    target = _client(data, data["intake"])
+    wrong_user = _client(data, data["other"])
+    url = f"/api/v1/dev/auto/organizations/{org_a}/staff-invitations"
+    payload = {
+        "targetLogin": logins[data["intake"]],
+        "role": "INTAKE",
+        "locationId": str(location),
+        "expiresInDays": 7,
+    }
+
+    assert admin.post(url, json=payload).status_code == 403
+    assert admin.post(url, json=payload, headers=_headers(data, data["manager"])).status_code == 201
+    created = admin.post(url, json=payload, headers=_headers(data, data["manager"]))
+    assert created.status_code == 409
+    # The first request above succeeded; its token is obtained from a separate,
+    # valid invite below so no plaintext token is retained in a test log.
+    first = admin.get(url)
+    assert first.status_code == 200
+    assert first.json()["items"] == []
+    assert admin.post(url, json={**payload, "role": "ADMIN"},
+                      headers=_headers(data, data["manager"])).status_code == 422
+
+    # Revoke the first invitation after reading its digest from the database:
+    # the service never exposes a stored plaintext token or a listable secret.
+    with psycopg.connect(DSN) as db:
+        row = db.execute(
+            """SELECT id,token_hash FROM auto_org_staff_invitation
+               WHERE organization_id=%s AND target_user_id=%s""",
+            (org_a, data["intake"]),
+        ).fetchone()
+    assert row is not None
+    invitation_id, token_hash = row
+    assert len(token_hash.strip()) == 64
+    assert admin.get(url).json()["items"][0]["status"] == "PENDING"
+    assert "token" not in admin.get(url).json()["items"][0]
+
+    # A new invitation is created for another role and returned once to the admin.
+    payload2 = {**payload, "role": "CASHIER"}
+    created = admin.post(url, json=payload2, headers=_headers(data, data["manager"]))
+    assert created.status_code == 201, created.text
+    assert created.headers["cache-control"] == "no-store"
+    invite = created.json()
+    secret = invite["token"]
+    assert len(secret) == 43
+    assert hashlib.sha256(secret.encode("ascii")).hexdigest() == (
+        psycopg.connect(DSN).__enter__().execute(
+            "SELECT token_hash FROM auto_org_staff_invitation WHERE id=%s",
+            (invite["invitationId"],),
+        ).fetchone()[0].strip()
+    )
+
+    # A different authenticated account cannot consume the token.
+    wrong = wrong_user.post(
+        "/api/v1/dev/auto/staff-invitations/accept",
+        json={"token": secret}, headers=_headers(data, data["other"]),
+    )
+    assert wrong.status_code == 403
+
+    accepted = target.post(
+        "/api/v1/dev/auto/staff-invitations/accept",
+        json={"token": secret}, headers=_headers(data, data["intake"]),
+    )
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json()["status"] == "ACCEPTED"
+    assert accepted.json()["role"] == "CASHIER"
+    replay = target.post(
+        "/api/v1/dev/auto/staff-invitations/accept",
+        json={"token": secret}, headers=_headers(data, data["intake"]),
+    )
+    assert replay.status_code == 409
+
+    listed = admin.get(url)
+    assert listed.status_code == 200
+    accepted_row = next(x for x in listed.json()["items"]
+                        if x["invitationId"] == invite["invitationId"])
+    assert accepted_row["status"] == "ACCEPTED"
+    assert accepted_row["grantId"] == accepted.json()["grantId"]
+    assert "token" not in accepted_row
+
+    audit = admin.get(
+        f"/api/v1/dev/auto/organizations/{org_a}/staff-invitations/audit"
+    )
+    assert audit.status_code == 200
+    events = [x for x in audit.json()["items"]
+              if x["invitationId"] == invite["invitationId"]]
+    assert {x["action"] for x in events} == {"CREATED", "ACCEPTED"}
+    assert {x["actorId"] for x in events} == {
+        str(data["manager"]), str(data["intake"])
+    }
+
+    with psycopg.connect(DSN) as db:
+        grant_actor = db.execute(
+            """SELECT actor_id FROM auto_org_staff_action
+               WHERE grant_id=%s AND action='GRANTED'""",
+            (accepted.json()["grantId"],),
+        ).fetchone()
+        assert grant_actor == (data["manager"],)
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute(
+                    "UPDATE auto_org_staff_invitation_event SET action='REVOKED' WHERE invitation_id=%s",
+                    (invite["invitationId"],),
+                )
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute(
+                    "DELETE FROM auto_org_staff_invitation WHERE id=%s",
+                    (invite["invitationId"],),
+                )
+
+
+def test_invitation_revoke_expiry_and_branch_retirement_blocker(monkeypatch):
+    data, org_a, org_b, location, logins = _setup(monkeypatch)
+    admin = _client(data, data["manager"])
+    target = _client(data, data["other"])
+    base = f"/api/v1/dev/auto/organizations/{org_a}/staff-invitations"
+    headers = _headers(data, data["manager"])
+
+    # Pending branch-scoped invitations are dependencies: a branch cannot be
+    # retired while it still has an outstanding employee invitation.
+    created = admin.post(base, json={
+        "targetLogin": logins[data["other"]], "role": "WAREHOUSE",
+        "locationId": str(location), "expiresInDays": 7,
+    }, headers=headers)
+    assert created.status_code == 201, created.text
+    invitation = created.json()
+    disable = f"/api/v1/dev/auto/organizations/{org_a}/locations/{location}/disable"
+    blocked = admin.post(disable, headers=headers)
+    assert blocked.status_code == 409
+
+    revoked = admin.post(
+        f"{base}/{invitation['invitationId']}/revoke", headers=headers
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "REVOKED"
+    rejected = target.post(
+        "/api/v1/dev/auto/staff-invitations/accept",
+        json={"token": invitation["token"]},
+        headers=_headers(data, data["other"]),
+    )
+    assert rejected.status_code == 409
+
+    # Expired tokens transition once to EXPIRED and can never grant authority.
+    expired_token = "Z" * 43
+    expired_id = uuid4()
+    old = datetime.now(timezone.utc) - timedelta(days=2)
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """INSERT INTO auto_org_staff_invitation
+               (id,organization_id,target_user_id,target_login,role_code,token_hash,
+                created_by,created_at,expires_at)
+               VALUES(%s,%s,%s,%s,'INTAKE',%s,%s,%s,%s)""",
+            (expired_id, org_a, data["other"], logins[data["other"]],
+             hashlib.sha256(expired_token.encode("ascii")).hexdigest(),
+             data["manager"], old, old + timedelta(days=1)),
+        )
+        db.execute(
+            """INSERT INTO auto_org_staff_invitation_event
+               (id,invitation_id,organization_id,actor_id,action)
+               VALUES(%s,%s,%s,%s,'CREATED')""",
+            (uuid4(), expired_id, org_a, data["manager"]),
+        )
+    expired = target.post(
+        "/api/v1/dev/auto/staff-invitations/accept",
+        json={"token": expired_token},
+        headers=_headers(data, data["other"]),
+    )
+    assert expired.status_code == 410
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT status FROM auto_org_staff_invitation WHERE id=%s",
+            (expired_id,),
+        ).fetchone() == ("EXPIRED",)
+        assert db.execute(
+            """SELECT action FROM auto_org_staff_invitation_event
+               WHERE invitation_id=%s ORDER BY created_at""",
+            (expired_id,),
+        ).fetchall() == [("CREATED",), ("EXPIRED",)]
+
+
+def test_invitation_is_tenant_scoped_and_disabled_without_dev_flag(monkeypatch):
+    data, org_a, org_b, location, logins = _setup(monkeypatch)
+    admin = _client(data, data["manager"])
+    path = f"/api/v1/dev/auto/organizations/{org_b}/staff-invitations"
+    payload = {"targetLogin": logins[data["intake"]], "role": "INTAKE"}
+    assert admin.post(path, json=payload,
+                      headers=_headers(data, data["manager"])).status_code == 403
+    monkeypatch.delenv("ROBOport_SYNTHETIC_AUTO_API", raising=False)
+    disabled = admin.post(
+        f"/api/v1/dev/auto/organizations/{org_a}/staff-invitations",
+        json=payload, headers=_headers(data, data["manager"]),
+    )
+    assert disabled.status_code == 404
