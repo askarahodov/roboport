@@ -73,7 +73,8 @@ function mockWorkshop(page:any) {
   }));
 }
 
-test('organization ADMIN creates a branch, work bay and shift, then cancels with audit', async ({page})=>{
+test('organization ADMIN creates a branch, work bay and shift, then cancels with audit', async ({page},testInfo)=>{
+  await page.setViewportSize({width:1280,height:900});
   await mockWorkshop(page);
   await page.goto('/staff/auto-setup');
   await expect(page.getByRole('heading',{name:'Организация, филиалы и посты'})).toBeVisible();
@@ -104,6 +105,13 @@ test('organization ADMIN creates a branch, work bay and shift, then cancels with
   await page.getByRole('button',{name:'Подтвердить отмену'}).click();
   await expect(page.getByText('Смена отменена.')).toBeVisible();
   await expect(page.getByRole('cell',{name:'SHIFT_CANCELED'})).toBeVisible();
+
+  await page.getByLabel('Тема оформления').selectOption('light');
+  await expect(page.locator('main.app')).not.toHaveClass(/dark/);
+  await page.screenshot({path:testInfo.outputPath('auto-organization-setup-light-1280.png'),fullPage:true});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app')).toHaveClass(/dark/);
+  await page.screenshot({path:testInfo.outputPath('auto-organization-setup-dark-1280.png'),fullPage:true});
 });
 
 test('workshop setup fails closed for a non-admin organization member',async({page})=>{
@@ -116,7 +124,7 @@ test('workshop setup fails closed for a non-admin organization member',async({pa
   await expect(page.getByRole('button',{name:'Создать филиал'})).toHaveCount(0);
 });
 
-test('organization setup remains keyboard-usable without horizontal page overflow on mobile',async({page})=>{
+test('organization setup remains keyboard-usable without horizontal page overflow on mobile',async({page},testInfo)=>{
   await page.setViewportSize({width:390,height:844});
   await mockWorkshop(page);
   await page.goto('/staff/auto-setup');
@@ -127,4 +135,8 @@ test('organization setup remains keyboard-usable without horizontal page overflo
   await expect(page.getByLabel('Код филиала')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByLabel('Часовой пояс IANA')).toBeFocused();
+  await expect(page.getByText('Филиалы ещё не созданы.')).toBeVisible();
+  await page.getByLabel('Тема оформления').selectOption('light');
+  await expect(page.locator('main.app')).not.toHaveClass(/dark/);
+  await page.screenshot({path:testInfo.outputPath('auto-organization-setup-mobile-390.png'),fullPage:true});
 });
