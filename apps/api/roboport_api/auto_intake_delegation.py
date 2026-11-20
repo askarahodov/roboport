@@ -36,7 +36,9 @@ def _manager(
     if organization_granted is not None:
         if not organization_granted:
             raise VehicleClaimRejected("no active organization manager grant")
-        return actor
+        # В tenant-bound модели полномочие задаётся филиальным grant;
+        # отдельное per-vehicle делегирование не может менять его эффект.
+        raise VehicleClaimRejected("organization staff is managed at branch scope")
 
     # Совместимость только для незакреплённых legacy fixtures.
     granted = manager_assignment(conn, actor, vehicle_id)
