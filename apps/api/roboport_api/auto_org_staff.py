@@ -228,11 +228,11 @@ def create_staff_invitation(
     raw_token = secrets.token_urlsafe(32)
     digest = hashlib.sha256(raw_token.encode("ascii")).hexdigest()
     invitation_id = uuid4()
-    created_at = datetime.now(timezone.utc)
-    expires_at = created_at + timedelta(days=expires_days)
 
     with conn.transaction():
         actor = _admin(conn, token, organization_id)
+        created_at = conn.execute("SELECT clock_timestamp()").fetchone()[0]
+        expires_at = created_at + timedelta(days=expires_days)
         target = conn.execute(
             """SELECT id FROM app_user
                WHERE normalized_login=%s AND status='ACTIVE' FOR SHARE""",
@@ -322,7 +322,7 @@ def list_staff_invitations(
                ORDER BY created_at DESC,id DESC LIMIT %s""",
             (organization_id, limit),
         ).fetchall()
-        now = datetime.now(timezone.utc)
+        now = conn.execute("SELECT clock_timestamp()").fetchone()[0]
         return [{
             "invitationId": str(ident),
             "targetLogin": login,
@@ -357,7 +357,7 @@ def revoke_staff_invitation(
             return "ALREADY_ACCEPTED"
         if status == "EXPIRED":
             return "EXPIRED"
-        now = datetime.now(timezone.utc)
+        now = conn.execute("SELECT clock_timestamp()").fetchone()[0]
         if expires_at <= now:
             conn.execute(
                 """UPDATE auto_org_staff_invitation
@@ -414,7 +414,7 @@ def accept_staff_invitation(
         ).fetchone()
         if user is None or user[0] != target_login:
             raise OrgStaffDenied("invitation unavailable")
-        now = datetime.now(timezone.utc)
+        now = conn.execute("SELECT clock_timestamp()").fetchone()[0]
         if expires_at <= now:
             conn.execute(
                 """UPDATE auto_org_staff_invitation
