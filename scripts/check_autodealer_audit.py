@@ -51,7 +51,7 @@ def validate(document: object, matrix_text: str) -> list[str]:
     records = document.get("records")
     if not isinstance(records, list):
         return problems + ["records must be an array"]
-    if len(records) < 49:
+    if len(records) < 61:
         problems.append("verified coverage must not silently shrink")
     urls: set[str] = set()
     ids: set[str] = set()
@@ -138,7 +138,7 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
     items = document.get("requirements")
     if not isinstance(items,list):
         return problems+["requirements must be a list"]
-    if len(items)<80:
+    if len(items)<103:
         problems.append("atomic acceptance requirements silently shrank")
     seen_ids=set()
     covered=set()

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-19",
+  "checkedOn": "2026-11-20",
   "source": "https://autodealer.ru/online/help/",
-  "completeness": "PARTIAL: reviewed or search-indexed public articles; NOT exhaustive navigation and NOT a statement of implementation readiness",
+  "completeness": "PARTIAL: atomic acceptance criteria cover the currently inventoried public Online help pages; exhaustive nested navigation and implementation readiness are NOT proven",
   "requirements": [
     {
       "id": "ADF-001",
@@ -1059,6 +1059,83 @@
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
       "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-097",
+      "pageId": "ADP-055",
+      "matrixId": "C02",
+      "ownerIssue": 115,
+      "capability": "Поиск предложений поставщиков и собственных остатков",
+      "acceptance": "Поиск по артикулу сначала показывает разрешённые остатки собственных складов, затем предложения подключённых поставщиков с производителем, номером, наличием, сроком, ценой, наценкой и поставщиком; фильтрация, группировка и сортировка не раскрывают чужой филиал или закупочную цену клиенту.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-098",
+      "pageId": "ADP-056",
+      "matrixId": "D07",
+      "ownerIssue": 170,
+      "capability": "Каталог и подключение кассовых служб",
+      "acceptance": "Показать поддерживаемые кассовые службы и отдельные настройки для каждой; регистрация, активация, региональная доступность и статус соединения привязаны к организации и филиалу. Секреты маскируются и не логируются; реальные фискальные операции запрещены до legal/operations gate.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-099",
+      "pageId": "ADP-057",
+      "matrixId": "D12",
+      "ownerIssue": 169,
+      "capability": "Сводная история и статистика клиента",
+      "acceptance": "Открыть документы, работы, товары, карты лояльности, сводку и ленту контактов; фильтровать документы по автомобилю, предприятию, типу и долгу. Различать клиентские товары и товары автосервиса; новый владелец автомобиля не получает документы прежнего заказчика.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-100",
+      "pageId": "ADP-058",
+      "matrixId": "B03",
+      "ownerIssue": 167,
+      "capability": "Интеграция диагностического оборудования",
+      "acceptance": "Отправить из разрешённого заказ-наряда только необходимый контекст автомобиля и клиента на настроенный стенд; поддержать несколько стендов, защищённый ротируемый ключ, проверку источника и неизменяемую привязку возвращённого отчёта к WorkOrder/Vehicle. Поддельный или повторный callback не создаёт второй результат.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-101",
+      "pageId": "ADP-059",
+      "matrixId": "D07",
+      "ownerIssue": 170,
+      "capability": "Региональная интеграция re:Kassa",
+      "acceptance": "В изолированном sandbox создать и активировать кассу, связать OFD ID/token, пароль приложения, PIN и предприятие, проверить соединение и отзыв/ротацию секретов. Повторный callback идемпотентен; реальные платежи и фискальные документы не включаются до юридической и операционной приёмки.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-102",
+      "pageId": "ADP-060",
+      "matrixId": "C02",
+      "ownerIssue": 115,
+      "capability": "Безопасное подключение поставщика",
+      "acceptance": "Подключить provider service по отдельно выданным credentials/API key, задать timeout и проверить соединение; связать service с юридическим контрагентом. Отсутствующая связь или timeout закрывает операцию fail-closed; секреты шифруются, маскируются и исключаются из логов и браузерных ответов.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-103",
+      "pageId": "ADP-061",
+      "matrixId": "C02",
+      "ownerIssue": 115,
+      "capability": "Сравнение и выбор запчастей",
+      "acceptance": "Искать по номеру детали среди разрешённых поставщиков и собственного склада, показывать оригиналы/аналоги, производителя, цену, наценку, наличие, срок, минимальное количество и ограничения возврата. Клиентский режим скрывает поставщика, закупочную цену и наценку; корзина создаёт только идемпотентную позицию в своём филиале.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
     }
   ]
 }

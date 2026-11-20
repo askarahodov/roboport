@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-19",
+  "checkedOn": "2026-11-20",
   "source": "AutoDealer Online public help (not desktop help)",
-  "completeness": "PARTIAL: discovery from public Online help articles and indexed excerpts; complete navigation hierarchy, every nested instruction and interactive function are NOT yet independently verified",
+  "completeness": "PARTIAL: discovery from public Online help articles, direct navigation links and indexed excerpts; complete navigation hierarchy, every nested instruction and interactive function are NOT yet independently verified",
   "records": [
     {
       "id": "ADP-001",
@@ -184,7 +184,7 @@
       "scenario": "CRM включён по умолчанию, автоматически создаёт сделки и отслеживает путь клиента от первого обращения до оплаты; вход через CRM, Канбан, Сделки и Воронку продаж; параметры управляются в общих настройках",
       "gap": "Есть synthetic лиды, нет подтверждённого revenue lineage",
       "evidence": "page",
-      "checkedOn": "2026-11-19"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-014",
@@ -198,7 +198,7 @@
       "scenario": "Контрагенты, авто, контакты, балансы, рекомендации",
       "gap": "Нет consent-complete customer master и реальных балансов",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-015",
@@ -254,7 +254,7 @@
       "scenario": "Конверсия, движение сделок и реальные суммы продаж",
       "gap": "Нет verified payments и полной событийной conversion аналитики",
       "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-019",
@@ -576,7 +576,7 @@
       "scenario": "Разговоры с клиентами и история сообщений по каналам",
       "gap": "Нет production-провайдеров чата, согласий, фактической доставки и живой переписки",
       "evidence": "page",
-      "checkedOn": "2026-11-19"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-042",
@@ -604,7 +604,7 @@
       "scenario": "Интеграция с онлайн-кассой и удалённая печать чеков",
       "gap": "Нет сертифицированного кассового провайдера и отправки фискальных чеков",
       "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-044",
@@ -759,6 +759,104 @@
       "gap": "Нет реального UIS adapter, безопасного secret lifecycle, webhook authentication/idempotency, call event model, employee extension mapping и защищённого хранения recording links",
       "evidence": "page",
       "checkedOn": "2026-11-19"
+    },
+    {
+      "id": "ADP-055",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/protcenka/index.html",
+      "title": "Проценка",
+      "section": "Склад",
+      "matrixId": "C02",
+      "priority": "M2",
+      "issue": 115,
+      "status": "D_PARTIAL",
+      "scenario": "Сводный поиск предложений поставщиков и собственных складских остатков с выбором запчастей для заказа",
+      "gap": "Есть только synthetic предложения; нет лицензированных supplier adapters, подтверждённой применяемости и договорных цен",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-056",
+      "url": "https://autodealer.ru/online/help/integratcii/kassy/index.html",
+      "title": "Кассы",
+      "section": "Интеграции",
+      "matrixId": "D07",
+      "priority": "M3",
+      "issue": 170,
+      "status": "PLANNED",
+      "scenario": "Каталог кассовых служб, кассового модуля, QR-дисплеев и региональных интеграций",
+      "gap": "Нет подключённого кассового провайдера, проверенного sandbox и юридического/фискального gate",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-057",
+      "url": "https://autodealer.ru/online/help/klienty/statistika-po-klientam.html",
+      "title": "Статистика по клиентам",
+      "section": "Клиенты",
+      "matrixId": "D12",
+      "priority": "M3",
+      "issue": 169,
+      "status": "D_PARTIAL",
+      "scenario": "История документов, работ, товаров, карт лояльности, сводки и контактов по клиенту",
+      "gap": "Нет доказанной полной финансовой сверки, owner-scoped history и согласованной лояльности",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-058",
+      "url": "https://autodealer.ru/online/help/integratcii/tekhnovektor.html",
+      "title": "ТехноВектор",
+      "section": "Интеграции",
+      "matrixId": "B03",
+      "priority": "M1",
+      "issue": 167,
+      "status": "PLANNED",
+      "scenario": "Интеграция автомобильного диагностического стенда с заказ-нарядом и историей клиента",
+      "gap": "Нет договорного hardware/provider adapter, защищённого подключения и проверки отчёта в автомобильном WorkOrder",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-059",
+      "url": "https://autodealer.ru/online/help/integratcii/kassy/re.-kassa.html",
+      "title": "re:Kassa",
+      "section": "Интеграции",
+      "matrixId": "D07",
+      "priority": "M3",
+      "issue": 170,
+      "status": "PLANNED",
+      "scenario": "Регистрация и активация кассы, привязка OFD credentials и предприятия для Казахстана",
+      "gap": "Нет регионального sandbox, действующего договора/credential lifecycle и юридического подтверждения фискального процесса",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-060",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/protcenka/podkliuchenie-postavshchikov.html",
+      "title": "Подключение поставщиков",
+      "section": "Склад",
+      "matrixId": "C02",
+      "priority": "M2",
+      "issue": 115,
+      "status": "PLANNED",
+      "scenario": "Подключение web-service поставщика, проверка соединения и сопоставление с юридическим контрагентом",
+      "gap": "Нет договорных credentials и provider adapters; секреты, timeout, tenant scope и supplier mapping требуют реализации",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-061",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/protcenka/poisk-zapchastei-v-protcenke.html",
+      "title": "Поиск запчастей в Проценке",
+      "section": "Склад",
+      "matrixId": "C02",
+      "priority": "M2",
+      "issue": 115,
+      "status": "D_PARTIAL",
+      "scenario": "Сравнение наличия, оригиналов, аналогов, цен, наценки, сроков и условий поставщиков",
+      "gap": "Есть synthetic предложения; нет лицензированных данных, реальной доступности, договорных условий и полного клиентского режима",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
     }
   ]
 }
