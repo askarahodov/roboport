@@ -8,6 +8,7 @@ from roboport_api.main import app
 from test_pg_baseline import DSN
 from test_pg_auto_vehicle_claim_http import _scenario
 from test_pg_auto_bay_booking import _org_and_bay
+from roboport_api.auto_document_access import publish_policy
 
 
 def setup(monkeypatch, count=26):
@@ -116,3 +117,41 @@ def test_register_rechecks_scope_after_role_or_proof_revocation(monkeypatch):
     allowed=http.get(url)
     assert allowed.status_code==200,allowed.text
     assert allowed.json()["items"]==[]
+
+
+def _admin_policy(d,org,loc,*,allowed,not_before=None):
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,NULL,%s,'ADMIN')""",(uuid4(),org,d["manager"]))
+        return publish_policy(
+            db,d["tokens"][d["manager"]],org,
+            request_key=uuid4(),role="INTAKE",loc=loc,user=None,
+            document="INTAKE_ACT",cap="READ",allowed=allowed,
+            not_before=not_before,
+        )
+
+
+def test_register_enforces_live_document_deny_policy(monkeypatch):
+    d,org,loc,foreign,foreign_loc,orders,http,url=setup(monkeypatch,2)
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    assert len(http.get(url).json()["items"])==2
+    _admin_policy(d,org,loc,allowed=False)
+    # A valid organization/branch staff grant is not enough to bypass a
+    # newer document-level DENY; list and export share this service gate.
+    assert http.get(url).status_code==403
+    assert http.get(url.replace("/orders","/orders/export")).status_code==403
+
+
+def test_register_applies_history_cutoff_before_pagination(monkeypatch):
+    d,org,loc,foreign,foreign_loc,orders,http,url=setup(monkeypatch,3)
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    assert len(http.get(url).json()["items"])==3
+    cutoff=datetime.now(timezone.utc)+timedelta(days=1)
+    _admin_policy(d,org,loc,allowed=True,not_before=cutoff)
+    response=http.get(url)
+    assert response.status_code==200,response.text
+    assert response.json()["items"]==[]
+    assert response.json().get("nextCursor") is None
+    # The exact-order locator is subject to the same cutoff as the list.
+    assert http.get(url,params={"orderId":str(orders[0])}).json()["items"]==[]
