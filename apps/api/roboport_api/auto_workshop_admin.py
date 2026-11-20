@@ -3,7 +3,7 @@
 Только synthetic/dev. Создание реальной организации и проверка её владельца
 остаются отдельным внешним процессом; этот модуль не создаёт ADMIN.
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import re
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -297,10 +297,8 @@ def create_shift(conn: psycopg.Connection, token: str, organization: UUID,
     if (type(location) is not UUID or type(employee) is not UUID
             or not all(isinstance(value, datetime) and value.tzinfo is not None
                        and value.utcoffset() is not None for value in (starts, ends))
-            or ends.astimezone(timezone.utc) <= starts.astimezone(timezone.utc)
-            or ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc) > timedelta(hours=24)
-            or starts.astimezone(timezone.utc) <= datetime.now(timezone.utc)):
-        raise WorkshopAdminInvalid("shift requires a future timezone-aware interval up to 24 hours")
+            or ends.astimezone(timezone.utc) <= starts.astimezone(timezone.utc)):
+        raise WorkshopAdminInvalid("shift requires a positive timezone-aware interval")
     with conn.transaction():
         actor = _admin(conn, token, organization)
         if conn.execute(
