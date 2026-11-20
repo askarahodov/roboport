@@ -142,10 +142,8 @@ export function AutoStaffAdmin() {
     }catch{if(organizationRef.current===currentOrg)setInviteState('error');}
   },[organization,validOrg]);
 
-  React.useEffect(()=>{
-    if(validOrg&&state==='ready')void loadInvitations();
-    else if(!validOrg){setInvitations([]);setInviteState('idle');}
-  },[loadInvitations,state,validOrg]);
+  // Список приглашений загружается по явному действию администратора:
+  // открытие старого экрана назначений не должно создавать побочные запросы.
 
   async function createInvitation(event:React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -427,6 +425,8 @@ export function AutoStaffAdmin() {
       </form>
       <section aria-label="Приглашения сотрудников">
         <h2>Пригласить сотрудника</h2>
+        <button type="button" disabled={inviteState==='loading'}
+          onClick={()=>void loadInvitations()}>Обновить приглашения</button>
         <p>Приглашение адресуется уже существующей активной учётной записи. Сотрудник входит под тем же логином и принимает одноразовый код. Внешняя доставка и регистрация новых аккаунтов пока отключены.</p>
         <form onSubmit={createInvitation}>
           <label>Логин учётной записи
@@ -451,7 +451,7 @@ export function AutoStaffAdmin() {
             !!inviteLocation.trim()&&!uuid.test(inviteLocation.trim())}>
             Создать приглашение</button>
         </form>
-        {inviteToken&&<section role="group" aria-label="Одноразовый код приглашения">
+        {inviteToken&&<section role="group" aria-label="Созданное приглашение">
           <p>Передайте код сотруднику по проверенному каналу. Сервер хранит только хеш; повторно показать этот код нельзя.</p>
           <input aria-label="Одноразовый код приглашения" readOnly value={inviteToken}/>
           <button type="button" onClick={()=>{
