@@ -131,3 +131,38 @@ test('открытие Docsify из сотруднического кабине�
   const missing=await page.request.get('/docs/guides/absent-issue-123.md');
   expect(missing.status()).toBe(404);
 });
+
+
+test('приглашённый сотрудник получает навигацию из организационных ролей без legacy user_role', async ({ page }) => {
+  await page.route('**/api/v1/dev/staff/access', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({
+      roles: ['ADMIN','INTAKE','MANAGER','ENGINEER','STOCK','FINANCE'],
+      legacyRoles: [],
+      organizationScopes: [
+        {organizationId:'11111111-1111-4111-8111-111111111111',
+          locationId:null,role:'ADMIN'},
+        {organizationId:'11111111-1111-4111-8111-111111111111',
+          locationId:'22222222-2222-4222-8222-222222222222',role:'INTAKE'},
+        {organizationId:'11111111-1111-4111-8111-111111111111',
+          locationId:'22222222-2222-4222-8222-222222222222',role:'MANAGER'},
+        {organizationId:'11111111-1111-4111-8111-111111111111',
+          locationId:'22222222-2222-4222-8222-222222222222',role:'MECHANIC'},
+        {organizationId:'11111111-1111-4111-8111-111111111111',
+          locationId:'22222222-2222-4222-8222-222222222222',role:'WAREHOUSE'},
+        {organizationId:'11111111-1111-4111-8111-111111111111',
+          locationId:'22222222-2222-4222-8222-222222222222',role:'CASHIER'},
+      ],
+    }),
+  }));
+  await page.goto('/staff');
+  const nav = page.getByRole('navigation', { name: 'Навигация СТО' });
+  await expect(nav.getByRole('link', { name: 'Организации и филиалы (dev)' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Календарь записи (dev)' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Диагностика автомобиля (dev)' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Инвентаризация (dev)' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Финансовый отчёт (dev)' })).toBeVisible();
+  await expect(page.getByLabel('Организационные полномочия')).toContainText('11111111-1111-4111-8111-111111111111');
+  await expect(page.getByRole('region', { name: 'Автомобильные привязки (dev)' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Назначения приёмщиков (dev)' })).toHaveCount(0);
+});
