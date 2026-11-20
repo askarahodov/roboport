@@ -72,7 +72,7 @@ test('organization ADMIN creates, revokes and audits a one-time staff invitation
   expect(posts).toHaveLength(2);
   expect(posts[1].path).toBe('/api/v1/dev/auto/organizations/'+org+
     '/staff-invitations/'+invitation+'/revoke');
-  await page.getByRole('button',{name:'Показать журнал приглашений',exact:true}).click();
+  await page.getByRole('button',{name:'Показать события приглашений',exact:true}).click();
   await expect(page.getByText(/Создано/)).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
 });
@@ -88,7 +88,7 @@ test('invitee must be authenticated as the invited account before accepting',asy
     return permitted?route.fulfill({
       status:201,contentType:'application/json',
       body:JSON.stringify({status:'ACCEPTED',organizationId:org,
-        grantId:invitation,role:'MECHANIC',locationId}),
+        grantId:invitation,role:'MECHANIC',locationId:location}),
     }):route.fulfill({
       status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}',
     });
