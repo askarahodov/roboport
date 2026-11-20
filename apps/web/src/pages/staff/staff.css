@@ -45,3 +45,20 @@
 .crm-kanban fieldset label{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;margin:.35rem 0}
 .crm-kanban fieldset input:not([type=checkbox]){max-width:12rem}
 .crm-kanban fieldset input[type=checkbox]{width:1.15rem;height:1.15rem;flex:none}
+
+/* Администрирование организации: адаптивные формы, таблицы и состояние DEV. */
+.crm-workspace .crm-heading>div{min-width:0;flex:1 1 18rem}
+.crm-workspace .status-badge{display:inline-flex;align-items:center;flex:none;white-space:nowrap;padding:.35rem .7rem;border:1px solid var(--rp-border);border-radius:999px;background:var(--rp-surface);font-size:.75rem;font-weight:760;letter-spacing:.06em}
+.crm-workspace .form-grid{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.75rem;align-items:end;min-width:0;margin:1rem 0}
+.crm-workspace .form-grid label,.crm-workspace form label{display:grid;gap:.45rem;min-width:0;font-size:.9rem;font-weight:650}
+.crm-workspace form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:.85rem;align-items:end;margin:1rem 0}
+.crm-workspace .form-grid input,.crm-workspace form input,.crm-workspace form select{box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-height:44px;padding:.65rem .75rem;border:1px solid var(--rp-border);border-radius:.65rem;background:var(--rp-surface);color:var(--rp-foreground)}
+.crm-workspace .form-grid button,.crm-workspace form button{min-height:44px;max-width:100%;white-space:normal}
+.crm-workspace .table-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;border:1px solid var(--rp-border);border-radius:.8rem}
+.crm-workspace .table-scroll table{width:100%;min-width:42rem;border-collapse:collapse}
+.crm-workspace .table-scroll th,.crm-workspace .table-scroll td{padding:.7rem .8rem;border-bottom:1px solid var(--rp-border);text-align:left;vertical-align:top}
+.crm-workspace .table-scroll th{background:var(--rp-surface);font-size:.8rem;white-space:nowrap}
+.crm-workspace .table-scroll td{white-space:nowrap}
+.crm-workspace .table-scroll code{white-space:normal;overflow-wrap:anywhere}
+.crm-workspace .table-scroll tr:last-child td{border-bottom:0}
+@media(max-width:600px){.crm-workspace .form-grid{grid-template-columns:minmax(0,1fr)}.crm-workspace form{grid-template-columns:minmax(0,1fr)}.crm-workspace .crm-heading{flex-wrap:wrap}.crm-workspace .status-badge{margin-left:auto}}
