@@ -39,14 +39,15 @@ function parseAudit(raw:unknown):Audit[] {
   return rows;
 }
 
-async function post(url:string,payload?:unknown) {
+async function post(url:string,payload?:unknown,idempotencyKey?:string) {
   const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
   if(!csrf.ok)throw new Error('Сессия недоступна или истекла');
   const value:unknown=await csrf.json();
   if(!value||typeof value!=='object'||!('csrfToken' in value)||
     typeof value.csrfToken!=='string')throw new Error('Не удалось проверить CSRF');
   return fetch(url,{method:'POST',credentials:'include',cache:'no-store',
-    headers:{'X-CSRF-Token':value.csrfToken,'Content-Type':'application/json'},
+    headers:{'X-CSRF-Token':value.csrfToken,'Content-Type':'application/json',
+      ...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{})},
     body:payload===undefined?undefined:JSON.stringify(payload)});
 }
 
@@ -65,6 +66,9 @@ export function AutoOrganizationSetup() {
   const [startsAt,setStartsAt]=React.useState('');
   const [endsAt,setEndsAt]=React.useState('');
   const [confirm,setConfirm]=React.useState<Confirm>(null);
+  const locationKey=React.useRef<string|null>(null);
+  const bayKey=React.useRef<string|null>(null);
+  const shiftKey=React.useRef<string|null>(null);
   const orgRef=React.useRef('');
   orgRef.current=organization.trim();
   const validOrg=uuid.test(organization.trim());
@@ -103,13 +107,16 @@ export function AutoOrganizationSetup() {
     else setState('idle');
   },[organization]);
 
-  async function execute(path:string,payload:unknown,success:string) {
+  async function execute(path:string,payload:unknown,success:string,keyRef?:React.MutableRefObject<string|null>) {
     const operationOrg=organization.trim();
     if(busy||!uuid.test(operationOrg))return;
+    const requestKey=keyRef?(keyRef.current??crypto.randomUUID()):undefined;
+    if(keyRef)keyRef.current=requestKey??null;
     setBusy(true);setMessage('');
     try {
       const response=await post('/api/v1/dev/auto/organizations/'+
-        encodeURIComponent(operationOrg)+path,payload);
+        encodeURIComponent(operationOrg)+path,payload,requestKey);
+      if(keyRef&&(response.ok||response.status<500))keyRef.current=null;
       // Не позволяем запоздалому ответу организации A очистить экран B.
       if(orgRef.current!==operationOrg)return;
       if(!response.ok){
@@ -160,7 +167,7 @@ export function AutoOrganizationSetup() {
       <section aria-labelledby="branches-title">
         <h2 id="branches-title">Филиалы</h2>
         <p>Часовой пояс задаётся при создании и фиксируется после появления первой смены или брони.</p>
-        <form onSubmit={e=>{e.preventDefault();void execute('/locations',{code:branchCode.trim(),timeZone},'Филиал создан.');}}>
+        <form onSubmit={e=>{e.preventDefault();void execute('/locations',{code:branchCode.trim(),timeZone},'Филиал создан.',locationKey);}}>
           <label>Код филиала
             <input value={branchCode} onChange={e=>setBranchCode(e.target.value.toUpperCase())}
               pattern="[A-Z0-9][A-Z0-9_-]{1,31}" minLength={2} maxLength={32} required/>
@@ -187,7 +194,7 @@ export function AutoOrganizationSetup() {
 
       <section aria-labelledby="bays-title">
         <h2 id="bays-title">Рабочие посты</h2>
-        <form onSubmit={e=>{e.preventDefault();void execute('/locations/'+locationId+'/bays',{code:bayCode.trim()},'Рабочий пост создан.');}}>
+        <form onSubmit={e=>{e.preventDefault();void execute('/locations/'+locationId+'/bays',{code:bayCode.trim()},'Рабочий пост создан.',bayKey);}}>
           <label>Филиал
             <select value={locationId} onChange={e=>setLocationId(e.target.value)} required>
               <option value="">Выберите филиал</option>
@@ -219,7 +226,7 @@ export function AutoOrganizationSetup() {
         <h2 id="shifts-title">Смены сотрудников</h2>
         <p>Сотрудник должен иметь действующее назначение в этой организации или филиале. Время вводится в ISO 8601 с явным смещением UTC.</p>
         <form onSubmit={e=>{e.preventDefault();void execute('/locations/'+locationId+'/shifts',
-          {userId:employeeId.trim(),startsAt:startsAt.trim(),endsAt:endsAt.trim()},'Смена создана.');}}>
+          {userId:employeeId.trim(),startsAt:startsAt.trim(),endsAt:endsAt.trim()},'Смена создана.',shiftKey);}}>
           <label>Филиал
             <select value={locationId} onChange={e=>setLocationId(e.target.value)} required>
               <option value="">Выберите филиал</option>
