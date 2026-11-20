@@ -14,8 +14,9 @@
 
 | Действие | Роли и границы | Рабочий URL (dev) | React UI | E2E-сценарий | Руководство |
 |---|---|---|---|---|---|
+| Вход приглашённого сотрудника | Только активные grants своих организаций/филиалов; legacy роли возвращаются отдельно | `/staff` | `StaffPortal.tsx` | `staff-access.spec.ts`, `test_pg_auto_org_staff_http.py` | [Администратор](administrator.md) |
 | Журнал назначений и отзывов | ADMIN только своей организации, read-only | `/staff/auto-admin` | `AutoStaffAdmin.tsx` | `auto-staff-console.spec.ts` | [Администратор](administrator.md) |
-| Начать привязку и независимое решение | INTAKE и отдельно MANAGER своей организации | `/staff` («Автомобили (dev)») | `StaffAutoClaims.tsx` | `auto-staff-review.spec.ts` | [Приёмщик](intake.md), [Руководитель](manager.md) |
+| Начать привязку и независимое решение | INTAKE и отдельно MANAGER организации/филиала, к которому привязана машина; legacy grants не дают fallback для tenant-bound авто | `/staff` («Автомобили (dev)») | `StaffAutoClaims.tsx` | `auto-staff-review.spec.ts`, `test_pg_auto_vehicle_claim_http.py` | [Приёмщик](intake.md), [Руководитель](manager.md) |
 | Записи и рабочие посты | INTAKE, MANAGER своего филиала | `/staff/auto-calendar` | `AutoCalendar.tsx` | `auto-calendar.spec.ts` | [Приёмщик](intake.md) |
 | Выбор услуг наряда | INTAKE своей организации/филиала; live proof | `/staff/auto-order-services` | `AutoOrderServices.tsx` | `auto-order-services.spec.ts` | [Приёмщик](intake.md) |
 | Приёмочный осмотр | INTAKE, конкретный наряд | `/staff/auto-workshop-qc` | `AutoWorkshopQc.tsx` | `auto-workshop-qc.spec.ts` | [Приёмщик](intake.md) |
