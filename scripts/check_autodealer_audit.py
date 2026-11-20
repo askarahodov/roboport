@@ -51,7 +51,7 @@ def validate(document: object, matrix_text: str) -> list[str]:
     records = document.get("records")
     if not isinstance(records, list):
         return problems + ["records must be an array"]
-    if len(records) < 77:
+    if len(records) < 85:
         problems.append("verified coverage must not silently shrink")
     urls: set[str] = set()
     ids: set[str] = set()
@@ -138,7 +138,7 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
     items = document.get("requirements")
     if not isinstance(items,list):
         return problems+["requirements must be a list"]
-    if len(items)<127:
+    if len(items)<150:
         problems.append("atomic acceptance requirements silently shrank")
     seen_ids=set()
     covered=set()
@@ -160,7 +160,10 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
         if page is None:
             problems.append(f"{where}: unknown source page")
         else:
-            covered.add(item["pageId"])
+            if page.get("evidence") == "nav_link":
+                problems.append(f"{where}: nav_link-only source cannot carry inferred acceptance")
+            else:
+                covered.add(item["pageId"])
             for attr,expected in (("matrixId",page["matrixId"]),
                                   ("ownerIssue",page["issue"]),
                                   ("sourceEvidence",page["evidence"])):

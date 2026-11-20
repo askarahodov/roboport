@@ -20,8 +20,8 @@ def test_all_public_pages_and_acceptance_criteria_are_traced():
     checks = _requirements()
     # Discovery is additive: fail if baseline coverage is lost, not when new
     # independently sourced pages and acceptance criteria are recorded.
-    assert len(pages["records"]) >= 77
-    assert len(checks["requirements"]) >= 127
+    assert len(pages["records"]) >= 85
+    assert len(checks["requirements"]) >= 150
     assert len({r["id"] for r in pages["records"]}) == len(pages["records"])
     evidenced_pages = {r["id"] for r in pages["records"] if r["evidence"] != "nav_link"}
     requirement_pages = {r["pageId"] for r in checks["requirements"]}

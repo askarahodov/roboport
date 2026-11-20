@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "checkedOn": "2026-11-20",
   "source": "https://autodealer.ru/online/help/",
-  "completeness": "PARTIAL: 127 atomic criteria cover full-page and search-excerpt sources; six nav_link-only targets are listed without guessed acceptance until their content can be retrieved",
+  "completeness": "PARTIAL: 150 atomic criteria cover full-page and search-excerpt sources; ten nav_link-only targets are listed without guessed acceptance until their content can be retrieved",
   "requirements": [
     {
       "id": "ADF-001",
@@ -1400,6 +1400,259 @@
       "status": "NOT_PROVEN_COMPLETE",
       "evidencePaths": [],
       "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-128",
+      "pageId": "ADP-002",
+      "matrixId": "B01",
+      "ownerIssue": 441,
+      "capability": "Жизненный цикл заказ-наряда",
+      "acceptance": "Список и карточка различают документный статус и этап выполнения; переходы сохраняют историю, закрытый документ нельзя незаметно переписать, отмена и повторное открытие требуют явного полномочия и аудита.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-129",
+      "pageId": "ADP-002",
+      "matrixId": "B01",
+      "ownerIssue": 441,
+      "capability": "Список заказ-нарядов и групповые действия",
+      "acceptance": "Список поддерживает фильтры по клиенту, автомобилю, исполнителю, датам и статусам; групповые операции не обходят ACL и закрытый период, выгрузки и связанные документы сохраняют исходный заказ-наряд.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-130",
+      "pageId": "ADP-003",
+      "matrixId": "B01",
+      "ownerIssue": 441,
+      "capability": "Создание и копирование заказ-наряда",
+      "acceptance": "Создание связывает клиента, автомобиль, работы, товары, осмотр и исполнителей; черновик можно безопасно продолжить, а копирование не переносит уникальные платежи, подписи, закрывающие документы и чужую историю.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-131",
+      "pageId": "ADP-004",
+      "matrixId": "B05",
+      "ownerIssue": 167,
+      "capability": "Каталог работ и назначение исполнителя",
+      "acceptance": "Работы выбираются из каталога с нормой времени и ценой, назначение исполнителя сохраняется в строке; изменение справочной цены/комиссии не переписывает уже созданный заказ без явного подтверждения и аудита.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-132",
+      "pageId": "ADP-006",
+      "matrixId": "B02",
+      "ownerIssue": 439,
+      "capability": "Акт осмотра автомобиля",
+      "acceptance": "Акт фиксирует пробег, топливо, комплектность, повреждения, особые отметки и фото; копирование предыдущего осмотра не переносит старые дефекты как новые, а текущий акт связан только со своим автомобилем и заказом.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-133",
+      "pageId": "ADP-007",
+      "matrixId": "D06",
+      "ownerIssue": 445,
+      "capability": "Способы оплаты, аванс и переплата",
+      "acceptance": "Оплата поддерживает разрешённые способы расчёта, явно разделяет внесённую сумму, аванс, долг и переплату; округление и сдача рассчитываются детерминированно, отрицательный остаток и двойное зачисление запрещены.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-134",
+      "pageId": "ADP-007",
+      "matrixId": "D06",
+      "ownerIssue": 445,
+      "capability": "Связь платежа с кассовым документом",
+      "acceptance": "Каждый платёж и возврат имеет основание, кассу и неизменяемую связь с заказ-нарядом; повтор операции идемпотентен, удаление/корректировка оставляет аудит, а кассовый документ нельзя создать дважды.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-135",
+      "pageId": "ADP-016",
+      "matrixId": "A05",
+      "ownerIssue": 446,
+      "capability": "Шаблоны ролей и уровни доступа",
+      "acceptance": "Шаблон роли задаёт отдельные права просмотра, создания, изменения и удаления по разделам и документам; индивидуальные исключения явно наследуются и не повышают права вне предприятия/филиала.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-136",
+      "pageId": "ADP-016",
+      "matrixId": "A05",
+      "ownerIssue": 446,
+      "capability": "Финансовая видимость и глубина доступа",
+      "acceptance": "Права отдельно ограничивают просмотр кассовых движений, закупочных цен, скидок и изменение цены продажи; пользователь видит только разрешённую глубину данных и не получает финансовые сведения соседнего предприятия.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-137",
+      "pageId": "ADP-031",
+      "matrixId": "B10",
+      "ownerIssue": 441,
+      "capability": "Реестр документов и закрытый период",
+      "acceptance": "Реестр различает черновики и проведённые документы, поддерживает просмотр и печать; закрытый период блокирует заднее редактирование, копирование не переносит чужие подписи/платежи, а документ сохраняет исходную нумерацию.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-138",
+      "pageId": "ADP-031",
+      "matrixId": "B10",
+      "ownerIssue": 441,
+      "capability": "Групповые операции и обмен документами",
+      "acceptance": "Массовые операции разрешены только для совместимых документов одного допустимого контекста; импорт/экспорт и ЭДО не создают дубли, а удаление или отмена проверяет связанные платежи, остатки и юридические документы.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-139",
+      "pageId": "ADP-032",
+      "matrixId": "A04",
+      "ownerIssue": 107,
+      "capability": "Налоговый режим и расчётные реквизиты предприятия",
+      "acceptance": "Налоговый режим, ставка НДС, расчётные счета и периоды действия задаются по предприятию; новые значения применяются только к новым документам, прошлые документы сохраняют реквизиты и правила расчёта своего периода.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-140",
+      "pageId": "ADP-057",
+      "matrixId": "D12",
+      "ownerIssue": 169,
+      "capability": "Статистика и история клиента",
+      "acceptance": "Карточка клиента показывает историю заказов, работ, товаров, документов и контактов с фильтрами по автомобилю и периоду; возвраты и клиентские товары не искажают суммы и историю.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-141",
+      "pageId": "ADP-057",
+      "matrixId": "D12",
+      "ownerIssue": 169,
+      "capability": "Разграничение клиентской аналитики",
+      "acceptance": "Статистика клиента и связанные документы доступны только при действующем object-level доступе к клиенту и его автомобилям; передача автомобиля новому владельцу не открывает историю прежнего заказчика.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-142",
+      "pageId": "ADP-078",
+      "matrixId": "B10",
+      "ownerIssue": 441,
+      "capability": "Область действия нумератора документов",
+      "acceptance": "Нумераторы настраиваются по предприятию и типу документа, с префиксом, суффиксом и периодом сброса; глобальная и локальная последовательности не смешиваются, формат отображается до проведения.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-143",
+      "pageId": "ADP-078",
+      "matrixId": "B10",
+      "ownerIssue": 441,
+      "capability": "Конкурентная выдача и ручная коррекция номера",
+      "acceptance": "Параллельное создание документов не выдаёт одинаковые номера; ручная установка номера корректно обновляет следующий номер, сбой транзакции не оставляет пропусков/дубликатов и закрытый период защищён.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-144",
+      "pageId": "ADP-050",
+      "matrixId": "B08",
+      "ownerIssue": 169,
+      "capability": "Рекомендации работ и товаров клиенту",
+      "acceptance": "Рекомендации привязаны к конкретному клиенту и автомобилю, имеют источник и ответственного; добавление рекомендации в заказ-наряд требует явного выбора и не создаёт продажу или списание без проведения.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-145",
+      "pageId": "ADP-012",
+      "matrixId": "B05",
+      "ownerIssue": 167,
+      "capability": "Каталог работ и связанные позиции",
+      "acceptance": "Работа хранит код, описание, норму времени, цену, скидку, категории, применяемость и связанные товары/материалы; поиск и фильтры не раскрывают чужой прайс, а изменение справочника не переписывает старые заказ-наряды.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-146",
+      "pageId": "ADP-012",
+      "matrixId": "B05",
+      "ownerIssue": 167,
+      "capability": "Комплексы работ и товаров",
+      "acceptance": "Комплекс добавляет набор работ и товаров атомарно, сохраняет состав, цены и назначение исполнителей на момент добавления; повторное добавление идемпотентно и не удваивает резервы или расход.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-147",
+      "pageId": "ADP-081",
+      "matrixId": "B01",
+      "ownerIssue": 441,
+      "capability": "Предварительная калькуляция",
+      "acceptance": "Калькуляция содержит версии работ, материалов, товаров и цен, позволяет сравнить предварительную сумму с заказ-нарядом; перенос в заказ создаёт согласованные строки без повторного списания и потери исходной версии.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-148",
+      "pageId": "ADP-082",
+      "matrixId": "B02",
+      "ownerIssue": 439,
+      "capability": "Диагностический лист неисправностей",
+      "acceptance": "Неисправности и рекомендации фиксируются с автором, временем, автомобилем и заказом; исправление/отказ сохраняет историю, а диагностический лист нельзя прикрепить к чужому автомобилю или закрытому заказу.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "search_excerpt"
+    },
+    {
+      "id": "ADF-149",
+      "pageId": "ADP-083",
+      "matrixId": "A05",
+      "ownerIssue": 446,
+      "capability": "Исполнители, подрядчики и доли участия",
+      "acceptance": "Исполнитель может быть сотрудником, подрядчиком или бригадой; доли участия в работе валидируются по сумме, схема оплаты действует по датам, расчёт вознаграждения сверяется с фактическими строками работ.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
+    },
+    {
+      "id": "ADF-150",
+      "pageId": "ADP-042",
+      "matrixId": "E03",
+      "ownerIssue": 118,
+      "capability": "Мобильный сценарий осмотра и диагностики",
+      "acceptance": "Мобильный клиент использует тот же авторизованный backend contract, ограничивает доступ к фото/СТС по объекту и роли, поддерживает согласованную запись/осмотр/диагностику; offline sync не создаёт повторные записи и не теряет аудит.",
+      "status": "NOT_PROVEN_COMPLETE",
+      "evidencePaths": [],
+      "sourceEvidence": "page"
     }
   ]
 }

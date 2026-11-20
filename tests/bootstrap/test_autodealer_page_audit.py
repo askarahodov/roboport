@@ -72,17 +72,21 @@ def test_november_20_sources_have_atomic_owned_acceptance_criteria():
         "ADP-071": ("C06", 168, "page"),
         "ADP-072": ("C04", 168, "page"),
         "ADP-073": ("C07", 168, "search_excerpt"),
+        "ADP-078": ("B10", 441, "page"),
+        "ADP-081": ("B01", 441, "search_excerpt"),
+        "ADP-082": ("B02", 439, "search_excerpt"),
+        "ADP-083": ("A05", 446, "page"),
     }
-    nav_link_ids = {"ADP-067", "ADP-068", "ADP-074", "ADP-075", "ADP-076", "ADP-077"}
-    assert len(inventory["records"]) >= 77
-    assert len(requirement_doc["requirements"]) >= 127
+    nav_link_ids = {"ADP-067", "ADP-068", "ADP-074", "ADP-075", "ADP-076", "ADP-077", "ADP-085", "ADP-086", "ADP-087", "ADP-088"}
+    assert len(inventory["records"]) >= 85
+    assert len(requirement_doc["requirements"]) >= 150
     for page_id, (matrix_id, owner_issue, evidence) in expected.items():
         page = pages[page_id]
         criteria = requirements_by_page[page_id]
         assert (page["matrixId"], page["issue"], page["evidence"]) == (
             matrix_id, owner_issue, evidence
         )
-        assert len(criteria) == (2 if page_id == "ADP-069" else 1)
+        assert len(criteria) == (2 if page_id in {"ADP-069", "ADP-078"} else 1)
         for criterion in criteria:
             assert criterion["matrixId"] == matrix_id
             assert criterion["ownerIssue"] == owner_issue
@@ -112,6 +116,29 @@ def test_added_requirements_cover_inventory_and_staff_boundaries():
         "ADF-114": "ADP-035",
         "ADF-115": "ADP-048",
         "ADF-116": "ADP-048",
+        "ADF-128": "ADP-002",
+        "ADF-129": "ADP-002",
+        "ADF-130": "ADP-003",
+        "ADF-131": "ADP-004",
+        "ADF-132": "ADP-006",
+        "ADF-133": "ADP-007",
+        "ADF-134": "ADP-007",
+        "ADF-135": "ADP-016",
+        "ADF-136": "ADP-016",
+        "ADF-137": "ADP-031",
+        "ADF-138": "ADP-031",
+        "ADF-139": "ADP-032",
+        "ADF-140": "ADP-057",
+        "ADF-141": "ADP-057",
+        "ADF-142": "ADP-078",
+        "ADF-143": "ADP-078",
+        "ADF-144": "ADP-050",
+        "ADF-145": "ADP-012",
+        "ADF-146": "ADP-012",
+        "ADF-147": "ADP-081",
+        "ADF-148": "ADP-082",
+        "ADF-149": "ADP-083",
+        "ADF-150": "ADP-042",
     }
     for requirement_id, page_id in expected.items():
         row = by_id[requirement_id]
