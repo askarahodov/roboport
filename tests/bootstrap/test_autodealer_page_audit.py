@@ -46,7 +46,6 @@ def test_inventory_does_not_silently_claim_complete_tree():
     assert any("incomplete" in msg for msg in validate(data,_matrix()))
 
 
-
 def test_november_20_sources_have_atomic_owned_acceptance_criteria():
     inventory = _data()
     requirement_doc = json.loads(REQUIREMENTS.read_text(encoding="utf-8"))
