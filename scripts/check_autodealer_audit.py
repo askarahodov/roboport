@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline structural contract for page-by-page AutoDealer Online gap inventory.
 
-Per-row source dates survive incremental discovery. Evidence older than 60d
+Evidence provenance: page = full text opened; search_excerpt = indexed excerpt only; nav_link = internal link only and carries no inferred acceptance. Per-row source dates survive incremental discovery. Evidence older than 60d
 must be reviewed rather than falsely stamped with the latest inventory date.
 Never crawls an external website in CI. Checking source contents, freshness and
 business acceptance requires an independent human/web review (issue #108).
