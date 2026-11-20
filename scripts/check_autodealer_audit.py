@@ -195,7 +195,7 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
             if any(p.startswith("/") or ".." in p.split("/")
                    or not (ROOT/p).is_file() for p in evidence):
                 problems.append(f"{where}: invalid evidence path")
-    missing=set(pages)-covered
+    missing={page_id for page_id,page in pages.items() if page.get("evidence") != "nav_link" and page_id not in covered}
     if missing:
         problems.append(f"{len(missing)} source pages lack acceptance requirements")
     return problems

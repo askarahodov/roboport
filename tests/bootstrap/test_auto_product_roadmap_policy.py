@@ -17,10 +17,10 @@ def test_automotive_matrix_has_complete_unique_feature_catalog():
         + [f"B{i:02}" for i in range(1, 12)]
         + [f"C{i:02}" for i in range(1, 11)]
         + [f"D{i:02}" for i in range(1, 13)]
-        + [f"E{i:02}" for i in range(1, 10)]
+        + [f"E{i:02}" for i in range(1, 11)]
     )
     assert ids == expected
-    assert len(ids) == len(set(ids)) == 52
+    assert len(ids) == len(set(ids)) == 53
     for marker in ("current-dev", "legacy", "planned", "M1", "M2", "M3"):
         assert marker in matrix
     assert "autodealer.ru/online/help/o-programme.html" in matrix
