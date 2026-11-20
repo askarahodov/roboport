@@ -16,20 +16,6 @@ depends_on = None
 
 
 def upgrade():
-    # CASHIER is already an advertised automotive staff role in the service/UI.
-    # Keep the database authority constraint aligned with that contract.
-    op.execute("""
-      ALTER TABLE auto_organization_role_grant
-      DROP CONSTRAINT auto_organization_role_grant_role_code_check
-    """)
-    op.execute("""
-      ALTER TABLE auto_organization_role_grant
-      ADD CONSTRAINT auto_organization_role_grant_role_code_check
-      CHECK (role_code IN (
-        'ADMIN','MANAGER','INTAKE','MECHANIC','WAREHOUSE','CASHIER'
-      ))
-    """)
-
     op.execute("""
       CREATE TABLE auto_org_staff_invitation (
         id uuid PRIMARY KEY,
@@ -208,25 +194,6 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("""
-      DO $body$
-      BEGIN
-        IF EXISTS (SELECT 1 FROM auto_organization_role_grant WHERE role_code='CASHIER')
-           OR EXISTS (SELECT 1 FROM auto_org_staff_invitation WHERE role_code='CASHIER') THEN
-          RAISE EXCEPTION 'CASHIER organization grants prevent downgrade';
-        END IF;
-      END;
-      $body$;
-    """)
     op.execute("DROP TABLE auto_org_staff_invitation_event")
     op.execute("DROP TABLE auto_org_staff_invitation")
     op.execute("DROP FUNCTION guard_auto_org_staff_invitation()")
-    op.execute("""
-      ALTER TABLE auto_organization_role_grant
-      DROP CONSTRAINT auto_organization_role_grant_role_code_check
-    """)
-    op.execute("""
-      ALTER TABLE auto_organization_role_grant
-      ADD CONSTRAINT auto_organization_role_grant_role_code_check
-      CHECK (role_code IN ('ADMIN','MANAGER','INTAKE','MECHANIC','WAREHOUSE'))
-    """)
