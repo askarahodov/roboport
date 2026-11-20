@@ -6,6 +6,7 @@ import { CustomerAccount } from './pages/customer/CustomerAccount';
 import { CustomerLogin } from './pages/customer/CustomerLogin';
 import { StaffPortal } from './pages/staff/StaffPortal';
 import { AutoStaffAdmin } from './pages/staff/AutoStaffAdmin';
+import { AutoOrganizationSetup } from './pages/staff/AutoOrganizationSetup';
 import { AutoCalendar } from './pages/staff/AutoCalendar';
 import { AutoBayOccupancy } from './pages/staff/AutoBayOccupancy';
 import { AutoDemoFinanceReport } from './pages/staff/AutoDemoFinanceReport';
@@ -80,6 +81,7 @@ function App() {
         <NavLink to="/account/login" className="header-login">Войти</NavLink>
         <NavLink to="/staff" end>Сотрудникам</NavLink>
         <NavLink to="/staff/auto-admin" end>Организации (dev)</NavLink>
+        <NavLink to="/staff/auto-setup" end>Филиалы и посты (dev)</NavLink>
         <NavLink to="/staff/auto-calendar" end>Календарь (dev)</NavLink>
         <NavLink to="/staff/auto-bay-occupancy" end>Загрузка постов (dev)</NavLink>
         <NavLink to="/staff/auto-demo-finance-report" end>Тестовая финсверка (dev)</NavLink>
@@ -157,6 +159,7 @@ function App() {
       <Route path="/account/login" element={<CustomerLogin />} />
       <Route path="/account/*" element={<CustomerAccount />} />
       <Route path="/staff/auto-admin" element={<AutoStaffAdmin />} />
+      <Route path="/staff/auto-setup" element={<AutoOrganizationSetup />} />
       <Route path="/staff/auto-calendar" element={<AutoCalendar />} />
       <Route path="/staff/auto-bay-occupancy" element={<AutoBayOccupancy />} />
       <Route path="/staff/auto-demo-finance-report" element={<AutoDemoFinanceReport />} />

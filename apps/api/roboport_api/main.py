@@ -12,6 +12,7 @@ from .auto_vehicle_http import router as auto_vehicle_router
 from .auto_vehicle_claim_http import router as auto_vehicle_claim_router
 from .auto_intake_delegation_http import router as auto_intake_delegation_router
 from .auto_org_staff_http import router as auto_org_staff_router
+from .auto_workshop_admin_http import router as auto_workshop_admin_router
 from .auto_appointment_http import router as auto_appointment_router
 from .auto_bay_occupancy import router as auto_bay_occupancy_router
 from .auto_demo_finance_report import router as auto_demo_finance_report_router
@@ -77,6 +78,7 @@ app.include_router(auto_vehicle_router)
 app.include_router(auto_vehicle_claim_router)
 app.include_router(auto_intake_delegation_router)
 app.include_router(auto_org_staff_router)
+app.include_router(auto_workshop_admin_router)
 app.include_router(auto_appointment_router)
 app.include_router(auto_bay_occupancy_router)
 app.include_router(auto_demo_finance_report_router)
