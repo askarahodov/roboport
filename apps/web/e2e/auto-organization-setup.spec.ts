@@ -33,6 +33,7 @@ function mockWorkshop(page:any) {
     const parts=path.split('/').filter(Boolean);
     const locIndex=parts.indexOf('locations');
     if(path.endsWith('/locations')){
+      expect(request.headers()['idempotency-key']).toBeTruthy();
       const body=request.postDataJSON();
       locations.push({locationId:location,code:body.code,timeZone:body.timeZone,
         disabled:false,createdAt:new Date().toISOString()});
@@ -41,6 +42,7 @@ function mockWorkshop(page:any) {
       return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({locationId:location})});
     }
     if(locIndex>=0&&parts[locIndex+2]==='bays'&&parts.length===locIndex+3){
+      expect(request.headers()['idempotency-key']).toBeTruthy();
       const body=request.postDataJSON();
       bays.push({bayId:bay,locationId:location,code:body.code,disabled:false,createdAt:new Date().toISOString()});
       audit.push({eventId:eventId(),locationId:location,actorId:actor,
@@ -48,6 +50,7 @@ function mockWorkshop(page:any) {
       return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({bayId:bay})});
     }
     if(locIndex>=0&&parts[locIndex+2]==='shifts'&&parts.length===locIndex+3){
+      expect(request.headers()['idempotency-key']).toBeTruthy();
       const body=request.postDataJSON();
       shifts.push({shiftId:shift,locationId:location,userId:body.userId,
         startsAt:body.startsAt,endsAt:body.endsAt,canceled:false,createdAt:new Date().toISOString()});
