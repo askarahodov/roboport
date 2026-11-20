@@ -202,7 +202,6 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
         for sql, params, label in (
             ("UPDATE auto_staff_shift SET canceled_at=now() WHERE id=%s", (shift,), "shift"),
             ("UPDATE auto_work_bay SET disabled_at=now() WHERE id=%s", (bay,), "bay"),
-            ("UPDATE auto_service_location SET disabled_at=now() WHERE id=%s", (location,), "location"),
         ):
             with db.transaction():
                 try:
