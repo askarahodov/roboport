@@ -58,7 +58,7 @@ export function AutoOrganizationSetup() {
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
   const [branchCode,setBranchCode]=React.useState('');
-  const [timeZone,setTimeZone]=React.useState('Europe/Berlin');
+  const [timeZone,setTimeZone]=React.useState('UTC');
   const [locationId,setLocationId]=React.useState('');
   const [bayCode,setBayCode]=React.useState('');
   const [employeeId,setEmployeeId]=React.useState('');
