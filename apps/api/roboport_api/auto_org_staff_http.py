@@ -11,7 +11,12 @@ from pydantic import BaseModel, ConfigDict, ValidationError, Field, StrictBool
 
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
-from .auto_org_staff import (grant_staff, revoke_staff, list_staff, list_staff_audit,\n    create_staff_invitation, list_staff_invitations, revoke_staff_invitation,\n    accept_staff_invitation, list_staff_invitation_audit, OrgStaffDenied, OrgStaffConflict)
+from .auto_org_staff import (
+    grant_staff, revoke_staff, list_staff, list_staff_audit,
+    create_staff_invitation, list_staff_invitations, revoke_staff_invitation,
+    accept_staff_invitation, list_staff_invitation_audit,
+    OrgStaffDenied, OrgStaffConflict,
+)
 
 from .auto_document_access import (
     publish_policy,list_policies,preview_employee_document_access,DocumentPolicyDenied,
