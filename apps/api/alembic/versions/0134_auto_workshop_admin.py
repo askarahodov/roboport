@@ -275,7 +275,8 @@ def downgrade():
                      'workshop.bay.create','workshop.shift.create')) THEN
           RAISE EXCEPTION 'workshop idempotency receipts prevent downgrade';
         END IF;
-      END $body$
+      END;
+      $body$;
     """)
     op.execute("ALTER TABLE auto_create_receipt DROP CONSTRAINT auto_create_receipt_operation_check")
     op.execute("""
