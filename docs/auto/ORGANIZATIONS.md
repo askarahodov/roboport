@@ -1,6 +1,6 @@
 # Организации и филиалы автомобильного сервиса
 
-**Статус: current-dev (schema, guards, internal API и отдельный UI реализованы); production и полный scope #166 остаются заблокированными.** Задача [#166](https://github.com/askarahodov/roboport/issues/166). Синтетическая модель, без реальных персональных данных.
+**Статус: current-dev** — схема организаций, staff grants/revoke, signed-bootstrap proof, приглашения существующих учётных записей, управление филиалами/постами/сменами и отдельные UI/API с PG17/E2E доказательствами реализованы в закрытом синтетическом контуре. Production и полный scope #166 остаются заблокированными. Задача [#166](https://github.com/askarahodov/roboport/issues/166). Реальные персональные данные не используются.
 
 ## Реализованная часть
 
@@ -8,7 +8,7 @@
 
 ## Что запрещено считать готовым
 
-Нет production ADMIN/bootstrap, создания организации через API, приглашений, графиков и постов, tenant-scoped customer/WorkOrder/Stock/Finance, UI управления и полноценной межорганизационной авторизации. Nullable `organization_id` — миграционный карантин, **не** допуск к данным; все новые endpoints обязаны deny-by-default для NULL и проверять tenant + location + actor + object. До #119 production запрещён.
+Не готовы: юридически доверенная проверка владельца организации и независимых операторов, production ADMIN provisioning/recovery, создание организации через API, внешняя доставка приглашений и самостоятельная регистрация новых аккаунтов, production ingress и полное production enforcement tenant/object ACL для клиентов, заказ-нарядов, склада и финансов. Текущие приглашения работают только для уже существующей активной учётной записи: ADMIN передаёт одноразовый код по проверенному внешнему каналу, а сотрудник принимает его под своей сессией. Филиалы, посты, смены и отдельные customer/WorkOrder/stock reads имеют только явно описанный current-dev scope. Nullable `organization_id` — миграционный карантин, **не** допуск к данным; каждый endpoint обязан deny-by-default для NULL и проверять tenant + location + actor + object. До независимого gate #119 production запрещён.
 
 ## Проверки и откат
 
@@ -18,7 +18,7 @@
 
 Добавлена таблица `auto_organization_role_grant` для штатных ролей `MANAGER`, `INTAKE`, `MECHANIC`, `WAREHOUSE`, с привязкой к организации и необязательному филиалу. База запрещает добавлять назначение к филиалу другой организации, повторять активный grant, менять идентичность записи или отменять отзыв. Связанные организации/филиалы должны быть действующими при создании назначения.
 
-**Это ещё не безопасный процесс выдачи прав:** существующая БД не имеет доверенного API выдачи ролей, actor audit и утверждённого ADMIN bootstrap. Пока новая таблица недоступна из HTTP и не используется в проверках реальных прав; прямые записи допускаются только из закрытых тестовых fixtures. Не выдавать `MANAGER` или `INTAKE` через legacy `user_role` на основании этой схемы. Реальные операции требуют отдельного service-layer с сериализацией отзывов, проверкой сессий и авторизованного администратора, audit и E2E. Задача #166 остаётся открытой.
+Миграция 0034 — только исходный каркас. Последующие миграции 0036/0037 и сервис `auto_org_staff.py` добавили закрытые current-dev операции, actor-attributed audit и offline signed-bootstrap proof; миграция 0135 добавила одноразовые приглашения. Ни одна из этих частей не является production IAM: legacy `user_role` не наследуется, а реальные полномочия проверяются по live session, организации, филиалу и объекту. Задача #166 остаётся открытой до production trust/recovery, полной tenant isolation и gate #119.
 
 Проверки: `PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_auto_org_grants.py` на disposable PG17 после `alembic upgrade head`.
 
@@ -48,7 +48,15 @@
 
 Доступны только при явном `ROBOport_SYNTHETIC_AUTO_API=1` и прямом HTTPS loopback, без доверия proxy-заголовкам: `POST /api/v1/dev/auto/organizations/{org_id}/staff` с JSON `userId`, `role`, необязательным `locationId`, а также `POST /api/v1/dev/auto/organizations/{org_id}/staff/{grant_id}/revoke`. Требуются активная session cookie, `Origin` и CSRF; активная организационная роль `ADMIN` независимо от legacy-роли. Ответы: `201` с `grantId`, `200` со статусом отзыва, `403` при недостатке полномочий, `409` при повторном активном назначении, `422` при ошибочном вводе. Ответы не кэшируются. Первый `ADMIN` доступен исключительно через закрытую синтетическую fixture, публичного bootstrap нет.
 
-**Важное ограничение:** эти маршруты предназначены только для одноразового dev PostgreSQL, не для реальных пользователей. Здесь нет приглашения сотрудника, подтверждения владения организацией, production ingress и UI. Все эти пункты остаются обязательными для #166 и #119. Проверка `tests/integration/test_pg_auto_org_staff_http.py` покрывает неавторизованный доступ, CSRF, чужую организацию, запрет выдачи ADMIN, повторное назначение, отзыв и атрибуцию аудита.
+**Важное ограничение:** прямое назначение по UUID и приглашения работают только на одноразовом synthetic PostgreSQL через HTTPS loopback, не для реальных пользователей. Внешняя доставка кода, self-service регистрация, проверка владения организацией, production ingress и recovery ADMIN не реализованы. Проверки staff grants: `tests/integration/test_pg_auto_org_staff_http.py`; приглашений: `tests/integration/test_pg_auto_org_staff_invitation_http.py`.
+
+## Приглашение сотрудников: закрытый one-time flow (0135, current-dev)
+
+ADMIN в `/staff/auto-admin` вводит логин **уже существующей активной** учётной записи, роль, при необходимости UUID филиала и срок 1–30 дней. Сервер проверяет ADMIN точной организации, отсутствие такого активного grant, активность target account и филиала; создаёт приглашение с криптографически случайным токеном, сохраняя в PostgreSQL только SHA-256 хеш. Токен возвращается один раз с `Cache-Control: no-store`, отображается в памяти вкладки и может быть скопирован. Его необходимо передать сотруднику по отдельно проверенному каналу; email/SMS delivery и создание новой учётной записи здесь отсутствуют.
+
+Сотрудник открывает `/staff/auto-invitation`, входит под тем же логином, которому адресовано приглашение, вставляет код и принимает его. Сервер повторно проверяет live session, точный `target_user_id`, срок действия, состояние организации/филиала и то, что пригласивший ADMIN всё ещё активен. Успешное принятие атомарно создаёт grant и два неизменяемых следа: авторизованное действие `GRANTED` от пригласившего ADMIN и событие `ACCEPTED` от сотрудника. Токен одноразовый; повтор — 409, истечение — 410, отзыв — 409, чужая учётная запись — 403. ADMIN может посмотреть список и журнал приглашений, отозвать ожидающее приглашение; pending invite филиала блокирует отключение филиала.
+
+Миграция `0135_auto_org_staff_invitation` запрещает переписывание identity, повторное принятие, удаление и изменение audit. Роль `CASHIER` синхронизирована с ограничением БД. Проверки: `tests/integration/test_pg_auto_org_staff_invitation_http.py` на PG17 и `apps/web/e2e/auto-staff-invitation.spec.ts`. Это current-dev onboarding существующих аккаунтов, **не** проверка личности, не email verification, не регистрация и не production IAM.
 
 ## Первичный ADMIN: закрытый signed-bootstrap (0037, current-dev)
 
@@ -60,7 +68,7 @@
 
 Маршрут `/staff/auto-admin` — отдельная автомобильная страница, не часть старого robot staff-портала. Администратор вводит UUID организации и видит активные назначения (только роль, UUID пользователя/филиала, UUID назначения), затем может назначить одну из ролей `MANAGER`, `INTAKE`, `MECHANIC`, `WAREHOUSE` или отозвать назначение после подтверждения. Экран использует `GET /api/v1/dev/auto/organizations/{org_id}/staff` и уже существующие закрытые POST-операции. Сервер всегда проверяет действующую сессию и активный ADMIN конкретной организации; GET ограничен 100 активными назначениями и не возвращает ФИО, почту, телефоны или историю другой организации. После отзыва список загружается повторно. При 403/404 отображается отказ, при ошибке — повторный запрос. CSRF запрашивается сервером перед изменением, а не хранится в localStorage.
 
-**Ограничения:** экран доступен через синтетические маршруты при HTTPS loopback, соответствующих dev feature flags и disposable PG17, а не для production. UUID организации вводится вручную, нет каталога приглашений/постов, search/pagination, юридической проверки владельца, recovery ADMIN или полноценных tenant customer/stock/finance операций. Не закрывать #166 и #119 по этому dev экрану. Код: `apps/web/src/pages/staff/AutoStaffAdmin.tsx`, `apps/api/roboport_api/auto_org_staff_http.py`; тест `tests/integration/test_pg_auto_org_staff_http.py`.
+**Ограничения:** экран доступен через синтетические маршруты при HTTPS loopback, соответствующих dev feature flags и disposable PG17, а не для production. UUID организации вводится вручную; каталог филиалов/постов находится на `/staff/auto-setup`. Приглашение возможно только уже существующей активной учётной записи по её login; нет внешней email/SMS доставки, регистрации, проверки личности/владения организацией, recovery ADMIN или полного production tenant customer/stock/finance enforcement. Не закрывать #166 и #119 по этому dev экрану. Код: `apps/web/src/pages/staff/AutoStaffAdmin.tsx`, `apps/api/roboport_api/auto_org_staff_http.py`; тесты `tests/integration/test_pg_auto_org_staff_http.py` и `tests/integration/test_pg_auto_org_staff_invitation_http.py`.
 
 ## Браузерная регрессия административной панели
 
@@ -72,7 +80,7 @@
 
 ## Посты и смены (0038, current-dev)
 
-Миграция `0038_auto_workshop` добавляет `auto_work_bay` (код поста уникален в филиале) и `auto_staff_shift` (UTC timestamps, длительность не более суток). Обе записи строго принадлежат существующим активным организации и филиалу. Identity поста и параметры смены нельзя переписать, отмена смены/отключение поста необратимы; удаление запрещено. Это фундамент для #113, **не** движок расписания: ещё нет API создания постов/смен, проверки пересечения смен, booking/exclusion constraints, WorkOrder, доступности персонала или пользовательского календаря. Публичная запись закрыта. PG17: `tests/integration/test_pg_auto_workshop.py`; downgrade только disposable DB.
+Миграция `0038_auto_workshop` добавляет `auto_work_bay` и `auto_staff_shift` с tenant/location constraints, неизменяемой identity и необратимыми disable/cancel. Миграции 0039–0041 добавляют exclusion/locking для конфликтов смен и бронирования поста; 0134 и PR #560 добавляют current-dev ADMIN API и UI создания/отключения филиалов, постов и смен, блокировки от параллельных операций и actor-attributed audit. Это всё ещё не production расписание: нет полноценного публичного календаря, production ingress, уведомлений и разрешения использовать реальные данные. Проверки: `tests/integration/test_pg_auto_workshop.py`, `tests/integration/test_pg_auto_workshop_admin_http.py` и `apps/web/e2e/auto-organization-setup.spec.ts` на synthetic PG17/browser стенде.
 
 ## Конкурентные конфликты смен (0039, current-dev)
 
@@ -299,8 +307,4 @@ HTTPS localhost, действующая сессия, CSRF и роль **ADMIN �
 Проверки: `tests/integration/test_pg_auto_workshop_admin_http.py` на PG17
 и `apps/web/e2e/auto-organization-setup.spec.ts` в браузере.
 
-**Ограничения:** экран назначает смены только уже существующим учётным
-записям. Приглашение/регистрация сотрудника, проверка реальной личности
-владельца организации, production ADMIN provisioning, production tenant
-enforcement и внешний доступ не реализованы. Этот функциональный срез
-не закрывает #166 и не снимает release gate #119.
+**Ограничения:** экран назначает смены только уже существующим учётным записям. Приглашения теперь доступны в `/staff/auto-admin`, но только для существующих активных аккаунтов с ручной передачей одноразового кода; регистрации и внешней доставки нет. Проверка реальной личности владельца, production ADMIN provisioning/recovery, production tenant enforcement и внешний доступ не реализованы. Этот функциональный срез не закрывает #166 и не снимает release gate #119.
