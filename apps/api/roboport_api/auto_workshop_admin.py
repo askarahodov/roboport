@@ -138,6 +138,12 @@ def create_location(conn: psycopg.Connection, token: str, organization: UUID,
     if (type(code) is not str or _CODE.fullmatch(code) is None
             or type(time_zone) is not str or not 3 <= len(time_zone) <= 64):
         raise WorkshopAdminInvalid("invalid branch code or time zone")
+    # Keep application validation identical to the PostgreSQL trigger in
+    # 0090_auto_location_timezone: only UTC or a canonical area/name path.
+    if time_zone != "UTC" and re.fullmatch(
+        r"^[A-Za-z][A-Za-z0-9_+-]*/[A-Za-z0-9_+/-]+$", time_zone
+    ) is None:
+        raise WorkshopAdminInvalid("time zone must be UTC or an IANA area/name")
     try:
         ZoneInfo(time_zone)
     except (ZoneInfoNotFoundError, ValueError) as exc:
