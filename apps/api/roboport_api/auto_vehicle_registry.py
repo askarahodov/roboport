@@ -11,6 +11,8 @@ from .auto_vehicle_org_scope import vehicle_organization_scope
 from .auto_vehicle_link_intake import (
     create_pending_vehicle_link, VehicleLinkConflict,
 )
+from .auto_vehicle_claim import VehicleClaimRejected
+
 from .auto_create_idempotency import (
     existing, remember, AutoIdempotencyConflict, validated_key,
 )
@@ -159,6 +161,8 @@ def create_vehicle_with_pending_link(
                 link_id = create_pending_vehicle_link(
                     conn, staff_token, previous, customer_id, key,
                 )
+            except VehicleClaimRejected as exc:
+                raise VehicleRegistryDenied("customer or branch unavailable") from exc
             except VehicleLinkConflict as exc:
                 raise AutoIdempotencyConflict("created link is no longer current") from exc
             return {
@@ -183,9 +187,12 @@ def create_vehicle_with_pending_link(
                        VALUES(%s,%s)""",
                     (vehicle_id, location_id),
                 )
-                link_id = create_pending_vehicle_link(
-                    conn, staff_token, vehicle_id, customer_id, key,
-                )
+                try:
+                    link_id = create_pending_vehicle_link(
+                        conn, staff_token, vehicle_id, customer_id, key,
+                    )
+                except VehicleClaimRejected as exc:
+                    raise VehicleRegistryDenied("customer or branch unavailable") from exc
                 conn.execute(
                     """INSERT INTO auto_vehicle_registry_audit(
                          id,vehicle_id,link_id,organization_id,location_id,
