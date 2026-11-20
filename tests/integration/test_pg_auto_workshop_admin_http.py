@@ -278,6 +278,10 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
         "LOCATION_CREATED", "BAY_CREATED", "SHIFT_CREATED",
         "SHIFT_CANCELED", "BAY_DISABLED", "LOCATION_DISABLED",
     }
+    # Idempotent replays must not create duplicate audit events.
+    assert actions.count("LOCATION_CREATED") == 1
+    assert actions.count("BAY_CREATED") == 1
+    assert actions.count("SHIFT_CREATED") == 1
     assert all(x["actorId"] == str(d["manager"]) for x in audit.json()["items"])
     with psycopg.connect(DSN) as db:
         event = db.execute(
