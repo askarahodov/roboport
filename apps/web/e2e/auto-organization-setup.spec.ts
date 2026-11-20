@@ -86,13 +86,13 @@ test('organization ADMIN creates a branch, work bay and shift, then cancels with
   await expect(page.getByText('Филиал создан.')).toBeVisible();
   await expect(page.getByRole('cell',{name:'BRANCH_A'})).toBeVisible();
 
-  await page.getByLabel('Филиал').first().selectOption(location);
+  await page.getByRole('combobox',{name:'Филиал'}).first().selectOption(location);
   await page.getByLabel('Код поста').fill('BAY_1');
   await page.getByRole('button',{name:'Создать пост'}).click();
   await expect(page.getByText('Рабочий пост создан.')).toBeVisible();
   await expect(page.getByRole('cell',{name:'BAY_1'})).toBeVisible();
 
-  await page.getByLabel('Филиал').nth(1).selectOption(location);
+  await page.getByRole('combobox',{name:'Филиал'}).nth(1).selectOption(location);
   await page.getByLabel('UUID сотрудника').fill(employee);
   await page.getByLabel('Начало (ISO 8601 с offset)').fill('2030-04-10T09:00:00+02:00');
   await page.getByLabel('Окончание (ISO 8601 с offset)').fill('2030-04-10T17:00:00+02:00');
