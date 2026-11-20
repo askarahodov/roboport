@@ -136,6 +136,12 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
         "endsAt": ends.isoformat(),
     }
     shift_headers = {**headers, "Idempotency-Key": "shift-create-key-0001"}
+    long_shift = client.post(
+        f"{root}/locations/{location}/shifts",
+        json={**shift_payload, "endsAt": (starts + timedelta(hours=25)).isoformat()},
+        headers={**headers, "Idempotency-Key": "shift-too-long-key-0001"},
+    )
+    assert long_shift.status_code == 422, long_shift.text
     denied_shift = client.post(
         f"{root}/locations/{location}/shifts",
         json=shift_payload, headers=shift_headers,
