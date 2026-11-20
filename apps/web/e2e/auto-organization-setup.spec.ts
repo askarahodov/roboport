@@ -112,3 +112,16 @@ test('workshop setup fails closed for a non-admin organization member',async({pa
   await expect(page.getByRole('alert')).toContainText('роль ADMIN');
   await expect(page.getByRole('button',{name:'Создать филиал'})).toHaveCount(0);
 });
+
+test('organization setup remains keyboard-usable without horizontal page overflow on mobile',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await mockWorkshop(page);
+  await page.goto('/staff/auto-setup');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(organization);
+  await expect(page.getByRole('heading',{name:'Филиалы'})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByLabel('Код филиала').focus();
+  await expect(page.getByLabel('Код филиала')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Часовой пояс IANA')).toBeFocused();
+});
