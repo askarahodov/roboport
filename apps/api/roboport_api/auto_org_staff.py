@@ -416,6 +416,16 @@ def accept_staff_invitation(
         ).fetchone()
         if org is None:
             raise OrgStaffDenied("organization unavailable")
+        issuer = conn.execute(
+            """SELECT g.id FROM auto_organization_role_grant g
+               JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
+               WHERE g.organization_id=%s AND g.user_id=%s
+                 AND g.role_code='ADMIN' AND g.location_id IS NULL
+                 AND g.revoked_at IS NULL FOR SHARE OF g,u""",
+            (organization_id, created_by),
+        ).fetchone()
+        if issuer is None:
+            raise OrgStaffDenied("invitation issuer no longer authorized")
         if location_id is not None:
             location = conn.execute(
                 """SELECT id FROM auto_service_location
