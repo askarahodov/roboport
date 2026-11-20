@@ -100,6 +100,16 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
 
     # Only a user with an active staff grant in this organization/branch can
     # receive a shift. A legacy global role alone is not organization authority.
+    shift_payload = {
+        "userId": str(d["intake"]),
+        "startsAt": starts.isoformat(),
+        "endsAt": ends.isoformat(),
+    }
+    denied_shift = client.post(
+        f"{root}/locations/{location}/shifts",
+        json=shift_payload, headers=headers,
+    )
+    assert denied_shift.status_code == 403, denied_shift.text
     with psycopg.connect(DSN) as db:
         db.execute(
             """INSERT INTO auto_organization_role_grant
@@ -107,11 +117,6 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
                VALUES(%s,%s,%s,%s,'MECHANIC')""",
             (uuid4(), organization, location, d["intake"]),
         )
-    shift_payload = {
-        "userId": str(d["intake"]),
-        "startsAt": starts.isoformat(),
-        "endsAt": ends.isoformat(),
-    }
     shift_result = client.post(
         f"{root}/locations/{location}/shifts",
         json=shift_payload, headers=headers,
@@ -141,6 +146,22 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
             (uuid4(), booking, organization, location, d["intake"],
              booking_starts, booking_ends),
         )
+
+    # Database guards must also reject direct writes that bypass the HTTP
+    # service's friendly 409 response.
+    with psycopg.connect(DSN) as db:
+        for sql, params, label in (
+            ("UPDATE auto_staff_shift SET canceled_at=now() WHERE id=%s", (shift,), "shift"),
+            ("UPDATE auto_work_bay SET disabled_at=now() WHERE id=%s", (bay,), "bay"),
+            ("UPDATE auto_service_location SET disabled_at=now() WHERE id=%s", (location,), "location"),
+        ):
+            with db.transaction():
+                try:
+                    db.execute(sql, params)
+                except psycopg.errors.RaiseException:
+                    pass
+                else:
+                    raise AssertionError(f"database guard accepted unsafe {label} change")
 
     cancel_blocked = client.post(
         f"{root}/locations/{location}/shifts/{shift}/cancel", headers=headers,
