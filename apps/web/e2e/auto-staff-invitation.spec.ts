@@ -72,7 +72,7 @@ test('organization ADMIN creates, revokes and audits a one-time staff invitation
   expect(posts).toHaveLength(2);
   expect(posts[1].path).toBe('/api/v1/dev/auto/organizations/'+org+
     '/staff-invitations/'+invitation+'/revoke');
-  await page.getByRole('button',{name:'Показать журнал приглашений'}).click();
+  await page.getByRole('button',{name:'Показать журнал приглашений',exact:true}).click();
   await expect(page.getByText(/Создано/)).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
 });
