@@ -13,7 +13,7 @@ from uuid import UUID
 
 import psycopg
 
-from .auto_org_authority import organization_role_allows
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 from .keyset_cursor import decode_cursor, encode_cursor
 
 
@@ -52,10 +52,16 @@ def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
         raise RegisterInvalid("INVALID_CURSOR") from exc
 
     with conn.transaction():
-        if not any(organization_role_allows(conn, token, org, role, loc,
-                                            for_mutation=True)
-                   for role in ("INTAKE", "MANAGER")):
-            raise RegisterDenied("FORBIDDEN")
+        try:
+            # The register is a document read, not merely a role-gated locator.
+            # Apply the live INTAKE_ACT policy (including user/branch DENY and
+            # historical cutoff) before filtering, counting or paginating rows.
+            history_cutoff = require_document_access(
+                conn, token, org, loc, ("INTAKE", "MANAGER"),
+                "INTAKE_ACT", "READ",
+            )
+        except DocumentPolicyDenied:
+            raise RegisterDenied("FORBIDDEN") from None
         # Proof, org, branch and current booking are applied in SQL *before*
         # the page limit, so revoked customers and cross-tenant rows cannot
         # influence search results, pagination or counts.
@@ -84,6 +90,7 @@ def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
               JOIN auto_service_location l ON l.id=w.location_id
                 AND l.organization_id=o.id AND l.disabled_at IS NULL
               WHERE w.organization_id=%s AND w.location_id=%s
+                AND (%s::timestamptz IS NULL OR w.created_at >= %s)
             ),
             statuses AS (
               SELECT a.id,a.created_at,a.appointment_id,
@@ -134,7 +141,8 @@ def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
                    (created_at,id)<(%s::timestamptz,%s::uuid))
             ORDER BY created_at DESC,id DESC
             LIMIT %s
-        """, (org, loc, org, loc, stage, stage, order_id, order_id,
+        """, (org, loc, history_cutoff, history_cutoff, org, loc,
+              stage, stage, order_id, order_id,
               after[0] if after else None,
               after[0] if after else None,
               after[1] if after else None, limit + 1)).fetchall()
