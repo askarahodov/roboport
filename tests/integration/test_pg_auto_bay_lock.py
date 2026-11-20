@@ -12,11 +12,15 @@ def test_booking_holds_bay_share_lock_until_commit_and_disable_denies_next():
         org, loc, bay = _org_and_bay(setup)
     with psycopg.connect(DSN) as first, psycopg.connect(DSN) as second:
         with first.transaction():
-            _book(first, org, loc, bay, '2032-06-01 08:00+00', '2032-06-01 09:00+00')
+            booking = _book(first, org, loc, bay, '2032-06-01 08:00+00', '2032-06-01 09:00+00')
             second.execute("SET lock_timeout='200ms'")
             with pytest.raises(psycopg.errors.LockNotAvailable):
                 with second.transaction():
                     second.execute("UPDATE auto_work_bay SET disabled_at=now() WHERE id=%s", (bay,))
+        # The in-flight booking wins the lock race. Reconcile that booking
+        # before retiring the bay; the API and database guard both reject
+        # disabling a bay that still owns a future active booking.
+        second.execute("UPDATE auto_bay_booking SET canceled_at=now() WHERE id=%s", (booking,))
         second.execute("UPDATE auto_work_bay SET disabled_at=now() WHERE id=%s", (bay,))
         with pytest.raises(psycopg.errors.RaiseException):
             with second.transaction():
