@@ -1,7 +1,7 @@
-"""Internal organization staff administration with fail-closed live authority.
+"""Управление персоналом организации с fail-closed проверкой действующих полномочий.
 
-ADMIN provisioning and staff invitations are synthetic/dev only until the
-independent identity, delivery and legal gates are approved.
+Выдача ADMIN и приглашения сотрудников доступны только в synthetic/dev-контуре
+до независимой проверки личности, канала доставки и юридических оснований.
 """
 from datetime import timedelta
 import hashlib
@@ -28,8 +28,9 @@ def _membership_lock(
     conn: psycopg.Connection, organization_id: UUID, target_user_id: UUID,
     role: str, location_id: UUID | None,
 ) -> None:
-    # Direct grants and invitations must not race into two different tables.
-    # A transaction-scoped advisory lock serializes the same membership tuple.
+    # Прямое назначение и приглашение не должны одновременно создавать
+    # конфликтующие записи в разных таблицах. Advisory lock транзакции
+    # сериализует операции для одной комбинации организации, пользователя и роли.
     key = f"{organization_id}:{target_user_id}:{role}:{location_id or ''}"
     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (key,))
 
@@ -38,8 +39,8 @@ def _admin(conn: psycopg.Connection, token: str, organization_id: UUID) -> UUID:
     actor = session_subject(conn, token, for_mutation=True)
     if actor is None:
         raise OrgStaffDenied("session unavailable")
-    # Organization row is locked before grant row; a disable must wait for
-    # the mutation, and a completed disable denies a new mutation.
+    # Сначала блокируется строка организации, затем строка полномочия:
+    # отключение ждёт текущую мутацию, а после отключения новая мутация запрещена.
     org = conn.execute(
         """SELECT id FROM auto_organization WHERE id=%s AND disabled_at IS NULL
            FOR SHARE""", (organization_id,),
@@ -91,9 +92,9 @@ def grant_staff(conn: psycopg.Connection, token: str, organization_id: UUID,
         ).fetchone()
         if user is None:
             raise OrgStaffDenied("target unavailable")
-        # Lock per organization to serialize duplicate proposals reliably.
-        # SELECT FOR SHARE above is compatible, but a unique constraint is
-        # the final concurrency guard for concurrent inserts.
+        # Advisory lock сериализует предложения одного полномочия.
+        # Совместимая блокировка FOR SHARE защищает учётную запись,
+        # а уникальное ограничение остаётся последним барьером конкурентных INSERT.
         grant_id = uuid4()
         try:
             with conn.transaction():
@@ -144,7 +145,7 @@ def revoke_staff(conn: psycopg.Connection, token: str, organization_id: UUID,
 
 
 def list_staff(conn: psycopg.Connection, token: str, organization_id: UUID) -> list[dict]:
-    """Bounded active grants, only to a live ADMIN of the exact tenant."""
+    """Ограниченный список активных полномочий только для действующего ADMIN организации."""
     if not isinstance(organization_id, UUID):
         raise OrgStaffDenied("invalid organization")
     with conn.transaction():
@@ -167,9 +168,9 @@ def list_staff(conn: psycopg.Connection, token: str, organization_id: UUID) -> l
 
 def list_staff_audit(conn: psycopg.Connection, token: str,
                      organization_id: UUID, *, limit: int = 100) -> list[dict]:
-    """Tenant-scoped, bounded immutable action history for current ADMIN only.
+    """Ограниченная история неизменяемых действий только для ADMIN своей организации.
 
-    Includes revoked grants; never reveals an organization via another tenant.
+    Включает отозванные полномочия и не раскрывает данные другого tenant.
     """
     if (type(organization_id) is not UUID or type(limit) is not int
             or not 1 <= limit <= 100):
@@ -208,11 +209,11 @@ def create_staff_invitation(
     target_login: str, role: str, location_id: UUID | None = None,
     *, expires_days: int = 7,
 ) -> dict:
-    """Create a one-time invite for an existing account; reveal token once.
+    """Создать одноразовое приглашение для существующей учётной записи и показать код один раз.
 
-    The invitation token is stored only as SHA-256. The invitee must already
-    have an active account and accept while authenticated as that exact user.
-    Delivery is intentionally out-of-band in this synthetic-only slice.
+    В БД хранится только SHA-256 токена. Приглашённый пользователь должен иметь
+    активную учётную запись и принять приглашение под собственной сессией.
+    В этом synthetic-срезе код передаётся по отдельному проверенному каналу.
     """
     if (type(organization_id) is not UUID or type(role) is not str
             or role not in STAFF_ROLES
@@ -384,7 +385,7 @@ def revoke_staff_invitation(
 def accept_staff_invitation(
     conn: psycopg.Connection, session_token: str, invitation_token: str,
 ) -> dict:
-    """Accept only as the pre-provisioned account bound to the invite."""
+    """Принять приглашение может только заранее созданная учётная запись-адресат."""
     digest = _invitation_digest(invitation_token)
     with conn.transaction():
         actor = session_subject(conn, session_token, for_mutation=True)
@@ -474,8 +475,8 @@ def accept_staff_invitation(
                 )
         except psycopg.errors.UniqueViolation as exc:
             raise OrgStaffConflict("active staff grant already exists") from exc
-        # The administrator authorized the membership; the invitee's separate
-        # ACCEPTED event proves possession of the token and authenticated account.
+        # Администратор санкционировал выдачу полномочия; отдельное событие
+        # ACCEPTED фиксирует предъявление кода и аутентификацию самого сотрудника.
         conn.execute(
             """INSERT INTO auto_org_staff_action
                (id,grant_id,organization_id,actor_id,action)
