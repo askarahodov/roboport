@@ -45,7 +45,6 @@ def upgrade():
         token_hash char(64) NOT NULL UNIQUE
           CHECK (token_hash ~ '^[a-f0-9]{64}$'),
         created_by uuid NOT NULL REFERENCES app_user(id),
-        request_key uuid NOT NULL,
         status text NOT NULL DEFAULT 'PENDING'
           CHECK (status IN ('PENDING','ACCEPTED','REVOKED','EXPIRED')),
         created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -71,7 +70,6 @@ def upgrade():
           (status='EXPIRED' AND accepted_by IS NULL AND accepted_grant_id IS NULL
             AND accepted_at IS NULL AND revoked_at IS NULL AND expired_at IS NOT NULL)
         ),
-        UNIQUE(organization_id,created_by,request_key)
       )
     """)
     op.execute("""
@@ -119,11 +117,11 @@ def upgrade():
 
         IF (NEW.id,NEW.organization_id,NEW.location_id,NEW.target_user_id,
             NEW.target_login,NEW.role_code,NEW.token_hash,NEW.created_by,
-            NEW.request_key,NEW.created_at,NEW.expires_at)
+            NEW.created_at,NEW.expires_at)
            IS DISTINCT FROM
            (OLD.id,OLD.organization_id,OLD.location_id,OLD.target_user_id,
             OLD.target_login,OLD.role_code,OLD.token_hash,OLD.created_by,
-            OLD.request_key,OLD.created_at,OLD.expires_at) THEN
+            OLD.created_at,OLD.expires_at) THEN
           RAISE EXCEPTION 'staff invitation identity immutable';
         END IF;
         IF OLD.status<>'PENDING' OR NEW.status NOT IN ('ACCEPTED','REVOKED','EXPIRED') THEN
