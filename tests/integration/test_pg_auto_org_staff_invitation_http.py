@@ -1,4 +1,4 @@
-"""PG17: one-time organization staff invitations, acceptance, revocation and audit."""
+"""PG17: одноразовые приглашения сотрудников, принятие, отзыв и аудит."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -67,7 +67,7 @@ def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
         "expiresInDays": 7,
     }
 
-    # Session and CSRF are both required; ADMIN is never assignable by invite.
+    # Требуются сессия и CSRF; роль ADMIN нельзя выдать через приглашение.
     assert TestClient(app, base_url="https://127.0.0.1").post(
         url, json=payload, headers=_headers(data, data["manager"])
     ).status_code == 403
@@ -92,7 +92,7 @@ def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
     )
     assert direct_grant.status_code == 409
 
-    # The plaintext secret is not stored or returned by list/audit endpoints.
+    # Секрет не хранится открытым текстом и не возвращается списком/аудитом.
     with psycopg.connect(DSN) as db:
         token_hash = db.execute(
             "SELECT token_hash FROM auto_org_staff_invitation WHERE id=%s",
@@ -109,7 +109,7 @@ def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
         f"/api/v1/dev/auto/organizations/{org_b}/staff-invitations"
     ).status_code == 403
 
-    # A different authenticated account cannot consume the token.
+    # Другая аутентифицированная учётная запись не может использовать этот токен.
     wrong = wrong_user.post(
         "/api/v1/dev/auto/staff-invitations/accept",
         json={"token": secret}, headers=_headers(data, data["other"]),
@@ -177,8 +177,8 @@ def test_invitation_revoke_expiry_and_branch_retirement_blocker(monkeypatch):
     base = f"/api/v1/dev/auto/organizations/{org_a}/staff-invitations"
     headers = _headers(data, data["manager"])
 
-    # Pending branch-scoped invitations are dependencies: a branch cannot be
-    # retired while it still has an outstanding employee invitation.
+    # Ожидающее приглашение с областью филиала является зависимостью:
+    # филиал нельзя отключить, пока приглашение не закрыто.
     created = admin.post(base, json={
         "targetLogin": logins[data["other"]], "role": "WAREHOUSE",
         "locationId": str(location), "expiresInDays": 7,
@@ -201,12 +201,12 @@ def test_invitation_revoke_expiry_and_branch_retirement_blocker(monkeypatch):
     )
     assert rejected.status_code == 409
 
-    # Once the invitation is revoked, the otherwise empty branch can be retired.
+    # После отзыва приглашения пустой филиал можно отключить.
     disabled = admin.post(disable, headers=headers)
     assert disabled.status_code == 200
     assert disabled.json()["status"] == "DISABLED"
 
-    # Expired tokens transition once to EXPIRED and can never grant authority.
+    # Истёкший токен однократно переходит в EXPIRED и больше не выдаёт полномочий.
     expired_token = "Z" * 43
     expired_id = uuid4()
     old = datetime.now(timezone.utc) - timedelta(days=2)
