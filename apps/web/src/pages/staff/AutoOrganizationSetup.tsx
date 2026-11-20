@@ -68,7 +68,6 @@ export function AutoOrganizationSetup() {
   const orgRef=React.useRef('');
   orgRef.current=organization.trim();
   const validOrg=uuid.test(organization.trim());
-  const root='/api/v1/dev/auto/organizations/'+encodeURIComponent(organization.trim());
 
   async function refresh(org=organization.trim()) {
     if(!uuid.test(org)){setData(null);setAudit([]);setState('idle');return;}
