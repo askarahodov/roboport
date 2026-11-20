@@ -53,7 +53,7 @@ test('organization ADMIN creates, revokes and audits a one-time staff invitation
   await expect(page.getByRole('heading',{name:'Пригласить сотрудника'})).toBeVisible();
   await page.getByLabel('Логин учётной записи').fill(userLogin);
   await page.getByLabel('Роль приглашения').selectOption('MECHANIC');
-  await page.getByLabel('UUID филиала (необязательно)').nth(1).fill(location);
+  await page.getByLabel('UUID филиала приглашения (необязательно)').fill(location);
   await page.getByLabel('Срок действия').selectOption('7');
   await page.getByRole('button',{name:'Создать приглашение'}).click();
   await expect(page.getByLabel('Одноразовый код приглашения')).toHaveValue(token);
