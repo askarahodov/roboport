@@ -10,7 +10,7 @@ React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0
 
 ## Контексты
 - Organization/ServiceLocation: филиал, часы, смены, посты, доступ сотрудника.
-- Customer/Vehicle: auto_vehicle + pending customer link. Доступ к автомобилю допускается только по явно проверенной, неотозванной связи; verified_at и verified_by требуют полномочного staff-review в будущем API. Связь машины с клиентом не передаёт старые наряды.
+- Customer/Vehicle: `auto_vehicle` + `auto_vehicle_customer_link`. Доступ к автомобилю допускается только по явно проверенной, неотозванной связи; `verified_at` и `verified_by` устанавливаются независимым staff-review. PostgreSQL migration `0133_auto_vehicle_link_guard` фиксирует неизменяемую идентичность связи, однократную верификацию и необратимый отзыв даже при прямом SQL; несколько клиентов могут иметь отдельные связи с одним автомобилем. Связь машины с клиентом не передаёт старые наряды. Схема и переходы: [DATA_MODEL.md](DATA_MODEL.md).
 - Scheduling: Appointment, WorkBay, исключение пересечений при конкурентной записи.
 - WorkOrder: автомобильная приёмка, Inspection, Labor, Estimate, QC.
 - Parts: OEM/aftermarket провайдер, применяемость, склад, резерв, закупки.

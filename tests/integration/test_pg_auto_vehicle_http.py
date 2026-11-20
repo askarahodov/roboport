@@ -59,11 +59,18 @@ def _seed():
                 (vehicle, model, vin),
             )
         for vehicle, customer in ((va, ca), (vb, cb)):
+            link_id = uuid4()
             conn.execute(
-                """INSERT INTO auto_vehicle_customer_link(
-                    id,vehicle_id,customer_id,verified_at,verified_by
-                ) VALUES(%s,%s,%s,now(),%s)""",
-                (uuid4(), vehicle, customer, reviewer),
+                """INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id)
+                   VALUES(%s,%s,%s)""",
+                (link_id, vehicle, customer),
+            )
+            # Fixtures follow the same legal state transition as the real
+            # review workflow: every link starts pending, then is verified once.
+            conn.execute(
+                """UPDATE auto_vehicle_customer_link
+                   SET verified_at=now(),verified_by=%s WHERE id=%s""",
+                (reviewer, link_id),
             )
         conn.execute(
             """INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id)

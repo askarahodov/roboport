@@ -14,10 +14,20 @@ from test_pg_baseline import DSN
 
 def work_order(db, d, org, loc, bay):
     booking = _book(db, org, loc, bay, "2035-02-01 09:00+00", "2035-02-01 10:00+00")
-    db.execute(
-        "UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
-        (d["manager"], d["link"]),
-    )
+    link_state = db.execute(
+        """SELECT verified_at,verified_by,revoked_at
+           FROM auto_vehicle_customer_link WHERE id=%s FOR UPDATE""",
+        (d["link"],),
+    ).fetchone()
+    if link_state is None or link_state[2] is not None:
+        raise AssertionError("work order fixture requires a live vehicle/customer link")
+    if link_state[0] is None:
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+            (d["manager"], d["link"]),
+        )
+    elif link_state[1] is None:
+        raise AssertionError("verified vehicle/customer link must retain its reviewer")
     appt, order = uuid4(), uuid4()
     db.execute("""INSERT INTO auto_appointment
        (id,booking_id,organization_id,location_id,vehicle_id,customer_link_id)

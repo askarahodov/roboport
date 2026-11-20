@@ -14,6 +14,7 @@
 | [FUNCTIONAL_MATRIX.md](auto/FUNCTIONAL_MATRIX.md) | current specification, реализации planned | 50+ функций AutoDealer benchmark, current-dev/legacy/planned |
 | [FEATURE_ROADMAP.md](auto/FEATURE_ROADMAP.md) | current roadmap | Зависимости #107–#174 и обязательный вывод robot legacy (#165) |
 | [ARCHITECTURE.md](auto/ARCHITECTURE.md) | planned / частично current | Границы автомобильных модулей, безопасность |
+| [DATA_MODEL.md](auto/DATA_MODEL.md) | current-dev | Автомобиль, связь с клиентом, immutable verification/revocation и границы истории |
 | [ADR-AUTO-001](auto/ADR-001.md) | current decision | Решение о поэтапной миграции |
 | [PARTS_CATALOG.md](auto/PARTS_CATALOG.md) | planned | Лицензированные OEM/aftermarket провайдеры |
 | [DOCUMENTATION_AUDIT.md](auto/DOCUMENTATION_AUDIT.md) | current | Сверка фактической реализации и устаревших разделов |
