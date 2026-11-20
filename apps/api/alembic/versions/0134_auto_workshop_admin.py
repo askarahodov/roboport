@@ -268,14 +268,14 @@ def downgrade():
     op.execute("DROP TRIGGER auto_location_deactivation_guard ON auto_service_location")
     op.execute("DROP FUNCTION guard_auto_location_deactivation()")
     op.execute("""
-      DO $
+      DO $body$
       BEGIN
         IF EXISTS (SELECT 1 FROM auto_create_receipt
                    WHERE operation IN ('workshop.location.create',
                      'workshop.bay.create','workshop.shift.create')) THEN
           RAISE EXCEPTION 'workshop idempotency receipts prevent downgrade';
         END IF;
-      END $
+      END $body$
     """)
     op.execute("ALTER TABLE auto_create_receipt DROP CONSTRAINT auto_create_receipt_operation_check")
     op.execute("""
