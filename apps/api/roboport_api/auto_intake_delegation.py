@@ -11,6 +11,9 @@ from .auto_vehicle_claim import VehicleClaimRejected
 from .session_lookup import session_subject
 from .auto_location_scope import location_scope_allows
 from .auto_manager_authority import manager_assignment
+from .auto_vehicle_org_scope import (
+    organization_vehicle_role_allows, organization_vehicle_target_has_role,
+)
 from .auto_create_idempotency import existing, remember, AutoIdempotencyConflict
 
 
@@ -25,7 +28,17 @@ def _manager(
     actor = session_subject(conn, token, for_mutation=for_mutation)
     if actor is None:
         raise VehicleClaimRejected("not authenticated")
-    # FOR SHARE сериализует отзыв роли/объектного назначения относительно мутации.
+    # Для автомобиля организации проверяется только tenant grant на его филиал.
+    # Старые глобальные роли не заменяют полномочие организации.
+    organization_granted = organization_vehicle_role_allows(
+        conn, token, "MANAGER", vehicle_id,
+    )
+    if organization_granted is not None:
+        if not organization_granted:
+            raise VehicleClaimRejected("no active organization manager grant")
+        return actor
+
+    # Совместимость только для незакреплённых legacy fixtures.
     granted = manager_assignment(conn, actor, vehicle_id)
     if not granted or not location_scope_allows(conn, actor, "MANAGER", vehicle_id):
         raise VehicleClaimRejected("no active manager assignment")
@@ -58,17 +71,24 @@ def grant_intake(conn: psycopg.Connection, token: str,
         actor = _manager(conn, token, vehicle_id, for_mutation=True)
         if actor == target_id:
             raise VehicleClaimRejected("self assignment forbidden")
-        eligible = conn.execute(
-            """SELECT u.id FROM app_user u
-               JOIN user_role ur ON ur.user_id=u.id AND ur.role_code='INTAKE'
-                 AND ur.revoked_at IS NULL
-                 AND (ur.expires_at IS NULL OR ur.expires_at>now())
-               WHERE u.id=%s AND u.status='ACTIVE'
-               LIMIT 1 FOR SHARE OF u,ur""",
-            (target_id,),
-        ).fetchone()
-        if eligible is None:
-            raise VehicleClaimRejected("target not active INTAKE")
+        organization_target = organization_vehicle_target_has_role(
+            conn, target_id, "INTAKE", vehicle_id,
+        )
+        if organization_target is not None:
+            if not organization_target:
+                raise VehicleClaimRejected("target not active organization INTAKE")
+        else:
+            eligible = conn.execute(
+                """SELECT u.id FROM app_user u
+                   JOIN user_role ur ON ur.user_id=u.id AND ur.role_code='INTAKE'
+                     AND ur.revoked_at IS NULL
+                     AND (ur.expires_at IS NULL OR ur.expires_at>now())
+                   WHERE u.id=%s AND u.status='ACTIVE'
+                   LIMIT 1 FOR SHARE OF u,ur""",
+                (target_id,),
+            ).fetchone()
+            if eligible is None:
+                raise VehicleClaimRejected("target not active INTAKE")
         payload = {"objectId": str(vehicle_id), "userId": str(target_id)}
         previous = existing(
             conn, actor, "vehicle.intake.grant", idempotency_key, payload,
