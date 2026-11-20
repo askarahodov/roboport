@@ -438,7 +438,7 @@ export function AutoStaffAdmin() {
               {staffRoles.map(r=><option key={r} value={r}>{r}</option>)}
             </select>
           </label>
-          <label>UUID филиала (необязательно)
+          <label>UUID филиала приглашения (необязательно)
             <input value={inviteLocation} onChange={e=>setInviteLocation(e.target.value)} />
           </label>
           <label>Срок действия
