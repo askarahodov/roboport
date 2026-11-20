@@ -159,11 +159,24 @@ def list_intake(conn: psycopg.Connection, token: str,
         rows = conn.execute(
             """SELECT a.id,a.user_id FROM auto_vehicle_staff_assignment a
                JOIN app_user u ON u.id=a.user_id AND u.status='ACTIVE'
-               JOIN user_role ur ON ur.user_id=a.user_id AND ur.role_code='INTAKE'
+               LEFT JOIN user_role ur ON ur.user_id=a.user_id AND ur.role_code='INTAKE'
                   AND ur.revoked_at IS NULL
                   AND (ur.expires_at IS NULL OR ur.expires_at>now())
+               LEFT JOIN auto_vehicle_location_binding b ON b.vehicle_id=a.vehicle_id
+               LEFT JOIN auto_service_location l ON l.id=b.location_id
                WHERE a.vehicle_id=%s AND a.role_code='INTAKE'
-                  AND a.revoked_at IS NULL
+                 AND a.revoked_at IS NULL
+                 AND (
+                   (l.organization_id IS NOT NULL AND l.disabled_at IS NULL
+                    AND EXISTS (
+                      SELECT 1 FROM auto_organization_role_grant g
+                      WHERE g.organization_id=l.organization_id
+                        AND g.location_id IS NOT DISTINCT FROM l.id
+                        AND g.user_id=a.user_id AND g.role_code='INTAKE'
+                        AND g.revoked_at IS NULL
+                    ))
+                   OR (l.organization_id IS NULL AND ur.user_id IS NOT NULL)
+                 )
                ORDER BY a.id LIMIT 50""", (vehicle_id,),
         ).fetchall()
         # UUID видны только явно назначенному MANAGER, без email и ФИО.
