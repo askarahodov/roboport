@@ -153,3 +153,25 @@ test('assignment tab shows actions only for the locked order',async({page})=>{
   await expect(panel.getByRole('button',{name:/Отозвать предложение/})).toHaveCount(0);
   await expect(panel.getByRole('button',{name:/Освободить назначение/})).toHaveCount(0);
 });
+
+test('workspace labels policy-restricted document stages without leaking status',async({page})=>{
+  const restricted={...steps,estimate:'RESTRICTED',technicalDocuments:'RESTRICTED'};
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname===root+'/workspace')return route.fulfill({
+      status:200,contentType:'application/json',
+      body:JSON.stringify({...snapshot(),steps:restricted}),
+    });
+    if(url.pathname===root+'/services'||
+      url.pathname===root.replace('/orders/'+order,'')+'/service-catalog')
+      return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}); 
+    throw Error('Unexpected API path '+url.pathname);
+  });
+  await page.goto(pageUrl);
+  const table=page.getByRole('table',{name:/Серверная сводка/});
+  await expect(table).toContainText('Смета');
+  await expect(table).toContainText('Технические документы');
+  await expect(table.getByText('Недоступно по правам')).toHaveCount(2);
+  await expect(table).not.toContainText('Черновик');
+  await expect(table).not.toContainText('Не создан');
+});
