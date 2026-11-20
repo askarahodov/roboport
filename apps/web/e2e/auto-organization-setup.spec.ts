@@ -78,7 +78,7 @@ test('organization ADMIN creates a branch, work bay and shift, then cancels with
   await page.goto('/staff/auto-setup');
   await expect(page.getByRole('heading',{name:'Организация, филиалы и посты'})).toBeVisible();
   await page.getByRole('textbox',{name:'UUID организации'}).fill(organization);
-  await expect(page.getByRole('heading',{name:'Филиалы'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Филиалы',exact:true})).toBeVisible();
 
   await page.getByLabel('Код филиала').fill('BRANCH_A');
   await page.getByLabel('Часовой пояс IANA').fill('Europe/Berlin');
@@ -121,7 +121,7 @@ test('organization setup remains keyboard-usable without horizontal page overflo
   await mockWorkshop(page);
   await page.goto('/staff/auto-setup');
   await page.getByRole('textbox',{name:'UUID организации'}).fill(organization);
-  await expect(page.getByRole('heading',{name:'Филиалы'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Филиалы',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.getByLabel('Код филиала').focus();
   await expect(page.getByLabel('Код филиала')).toBeFocused();
