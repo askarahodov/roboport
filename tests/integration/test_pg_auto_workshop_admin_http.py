@@ -64,18 +64,33 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
     )
     assert alias.status_code == 422, alias.text
 
+    branch_headers = {**headers, "Idempotency-Key": "branch-create-key-0001"}
     created = client.post(
         root + "/locations",
         json={"code": branch_code, "timeZone": "Europe/Berlin"},
-        headers=headers,
+        headers=branch_headers,
     )
     assert created.status_code == 201, created.text
     location = created.json()["locationId"]
-    assert client.post(
+    replayed_branch = client.post(
         root + "/locations",
         json={"code": branch_code, "timeZone": "Europe/Berlin"},
-        headers=headers,
-    ).status_code == 409
+        headers=branch_headers,
+    )
+    assert replayed_branch.status_code == 201
+    assert replayed_branch.json()["locationId"] == location
+    changed_payload = client.post(
+        root + "/locations",
+        json={"code": "BR_OTHER_" + uuid4().hex[:6].upper(), "timeZone": "Europe/Berlin"},
+        headers=branch_headers,
+    )
+    assert changed_payload.status_code == 409
+    duplicate_branch = client.post(
+        root + "/locations",
+        json={"code": branch_code, "timeZone": "Europe/Berlin"},
+        headers={**headers, "Idempotency-Key": "branch-create-key-0002"},
+    )
+    assert duplicate_branch.status_code == 409
 
     branch_list = client.get(root + "/workshop")
     assert branch_list.status_code == 200
@@ -83,19 +98,28 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
                for x in branch_list.json()["locations"])
 
     # A bay is created only under an active branch of this organization.
+    bay_headers = {**headers, "Idempotency-Key": "bay-create-key-0001"}
     bay_result = client.post(
         f"{root}/locations/{location}/bays",
-        json={"code": bay_code}, headers=headers,
+        json={"code": bay_code}, headers=bay_headers,
     )
     assert bay_result.status_code == 201, bay_result.text
     bay = bay_result.json()["bayId"]
+    replayed_bay = client.post(
+        f"{root}/locations/{location}/bays",
+        json={"code": bay_code}, headers=bay_headers,
+    )
+    assert replayed_bay.status_code == 201
+    assert replayed_bay.json()["bayId"] == bay
     assert client.post(
         f"{root}/locations/{location}/bays",
-        json={"code": bay_code}, headers=headers,
+        json={"code": bay_code},
+        headers={**headers, "Idempotency-Key": "bay-create-key-0002"},
     ).status_code == 409
     assert client.post(
         f"{other_root}/locations/{location}/bays",
-        json={"code": "BAY_FOREIGN"}, headers=headers,
+        json={"code": "BAY_FOREIGN"},
+        headers={**headers, "Idempotency-Key": "bay-foreign-key-0001"},
     ).status_code == 403
 
     # Only a user with an active staff grant in this organization/branch can
@@ -105,9 +129,10 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
         "startsAt": starts.isoformat(),
         "endsAt": ends.isoformat(),
     }
+    shift_headers = {**headers, "Idempotency-Key": "shift-create-key-0001"}
     denied_shift = client.post(
         f"{root}/locations/{location}/shifts",
-        json=shift_payload, headers=headers,
+        json=shift_payload, headers=shift_headers,
     )
     assert denied_shift.status_code == 403, denied_shift.text
     with psycopg.connect(DSN) as db:
@@ -119,13 +144,25 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
         )
     shift_result = client.post(
         f"{root}/locations/{location}/shifts",
-        json=shift_payload, headers=headers,
+        json=shift_payload, headers=shift_headers,
     )
     assert shift_result.status_code == 201, shift_result.text
     shift = shift_result.json()["shiftId"]
+    replayed_shift = client.post(
+        f"{root}/locations/{location}/shifts",
+        json=shift_payload, headers=shift_headers,
+    )
+    assert replayed_shift.status_code == 201
+    assert replayed_shift.json()["shiftId"] == shift
+    different_shift_payload = {**shift_payload, "endsAt": (ends + timedelta(hours=1)).isoformat()}
+    assert client.post(
+        f"{root}/locations/{location}/shifts",
+        json=different_shift_payload, headers=shift_headers,
+    ).status_code == 409
     overlap = client.post(
         f"{root}/locations/{location}/shifts",
-        json=shift_payload, headers=headers,
+        json=shift_payload,
+        headers={**headers, "Idempotency-Key": "shift-overlap-key-0001"},
     )
     assert overlap.status_code == 409, overlap.text
 
@@ -190,13 +227,7 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
     assert replay.status_code == 200
     assert replay.json()["status"] == "ALREADY_CANCELED"
 
-    disabled_bay = client.post(
-        f"{root}/locations/{location}/bays/{bay}/disable", headers=headers,
-    )
-    assert disabled_bay.status_code == 200, disabled_bay.text
-    assert disabled_bay.json()["status"] == "DISABLED"
-
-    # A branch cannot be disabled while it still has a live branch grant.
+    # A receipt never bypasses the current staff grant check.
     with psycopg.connect(DSN) as db:
         db.execute(
             """UPDATE auto_organization_role_grant SET revoked_at=now()
@@ -204,6 +235,19 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
                  AND user_id=%s AND role_code='MECHANIC' AND revoked_at IS NULL""",
             (organization, location, d["intake"]),
         )
+    revoked_replay = client.post(
+        f"{root}/locations/{location}/shifts",
+        json=shift_payload, headers=shift_headers,
+    )
+    assert revoked_replay.status_code == 403, revoked_replay.text
+
+    disabled_bay = client.post(
+        f"{root}/locations/{location}/bays/{bay}/disable", headers=headers,
+    )
+    assert disabled_bay.status_code == 200, disabled_bay.text
+    assert disabled_bay.json()["status"] == "DISABLED"
+
+    # The branch grant was revoked above; branch deactivation can now proceed.
     disabled_location = client.post(
         f"{root}/locations/{location}/disable", headers=headers,
     )
@@ -211,7 +255,8 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
     assert disabled_location.json()["status"] == "DISABLED"
     assert client.post(
         f"{root}/locations/{location}/bays",
-        json={"code": "BAY_AFTER_DISABLE"}, headers=headers,
+        json={"code": "BAY_AFTER_DISABLE"},
+        headers={**headers, "Idempotency-Key": "bay-after-disable-0001"},
     ).status_code == 403
 
     data = client.get(root + "/workshop")
