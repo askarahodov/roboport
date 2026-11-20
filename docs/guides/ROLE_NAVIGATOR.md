@@ -11,6 +11,7 @@
 | Задача | Роль и предварительные условия | Экран synthetic dev | Руководство и тест | Отказ / безопасное восстановление |
 |---|---|---|---|---|
 | Просмотреть назначения и отзывы | **ADMIN** своей организации; только чтение | `/staff/auto-admin` → «Показать журнал» | [Администратор](administrator.md) · [auto-staff-console.spec.ts](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-staff-console.spec.ts) · [test_pg_auto_org_staff_http.py](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_org_staff_http.py) | 403 чужая организация → проверить grant; 422 лимит → исправить значение |
+| Пригласить сотрудника / принять приглашение | **ADMIN** создаёт для существующего активного login; сотрудник принимает под той же live session | `/staff/auto-admin`, `/staff/auto-invitation` | [Администратор](administrator.md) · [auto-staff-invitation.spec.ts](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-staff-invitation.spec.ts) · [test_pg_auto_org_staff_invitation_http.py](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_org_staff_invitation_http.py) | 403 другой аккаунт/нет ADMIN; 409 повтор/отзыв; 410 истёкший код; token показывается один раз и передаётся out-of-band |
 | Привязать автомобиль к клиенту | **INTAKE** формирует pending; **CLIENT** предъявляет код; независимый **MANAGER** подтверждает | `/staff`, `/account/vehicles` | [Приёмщик](intake.md) · [Клиент](client.md) · [auto-staff-review.spec.ts](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-staff-review.spec.ts) · [test_pg_auto_vehicle_claim_http.py](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_vehicle_claim_http.py) | 403 нет полномочий, 429 лимит попыток → не подбирать код и не использовать чужой UUID |
 | Создать запись на пост | **INTAKE** или **MANAGER**, своя организация/филиал; подтверждённая связь | `/staff/auto-calendar` | [Приёмщик](intake.md) · [auto-calendar.spec.ts](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-calendar.spec.ts) · [test_pg_auto_appointment_http.py](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_appointment_http.py) | 409 занят пост/состояние изменилось → перечитать календарь, не создавать дубликат |
 | Самостоятельно записаться / перенести / отменить | **CLIENT**, собственный verified link и доступное окно до работ | `/account/auto-booking` | [Клиент](client.md) · [Контракт](../auto/CUSTOMER_BOOKING.md) · [customer-auto-booking.spec.ts](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/customer-auto-booking.spec.ts) · [test_pg_auto_customer_booking_http.py](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_customer_booking_http.py) | 403 нет связи, 409 слот занят/операция устарела → обновить страницу; не считать dev-запись реальной |
@@ -63,7 +64,7 @@
 |---|---|---|---|
 | Бухгалтер / кассир | **planned** | Реальная оплата, аванс, возврат денег, фискальный чек, ДДС | [Бухгалтер](finance.md) · #170/#119; `SIM_PAYMENT` и `SIM_REFUND` **не** деньги |
 | Клиент | **planned для production** | Публичная запись с реальными данными, юридически значимые согласия и получение автомобиля | [Клиент](client.md) · #117/#119; отдельный synthetic booking **current-dev** |
-| Администратор | **planned для production** | Боевой bootstrap организации и полноценное управление полномочиями из UI | [Администратор](administrator.md) · #166/#119 |
+| Администратор | **current-dev / planned для production** | Dev: grants, аудит, одноразовые приглашения существующих аккаунтов, филиалы/посты/смены. Planned: юридический bootstrap/recovery, self-service регистрация, внешняя доставка и production IAM | [Администратор](administrator.md) · #166/#119 |
 | Мобильный клиент | **planned** | Нативный iOS/Android вход, push, offline, mobile-платежи | [Мобильное приложение](mobile.md) · #118 |
 | Персонал СТО | **planned для production** | Подписанный акт и фактическая выдача автомобиля | [Приёмщик](intake.md) · #439/#441/#119 |
 
@@ -292,6 +293,7 @@ VIN, произвольных заметок или юридических фи�
 - **Отказы:** 403 чужая организация/нет ADMIN; 409 активные зависимости или
   пересечение смен; 422 некорректный код, timezone, UUID или интервал.
   Журнал actor-attributed и append-only.
-- **Ограничения:** только существующие аккаунты и synthetic dev. Приглашение
-  новых сотрудников, production ADMIN provisioning и полный tenant/legal gate
-  #119 остаются planned; этот экран не закрывает #166.
+- **Ограничения:** только synthetic dev и существующие активные аккаунты.
+  Внешняя доставка приглашений, self-service регистрация, юридический
+  ADMIN provisioning/recovery и полный tenant/legal gate #119 остаются planned;
+  pending invitations филиала блокируют его отключение. Этот экран не закрывает #166.
