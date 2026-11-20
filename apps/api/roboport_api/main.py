@@ -10,6 +10,7 @@ from .auth_http import router as synthetic_auth_router
 from .oidc_http import router as oidc_router
 from .auto_vehicle_http import router as auto_vehicle_router
 from .auto_vehicle_claim_http import router as auto_vehicle_claim_router
+from .auto_vehicle_registry_http import router as auto_vehicle_registry_router
 from .auto_intake_delegation_http import router as auto_intake_delegation_router
 from .auto_org_staff_http import router as auto_org_staff_router
 from .auto_workshop_admin_http import router as auto_workshop_admin_router
@@ -76,6 +77,7 @@ app.include_router(_current_auth_router)
 app.include_router(oidc_router)
 app.include_router(auto_vehicle_router)
 app.include_router(auto_vehicle_claim_router)
+app.include_router(auto_vehicle_registry_router)
 app.include_router(auto_intake_delegation_router)
 app.include_router(auto_org_staff_router)
 app.include_router(auto_workshop_admin_router)
