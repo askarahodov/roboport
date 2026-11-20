@@ -485,7 +485,7 @@ export function AutoStaffAdmin() {
               Отозвать приглашение</button>)}
         </li>)}</ul>:<p>Приглашений пока нет.</p>)}
         <button type="button" disabled={inviteAuditState==='loading'}
-          onClick={()=>void loadInvitationAudit()}>Показать журнал приглашений</button>
+          onClick={()=>void loadInvitationAudit()}>Показать события приглашений</button>
         {inviteAuditState==='loading'&&<p role="status">Загрузка журнала приглашений…</p>}
         {inviteAuditState==='denied'&&<p role="alert">Журнал приглашений недоступен.</p>}
         {inviteAuditState==='error'&&<p role="alert">Не удалось загрузить журнал приглашений.</p>}
