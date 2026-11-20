@@ -20,10 +20,13 @@ def test_all_public_pages_and_acceptance_criteria_are_traced():
     checks = _requirements()
     # Discovery is additive: fail if baseline coverage is lost, not when new
     # independently sourced pages and acceptance criteria are recorded.
-    assert len(pages["records"]) >= 49
-    assert len(checks["requirements"]) >= 89
+    assert len(pages["records"]) >= 85
+    assert len(checks["requirements"]) >= 150
     assert len({r["id"] for r in pages["records"]}) == len(pages["records"])
-    assert len({r["pageId"] for r in checks["requirements"]}) == len(pages["records"])
+    evidenced_pages = {r["id"] for r in pages["records"] if r["evidence"] != "nav_link"}
+    requirement_pages = {r["pageId"] for r in checks["requirements"]}
+    assert requirement_pages == evidenced_pages
+    assert all(r["id"] not in requirement_pages for r in pages["records"] if r["evidence"] == "nav_link")
     assert not validate(pages, MATRIX.read_text(encoding="utf-8"))
     assert not validate_requirements(checks, pages)
     assert "PARTIAL" in pages["completeness"]
@@ -40,7 +43,7 @@ def test_old_source_dates_are_preserved_and_future_or_stale_dates_fail_closed():
     assert rows["ADP-001"]["checkedOn"] == "2026-11-06"
     assert rows["ADP-049"]["checkedOn"] == "2026-11-18"
     assert rows["ADP-020"]["checkedOn"] == "2026-11-19"
-    assert rows["ADP-050"]["checkedOn"] == "2026-11-19"
+    assert rows["ADP-050"]["checkedOn"] == "2026-11-20"
     assert len({x["checkedOn"] for x in rows.values()}) >= 3
     for value in ("2025-01-01", "2026-12-01", "invalid"):
         altered = copy.deepcopy(pages)

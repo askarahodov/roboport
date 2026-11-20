@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-19",
+  "checkedOn": "2026-11-20",
   "source": "AutoDealer Online public help (not desktop help)",
-  "completeness": "PARTIAL: discovery from public Online help articles and indexed excerpts; complete navigation hierarchy, every nested instruction and interactive function are NOT yet independently verified",
+  "completeness": "PARTIAL: 85 public Online Help sources across full pages, indexed excerpts and internal navigation links; ten nav_link-only targets are listed without inferred behavior, and the complete sitemap/tree is not yet independently verified",
   "records": [
     {
       "id": "ADP-001",
@@ -30,7 +30,7 @@
       "scenario": "Статусы, список и документы заказ-наряда, прибыль/платежи",
       "gap": "Нет документного POSTED/CLOSED, актов, реальных оплат и выдачи",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-003",
@@ -44,7 +44,7 @@
       "scenario": "Единый документ с клиентом, работами, товарами, актом и платежами",
       "gap": "Существующие экраны не образуют подписанный, проведенный, закрытый документ",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-004",
@@ -58,7 +58,7 @@
       "scenario": "Операции, комплексы, нормы и назначение исполнителя",
       "gap": "Нет комплексов, исполнителей, кратности, лимитов скидок",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-005",
@@ -70,9 +70,9 @@
       "issue": 168,
       "status": "D_PARTIAL",
       "scenario": "Складские товары, детали клиента, внутренние расходники",
-      "gap": "Нет полного состава материалов/товаров в UI и договорных документов",
+      "gap": "Нет полного состава материалов/товаров в UI и договорных документов; источник помечен «Старый текст: true», фактический UI требует повторной сверки",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-006",
@@ -86,7 +86,7 @@
       "scenario": "Тип ТС, осмотр, схема повреждений, состояние, сравнение с прошлым визитом",
       "gap": "Чек-лист current-dev без фото зон/юридической подписи и версии документа",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-007",
@@ -100,7 +100,7 @@
       "scenario": "Финансовые платежи документа, остаток и округление",
       "gap": "Нет реального cashier/payments/refunds/фискального документа",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-008",
@@ -170,7 +170,7 @@
       "scenario": "Каталог операций/комплексов, привязка товаров и тарифы",
       "gap": "Есть selected services и norm-hour pricing, нет полного каталога комплексов",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-013",
@@ -184,7 +184,7 @@
       "scenario": "CRM включён по умолчанию, автоматически создаёт сделки и отслеживает путь клиента от первого обращения до оплаты; вход через CRM, Канбан, Сделки и Воронку продаж; параметры управляются в общих настройках",
       "gap": "Есть synthetic лиды, нет подтверждённого revenue lineage",
       "evidence": "page",
-      "checkedOn": "2026-11-19"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-014",
@@ -198,7 +198,7 @@
       "scenario": "Контрагенты, авто, контакты, балансы, рекомендации",
       "gap": "Нет consent-complete customer master и реальных балансов",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-015",
@@ -226,7 +226,7 @@
       "scenario": "Настройка granular document roles и персональных исключений",
       "gap": "Есть scoped grants; нет per-document/per-price/period effective ACL",
       "evidence": "page",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-017",
@@ -254,7 +254,7 @@
       "scenario": "Конверсия, движение сделок и реальные суммы продаж",
       "gap": "Нет verified payments и полной событийной conversion аналитики",
       "evidence": "search_excerpt",
-      "checkedOn": "2026-11-06"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-019",
@@ -436,7 +436,7 @@
       "scenario": "Список и статусы документов, действия, массовые операции, копия, УПД и ЭДО",
       "gap": "Нет production-safe полного документного контура, массовой транзакционной обработки, подписанных форм и ЭДО",
       "evidence": "page",
-      "checkedOn": "2026-11-18"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-032",
@@ -450,7 +450,7 @@
       "scenario": "Юрлица, ИП, налоговые периоды, счета, сотрудники, договорные шаблоны, закрытый период",
       "gap": "Есть dev филиалы/права, но нет юридических реквизитов и налоговых периодов, реальных счетов, лицензированных интеграций",
       "evidence": "page",
-      "checkedOn": "2026-11-18"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-033",
@@ -478,7 +478,7 @@
       "scenario": "Карточка сотрудника, привязка предприятий, назначение зарплатных схем и периодов",
       "gap": "Dev роли и гранты есть; кадровая карточка и периодические назначения/зарплатные схемы полностью не доказаны",
       "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-035",
@@ -492,7 +492,7 @@
       "scenario": "Создание пользователей и настройка прав/ролей",
       "gap": "Технические гранты не равны завершённому lifecycle сотрудника, учётной записи и production IAM",
       "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-036",
@@ -576,7 +576,7 @@
       "scenario": "Разговоры с клиентами и история сообщений по каналам",
       "gap": "Нет production-провайдеров чата, согласий, фактической доставки и живой переписки",
       "evidence": "page",
-      "checkedOn": "2026-11-19"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-042",
@@ -590,7 +590,7 @@
       "scenario": "Мобильные роли, настройки, скачивание приложения и сценарии сотрудников",
       "gap": "Нет native iOS/Android приложений с действующей мобильной авторизацией и релизом",
       "evidence": "page",
-      "checkedOn": "2026-11-19"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-043",
@@ -604,7 +604,7 @@
       "scenario": "Интеграция с онлайн-кассой и удалённая печать чеков",
       "gap": "Нет сертифицированного кассового провайдера и отправки фискальных чеков",
       "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-044",
@@ -646,7 +646,7 @@
       "scenario": "Список связанных документов и финансового баланса поставщика",
       "gap": "Нет production-сверки поставщика, контрактных возвратов и его платёжной истории",
       "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-047",
@@ -674,7 +674,7 @@
       "scenario": "Контракты и госконтракты клиента, сроки, архивация, связи с документами",
       "gap": "Нет подтверждённого юридического workflow договоров клиента в собственном кабинете",
       "evidence": "search_excerpt",
-      "checkedOn": "2026-11-18"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-049",
@@ -702,7 +702,7 @@
       "scenario": "В карточке автомобиля клиента сохранить рекомендации отложенных работ и товаров: работа вручную или из справочника со связанными позициями, товар из номенклатуры, склада или комплексов; выводить список для последующего обращения.",
       "gap": "Отсутствует отдельный автомобильный реестр рекомендованных товаров и работ и возможность создавать их из диагностики; нельзя подменять рекомендацию заметкой CRM.",
       "evidence": "page",
-      "checkedOn": "2026-11-19"
+      "checkedOn": "2026-11-20"
     },
     {
       "id": "ADP-051",
@@ -759,6 +759,440 @@
       "gap": "Нет реального UIS adapter, безопасного secret lifecycle, webhook authentication/idempotency, call event model, employee extension mapping и защищённого хранения recording links",
       "evidence": "page",
       "checkedOn": "2026-11-19"
+    },
+    {
+      "id": "ADP-055",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/protcenka/index.html",
+      "title": "Проценка",
+      "section": "Склад",
+      "matrixId": "C02",
+      "priority": "M2",
+      "issue": 115,
+      "status": "D_PARTIAL",
+      "scenario": "Сводный поиск предложений поставщиков и собственных складских остатков с выбором запчастей для заказа",
+      "gap": "Есть только synthetic предложения; нет лицензированных supplier adapters, подтверждённой применяемости и договорных цен; источник помечен «Старый текст: true», актуальность UI требует повторной сверки",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-056",
+      "url": "https://autodealer.ru/online/help/integratcii/kassy/index.html",
+      "title": "Кассы",
+      "section": "Интеграции",
+      "matrixId": "D07",
+      "priority": "M3",
+      "issue": 170,
+      "status": "PLANNED",
+      "scenario": "Каталог кассовых служб, кассового модуля, QR-дисплеев и региональных интеграций",
+      "gap": "Нет подключённого кассового провайдера, проверенного sandbox и юридического/фискального gate",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-057",
+      "url": "https://autodealer.ru/online/help/klienty/statistika-po-klientam.html",
+      "title": "Статистика по клиентам",
+      "section": "Клиенты",
+      "matrixId": "D12",
+      "priority": "M3",
+      "issue": 169,
+      "status": "D_PARTIAL",
+      "scenario": "История документов, работ, товаров, карт лояльности, сводки и контактов по клиенту",
+      "gap": "Нет доказанной полной финансовой сверки, owner-scoped history и согласованной лояльности; источник помечен «Старый текст: true», актуальность UI требует повторной сверки",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-058",
+      "url": "https://autodealer.ru/online/help/integratcii/tekhnovektor.html",
+      "title": "ТехноВектор",
+      "section": "Интеграции",
+      "matrixId": "B03",
+      "priority": "M1",
+      "issue": 167,
+      "status": "PLANNED",
+      "scenario": "Интеграция автомобильного диагностического стенда с заказ-нарядом и историей клиента",
+      "gap": "Нет договорного hardware/provider adapter, защищённого подключения и проверки отчёта в автомобильном WorkOrder; источник помечен «Старый текст: true», актуальность UI требует повторной сверки",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-059",
+      "url": "https://autodealer.ru/online/help/integratcii/kassy/re.-kassa.html",
+      "title": "re:Kassa",
+      "section": "Интеграции",
+      "matrixId": "D07",
+      "priority": "M3",
+      "issue": 170,
+      "status": "PLANNED",
+      "scenario": "Регистрация и активация кассы, привязка OFD credentials и предприятия для Казахстана",
+      "gap": "Нет регионального sandbox, действующего договора/credential lifecycle и юридического подтверждения фискального процесса; источник помечен «Старый текст: true», актуальность UI требует повторной сверки",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-060",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/protcenka/podkliuchenie-postavshchikov.html",
+      "title": "Подключение поставщиков",
+      "section": "Склад",
+      "matrixId": "C02",
+      "priority": "M2",
+      "issue": 115,
+      "status": "PLANNED",
+      "scenario": "Подключение web-service поставщика, проверка соединения и сопоставление с юридическим контрагентом",
+      "gap": "Нет договорных credentials и provider adapters; секреты, timeout, tenant scope и supplier mapping требуют реализации; источник помечен «Старый текст: true», актуальность UI требует повторной сверки",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-061",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/protcenka/poisk-zapchastei-v-protcenke.html",
+      "title": "Поиск запчастей в Проценке",
+      "section": "Склад",
+      "matrixId": "C02",
+      "priority": "M2",
+      "issue": 115,
+      "status": "D_PARTIAL",
+      "scenario": "Сравнение наличия, оригиналов, аналогов, цен, наценки, сроков и условий поставщиков",
+      "gap": "Есть synthetic предложения; нет лицензированных данных, реальной доступности, договорных условий и полного клиентского режима",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-062",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/pereprodazha.html",
+      "title": "Перепродажа",
+      "section": "Склад",
+      "matrixId": "C04",
+      "priority": "M1",
+      "issue": 168,
+      "status": "D_PARTIAL",
+      "scenario": "Перемещение товаров между предприятиями с парными накладными расхода и прихода",
+      "gap": "Есть только synthetic stock pilot; парные production документы, права обоих предприятий и полный rollback не доказаны",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-063",
+      "url": "https://autodealer.ru/online/help/rabota-v-programme/rabota-so-spiskami.html",
+      "title": "Работа со списками",
+      "section": "Настройки",
+      "matrixId": "E10",
+      "priority": "M2",
+      "issue": 107,
+      "status": "D_PARTIAL",
+      "scenario": "Общие списки: поиск, фильтры, сортировка, пагинация, группы, настройка столбцов и массовые операции",
+      "gap": "Не все списки поддерживают единый набор действий; ACL и audit для массовых изменений не доказаны",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-064",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/index.html",
+      "title": "Складской учёт",
+      "section": "Склад",
+      "matrixId": "C04",
+      "priority": "M1",
+      "issue": 168,
+      "status": "D_PARTIAL",
+      "scenario": "Корневой раздел складских операций и переходы к остаткам, поступлениям, реализации, инвентаризации, минимальным остаткам, проценке и возвратам",
+      "gap": "Источник помечен «Старый текст: true»; не все вложенные операции получены и не доказан production stock ledger",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-065",
+      "url": "https://autodealer.ru/online/help/otchety-monitor-i-grafiki/otchety/otchety.-sotrudniki.html",
+      "title": "Отчеты. Сотрудники",
+      "section": "Отчёты",
+      "matrixId": "D09",
+      "priority": "M3",
+      "issue": 171,
+      "status": "PLANNED",
+      "scenario": "Отчёты менеджеров, исполнителей и начисления зарплаты по периодам, предприятиям и сотрудникам",
+      "gap": "Источник помечен «Старый текст: true»; нет проверенной payroll policy, сверки ledger и role-scoped report endpoints",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-066",
+      "url": "https://autodealer.ru/online/help/nachalo-raboty-s-sistemoi/sozdanie-spiska-sotrudnikov.html",
+      "title": "Создание списка сотрудников",
+      "section": "Предприятие",
+      "matrixId": "A05",
+      "priority": "M1",
+      "issue": 446,
+      "status": "PLANNED",
+      "scenario": "Первоначальное создание сотрудников с назначением предприятия, отдела и схемы оплаты",
+      "gap": "Доступна только поисковая выдержка; production invitation, identity verification и trusted bootstrap не подтверждены",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-067",
+      "url": "https://autodealer.ru/online/help/obshchie-spravochniki/predpriiatiia/otdely.html",
+      "title": "Отделы",
+      "section": "Предприятие",
+      "matrixId": "A05",
+      "priority": "M1",
+      "issue": 446,
+      "status": "PLANNED",
+      "scenario": "Организационная структура отделов и привязка сотрудников к подразделениям",
+      "gap": "Обнаружена только внутренняя ссылка из страницы предприятия; содержимое недоступно, поведение не предполагается",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-068",
+      "url": "https://autodealer.ru/online/help/dengi/zagruzka-bankovskikh-vypisok.html",
+      "title": "Загрузка банковских выписок",
+      "section": "Финансы",
+      "matrixId": "D05",
+      "priority": "M2",
+      "issue": 170,
+      "status": "PLANNED",
+      "scenario": "Импорт банковских выписок и распределение операций по предприятию и расчётному счёту",
+      "gap": "Обнаружена только внутренняя ссылка из финансового раздела; статья недоступна, форматы и правила проводок не предполагаются",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-069",
+      "url": "https://autodealer.ru/online/help/registratciia-v-programme.html",
+      "title": "Регистрация в программе",
+      "section": "Доступ",
+      "matrixId": "A05",
+      "priority": "M1",
+      "issue": 446,
+      "status": "PLANNED",
+      "scenario": "Регистрация с выбором региона, email, телефоном, согласием и первым запуском",
+      "gap": "Источник актуален, но production identity verification, consent retention и безопасное provisioning не реализованы",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-070",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/komplektatciia-i-razukomplektatciia.html",
+      "title": "Комплектация и разукомплектация",
+      "section": "Склад",
+      "matrixId": "C08",
+      "priority": "M2",
+      "issue": 168,
+      "status": "D_PARTIAL",
+      "scenario": "Сборка и разборка комплектов с резервированием компонентов, FIFO, себестоимостью, списанием и поступлением",
+      "gap": "Источник помечен «Старый текст: true»; production batch accounting, FIFO и reconciliation не доказаны",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-071",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/prikhod-tovara/index.html",
+      "title": "Приход товара",
+      "section": "Склад",
+      "matrixId": "C06",
+      "priority": "M1",
+      "issue": 168,
+      "status": "D_PARTIAL",
+      "scenario": "Приходные документы, партии, поставщики, платежи, переплаты, УПД XML и массовые операции",
+      "gap": "Источник обновлён 30.07.2026; production document/payment/EDI workflow and reconciliation не доказаны",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-072",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/minimalnye-ostatki.html",
+      "title": "Минимальные остатки",
+      "section": "Склад",
+      "matrixId": "C04",
+      "priority": "M1",
+      "issue": 168,
+      "status": "D_PARTIAL",
+      "scenario": "Пороговые остатки по разрешённым складам, уже заказанное количество и рекомендуемый объём пополнения",
+      "gap": "Источник помечен «Старый текст: true»; tenant-scoped stock alerts и procurement linkage не доказаны",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-073",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/vozvraty/vozvrat-postavshchiku.html",
+      "title": "Возврат поставщику",
+      "section": "Склад",
+      "matrixId": "C07",
+      "priority": "M2",
+      "issue": 168,
+      "status": "D_PARTIAL",
+      "scenario": "Возврат поставщику по приходу, доступному остатку, комиссии, оплатам и кодам маркировки",
+      "gap": "Только поисковая выдержка; полный возврат, платежи, УПД/ЭДО и сверка не подтверждены",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-074",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/skladskoi-uchet/sostoianie-sklada.html",
+      "title": "Состояние склада",
+      "section": "Склад",
+      "matrixId": "C04",
+      "priority": "M1",
+      "issue": 168,
+      "status": "PLANNED",
+      "scenario": "Просмотр состояния и расположения остатков на торговых и неторговых складах",
+      "gap": "Только внутренняя ссылка из корневого раздела; целевой текст не получен, поведение не предполагается",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-075",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/skladskoi-uchet/raskhodnye-nakladnye.html",
+      "title": "Расходные накладные",
+      "section": "Склад",
+      "matrixId": "C06",
+      "priority": "M1",
+      "issue": 168,
+      "status": "PLANNED",
+      "scenario": "Документы расхода товаров со склада и их связи с заказами и контрагентами",
+      "gap": "Только внутренняя ссылка из корневого раздела; целевой текст не получен, поведение не предполагается",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-076",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/skladskoi-uchet/tovarnye-cheki.html",
+      "title": "Товарные чеки",
+      "section": "Финансы",
+      "matrixId": "D05",
+      "priority": "M1",
+      "issue": 170,
+      "status": "PLANNED",
+      "scenario": "Товарные чеки как клиентские документы продажи и денежного расчёта",
+      "gap": "Только внутренняя ссылка из корневого раздела; целевой текст не получен, поведение не предполагается",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-077",
+      "url": "https://autodealer.ru/online/help/skladskoi-uchet/skladskoi-uchet/vozvraty/index.html",
+      "title": "Возвраты",
+      "section": "Склад",
+      "matrixId": "C07",
+      "priority": "M2",
+      "issue": 168,
+      "status": "PLANNED",
+      "scenario": "Корневой раздел возвратов клиентов и поставщикам",
+      "gap": "Только внутренняя ссылка из корневого раздела; целевой текст не получен, поведение не предполагается",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-078",
+      "url": "https://autodealer.ru/online/help/obshchie-spravochniki/dokumenty/numeratory-dokumentov.html",
+      "title": "Нумераторы документов",
+      "section": "Документы",
+      "matrixId": "B10",
+      "priority": "M1",
+      "issue": 441,
+      "status": "PLANNED",
+      "scenario": "Настройка нумераторов документов по предприятиям и типам, префиксам, суффиксам и периодам",
+      "gap": "Источник помечен «Старый текст: true»; текущая реализация нумерации и конкурентная выдача номеров не подтверждены",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-081",
+      "url": "https://autodealer.ru/online/help/kalkuliatcii.html",
+      "title": "Калькуляции",
+      "section": "Документы",
+      "matrixId": "B01",
+      "priority": "M1",
+      "issue": 441,
+      "status": "PLANNED",
+      "scenario": "Предварительные калькуляции работ и товаров с последующим созданием заказ-наряда и связанных документов",
+      "gap": "Только поисковая выдержка; полный текст, версии расчёта и связь с проведёнными документами не подтверждены",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-082",
+      "url": "https://autodealer.ru/online/help/diagnosticheskii-list-neispravnosti/",
+      "title": "Диагностический лист неисправности",
+      "section": "Приёмка",
+      "matrixId": "B02",
+      "priority": "M1",
+      "issue": 439,
+      "status": "PLANNED",
+      "scenario": "Фиксация неисправностей, рекомендаций и результатов диагностики с привязкой к клиенту, автомобилю и заказ-наряду",
+      "gap": "Только поисковая выдержка; полный workflow, роли и неизменяемая история дефектов не подтверждены",
+      "evidence": "search_excerpt",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-083",
+      "url": "https://autodealer.ru/online/help/ispolniteli.html",
+      "title": "Исполнители",
+      "section": "Кадры",
+      "matrixId": "A05",
+      "priority": "M1",
+      "issue": 446,
+      "status": "PLANNED",
+      "scenario": "Исполнители, подрядчики, бригады, схемы оплаты и доли участия в выполнении работ",
+      "gap": "Источник помечен «Старый текст: true»; production кадровый учёт, начисления и раздельные полномочия не подтверждены",
+      "evidence": "page",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-085",
+      "url": "https://autodealer.ru/online/help/zakaz-nariady/sozdanie-zakaz-nariada/zakaz-nariady/sozdanie-zakaz-nariada/zakaz-nariad.-tekstovye-shablony.html",
+      "title": "Текстовые шаблоны заказ-наряда",
+      "section": "Ремонт",
+      "matrixId": "B01",
+      "priority": "M2",
+      "issue": 441,
+      "status": "PLANNED",
+      "scenario": "Текстовые шаблоны и печатные формулировки для заказ-наряда",
+      "gap": "Только внутренняя ссылка из статьи создания заказ-наряда; целевой текст не получен",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-086",
+      "url": "https://autodealer.ru/online/help/zakaz-nariady/sozdanie-zakaz-nariada/normy-vremeni.html",
+      "title": "Нормы времени",
+      "section": "Ремонт",
+      "matrixId": "B05",
+      "priority": "M1",
+      "issue": 167,
+      "status": "PLANNED",
+      "scenario": "Справочник норм времени и применение нормативов к выполняемым работам",
+      "gap": "Только внутренняя ссылка из статьи работ; целевой текст не получен",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-087",
+      "url": "https://autodealer.ru/online/help/klienty/klienty/dobavlenie-klienta/lenta.html",
+      "title": "Лента клиента",
+      "section": "Клиенты",
+      "matrixId": "D12",
+      "priority": "M2",
+      "issue": 169,
+      "status": "PLANNED",
+      "scenario": "Хронология контактов и обращений клиента с привязкой к ответственному сотруднику и источнику",
+      "gap": "Только внутренняя ссылка из статистики клиента; целевой текст не получен",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
+    },
+    {
+      "id": "ADP-088",
+      "url": "https://autodealer.ru/online/help/zakaz-nariady/sozdanie-zakaz-nariada/obshchie-spravochniki/avtomobili/komplektnost.html",
+      "title": "Комплектность автомобиля",
+      "section": "Приёмка",
+      "matrixId": "B02",
+      "priority": "M1",
+      "issue": 439,
+      "status": "PLANNED",
+      "scenario": "Чек-лист комплектности автомобиля при приёмке и фиксация отсутствующих элементов",
+      "gap": "Только внутренняя ссылка из статьи акта осмотра; целевой текст не получен",
+      "evidence": "nav_link",
+      "checkedOn": "2026-11-20"
     }
   ]
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline structural contract for page-by-page AutoDealer Online gap inventory.
 
-Per-row source dates survive incremental discovery. Evidence older than 60d
+Evidence provenance: page = full text opened; search_excerpt = indexed excerpt only; nav_link = internal link only and carries no inferred acceptance. Per-row source dates survive incremental discovery. Evidence older than 60d
 must be reviewed rather than falsely stamped with the latest inventory date.
 Never crawls an external website in CI. Checking source contents, freshness and
 business acceptance requires an independent human/web review (issue #108).
@@ -24,7 +24,7 @@ EXPECTED_FIELDS = {
     "status", "scenario", "gap", "evidence", "checkedOn",
 }
 VALID_STATUSES = {"D_PARTIAL", "PLANNED"}
-VALID_EVIDENCE = {"page", "search_excerpt"}
+VALID_EVIDENCE = {"page", "search_excerpt", "nav_link"}
 
 
 def validate(document: object, matrix_text: str) -> list[str]:
@@ -51,7 +51,7 @@ def validate(document: object, matrix_text: str) -> list[str]:
     records = document.get("records")
     if not isinstance(records, list):
         return problems + ["records must be an array"]
-    if len(records) < 49:
+    if len(records) < 85:
         problems.append("verified coverage must not silently shrink")
     urls: set[str] = set()
     ids: set[str] = set()
@@ -75,8 +75,7 @@ def validate(document: object, matrix_text: str) -> list[str]:
             parsed = urlparse(url)
             if (parsed.scheme != "https" or parsed.netloc != "autodealer.ru"
                 or not parsed.path.startswith("/online/help/")
-                or not parsed.path.endswith(".html")
-                and not parsed.path.endswith("/index.html")
+                or not (parsed.path.endswith(".html") or parsed.path.endswith("/"))
                 or parsed.query or parsed.fragment or parsed.params
                 or ".." in parsed.path):
                 problems.append(f"{where}: URL must be an Online help article")
@@ -138,7 +137,7 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
     items = document.get("requirements")
     if not isinstance(items,list):
         return problems+["requirements must be a list"]
-    if len(items)<80:
+    if len(items)<150:
         problems.append("atomic acceptance requirements silently shrank")
     seen_ids=set()
     covered=set()
@@ -160,7 +159,10 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
         if page is None:
             problems.append(f"{where}: unknown source page")
         else:
-            covered.add(item["pageId"])
+            if page.get("evidence") == "nav_link":
+                problems.append(f"{where}: nav_link-only source cannot carry inferred acceptance")
+            else:
+                covered.add(item["pageId"])
             for attr,expected in (("matrixId",page["matrixId"]),
                                   ("ownerIssue",page["issue"]),
                                   ("sourceEvidence",page["evidence"])):
@@ -195,7 +197,7 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
             if any(p.startswith("/") or ".." in p.split("/")
                    or not (ROOT/p).is_file() for p in evidence):
                 problems.append(f"{where}: invalid evidence path")
-    missing=set(pages)-covered
+    missing={page_id for page_id,page in pages.items() if page.get("evidence") != "nav_link" and page_id not in covered}
     if missing:
         problems.append(f"{len(missing)} source pages lack acceptance requirements")
     return problems
