@@ -241,7 +241,6 @@ def downgrade():
     op.execute("DROP TRIGGER auto_location_deactivation_guard ON auto_service_location")
     op.execute("DROP FUNCTION guard_auto_location_deactivation()")
     op.execute("DROP TABLE auto_workshop_admin_action")
-    op.execute("DROP FUNCTION guard_auto_location_deactivation()")
     # Reinstall the pre-0134 workshop guard for disposable PG17 only.
     op.execute("""
       CREATE OR REPLACE FUNCTION guard_auto_workshop()
