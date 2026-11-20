@@ -84,6 +84,12 @@ def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
     assert invite["role"] == "CASHIER"
     assert admin.post(url, json=payload,
                       headers=_headers(data, data["manager"])).status_code == 409
+    direct_grant = admin.post(
+        f"/api/v1/dev/auto/organizations/{org_a}/staff",
+        json={"userId":str(data["intake"]),"role":"CASHIER","locationId":str(location)},
+        headers=_headers(data, data["manager"]),
+    )
+    assert direct_grant.status_code == 409
 
     # The plaintext secret is not stored or returned by list/audit endpoints.
     with psycopg.connect(DSN) as db:
@@ -116,6 +122,9 @@ def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
     assert accepted.status_code == 201, accepted.text
     assert accepted.json()["status"] == "ACCEPTED"
     assert accepted.json()["role"] == "CASHIER"
+    duplicate_after_accept = admin.post(url, json=payload,
+        headers=_headers(data, data["manager"]))
+    assert duplicate_after_accept.status_code == 409
     replay = target.post(
         "/api/v1/dev/auto/staff-invitations/accept",
         json={"token": secret}, headers=_headers(data, data["intake"]),
