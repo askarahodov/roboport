@@ -2,7 +2,7 @@ import React from 'react';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Grant = { grantId: string; userId: string; role: string; locationId: string | null };
-type AuditEvent = { eventId: string; grantId: string; actorId: string; userId: string; action: 'GRANTED' | 'REVOKED'; role: string; locationId: string | null; createdAt: string };
+type AuditEvent = { eventId: string; grantId: string; actorId: string; userId: string; action: 'GRANTED' | 'REVOKED'; role: string; locationId: string | null; createdAt: string };\ntype StaffInvitation = { invitationId:string; targetLogin:string; role:string; locationId:string|null; status:'PENDING'|'ACCEPTED'|'REVOKED'|'EXPIRED'; createdAt:string; expiresAt:string; grantId:string|null };\ntype InvitationEvent = { eventId:string; invitationId:string; actorId:string; action:'CREATED'|'ACCEPTED'|'REVOKED'|'EXPIRED'; createdAt:string; targetLogin:string; role:string; locationId:string|null };
 const staffRoles = ['MANAGER', 'INTAKE', 'MECHANIC', 'WAREHOUSE', 'CASHIER'] as const;
 const roles = ['MANAGER', 'INTAKE', 'MECHANIC', 'WAREHOUSE', 'CASHIER'] as const;
 const documents = ['INTAKE_ACT','ESTIMATE','HANDOVER','SUPPLIER_ORDER','FINANCE'] as const;
@@ -42,6 +42,18 @@ export function AutoStaffAdmin() {
   const [confirmId, setConfirmId] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState('');
   const [refresh, setRefresh] = React.useState(0);
+  const [inviteLogin,setInviteLogin] = React.useState('');
+  const [inviteRole,setInviteRole] = React.useState<typeof staffRoles[number]>('INTAKE');
+  const [inviteLocation,setInviteLocation] = React.useState('');
+  const [inviteDays,setInviteDays] = React.useState(7);
+  const [invitations,setInvitations] = React.useState<StaffInvitation[]>([]);
+  const [inviteState,setInviteState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
+  const [inviteBusy,setInviteBusy] = React.useState(false);
+  const [inviteMessage,setInviteMessage] = React.useState('');
+  const [inviteToken,setInviteToken] = React.useState('');
+  const [inviteConfirmId,setInviteConfirmId] = React.useState<string|null>(null);
+  const [inviteAudit,setInviteAudit] = React.useState<InvitationEvent[]>([]);
+  const [inviteAuditState,setInviteAuditState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [policyRole,setPolicyRole] = React.useState<typeof roles[number]>('MANAGER');
   const [policyDoc,setPolicyDoc] = React.useState<DocumentKind>('ESTIMATE');
   const [policyCap,setPolicyCap] = React.useState<Capability>('READ');
@@ -65,6 +77,8 @@ export function AutoStaffAdmin() {
   organizationRef.current = organization.trim();
   React.useEffect(() => {
     setConfirmId(null);setAudit([]);setAuditState('idle');setMessage('');
+    setInvitations([]);setInviteState('idle');setInviteToken('');setInviteMessage('');
+    setInviteConfirmId(null);setInviteAudit([]);setInviteAuditState('idle');
     policyRequest.current++;
     setPolicyEvents([]);setPolicyCursor(null);setPolicyTrail([]);
     setPolicyNextBefore(null);setPolicyState('idle');
@@ -97,6 +111,117 @@ export function AutoStaffAdmin() {
     })();
     return () => controller.abort();
   }, [organization, refresh, validOrg]);
+
+  async function loadInvitations() {
+    if (!validOrg) return;
+    const currentOrg=organization.trim();
+    setInvitations([]);setInviteState('loading');
+    try {
+      const response=await fetch('/api/v1/dev/auto/organizations/'+
+        encodeURIComponent(currentOrg)+'/staff-invitations?limit=100',
+        {credentials:'include',cache:'no-store'});
+      if(organizationRef.current!==currentOrg)return;
+      if([401,403,404].includes(response.status)){setInviteState('denied');return;}
+      if(!response.ok)throw new Error();
+      const body:unknown=await response.json();
+      if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)||
+        body.items.length>100||!body.items.every((item:unknown)=>{
+          if(!item||typeof item!=='object')return false;
+          const v=item as StaffInvitation;
+          return uuid.test(v.invitationId)&&typeof v.targetLogin==='string'&&
+            staffRoles.includes(v.role as typeof staffRoles[number])&&
+            (v.locationId===null||typeof v.locationId==='string'&&uuid.test(v.locationId))&&
+            ['PENDING','ACCEPTED','REVOKED','EXPIRED'].includes(v.status)&&
+            typeof v.createdAt==='string'&&Number.isFinite(Date.parse(v.createdAt))&&
+            typeof v.expiresAt==='string'&&Number.isFinite(Date.parse(v.expiresAt))&&
+            (v.grantId===null||typeof v.grantId==='string'&&uuid.test(v.grantId));
+        }))throw new Error();
+      setInvitations(body.items as StaffInvitation[]);setInviteState('ready');
+    }catch{if(organizationRef.current===currentOrg)setInviteState('error');}
+  }
+
+  React.useEffect(()=>{
+    if(validOrg&&state==='ready')void loadInvitations();
+    else if(!validOrg){setInvitations([]);setInviteState('idle');}
+  },[organization,state,refresh,validOrg]);
+
+  async function createInvitation(event:React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if(inviteBusy||!validOrg||!inviteLogin.trim()||
+       inviteLocation.trim()&&!uuid.test(inviteLocation.trim()))return;
+    const org=organization.trim();
+    setInviteBusy(true);setInviteMessage('');setInviteToken('');
+    try{
+      const response=await mutate('/api/v1/dev/auto/organizations/'+
+        encodeURIComponent(org)+'/staff-invitations',{
+          targetLogin:inviteLogin.trim().toLowerCase(),role:inviteRole,
+          locationId:inviteLocation.trim()||null,expiresInDays:inviteDays,
+        });
+      if(org!==organizationRef.current)return;
+      if(response.status===409){setInviteMessage('409 — активное назначение или приглашение уже существует.');return;}
+      if([401,403,404].includes(response.status)){setInviteMessage('403 — приглашение не разрешено сервером.');return;}
+      if(response.status===422){setInviteMessage('422 — проверьте логин, роль, филиал и срок действия.');return;}
+      if(!response.ok)throw new Error();
+      const value:unknown=await response.json();
+      if(!value||typeof value!=='object'||!('invitationId' in value)||
+        typeof value.invitationId!=='string'||!uuid.test(value.invitationId)||
+        !('token' in value)||typeof value.token!=='string'||
+        !/^[A-Za-z0-9_-]{40,64}$/.test(value.token)||
+        !('expiresAt' in value)||typeof value.expiresAt!=='string'||
+        !Number.isFinite(Date.parse(value.expiresAt)))throw new Error();
+      setInviteToken(value.token);
+      setInviteMessage('Приглашение создано. Одноразовый код показан только сейчас.');
+      await loadInvitations();
+    }catch{
+      if(org===organizationRef.current)
+        setInviteMessage('Результат неизвестен. Проверьте список; при необходимости отзовите приглашение и создайте новое.');
+    }finally{setInviteBusy(false);}
+  }
+
+  async function revokeInvitation(invitationId:string) {
+    if(inviteBusy||!validOrg)return;
+    const org=organization.trim();
+    setInviteBusy(true);setInviteMessage('');
+    try{
+      const response=await mutate('/api/v1/dev/auto/organizations/'+
+        encodeURIComponent(org)+'/staff-invitations/'+encodeURIComponent(invitationId)+'/revoke',{});
+      if(org!==organizationRef.current)return;
+      if([401,403,404].includes(response.status)){setInviteMessage('403 — отзыв приглашения не разрешён.');return;}
+      if(!response.ok)throw new Error();
+      const value=await response.json() as {status?:string};
+      setInviteConfirmId(null);
+      setInviteMessage(value.status==='REVOKED'?'Приглашение отозвано.':'Приглашение уже закрыто: '+String(value.status));
+      await loadInvitations();
+    }catch{
+      if(org===organizationRef.current)setInviteMessage('Не удалось подтвердить отзыв. Перечитайте список приглашений.');
+    }finally{setInviteBusy(false);}
+  }
+
+  async function loadInvitationAudit() {
+    if(!validOrg)return;
+    const org=organization.trim();
+    setInviteAudit([]);setInviteAuditState('loading');
+    try{
+      const response=await fetch('/api/v1/dev/auto/organizations/'+
+        encodeURIComponent(org)+'/staff-invitations/audit?limit=100',
+        {credentials:'include',cache:'no-store'});
+      if(org!==organizationRef.current)return;
+      if([401,403,404].includes(response.status)){setInviteAuditState('denied');return;}
+      if(!response.ok)throw new Error();
+      const body:unknown=await response.json();
+      if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)||
+        body.items.length>100||!body.items.every((item:unknown)=>{
+          if(!item||typeof item!=='object')return false;
+          const v=item as InvitationEvent;
+          return uuid.test(v.eventId)&&uuid.test(v.invitationId)&&uuid.test(v.actorId)&&
+            ['CREATED','ACCEPTED','REVOKED','EXPIRED'].includes(v.action)&&
+            typeof v.targetLogin==='string'&&staffRoles.includes(v.role as typeof staffRoles[number])&&
+            (v.locationId===null||typeof v.locationId==='string'&&uuid.test(v.locationId))&&
+            typeof v.createdAt==='string'&&Number.isFinite(Date.parse(v.createdAt));
+        }))throw new Error();
+      setInviteAudit(body.items as InvitationEvent[]);setInviteAuditState('ready');
+    }catch{if(org===organizationRef.current)setInviteAuditState('error');}
+  }
 
   async function loadAudit() {
     if (!validOrg) return;
@@ -298,6 +423,70 @@ export function AutoStaffAdmin() {
         <button disabled={busy || !uuid.test(user.trim()) || !!location.trim() && !uuid.test(location.trim())} type="submit">
           Назначить</button>
       </form>
+      <section aria-label="Приглашения сотрудников">
+        <h2>Пригласить сотрудника</h2>
+        <p>Приглашение адресуется уже существующей активной учётной записи. Сотрудник входит под тем же логином и принимает одноразовый код. Внешняя доставка и регистрация новых аккаунтов пока отключены.</p>
+        <form onSubmit={createInvitation}>
+          <label>Логин учётной записи
+            <input required maxLength={128} value={inviteLogin}
+              onChange={e=>setInviteLogin(e.target.value)} />
+          </label>
+          <label>Роль приглашения
+            <select value={inviteRole} onChange={e=>setInviteRole(e.target.value as typeof staffRoles[number])}>
+              {staffRoles.map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+          </label>
+          <label>UUID филиала (необязательно)
+            <input value={inviteLocation} onChange={e=>setInviteLocation(e.target.value)} />
+          </label>
+          <label>Срок действия
+            <select value={inviteDays} onChange={e=>setInviteDays(Number(e.target.value))}>
+              <option value={1}>1 день</option><option value={7}>7 дней</option>
+              <option value={14}>14 дней</option><option value={30}>30 дней</option>
+            </select>
+          </label>
+          <button type="submit" disabled={inviteBusy||!inviteLogin.trim()||
+            !!inviteLocation.trim()&&!uuid.test(inviteLocation.trim())}>
+            Создать приглашение</button>
+        </form>
+        {inviteToken&&<section role="group" aria-label="Одноразовый код приглашения">
+          <p>Передайте код сотруднику по проверенному каналу. Сервер хранит только хеш; повторно показать этот код нельзя.</p>
+          <input aria-label="Одноразовый код приглашения" readOnly value={inviteToken}/>
+          <button type="button" onClick={()=>void navigator.clipboard.writeText(inviteToken)
+            .then(()=>setInviteMessage('Код скопирован.'))
+            .catch(()=>setInviteMessage('Не удалось скопировать. Выделите код вручную.'))}>
+            Скопировать код</button>
+          <a href="/staff/auto-invitation">Страница принятия приглашения</a>
+        </section>}
+        {inviteState==='loading'&&<p role="status">Загрузка приглашений…</p>}
+        {inviteState==='denied'&&<p role="alert">Список приглашений недоступен.</p>}
+        {inviteState==='error'&&<p role="alert">Не удалось загрузить приглашения.
+          <button type="button" onClick={()=>void loadInvitations()}>Повторить</button></p>}
+        {inviteState==='ready'&&(invitations.length?<ul>{invitations.map(item=><li key={item.invitationId}>
+          <strong>{item.targetLogin}</strong> · {item.role} · {item.locationId??'Все филиалы'} ·
+          {' '}{({PENDING:'Ожидает',ACCEPTED:'Принято',REVOKED:'Отозвано',EXPIRED:'Истекло'} as const)[item.status]} ·
+          {' '}до {new Date(item.expiresAt).toLocaleString('ru-RU')}
+          {item.grantId&&<> · назначение {item.grantId}</>}
+          {item.status==='PENDING'&&(inviteConfirmId===item.invitationId?
+            <span>
+              <button type="button" disabled={inviteBusy} onClick={()=>void revokeInvitation(item.invitationId)}>
+                Подтвердить отзыв приглашения</button>
+              <button type="button" disabled={inviteBusy} onClick={()=>setInviteConfirmId(null)}>Отмена</button>
+            </span>:
+            <button type="button" disabled={inviteBusy} onClick={()=>setInviteConfirmId(item.invitationId)}>
+              Отозвать приглашение</button>)}
+        </li>)}</ul>:<p>Приглашений пока нет.</p>)}
+        <button type="button" disabled={inviteAuditState==='loading'}
+          onClick={()=>void loadInvitationAudit()}>Показать журнал приглашений</button>
+        {inviteAuditState==='loading'&&<p role="status">Загрузка журнала приглашений…</p>}
+        {inviteAuditState==='denied'&&<p role="alert">Журнал приглашений недоступен.</p>}
+        {inviteAuditState==='error'&&<p role="alert">Не удалось загрузить журнал приглашений.</p>}
+        {inviteAuditState==='ready'&&(inviteAudit.length?<ol>{inviteAudit.map(event=><li key={event.eventId}>
+          {({CREATED:'Создано',ACCEPTED:'Принято',REVOKED:'Отозвано',EXPIRED:'Истекло'} as const)[event.action]} ·
+          {event.targetLogin} · {event.role} · {new Date(event.createdAt).toLocaleString('ru-RU')} · автор {event.actorId}
+        </li>)}</ol>:<p>В журнале нет событий.</p>)}
+      </section>
+      {inviteMessage&&<p role="status">{inviteMessage}</p>}
     </>}
     {state === 'ready' && <section aria-label="Журнал действий сотрудников">
       <h2>Журнал назначений и отзывов</h2>
