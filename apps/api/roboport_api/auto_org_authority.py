@@ -1,6 +1,6 @@
-"""Fail-closed organization authorization for future automotive endpoints.
+"""Fail-closed проверка организационных полномочий для закрытых synthetic/dev API.
 
-Not connected to public routes: no bootstrap or user-management API yet.
+Это не production IAM, не bootstrap первого ADMIN и не публичный user-management.
 """
 from uuid import UUID
 import psycopg
