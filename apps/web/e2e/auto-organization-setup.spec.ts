@@ -13,6 +13,8 @@ function mockWorkshop(page:any) {
   const bays:any[]=[];
   const shifts:any[]=[];
   const audit:any[]=[];
+  let eventCounter=0;
+  const eventId=()=> '77777777-7777-4777-8777-'+String(++eventCounter).padStart(12,'0');
   return page.route('**/api/v1/auth/csrf',route=>route.fulfill({
     status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}',
   })).then(()=>page.route(api,async(route:any)=>{
@@ -34,14 +36,14 @@ function mockWorkshop(page:any) {
       const body=request.postDataJSON();
       locations.push({locationId:location,code:body.code,timeZone:body.timeZone,
         disabled:false,createdAt:new Date().toISOString()});
-      audit.push({eventId:crypto.randomUUID(),locationId:location,actorId:actor,
+      audit.push({eventId:eventId(),locationId:location,actorId:actor,
         entityType:'LOCATION',entityId:location,action:'LOCATION_CREATED',createdAt:new Date().toISOString()});
       return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({locationId:location})});
     }
     if(locIndex>=0&&parts[locIndex+2]==='bays'&&parts.length===locIndex+3){
       const body=request.postDataJSON();
       bays.push({bayId:bay,locationId:location,code:body.code,disabled:false,createdAt:new Date().toISOString()});
-      audit.push({eventId:crypto.randomUUID(),locationId:location,actorId:actor,
+      audit.push({eventId:eventId(),locationId:location,actorId:actor,
         entityType:'BAY',entityId:bay,action:'BAY_CREATED',createdAt:new Date().toISOString()});
       return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({bayId:bay})});
     }
@@ -49,13 +51,13 @@ function mockWorkshop(page:any) {
       const body=request.postDataJSON();
       shifts.push({shiftId:shift,locationId:location,userId:body.userId,
         startsAt:body.startsAt,endsAt:body.endsAt,canceled:false,createdAt:new Date().toISOString()});
-      audit.push({eventId:crypto.randomUUID(),locationId:location,actorId:actor,
+      audit.push({eventId:eventId(),locationId:location,actorId:actor,
         entityType:'SHIFT',entityId:shift,action:'SHIFT_CREATED',createdAt:new Date().toISOString()});
       return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({shiftId:shift})});
     }
     if(path.endsWith('/cancel')){
       const item=shifts.find(x=>x.shiftId===shift);if(item)item.canceled=true;
-      audit.push({eventId:crypto.randomUUID(),locationId:location,actorId:actor,
+      audit.push({eventId:eventId(),locationId:location,actorId:actor,
         entityType:'SHIFT',entityId:shift,action:'SHIFT_CANCELED',createdAt:new Date().toISOString()});
       return route.fulfill({status:200,contentType:'application/json',body:'{"status":"CANCELED"}'});
     }
