@@ -115,6 +115,11 @@ def upgrade():
           IF NOT FOUND THEN RAISE EXCEPTION 'invitation target unavailable'; END IF;
           PERFORM 1 FROM app_user WHERE id=NEW.created_by AND status='ACTIVE' FOR SHARE;
           IF NOT FOUND THEN RAISE EXCEPTION 'invitation actor unavailable'; END IF;
+          PERFORM 1 FROM auto_organization_role_grant
+            WHERE organization_id=NEW.organization_id AND user_id=NEW.created_by
+              AND role_code='ADMIN' AND location_id IS NULL AND revoked_at IS NULL
+            FOR SHARE;
+          IF NOT FOUND THEN RAISE EXCEPTION 'invitation actor is not active organization ADMIN'; END IF;
           RETURN NEW;
         END IF;
 
@@ -135,6 +140,17 @@ def upgrade():
              OR NEW.accepted_grant_id IS NULL OR NEW.accepted_at IS NULL
              OR NEW.accepted_at<OLD.created_at OR NEW.accepted_at>OLD.expires_at
              OR NOT EXISTS (
+               SELECT 1 FROM app_user u
+               WHERE u.id=OLD.target_user_id AND u.status='ACTIVE'
+             )
+             OR NOT EXISTS (
+               SELECT 1 FROM auto_organization_role_grant admin
+               JOIN app_user issuer ON issuer.id=admin.user_id AND issuer.status='ACTIVE'
+               WHERE admin.organization_id=OLD.organization_id
+                 AND admin.user_id=OLD.created_by AND admin.role_code='ADMIN'
+                 AND admin.location_id IS NULL AND admin.revoked_at IS NULL
+             )
+             OR NOT EXISTS (
                SELECT 1 FROM auto_organization_role_grant g
                WHERE g.id=NEW.accepted_grant_id
                  AND g.organization_id=OLD.organization_id
@@ -145,7 +161,7 @@ def upgrade():
             RAISE EXCEPTION 'staff invitation acceptance mismatch';
           END IF;
         ELSIF NEW.status='REVOKED' THEN
-          IF NEW.revoked_at IS NULL THEN
+          IF NEW.revoked_at IS NULL OR NEW.revoked_at<OLD.created_at THEN
             RAISE EXCEPTION 'staff invitation revocation timestamp required';
           END IF;
         ELSIF NEW.status='EXPIRED' THEN
