@@ -15,11 +15,11 @@ type Steps={
   services:'EMPTY'|'SELECTED';
   inspection:'MISSING'|'RECORDED';
   intakeAct:'MISSING'|'AWAITING_CLIENT'|'ACKNOWLEDGED'|'DISPUTED';
-  estimate:'MISSING'|'AWAITING_CLIENT'|'APPROVED'|'DECLINED';
+  estimate:'MISSING'|'AWAITING_CLIENT'|'APPROVED'|'DECLINED'|'RESTRICTED';
   execution:'NOT_STARTED'|'IN_PROGRESS'|'FINISHED';
   quality:'NOT_CHECKED'|'PASS'|'FAIL';
   technicalDocuments:'DRAFT'|'PREVIEW_SEALED'|'POSTED'|
-    'CLIENT_ACKNOWLEDGED'|'CLIENT_DISPUTED'|'CLOSED_TECHNICAL';
+    'CLIENT_ACKNOWLEDGED'|'CLIENT_DISPUTED'|'CLOSED_TECHNICAL'|'RESTRICTED';
 };
 type Stage=keyof Steps;
 type Snapshot={workOrderId:string;syntheticOnly:true;realMoney:false;
@@ -46,6 +46,7 @@ const stateNames:Record<string,string>={
   APPROVED:'Согласована',DECLINED:'Отклонена',NOT_STARTED:'Не начато',
   IN_PROGRESS:'В работе',FINISHED:'Работы завершены',
   NOT_CHECKED:'QC не проводился',PASS:'QC пройден',FAIL:'QC не пройден',
+  RESTRICTED:'Недоступно по правам',
   DRAFT:'Черновик',PREVIEW_SEALED:'Технический пакет сформирован',
   POSTED:'Технически проведён',CLIENT_ACKNOWLEDGED:'Клиент подтвердил',
   CLIENT_DISPUTED:'Клиент оспорил',CLOSED_TECHNICAL:'Технически закрыт',
