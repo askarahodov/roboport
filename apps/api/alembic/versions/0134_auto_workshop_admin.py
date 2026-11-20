@@ -236,11 +236,67 @@ def downgrade():
     op.execute("DROP TRIGGER auto_vehicle_location_binding_scope ON auto_vehicle_location_binding")
     op.execute("DROP FUNCTION guard_auto_vehicle_location_binding_insert()")
     op.execute("DROP TRIGGER auto_location_role_grant_guard ON auto_location_role_grant")
-    op.execute("DROP FUNCTION guard_auto_location_role_grant()")
-    op.execute("CREATE TRIGGER auto_location_role_grant_guard BEFORE UPDATE ON auto_location_role_grant FOR EACH ROW EXECUTE FUNCTION guard_auto_location_role_grant()")
+    op.execute("""
+      CREATE OR REPLACE FUNCTION guard_auto_location_role_grant()
+      RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF (NEW.id,NEW.location_id,NEW.user_id,NEW.role_code,NEW.created_at)
+           IS DISTINCT FROM
+           (OLD.id,OLD.location_id,OLD.user_id,OLD.role_code,OLD.created_at) THEN
+          RAISE EXCEPTION 'auto location grant identity immutable';
+        END IF;
+        IF OLD.revoked_at IS NOT NULL
+           AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at THEN
+          RAISE EXCEPTION 'auto location grant revocation irreversible';
+        END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE TRIGGER auto_location_role_grant_guard
+      BEFORE UPDATE ON auto_location_role_grant
+      FOR EACH ROW EXECUTE FUNCTION guard_auto_location_role_grant()
+    """)
     op.execute("DROP TRIGGER auto_location_deactivation_guard ON auto_service_location")
     op.execute("DROP FUNCTION guard_auto_location_deactivation()")
     op.execute("DROP TABLE auto_workshop_admin_action")
+
+    # Restore the original organization grant guard for disposable PG17 only.
+    op.execute("""
+      CREATE OR REPLACE FUNCTION auto_organization_grant_guard()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF TG_OP = 'DELETE' THEN
+          RAISE EXCEPTION 'grant deletion forbidden';
+        END IF;
+        IF TG_OP = 'INSERT' THEN
+          IF NOT EXISTS (SELECT 1 FROM auto_organization o
+                         WHERE o.id=NEW.organization_id AND o.disabled_at IS NULL) THEN
+            RAISE EXCEPTION 'organization unavailable';
+          END IF;
+          IF NEW.location_id IS NOT NULL AND NOT EXISTS
+             (SELECT 1 FROM auto_service_location l
+              WHERE l.id=NEW.location_id AND l.organization_id=NEW.organization_id
+                AND l.disabled_at IS NULL) THEN
+            RAISE EXCEPTION 'location organization mismatch';
+          END IF;
+        ELSE
+          IF (NEW.id,NEW.organization_id,NEW.location_id,NEW.user_id,
+              NEW.role_code,NEW.created_at)
+             IS DISTINCT FROM
+             (OLD.id,OLD.organization_id,OLD.location_id,OLD.user_id,
+              OLD.role_code,OLD.created_at) THEN
+            RAISE EXCEPTION 'grant identity immutable';
+          END IF;
+          IF OLD.revoked_at IS NOT NULL AND
+             NEW.revoked_at IS DISTINCT FROM OLD.revoked_at THEN
+            RAISE EXCEPTION 'revocation irreversible';
+          END IF;
+        END IF;
+        RETURN NEW;
+      END $$
+    """)
+
     # Reinstall the pre-0134 workshop guard for disposable PG17 only.
     op.execute("""
       CREATE OR REPLACE FUNCTION guard_auto_workshop()
