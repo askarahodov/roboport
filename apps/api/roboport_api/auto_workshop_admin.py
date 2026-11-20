@@ -11,6 +11,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import psycopg
 
 from .session_lookup import session_subject
+from .auto_create_idempotency import (
+    AutoIdempotencyConflict, existing as existing_receipt,
+    remember as remember_receipt, validated_key,
+)
 
 
 _CODE = re.compile(r"^[A-Z0-9][A-Z0-9_-]{1,31}$")
@@ -50,6 +54,17 @@ def _admin(conn: psycopg.Connection, token: str, organization: UUID) -> UUID:
     ).fetchone() is None:
         raise WorkshopAdminDenied("organization admin required")
     return actor
+
+
+
+def _required_key(raw: str | None) -> str:
+    try:
+        key = validated_key(raw)
+    except ValueError as exc:
+        raise WorkshopAdminInvalid("invalid Idempotency-Key") from exc
+    if key is None:
+        raise WorkshopAdminInvalid("Idempotency-Key is required")
+    return key
 
 
 def _record(conn: psycopg.Connection, organization: UUID, location: UUID,
@@ -134,12 +149,11 @@ def list_workshop_audit(conn: psycopg.Connection, token: str,
 
 
 def create_location(conn: psycopg.Connection, token: str, organization: UUID,
-                    code: str, time_zone: str) -> UUID:
+                    code: str, time_zone: str,
+                    idempotency_key: str | None) -> UUID:
     if (type(code) is not str or _CODE.fullmatch(code) is None
             or type(time_zone) is not str or not 3 <= len(time_zone) <= 64):
         raise WorkshopAdminInvalid("invalid branch code or time zone")
-    # Keep application validation identical to the PostgreSQL trigger in
-    # 0090_auto_location_timezone: only UTC or a canonical area/name path.
     if time_zone != "UTC" and re.fullmatch(
         r"^[A-Za-z][A-Za-z0-9_+-]*/[A-Za-z0-9_+/-]+$", time_zone
     ) is None:
@@ -148,12 +162,30 @@ def create_location(conn: psycopg.Connection, token: str, organization: UUID,
         ZoneInfo(time_zone)
     except (ZoneInfoNotFoundError, ValueError) as exc:
         raise WorkshopAdminInvalid("unknown IANA time zone") from exc
+    key = _required_key(idempotency_key)
     with conn.transaction():
         actor = _admin(conn, token, organization)
         if conn.execute(
             "SELECT 1 FROM pg_timezone_names WHERE name=%s", (time_zone,)
         ).fetchone() is None:
             raise WorkshopAdminInvalid("unknown PostgreSQL time zone")
+        payload = {"objectId": str(organization), "code": code, "timeZone": time_zone}
+        try:
+            replay = existing_receipt(
+                conn, actor, "workshop.location.create", key, payload
+            )
+        except AutoIdempotencyConflict as exc:
+            raise WorkshopAdminConflict("Idempotency-Key reused with another payload") from exc
+        if replay is not None:
+            row = conn.execute(
+                """SELECT id FROM auto_service_location
+                   WHERE id=%s AND organization_id=%s AND code=%s
+                     AND timezone_name=%s AND disabled_at IS NULL""",
+                (replay, organization, code, time_zone),
+            ).fetchone()
+            if row is None:
+                raise WorkshopAdminConflict("previous branch result is no longer active")
+            return replay
         location = uuid4()
         try:
             with conn.transaction():
@@ -167,6 +199,9 @@ def create_location(conn: psycopg.Connection, token: str, organization: UUID,
             raise WorkshopAdminConflict("branch code already exists") from exc
         _record(conn, organization, location, actor,
                 "LOCATION", location, "LOCATION_CREATED")
+        remember_receipt(
+            conn, actor, "workshop.location.create", key, payload, location
+        )
         return location
 
 
@@ -224,10 +259,12 @@ def disable_location(conn: psycopg.Connection, token: str,
 
 
 def create_bay(conn: psycopg.Connection, token: str, organization: UUID,
-               location: UUID, code: str) -> UUID:
+               location: UUID, code: str,
+               idempotency_key: str | None) -> UUID:
     if (type(location) is not UUID or type(code) is not str
             or _CODE.fullmatch(code) is None):
         raise WorkshopAdminInvalid("invalid bay code or branch")
+    key = _required_key(idempotency_key)
     with conn.transaction():
         actor = _admin(conn, token, organization)
         if conn.execute(
@@ -237,6 +274,23 @@ def create_bay(conn: psycopg.Connection, token: str, organization: UUID,
             (location, organization),
         ).fetchone() is None:
             raise WorkshopAdminDenied("branch unavailable")
+        payload = {"objectId": str(location), "code": code}
+        try:
+            replay = existing_receipt(
+                conn, actor, "workshop.bay.create", key, payload
+            )
+        except AutoIdempotencyConflict as exc:
+            raise WorkshopAdminConflict("Idempotency-Key reused with another payload") from exc
+        if replay is not None:
+            row = conn.execute(
+                """SELECT id FROM auto_work_bay
+                   WHERE id=%s AND organization_id=%s AND location_id=%s
+                     AND code=%s AND disabled_at IS NULL""",
+                (replay, organization, location, code),
+            ).fetchone()
+            if row is None:
+                raise WorkshopAdminConflict("previous bay result is no longer active")
+            return replay
         bay = uuid4()
         try:
             with conn.transaction():
@@ -249,6 +303,7 @@ def create_bay(conn: psycopg.Connection, token: str, organization: UUID,
         except psycopg.errors.UniqueViolation as exc:
             raise WorkshopAdminConflict("bay code already exists in this branch") from exc
         _record(conn, organization, location, actor, "BAY", bay, "BAY_CREATED")
+        remember_receipt(conn, actor, "workshop.bay.create", key, payload, bay)
         return bay
 
 
@@ -293,12 +348,14 @@ def disable_bay(conn: psycopg.Connection, token: str, organization: UUID,
 
 def create_shift(conn: psycopg.Connection, token: str, organization: UUID,
                  location: UUID, employee: UUID,
-                 starts: datetime, ends: datetime) -> UUID:
+                 starts: datetime, ends: datetime,
+                 idempotency_key: str | None) -> UUID:
     if (type(location) is not UUID or type(employee) is not UUID
             or not all(isinstance(value, datetime) and value.tzinfo is not None
                        and value.utcoffset() is not None for value in (starts, ends))
             or ends.astimezone(timezone.utc) <= starts.astimezone(timezone.utc)):
         raise WorkshopAdminInvalid("shift requires a positive timezone-aware interval")
+    key = _required_key(idempotency_key)
     with conn.transaction():
         actor = _admin(conn, token, organization)
         if conn.execute(
@@ -322,6 +379,26 @@ def create_shift(conn: psycopg.Connection, token: str, organization: UUID,
             (organization, employee, list(_STAFF_ROLES), location),
         ).fetchone() is None:
             raise WorkshopAdminDenied("employee needs an active organization or branch role")
+        payload = {
+            "objectId": str(location), "employeeId": str(employee),
+            "startsAt": starts.isoformat(), "endsAt": ends.isoformat(),
+        }
+        try:
+            replay = existing_receipt(
+                conn, actor, "workshop.shift.create", key, payload
+            )
+        except AutoIdempotencyConflict as exc:
+            raise WorkshopAdminConflict("Idempotency-Key reused with another payload") from exc
+        if replay is not None:
+            row = conn.execute(
+                """SELECT user_id,starts_at,ends_at,canceled_at FROM auto_staff_shift
+                   WHERE id=%s AND organization_id=%s AND location_id=%s""",
+                (replay, organization, location),
+            ).fetchone()
+            if (row is None or row[3] is not None or row[0] != employee
+                    or row[1] != starts or row[2] != ends):
+                raise WorkshopAdminConflict("previous shift result is no longer active")
+            return replay
         shift = uuid4()
         try:
             with conn.transaction():
@@ -334,6 +411,7 @@ def create_shift(conn: psycopg.Connection, token: str, organization: UUID,
         except psycopg.errors.ExclusionViolation as exc:
             raise WorkshopAdminConflict("employee already has an overlapping shift") from exc
         _record(conn, organization, location, actor, "SHIFT", shift, "SHIFT_CREATED")
+        remember_receipt(conn, actor, "workshop.shift.create", key, payload, shift)
         return shift
 
 
