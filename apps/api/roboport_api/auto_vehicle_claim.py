@@ -1,7 +1,7 @@
 """Доказательство владения авто и независимое подтверждение сотрудником.
 
-Only synthetic data: доказательство выдаётся по закрытому каналу, сырое значение
-не сохраняется в БД и не попадает в audit. Это не подтверждает старые наряды.
+Только синтетические данные: доказательство выдаётся по закрытому каналу, сырое значение
+не сохраняется в БД и не попадает в аудит. Это не подтверждает старые наряды.
 """
 from datetime import datetime, timezone
 import hashlib
@@ -26,7 +26,7 @@ class VehicleClaimRejected(Exception):
 def _role_scoped(
     conn: psycopg.Connection, token: str, role: str, vehicle: UUID,
 ) -> UUID:
-    """Действующая сессия + роль + назначение на эту конкретную машину."""
+    """Сессия + tenant/branch grant для привязанного авто или legacy object grant."""
     actor = session_subject(conn, token, for_mutation=True)
     if actor is None:
         raise VehicleClaimRejected("unauthorized")
