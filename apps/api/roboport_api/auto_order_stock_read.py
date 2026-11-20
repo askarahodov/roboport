@@ -1,7 +1,7 @@
 """Tenant- and branch-scoped work order stock history, synthetic dev only."""
 from uuid import UUID
 import psycopg
-from .auto_org_authority import organization_role_allows
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 from .auto_stock_service import AutoStockDenied
 
 
@@ -14,11 +14,14 @@ def list_work_order_stock(conn: psycopg.Connection, token: str,
             or type(limit) is not int or not 1 <= limit <= 100):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        if not (organization_role_allows(conn, token, organization_id, "WAREHOUSE",
-                                         location_id, for_mutation=True)
-                or organization_role_allows(conn, token, organization_id, "MANAGER",
-                                            location_id, for_mutation=True)):
-            raise AutoStockDenied("FORBIDDEN")
+        try:
+            require_document_access(
+                conn, token, organization_id, location_id,
+                ("WAREHOUSE", "MANAGER"), "SUPPLIER_ORDER", "READ",
+                order=work_order_id,
+            )
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         order = conn.execute(
             """SELECT w.id FROM auto_work_order w
                JOIN auto_organization o ON o.id=w.organization_id AND o.disabled_at IS NULL

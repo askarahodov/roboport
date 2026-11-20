@@ -1,5 +1,6 @@
 """PG17 tenant isolation: work order warehouse read across organizations."""
 from uuid import uuid4
+from datetime import datetime, timedelta, timezone
 import psycopg
 import pytest
 from roboport_api.auto_order_stock_read import list_work_order_stock
@@ -10,6 +11,7 @@ from test_pg_auto_stock_ledger import sku, record
 from test_pg_auto_stock_service import grant
 from test_pg_auto_work_order_stock import work_order, act
 from test_pg_baseline import DSN
+from roboport_api.auto_document_access import publish_policy
 
 
 def test_scoped_work_order_ledger_and_revocation():
@@ -139,3 +141,38 @@ def test_http_stock_read_denies_disabled_location(monkeypatch):
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_service_location SET disabled_at=now() WHERE id=%s", (loc,))
     assert client.get(path).status_code == 403
+
+
+def test_stock_history_enforces_document_deny_and_order_history_cutoff():
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,bay=_org_and_bay(db)
+        order,_=work_order(db,d,org,loc,bay)
+        item=sku(db,org,loc)
+        record(db,item,"RECEIPT",4)
+        grant(db,d["intake"],org,loc)
+        act(db,d,org,loc,order,item,"RESERVE",2)
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,NULL,%s,'ADMIN')""",(uuid4(),org,d["manager"]))
+        admin=d["tokens"][d["manager"]]
+        token=d["tokens"][d["intake"]]
+
+        def publish(*,allowed,cutoff=None):
+            return publish_policy(
+                db,admin,org,request_key=uuid4(),role="WAREHOUSE",
+                loc=loc,user=None,document="SUPPLIER_ORDER",cap="READ",
+                allowed=allowed,not_before=cutoff,
+            )
+
+        assert len(list_work_order_stock(db,token,org,loc,order))==1
+        publish(allowed=False)
+        with pytest.raises(AutoStockDenied,match="FORBIDDEN"):
+            list_work_order_stock(db,token,org,loc,order)
+        # A newer ALLOW is still restrictive when its history cutoff is in
+        # the future: the old order must not become visible.
+        publish(allowed=True,cutoff=datetime.now(timezone.utc)+timedelta(days=1))
+        with pytest.raises(AutoStockDenied,match="FORBIDDEN"):
+            list_work_order_stock(db,token,org,loc,order)
+        publish(allowed=True,cutoff=datetime.now(timezone.utc)-timedelta(days=1))
+        assert len(list_work_order_stock(db,token,org,loc,order))==1
