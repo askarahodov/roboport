@@ -1,4 +1,5 @@
 """PG17: one-time organization staff invitations, acceptance, revocation and audit."""
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hashlib
 from uuid import uuid4
@@ -256,3 +257,78 @@ def test_invitation_is_tenant_scoped_and_disabled_without_dev_flag(monkeypatch):
         json=payload, headers=_headers(data, data["manager"]),
     )
     assert disabled.status_code == 404
+
+
+def test_concurrent_acceptance_is_exactly_once(monkeypatch):
+    data, org_a, _org_b, location, logins = _setup(monkeypatch)
+    admin = _client(data, data["manager"])
+    base = f"/api/v1/dev/auto/organizations/{org_a}/staff-invitations"
+    created = admin.post(base, json={
+        "targetLogin": logins[data["intake"]], "role": "MECHANIC",
+        "locationId": str(location), "expiresInDays": 7,
+    }, headers=_headers(data, data["manager"]))
+    assert created.status_code == 201, created.text
+    secret = created.json()["token"]
+
+    def accept_once(_):
+        client = _client(data, data["intake"])
+        try:
+            response = client.post(
+                "/api/v1/dev/auto/staff-invitations/accept",
+                json={"token": secret}, headers=_headers(data, data["intake"]),
+            )
+            return response.status_code
+        finally:
+            client.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(accept_once, range(2)))
+    assert sorted(results) == [201, 409]
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            """SELECT count(*) FROM auto_organization_role_grant
+               WHERE organization_id=%s AND user_id=%s AND role_code='MECHANIC'
+                 AND location_id=%s AND revoked_at IS NULL""",
+            (org_a, data["intake"], location),
+        ).fetchone() == (1,)
+        assert db.execute(
+            """SELECT action FROM auto_org_staff_invitation_event
+               WHERE invitation_id=%s ORDER BY action""",
+            (created.json()["invitationId"],),
+        ).fetchall() == [("ACCEPTED",), ("CREATED",)]
+
+
+def test_invitation_cannot_be_accepted_after_issuer_admin_is_revoked(monkeypatch):
+    data, org_a, _org_b, _location, logins = _setup(monkeypatch)
+    admin = _client(data, data["manager"])
+    target = _client(data, data["intake"])
+    created = admin.post(
+        f"/api/v1/dev/auto/organizations/{org_a}/staff-invitations",
+        json={"targetLogin":logins[data["intake"]],"role":"INTAKE"},
+        headers=_headers(data, data["manager"]),
+    )
+    assert created.status_code == 201, created.text
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """UPDATE auto_organization_role_grant SET revoked_at=now()
+               WHERE organization_id=%s AND user_id=%s AND role_code='ADMIN'
+                 AND location_id IS NULL AND revoked_at IS NULL""",
+            (org_a, data["manager"]),
+        )
+    response = target.post(
+        "/api/v1/dev/auto/staff-invitations/accept",
+        json={"token":created.json()["token"]},
+        headers=_headers(data, data["intake"]),
+    )
+    assert response.status_code == 403
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            "SELECT status FROM auto_org_staff_invitation WHERE id=%s",
+            (created.json()["invitationId"],),
+        ).fetchone() == ("PENDING",)
+        assert db.execute(
+            """SELECT count(*) FROM auto_organization_role_grant
+               WHERE organization_id=%s AND user_id=%s AND role_code='INTAKE'
+                 AND revoked_at IS NULL""",
+            (org_a, data["intake"]),
+        ).fetchone() == (0,)
