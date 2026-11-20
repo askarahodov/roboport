@@ -75,8 +75,7 @@ def validate(document: object, matrix_text: str) -> list[str]:
             parsed = urlparse(url)
             if (parsed.scheme != "https" or parsed.netloc != "autodealer.ru"
                 or not parsed.path.startswith("/online/help/")
-                or not parsed.path.endswith(".html")
-                and not parsed.path.endswith("/index.html")
+                or not (parsed.path.endswith(".html") or parsed.path.endswith("/"))
                 or parsed.query or parsed.fragment or parsed.params
                 or ".." in parsed.path):
                 problems.append(f"{where}: URL must be an Online help article")

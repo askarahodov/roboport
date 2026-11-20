@@ -86,7 +86,7 @@ def test_november_20_sources_have_atomic_owned_acceptance_criteria():
         assert (page["matrixId"], page["issue"], page["evidence"]) == (
             matrix_id, owner_issue, evidence
         )
-        assert len(criteria) == (2 if page_id in {"ADP-069", "ADP-078"} else 1)
+        assert len(criteria) == (3 if page_id == "ADP-057" else 2 if page_id in {"ADP-069", "ADP-078"} else 1)
         for criterion in criteria:
             assert criterion["matrixId"] == matrix_id
             assert criterion["ownerIssue"] == owner_issue

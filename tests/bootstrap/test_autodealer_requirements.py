@@ -43,7 +43,7 @@ def test_old_source_dates_are_preserved_and_future_or_stale_dates_fail_closed():
     assert rows["ADP-001"]["checkedOn"] == "2026-11-06"
     assert rows["ADP-049"]["checkedOn"] == "2026-11-18"
     assert rows["ADP-020"]["checkedOn"] == "2026-11-19"
-    assert rows["ADP-050"]["checkedOn"] == "2026-11-19"
+    assert rows["ADP-050"]["checkedOn"] == "2026-11-20"
     assert len({x["checkedOn"] for x in rows.values()}) >= 3
     for value in ("2025-01-01", "2026-12-01", "invalid"):
         altered = copy.deepcopy(pages)
