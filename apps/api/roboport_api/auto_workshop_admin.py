@@ -220,9 +220,9 @@ def disable_location(conn: psycopg.Connection, token: str,
             raise WorkshopAdminDenied("branch unavailable")
         if row[1] is not None:
             return "ALREADY_DISABLED"
-        # This FOR UPDATE lock serializes retirement with branch-scoped
-        # INSERT guards taking FOR SHARE; after waiting, the checks below see
-        # every create that committed first, while later creates see disabled_at.
+        # FOR UPDATE сериализует отключение с филиальными INSERT-guard,
+        # которые берут FOR SHARE: после ожидания проверка видит уже
+        # зафиксированные создания, а последующие INSERT увидят disabled_at.
         active = conn.execute(
             """SELECT
               EXISTS(SELECT 1 FROM auto_work_bay
