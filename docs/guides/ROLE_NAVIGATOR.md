@@ -288,7 +288,7 @@ VIN, произвольных заметок или юридических фи�
   отключить при активных постах/сменах/назначениях/бронях или привязанных авто.
 - **Доказательство:** [PG17 HTTP](https://github.com/askarahodov/roboport/blob/main/tests/integration/test_pg_auto_workshop_admin_http.py),
   [Playwright](https://github.com/askarahodov/roboport/blob/main/apps/web/e2e/auto-organization-setup.spec.ts),
-  [инструкция администратора](administrator.md#филиалы-посты-и-смены--закрытый-dev-контур-166).
+  [инструкция администратора](administrator.md).
 - **Отказы:** 403 чужая организация/нет ADMIN; 409 активные зависимости или
   пересечение смен; 422 некорректный код, timezone, UUID или интервал.
   Журнал actor-attributed и append-only.
