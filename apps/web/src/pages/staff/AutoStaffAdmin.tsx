@@ -454,9 +454,15 @@ export function AutoStaffAdmin() {
         {inviteToken&&<section role="group" aria-label="Одноразовый код приглашения">
           <p>Передайте код сотруднику по проверенному каналу. Сервер хранит только хеш; повторно показать этот код нельзя.</p>
           <input aria-label="Одноразовый код приглашения" readOnly value={inviteToken}/>
-          <button type="button" onClick={()=>void navigator.clipboard.writeText(inviteToken)
-            .then(()=>setInviteMessage('Код скопирован.'))
-            .catch(()=>setInviteMessage('Не удалось скопировать. Выделите код вручную.'))}>
+          <button type="button" onClick={()=>{
+            if(!navigator.clipboard?.writeText){
+              setInviteMessage('Буфер обмена недоступен. Выделите код вручную.');
+              return;
+            }
+            void navigator.clipboard.writeText(inviteToken)
+              .then(()=>setInviteMessage('Код скопирован.'))
+              .catch(()=>setInviteMessage('Не удалось скопировать. Выделите код вручную.'));
+          }}>
             Скопировать код</button>
           <a href="/staff/auto-invitation">Страница принятия приглашения</a>
         </section>}
