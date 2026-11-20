@@ -63,6 +63,12 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
         headers=headers,
     )
     assert alias.status_code == 422, alias.text
+    missing_key = client.post(
+        root + "/locations",
+        json={"code": branch_code, "timeZone": "Europe/Berlin"},
+        headers=headers,
+    )
+    assert missing_key.status_code == 422, missing_key.text
 
     branch_headers = {**headers, "Idempotency-Key": "branch-create-key-0001"}
     created = client.post(
@@ -297,6 +303,19 @@ def test_admin_manages_branch_bays_shifts_and_immutable_audit(monkeypatch):
                 pass
             else:
                 raise AssertionError("workshop admin audit accepted DELETE")
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """UPDATE auto_organization_role_grant SET revoked_at=now()
+               WHERE organization_id=%s AND user_id=%s
+                 AND role_code='ADMIN' AND location_id IS NULL AND revoked_at IS NULL""",
+            (organization, d["manager"]),
+        )
+    denied_replay = client.post(
+        root + "/locations",
+        json={"code": branch_code, "timeZone": "Europe/Berlin"},
+        headers=branch_headers,
+    )
+    assert denied_replay.status_code == 403, denied_replay.text
 
 
 def test_workshop_admin_api_is_disabled_without_synthetic_flag(monkeypatch):
