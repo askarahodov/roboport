@@ -66,6 +66,14 @@ def grant_staff(conn: psycopg.Connection, token: str, organization_id: UUID,
             ).fetchone()
             if location is None:
                 raise OrgStaffDenied("location unavailable")
+        if conn.execute(
+            """SELECT 1 FROM auto_org_staff_invitation
+               WHERE organization_id=%s AND target_user_id=%s AND role_code=%s
+                 AND location_id IS NOT DISTINCT FROM %s AND status='PENDING'
+                 AND expires_at>clock_timestamp() LIMIT 1""",
+            (organization_id, target, role, location_id),
+        ).fetchone() is not None:
+            raise OrgStaffConflict("pending invitation already exists")
         user = conn.execute(
             "SELECT id FROM app_user WHERE id=%s AND status='ACTIVE' FOR SHARE",
             (target,),
