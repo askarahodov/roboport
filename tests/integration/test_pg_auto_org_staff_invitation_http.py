@@ -123,6 +123,21 @@ def test_invitation_is_bound_to_authenticated_account_and_one_time(monkeypatch):
     assert accepted.status_code == 201, accepted.text
     assert accepted.json()["status"] == "ACCEPTED"
     assert accepted.json()["role"] == "CASHIER"
+    # Приглашение должно открывать портал без наследования старой глобальной роли.
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "UPDATE user_role SET revoked_at=now() WHERE user_id=%s",
+            (data["intake"],),
+        )
+    staff_access = target.get("/api/v1/dev/staff/access")
+    assert staff_access.status_code == 200, staff_access.text
+    assert staff_access.json()["roles"] == ["FINANCE"]
+    assert staff_access.json()["legacyRoles"] == []
+    assert staff_access.json()["organizationScopes"] == [{
+        "organizationId": str(org_a),
+        "locationId": str(location),
+        "role": "CASHIER",
+    }]
     duplicate_after_accept = admin.post(url, json=payload,
         headers=_headers(data, data["manager"]))
     assert duplicate_after_accept.status_code == 409
