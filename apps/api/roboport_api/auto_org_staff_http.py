@@ -1,6 +1,6 @@
-"""Closed, loopback-only organization staff endpoints for synthetic PG17.
+"""Закрытые loopback-маршруты управления персоналом для synthetic PG17.
 
-No ADMIN bootstrap endpoint. No real personnel or public production access.
+Нет HTTP-bootstrap для ADMIN, доступа к реальным сотрудникам или production.
 """
 from uuid import UUID
 from datetime import datetime
@@ -152,7 +152,7 @@ async def create_staff_invite(org_id: str, request: Request):
             return _response(request, 403, "FORBIDDEN")
         except OrgStaffConflict:
             return _response(request, 409, "CONFLICT")
-    # The opaque token is returned exactly once and never persisted in plaintext.
+    # Непрозрачный токен возвращается только один раз и не хранится в открытом виде.
     return JSONResponse(status_code=201, content=result,
                         headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
