@@ -1,5 +1,5 @@
 """Disposable OIDC Keycloak test fixture, DO NOT run against real data."""
-from uuid import UUID
+from uuid import uuid4
 import psycopg
 from test_pg_baseline import DSN
 
@@ -24,10 +24,18 @@ with psycopg.connect(DSN) as db:
             (vehicle,"TEST"+sub.split("-")[0]+"00000"),
         )
         db.execute("INSERT INTO account_customer_link(user_id,customer_id) VALUES(%s,%s)",(user,customer))
+        link_id=uuid4()
         db.execute(
-            "INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id,verified_at,verified_by) "
-            "VALUES(gen_random_uuid(),%s,%s,now(),%s)",
-            (vehicle,customer,reviewer),
+            "INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id) "
+            "VALUES(%s,%s,%s)",
+            (link_id,vehicle,customer),
+        )
+        # New links must be inserted PENDING; verification is the one allowed
+        # immutable NULL -> (verified_at, verified_by) transition.
+        db.execute(
+            "UPDATE auto_vehicle_customer_link "
+            "SET verified_at=clock_timestamp(), verified_by=%s WHERE id=%s",
+            (reviewer,link_id),
         )
         db.execute("INSERT INTO oidc_identity(issuer,subject,user_id) VALUES(%s,%s,%s)",(issuer,sub,user))
 print("Synthetic IdP/PG automotive ownership A/B links prepared")
