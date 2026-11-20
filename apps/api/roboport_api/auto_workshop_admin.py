@@ -3,7 +3,7 @@
 Только synthetic/dev. Создание реальной организации и проверка её владельца
 остаются отдельным внешним процессом; этот модуль не создаёт ADMIN.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -353,8 +353,9 @@ def create_shift(conn: psycopg.Connection, token: str, organization: UUID,
     if (type(location) is not UUID or type(employee) is not UUID
             or not all(isinstance(value, datetime) and value.tzinfo is not None
                        and value.utcoffset() is not None for value in (starts, ends))
-            or ends.astimezone(timezone.utc) <= starts.astimezone(timezone.utc)):
-        raise WorkshopAdminInvalid("shift requires a positive timezone-aware interval")
+            or ends.astimezone(timezone.utc) <= starts.astimezone(timezone.utc)
+            or ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc) > timedelta(hours=24)):
+        raise WorkshopAdminInvalid("shift requires a positive timezone-aware interval up to 24 hours")
     key = _required_key(idempotency_key)
     with conn.transaction():
         actor = _admin(conn, token, organization)
@@ -410,6 +411,8 @@ def create_shift(conn: psycopg.Connection, token: str, organization: UUID,
                 )
         except psycopg.errors.ExclusionViolation as exc:
             raise WorkshopAdminConflict("employee already has an overlapping shift") from exc
+        except psycopg.errors.CheckViolation as exc:
+            raise WorkshopAdminInvalid("shift interval violates database constraints") from exc
         _record(conn, organization, location, actor, "SHIFT", shift, "SHIFT_CREATED")
         remember_receipt(conn, actor, "workshop.shift.create", key, payload, shift)
         return shift
