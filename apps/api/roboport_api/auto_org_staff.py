@@ -24,6 +24,16 @@ class OrgStaffConflict(ValueError):
     pass
 
 
+def _membership_lock(
+    conn: psycopg.Connection, organization_id: UUID, target_user_id: UUID,
+    role: str, location_id: UUID | None,
+) -> None:
+    # Direct grants and invitations must not race into two different tables.
+    # A transaction-scoped advisory lock serializes the same membership tuple.
+    key = f"{organization_id}:{target_user_id}:{role}:{location_id or ''}"
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (key,))
+
+
 def _admin(conn: psycopg.Connection, token: str, organization_id: UUID) -> UUID:
     actor = session_subject(conn, token, for_mutation=True)
     if actor is None:
@@ -66,6 +76,7 @@ def grant_staff(conn: psycopg.Connection, token: str, organization_id: UUID,
             ).fetchone()
             if location is None:
                 raise OrgStaffDenied("location unavailable")
+        _membership_lock(conn, organization_id, target, role, location_id)
         if conn.execute(
             """SELECT 1 FROM auto_org_staff_invitation
                WHERE organization_id=%s AND target_user_id=%s AND role_code=%s
@@ -239,6 +250,7 @@ def create_staff_invitation(
             if location is None:
                 raise OrgStaffDenied("location unavailable")
 
+        _membership_lock(conn, organization_id, target_id, role, location_id)
         if conn.execute(
             """SELECT 1 FROM auto_organization_role_grant
                WHERE organization_id=%s AND user_id=%s AND role_code=%s
