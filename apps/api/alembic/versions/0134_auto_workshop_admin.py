@@ -14,6 +14,14 @@ depends_on = None
 
 
 def upgrade():
+    op.execute("ALTER TABLE auto_create_receipt DROP CONSTRAINT auto_create_receipt_operation_check")
+    op.execute("""
+      ALTER TABLE auto_create_receipt ADD CONSTRAINT auto_create_receipt_operation_check
+      CHECK (operation IN (
+        'vehicle.link.propose','vehicle.intake.grant',
+        'workshop.location.create','workshop.bay.create','workshop.shift.create'
+      ))
+    """)
     op.execute("""
       CREATE TABLE auto_workshop_admin_action (
         id uuid PRIMARY KEY,
@@ -259,6 +267,21 @@ def downgrade():
     """)
     op.execute("DROP TRIGGER auto_location_deactivation_guard ON auto_service_location")
     op.execute("DROP FUNCTION guard_auto_location_deactivation()")
+    op.execute("""
+      DO $
+      BEGIN
+        IF EXISTS (SELECT 1 FROM auto_create_receipt
+                   WHERE operation IN ('workshop.location.create',
+                     'workshop.bay.create','workshop.shift.create')) THEN
+          RAISE EXCEPTION 'workshop idempotency receipts prevent downgrade';
+        END IF;
+      END $
+    """)
+    op.execute("ALTER TABLE auto_create_receipt DROP CONSTRAINT auto_create_receipt_operation_check")
+    op.execute("""
+      ALTER TABLE auto_create_receipt ADD CONSTRAINT auto_create_receipt_operation_check
+      CHECK (operation IN ('vehicle.link.propose','vehicle.intake.grant'))
+    """)
     op.execute("DROP TABLE auto_workshop_admin_action")
 
     # Restore the original organization grant guard for disposable PG17 only.
