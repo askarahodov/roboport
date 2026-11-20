@@ -84,7 +84,7 @@
 - **ADP-083 — [Исполнители](https://autodealer.ru/online/help/ispolniteli.html):** сотрудники, подрядчики, бригады, схемы оплаты и доли участия; полный текст открыт, источник помечен «Старый текст: true».
 - **ADP-085 — Текстовые шаблоны заказ-наряда, ADP-086 — Нормы времени, ADP-087 — Лента клиента, ADP-088 — Комплектность автомобиля:** четыре внутренних перехода обнаружены в статьях создания заказ-наряда, работ, статистики клиента и акта осмотра. Целевые тексты не получены; все четыре остаются nav_link и не получают придуманных acceptance-критериев.
 - **Устранение дублей:** рекомендации уже зарегистрированы как ADP-050, работы и комплексы — как ADP-012, мобильное приложение — как ADP-042. Эти три существующие страницы повторно открыты и получили новую дату проверки, вместо создания дублирующих записей.
-- **Повторно сверены 13 существующих записей:** ADP-002, ADP-003, ADP-004, ADP-006, ADP-007, ADP-012, ADP-016, ADP-031, ADP-042, ADP-046, ADP-050 и ADP-057; ADP-032 был повторно проверен в предыдущем проходе. В реестре дата проверки фиксируется отдельно от даты обновления статьи.
+- **Повторно сверены 12 существующих записей:** ADP-002, ADP-003, ADP-004, ADP-006, ADP-007, ADP-012, ADP-016, ADP-031, ADP-042, ADP-046, ADP-050 и ADP-057; ADP-032 был повторно проверен в предыдущем проходе. В реестре дата проверки фиксируется отдельно от даты обновления статьи.
 
 
 | ID | Раздел | Страница | Матрица | Приоритет | Наш статус | Issue | Не закрыто |
@@ -167,14 +167,6 @@
 | ADP-075 | Склад | [Расходные накладные](https://autodealer.ru/online/help/skladskoi-uchet/skladskoi-uchet/raskhodnye-nakladnye.html) | C06 | M1 | PLANNED | [#168](https://github.com/askarahodov/roboport/issues/168) | Только nav_link; содержимое не получено |
 | ADP-076 | Финансы | [Товарные чеки](https://autodealer.ru/online/help/skladskoi-uchet/skladskoi-uchet/tovarnye-cheki.html) | D05 | M1 | PLANNED | [#170](https://github.com/askarahodov/roboport/issues/170) | Только nav_link; содержимое не получено |
 | ADP-077 | Склад | [Возвраты](https://autodealer.ru/online/help/skladskoi-uchet/skladskoi-uchet/vozvraty/index.html) | C07 | M2 | PLANNED | [#168](https://github.com/askarahodov/roboport/issues/168) | Только nav_link; содержимое не получено |
-| ADP-078 | Документы | [Нумераторы документов](https://autodealer.ru/online/help/obshchie-spravochniki/dokumenty/numeratory-dokumentov.html) | B10 | M1 | PLANNED | [#441](https://github.com/askarahodov/roboport/issues/441) | Источник устарел; текущая нумерация и concurrency не доказаны |
-| ADP-081 | Документы | [Калькуляции](https://autodealer.ru/online/help/kalkuliatcii.html) | B01 | M1 | PLANNED | [#441](https://github.com/askarahodov/roboport/issues/441) | Только поисковая выдержка; нет полного workflow и версии расчёта |
-| ADP-082 | Приёмка | [Диагностический лист неисправности](https://autodealer.ru/online/help/diagnosticheskii-list-neispravnosti/) | B02 | M1 | PLANNED | [#439](https://github.com/askarahodov/roboport/issues/439) | Только поисковая выдержка; роли и история не подтверждены |
-| ADP-083 | Кадры | [Исполнители](https://autodealer.ru/online/help/ispolniteli.html) | A05 | M1 | PLANNED | [#446](https://github.com/askarahodov/roboport/issues/446) | Источник устарел; кадровый и payroll workflow не подтверждён |
-| ADP-085 | Ремонт | Текстовые шаблоны заказ-наряда | B01 | M2 | PLANNED | [#441](https://github.com/askarahodov/roboport/issues/441) | Только nav_link; содержимое не получено |
-| ADP-086 | Ремонт | Нормы времени | B05 | M1 | PLANNED | [#167](https://github.com/askarahodov/roboport/issues/167) | Только nav_link; содержимое не получено |
-| ADP-087 | Клиенты | Лента клиента | D12 | M2 | PLANNED | [#169](https://github.com/askarahodov/roboport/issues/169) | Только nav_link; содержимое не получено |
-| ADP-088 | Приёмка | Комплектность автомобиля | B02 | M1 | PLANNED | [#439](https://github.com/askarahodov/roboport/issues/439) | Только nav_link; содержимое не получено |
 | ADP-078 | Документы | [Нумераторы документов](https://autodealer.ru/online/help/obshchie-spravochniki/dokumenty/numeratory-dokumentov.html) | B10 | M1 | PLANNED | [#441](https://github.com/askarahodov/roboport/issues/441) | Источник устарел; текущая нумерация и concurrency не доказаны |
 | ADP-081 | Документы | [Калькуляции](https://autodealer.ru/online/help/kalkuliatcii.html) | B01 | M1 | PLANNED | [#441](https://github.com/askarahodov/roboport/issues/441) | Только поисковая выдержка; нет полного workflow и версии расчёта |
 | ADP-082 | Приёмка | [Диагностический лист неисправности](https://autodealer.ru/online/help/diagnosticheskii-list-neispravnosti/) | B02 | M1 | PLANNED | [#439](https://github.com/askarahodov/roboport/issues/439) | Только поисковая выдержка; роли и история не подтверждены |
