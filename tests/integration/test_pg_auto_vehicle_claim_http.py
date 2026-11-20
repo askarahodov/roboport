@@ -259,3 +259,141 @@ def test_auto_claim_opt_in_and_https_only(monkeypatch):
     monkeypatch.delenv("ROBOport_SYNTHETIC_AUTO_API")
     https = _http()
     assert https.post(f"/api/v1/dev/auto/links/{uuid4()}/issue-proof").status_code == 404
+
+
+def test_organization_bound_vehicle_claim_uses_only_organization_branch_grants(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d = _scenario()
+    organization, location, new_customer = uuid4(), uuid4(), uuid4()
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            "INSERT INTO auto_organization(id,code,display_name) VALUES(%s,%s,'Synthetic')",
+            (organization, "ORG_" + organization.hex[:10].upper()),
+        )
+        db.execute(
+            """INSERT INTO auto_service_location(id,code,organization_id)
+               VALUES(%s,%s,%s)""",
+            (location, "LOC_" + location.hex[:10].upper(), organization),
+        )
+        db.execute(
+            """INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id)
+               VALUES(%s,%s)""", (d["vehicle"], location),
+        )
+        for user, role in ((d["intake"], "INTAKE"), (d["manager"], "MANAGER")):
+            db.execute(
+                """INSERT INTO auto_organization_role_grant
+                   (id,organization_id,location_id,user_id,role_code)
+                   VALUES(%s,%s,%s,%s,%s)""",
+                (uuid4(), organization, location, user, role),
+            )
+            # Принадлежность к организации заменяет старую глобальную роль
+            # и отдельное legacy-назначение на автомобиль.
+            db.execute(
+                "UPDATE user_role SET revoked_at=now() WHERE user_id=%s AND role_code=%s",
+                (user, role),
+            )
+            db.execute(
+                """UPDATE auto_vehicle_staff_assignment SET revoked_at=now()
+                   WHERE vehicle_id=%s AND user_id=%s AND role_code=%s""",
+                (d["vehicle"], user, role),
+            )
+        db.execute(
+            "INSERT INTO customer(id,label) VALUES(%s,%s)",
+            (new_customer, "auto-org-" + new_customer.hex),
+        )
+        db.execute(
+            "INSERT INTO account_customer_link(user_id,customer_id) VALUES(%s,%s)",
+            (d["client_a"], new_customer),
+        )
+
+    http = _http()
+    pending = _act(
+        http, d, d["intake"],
+        f"/api/v1/dev/auto/vehicles/{d['vehicle']}/links",
+        json={"customerId": str(new_customer)},
+    )
+    assert pending.status_code == 201, pending.text
+    assert pending.json()["status"] == "PENDING"
+
+    issued = _act(
+        http, d, d["intake"],
+        f"/api/v1/dev/auto/links/{d['link']}/issue-proof",
+    )
+    assert issued.status_code == 200, issued.text
+    claim, proof = issued.json()["claimId"], issued.json()["proof"]
+    redeemed = _act(
+        http, d, d["client_a"],
+        f"/api/v1/dev/auto/claims/{claim}/redeem",
+        json={"proof": proof},
+    )
+    assert redeemed.status_code == 200
+    assert redeemed.json()["status"] == "PENDING_REVIEW"
+    reviewed = _act(
+        http, d, d["manager"],
+        f"/api/v1/dev/auto/claims/{claim}/review",
+        json={"approve": True},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["status"] == "VERIFIED"
+    revoked = _act(
+        http, d, d["manager"],
+        f"/api/v1/dev/auto/links/{d['link']}/revoke",
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["status"] == "REVOKED"
+
+    # Отзыв филиального grant закрывает новые операции, даже если legacy
+    # роль/назначение отсутствуют и пользователь остаётся в активной сессии.
+    with psycopg.connect(DSN) as db:
+        db.execute(
+            """UPDATE auto_organization_role_grant SET revoked_at=now()
+               WHERE organization_id=%s AND user_id=%s AND role_code='MANAGER'""",
+            (organization, d["manager"]),
+        )
+    denied = _act(
+        http, d, d["manager"],
+        f"/api/v1/dev/auto/links/{d['other_link']}/revoke",
+    )
+    assert denied.status_code == 403
+
+
+def test_organization_bound_vehicle_rejects_legacy_grants_from_another_tenant(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d = _scenario()
+    organization_a, organization_b = uuid4(), uuid4()
+    location_a, location_b = uuid4(), uuid4()
+    with psycopg.connect(DSN) as db:
+        for organization in (organization_a, organization_b):
+            db.execute(
+                "INSERT INTO auto_organization(id,code,display_name) VALUES(%s,%s,'Synthetic')",
+                (organization, "ORG_" + organization.hex[:10].upper()),
+            )
+        for organization, location in (
+            (organization_a, location_a), (organization_b, location_b),
+        ):
+            db.execute(
+                """INSERT INTO auto_service_location(id,code,organization_id)
+                   VALUES(%s,%s,%s)""",
+                (location, "LOC_" + location.hex[:10].upper(), organization),
+            )
+        db.execute(
+            """INSERT INTO auto_vehicle_location_binding(vehicle_id,location_id)
+               VALUES(%s,%s)""", (d["vehicle"], location_b),
+        )
+        # Сотрудник имеет legacy полномочие и grant организации A, но машина
+        # закреплена за организацией B. Fallback на user_role запрещён.
+        db.execute(
+            """INSERT INTO auto_organization_role_grant
+               (id,organization_id,location_id,user_id,role_code)
+               VALUES(%s,%s,%s,%s,'INTAKE')""",
+            (uuid4(), organization_a, location_a, d["intake"]),
+        )
+    response = _act(
+        _http(), d, d["intake"],
+        f"/api/v1/dev/auto/links/{d['link']}/issue-proof",
+    )
+    assert response.status_code == 403
