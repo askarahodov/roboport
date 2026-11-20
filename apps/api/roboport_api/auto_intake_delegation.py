@@ -1,7 +1,7 @@
-"""Делегирование только INTAKE, только на конкретную машину, только действующим MANAGER.
+"""Legacy-делегирование INTAKE на конкретную машину для незакреплённых fixtures.
 
-Начальный MANAGER object scope остаётся исключительно в синтетических fixture.
-Никакого ADMIN override, полномочий MANAGER и истории чужих заказов.
+Для tenant-bound автомобилей полномочие задаётся организационной ролью филиала;
+per-vehicle экран не может заменить или отозвать такой grant.
 """
 from uuid import UUID, uuid4
 
@@ -58,7 +58,7 @@ def _record(conn: psycopg.Connection, ident: UUID, vehicle: UUID,
 def grant_intake(conn: psycopg.Connection, token: str,
                  vehicle_id: UUID, target_id: UUID,
                  idempotency_key: str | None = None) -> UUID:
-    """Сериалицовать создание для vehicle и не позволить эскалацию до MANAGER."""
+    """Сериализовать legacy-назначение INTAKE и не допустить эскалацию до MANAGER."""
     if not isinstance(vehicle_id, UUID) or not isinstance(target_id, UUID):
         raise VehicleClaimRejected("bad UUID")
     with conn.transaction():
