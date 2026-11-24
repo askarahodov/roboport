@@ -34,6 +34,7 @@ from .auto_crm_outcomes import router as auto_crm_outcomes_router
 from .auto_crm_workflow_http import router as auto_crm_workflow_router
 from .auto_crm_consent_http import router as auto_crm_consent_router
 from .auto_crm_survey_http import router as auto_crm_survey_router
+from .auto_crm_provider_http import router as auto_crm_provider_router
 from .auto_mechanic_productivity import router as auto_mechanic_productivity_router
 from .auto_material_cost_evidence import router as auto_material_cost_evidence_router
 from .auto_stock_abc_xyz import router as auto_stock_abc_xyz_router
@@ -104,6 +105,7 @@ app.include_router(auto_crm_outcomes_router)
 app.include_router(auto_crm_workflow_router)
 app.include_router(auto_crm_consent_router)
 app.include_router(auto_crm_survey_router)
+app.include_router(auto_crm_provider_router)
 app.include_router(auto_mechanic_productivity_router)
 app.include_router(auto_material_cost_evidence_router)
 app.include_router(auto_stock_abc_xyz_router)

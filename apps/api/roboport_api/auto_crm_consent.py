@@ -10,7 +10,8 @@ from .keyset_cursor import encode_cursor, decode_cursor
 from .session_lookup import session_subject
 from .auto_crm_leads import _authority,_lead,LeadDenied,LeadConflict
 
-CHANNELS=("CALL","EMAIL","SMS")
+CHANNELS=("CALL","EMAIL","SMS","MESSENGER")
+LEGACY_CHANNELS=CHANNELS[:3]
 TEMPLATES=("BOOKING_REMINDER","SERVICE_UPDATE","POST_SERVICE_REVIEW")
 PURPOSE="SERVICE_UPDATE"
 
@@ -61,7 +62,8 @@ def _snapshot(conn,customer_id):
     return flags,event_ids
 
 
-def _customer_state(conn,actor):
+def _customer_state(conn,actor,*,extended=False):
+    channels=CHANNELS if extended else LEGACY_CHANNELS
     rows=conn.execute("""
       SELECT DISTINCT ON(channel_code) channel_code,enabled,version
       FROM auto_crm_contact_consent_event
@@ -72,19 +74,19 @@ def _customer_state(conn,actor):
     return {
       "syntheticOnly":True,"purposeCode":PURPOSE,
       "legalConsentVerified":False,"sendAllowed":False,
-      "channels":{channel:latest.get(channel,(False,0))[0] for channel in CHANNELS},
-      "revisions":{channel:latest.get(channel,(False,0))[1] for channel in CHANNELS},
+      "channels":{channel:latest.get(channel,(False,0))[0] for channel in channels},
+      "revisions":{channel:latest.get(channel,(False,0))[1] for channel in channels},
     }
 
 
-def read_customer_consent(conn,token):
+def read_customer_consent(conn,token,*,extended=False):
     with conn.transaction():
         actor=_client(conn,token)
-        return _customer_state(conn,actor)
+        return _customer_state(conn,actor,extended=extended)
 
 
-def change_customer_consent(conn,token,channel,enabled,expected_revision,key):
-    if (channel not in CHANNELS or type(enabled) is not bool or
+def change_customer_consent(conn,token,channel,enabled,expected_revision,key,*,extended=False):
+    if (channel not in (CHANNELS if extended else LEGACY_CHANNELS) or type(enabled) is not bool or
         type(expected_revision) is not int or not 0<=expected_revision<2147483647 or
         type(key) is not UUID):
         raise LeadDenied("INVALID_INPUT")
@@ -99,8 +101,8 @@ def change_customer_consent(conn,token,channel,enabled,expected_revision,key):
         if prior:
             if prior!=(actor,channel,PURPOSE,enabled,expected_revision+1):
                 raise LeadConflict("KEY_REUSED")
-            return {"replayed":True,**_customer_state(conn,actor)}
-        state=_customer_state(conn,actor)
+            return {"replayed":True,**_customer_state(conn,actor,extended=extended)}
+        state=_customer_state(conn,actor,extended=extended)
         if expected_revision!=state["revisions"][channel]:
             raise LeadConflict("STALE_REVISION")
         try:
@@ -114,7 +116,7 @@ def change_customer_consent(conn,token,channel,enabled,expected_revision,key):
             # При конкурирующей записи не раскрываем владельца ключа и
             # откатываем транзакцию через штатный конфликт.
             raise LeadConflict("KEY_REUSED") from None
-        return {"replayed":False,**_customer_state(conn,actor)}
+        return {"replayed":False,**_customer_state(conn,actor,extended=extended)}
 
 
 def _lead_customer(conn,lead):
@@ -126,19 +128,19 @@ def _lead_customer(conn,lead):
     return customer[0]
 
 
-def read_staff_consent(conn,token,org,loc,lead_id):
+def read_staff_consent(conn,token,org,loc,lead_id,*,extended=False):
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
         lead=_lead(conn,org,loc,lead_id,actor,manager)
         flags,_=_snapshot(conn,_lead_customer(conn,lead))
         return {"syntheticOnly":True,"purposeCode":PURPOSE,
                 "legalConsentVerified":False,"sendAllowed":False,
-                "channels":flags}
+                "channels":{c:flags[c] for c in (CHANNELS if extended else LEGACY_CHANNELS)}}
 
 
-def create_mock_message(conn,token,org,loc,lead_id,key,channel,template):
+def create_mock_message(conn,token,org,loc,lead_id,key,channel,template,*,extended=False):
     if (any(type(x) is not UUID for x in (org,loc,lead_id,key)) or
-        channel not in CHANNELS or template not in TEMPLATES):
+        channel not in (CHANNELS if extended else LEGACY_CHANNELS) or template not in TEMPLATES):
         raise LeadDenied("INVALID_INPUT")
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
@@ -191,13 +193,13 @@ def create_mock_message(conn,token,org,loc,lead_id,key,channel,template):
                 "createdAt":row[1].isoformat()}
 
 
-def list_mock_messages(conn,token,org,loc,lead_id,cursor=None):
+def list_mock_messages(conn,token,org,loc,lead_id,cursor=None,*,extended=False):
     if type(lead_id) is not UUID:
         raise LeadDenied("INVALID_INPUT")
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
         lead=_lead(conn,org,loc,lead_id,actor,manager)
-        scope=hashlib.sha256(f"crm-mock:{org}:{loc}:{lead_id}".encode()).hexdigest()[:32]
+        scope=hashlib.sha256(f"crm-mock:{org}:{loc}:{lead_id}:{extended}".encode()).hexdigest()[:32]
         try:
             after=decode_cursor(cursor,scope,token) if cursor is not None else None
         except ValueError:
@@ -208,9 +210,10 @@ def list_mock_messages(conn,token,org,loc,lead_id,cursor=None):
           SELECT id,channel_code,template_code,consent_event_ids,created_at
           FROM auto_crm_mock_outbox
           WHERE lead_id=%s AND organization_id=%s AND location_id=%s
+            AND channel_code=ANY(%s::text[])
             AND (%s::timestamptz IS NULL OR (created_at,id)<(%s::timestamptz,%s::uuid))
           ORDER BY created_at DESC,id DESC LIMIT 101
-        """,(lead_id,org,loc,*position)).fetchall()
+        """,(lead_id,org,loc,list(CHANNELS if extended else LEGACY_CHANNELS),*position)).fetchall()
         result={"syntheticOnly":True,"sendAllowed":False,
                 "legalConsentVerified":False,"items":[{
                   "messageId":str(ident),"channelCode":channel,
