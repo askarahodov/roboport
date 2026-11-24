@@ -84,6 +84,9 @@ export function AutoDiagnostics({lockedScope}:{lockedScope?:{org:string;loc:stri
     try{
       const csrf=await fetch('/api/v1/auth/csrf',
         {method:'POST',credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(csrf.status)){
+        setData(null);setLoaded('');setStatus('denied');setPending(null);return;
+      }
       if(!csrf.ok)throw Error('csrf');
       const obj:unknown=await csrf.json();
       if(!obj||typeof obj!=='object'||!('csrfToken' in obj)||
