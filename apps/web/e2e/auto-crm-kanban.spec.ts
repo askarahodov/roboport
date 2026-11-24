@@ -165,7 +165,11 @@ test('customer service consent is distinct from contact preference and never ena
   const section=page.getByLabel('Тестовое согласие на сервисные уведомления CRM');
   await expect(section.getByText('Юридическое подтверждение: отсутствует. Отправка: запрещена.')).toBeVisible();
   await section.getByLabel('Звонок').check();
+  const confirmed=page.waitForResponse(response=>
+    response.url().endsWith('/api/v1/dev/account/crm-contact-consent')&&response.request().method()==='POST');
   await section.getByRole('button',{name:'Сохранить тестовый выбор: Звонок'}).click();
+  expect((await confirmed).status()).toBe(201);
+  await expect(section).toContainText('Тестовый выбор записан. Реальная отправка остаётся выключенной.');
   await expect(section.getByLabel('Звонок')).toBeChecked();
   expect(enabled).toBe(true);
   await expect(section).toContainText('Юридическое подтверждение: отсутствует');
