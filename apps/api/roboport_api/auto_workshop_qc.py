@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 
 
 class InspectionDenied(ValueError):
@@ -54,6 +55,19 @@ def _actor_and_order(conn, token, org, loc, order, roles):
     return actor
 
 
+def _inspection_policy(conn, token, org, loc, order, *, write_roles=(), capability="WRITE"):
+    """Политика применяется до чтения документа, изменения и повторной выдачи."""
+    try:
+        require_document_access(conn, token, org, loc,
+                                ("INTAKE", "MECHANIC", "MANAGER"),
+                                "INTAKE_ACT", "READ", order=order)
+        if write_roles:
+            require_document_access(conn, token, org, loc, write_roles,
+                                    "INTAKE_ACT", capability, order=order)
+    except DocumentPolicyDenied:
+        raise InspectionDenied("FORBIDDEN") from None
+
+
 def _snapshot(conn, order):
     inspection = conn.execute("""
         SELECT id,odometer_km,fuel_percent,tyres_ok,lights_ok,fluid_leak,
@@ -97,6 +111,7 @@ def _snapshot(conn, order):
 def read_work_order_inspection(conn, token, org, loc, order):
     with conn.transaction():
         _actor_and_order(conn,token,org,loc,order,("INTAKE","MECHANIC","MANAGER"))
+        _inspection_policy(conn,token,org,loc,order)
         return _snapshot(conn,order)
 
 
@@ -110,6 +125,8 @@ def submit_work_order_inspection(conn, token, org, loc, order, *,
         raise InspectionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_actor_and_order(conn,token,org,loc,order,("INTAKE",))
+        _inspection_policy(conn,token,org,loc,order,write_roles=("INTAKE",),
+                           capability="CREATE")
         old=conn.execute("""
           SELECT odometer_km,fuel_percent,tyres_ok,lights_ok,fluid_leak,exterior_code
           FROM auto_work_order_inspection WHERE work_order_id=%s
@@ -136,6 +153,7 @@ def record_work_order_qc(conn, token, org, loc, order, *,
         raise InspectionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_actor_and_order(conn,token,org,loc,order,("MECHANIC",))
+        _inspection_policy(conn,token,org,loc,order,write_roles=("MECHANIC",))
         inspection=conn.execute("""
           SELECT id,actor_id FROM auto_work_order_inspection
           WHERE work_order_id=%s FOR SHARE
@@ -208,6 +226,7 @@ def record_work_order_qc_rework(conn, token, org, loc, order, *,
         raise InspectionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_actor_and_order(conn,token,org,loc,order,("MECHANIC",))
+        _inspection_policy(conn,token,org,loc,order,write_roles=("MECHANIC",))
         # WorkOrder lock serializes FAIL, rework and PASS.
         previous=conn.execute("""
           SELECT id,work_order_id,fail_event_id,actor_id,action_code
@@ -254,9 +273,17 @@ def pending_work_order_qc(conn, token, org, loc, limit=20, after_order_id=None):
             or (after_order_id is not None and type(after_order_id) is not UUID)):
         raise InspectionDenied("INVALID_INPUT")
     with conn.transaction():
-        if not organization_role_allows(conn,token,org,"MECHANIC",loc,
-                                        for_mutation=True):
-            raise InspectionDenied("FORBIDDEN")
+        try:
+            # Очередь должна соблюдать тот же READ/cutoff до LIMIT.
+            cutoff=require_document_access(conn,token,org,loc,("MECHANIC",),
+                                           "INTAKE_ACT","READ")
+            # При совмещении ролей запрет другой роли не обходится очередью.
+            cutoff_all=require_document_access(conn,token,org,loc,
+                ("INTAKE","MECHANIC","MANAGER"),"INTAKE_ACT","READ")
+            cutoff=max(x for x in (cutoff,cutoff_all) if x is not None) if (
+                cutoff is not None or cutoff_all is not None) else None
+        except DocumentPolicyDenied:
+            raise InspectionDenied("FORBIDDEN") from None
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:
             raise InspectionDenied("FORBIDDEN")
@@ -296,6 +323,7 @@ def pending_work_order_qc(conn, token, org, loc, limit=20, after_order_id=None):
             LEFT JOIN auto_work_order_execution execution
               ON execution.work_order_id=w.id
             WHERE w.organization_id=%s AND w.location_id=%s
+              AND (%s::timestamptz IS NULL OR w.created_at >= %s::timestamptz)
               AND (latest.result IS NULL OR latest.result='FAIL')
               AND (execution.id IS NULL OR EXISTS(
                 SELECT 1 FROM auto_work_order_execution_finish finish
@@ -313,7 +341,7 @@ def pending_work_order_qc(conn, token, org, loc, limit=20, after_order_id=None):
               )
               AND (%s::uuid IS NULL OR w.id>%s::uuid)
             ORDER BY w.id LIMIT %s
-        """,(actor,org,loc,actor,actor,after_order_id,after_order_id,limit+1)).fetchall()
+        """,(actor,org,loc,cutoff,cutoff,actor,actor,after_order_id,after_order_id,limit+1)).fetchall()
         next_id=rows[limit-1][0] if len(rows)>limit else None
         return ([{"orderId":str(order_id),"status":state,
                   "lastFindingCode":finding}

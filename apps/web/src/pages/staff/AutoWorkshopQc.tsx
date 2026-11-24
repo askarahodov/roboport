@@ -94,6 +94,10 @@ export function AutoWorkshopQc({lockedScope}:{lockedScope?:{org:string;loc:strin
     try {
       const csrf=await fetch('/api/v1/auth/csrf',
         {method:'POST',credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(csrf.status)){
+        queueSequence.current+=1;setQueue(emptyQueue());
+        setStatus('denied');setSnapshot(null);setLoadedScope('');setPending(null);return;
+      }
       if(!csrf.ok)throw Error('CSRF');
       const value:unknown=await csrf.json();
       if(!value||typeof value!=='object'||!('csrfToken' in value)||
@@ -103,7 +107,8 @@ export function AutoWorkshopQc({lockedScope}:{lockedScope?:{org:string;loc:strin
         body});
       if(currentScope!==scope)return;
       if([401,403,404].includes(res.status)){
-        setStatus('denied');setSnapshot(null);setPending(null);return;
+        queueSequence.current+=1;setQueue(emptyQueue());
+        setStatus('denied');setSnapshot(null);setLoadedScope('');setPending(null);return;
       }
       if(res.status>=500)throw Error('unknown');
       if(!res.ok){

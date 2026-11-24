@@ -5,7 +5,7 @@ vehicle/customer link bound to the requested tenant location is returned.
 """
 from uuid import UUID
 import psycopg
-from .auto_org_authority import organization_role_allows
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 from .auto_stock_service import AutoStockDenied
 
 
@@ -17,11 +17,12 @@ def get_order_customer_summary(conn: psycopg.Connection, token: str,
     if any(type(x) is not UUID for x in (organization_id, location_id, order_id)):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        if not (organization_role_allows(conn, token, organization_id, "INTAKE",
-                                         location_id, for_mutation=True)
-                or organization_role_allows(conn, token, organization_id, "MANAGER",
-                                            location_id, for_mutation=True)):
-            raise AutoStockDenied("FORBIDDEN")
+        try:
+            require_document_access(conn, token, organization_id, location_id,
+                                    ("INTAKE", "MANAGER"), "INTAKE_ACT", "READ",
+                                    order=order_id)
+        except DocumentPolicyDenied:
+            raise AutoStockDenied("FORBIDDEN") from None
         row = conn.execute(
             """SELECT w.id,a.id,a.vehicle_id,link.customer_id,link.id
                FROM auto_work_order w

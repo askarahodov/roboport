@@ -7,7 +7,7 @@ No free text, VIN, contact data or claim of production repair certification.
 from uuid import UUID,uuid4
 import psycopg
 
-from .auto_workshop_qc import _actor_and_order,InspectionDenied
+from .auto_workshop_qc import _actor_and_order,_inspection_policy,InspectionDenied
 
 
 class DiagnosticDenied(ValueError):
@@ -22,9 +22,11 @@ FINDINGS=frozenset(("NO_FAULT","MAINTENANCE_DUE","FAULT_CONFIRMED","FURTHER_CHEC
 SEVERITIES=frozenset(("ROUTINE","SOON","URGENT"))
 
 
-def _scope(conn,token,org,loc,order,roles):
+def _scope(conn,token,org,loc,order,roles,*,write=False):
     try:
-        return _actor_and_order(conn,token,org,loc,order,roles)
+        actor=_actor_and_order(conn,token,org,loc,order,roles)
+        _inspection_policy(conn,token,org,loc,order,write_roles=roles if write else ())
+        return actor
     except InspectionDenied:
         raise DiagnosticDenied("FORBIDDEN") from None
 
@@ -96,7 +98,7 @@ def record_diagnostic(conn,token,org,loc,order,*,request_key,service_id,
             or (finding_code=="NO_FAULT" and severity_code!="ROUTINE")):
         raise DiagnosticDenied("INVALID_INPUT")
     with conn.transaction():
-        actor=_scope(conn,token,org,loc,order,("MECHANIC",))
+        actor=_scope(conn,token,org,loc,order,("MECHANIC",),write=True)
         previous=conn.execute("""
           SELECT work_order_id,service_id,actor_id,finding_code,severity_code
           FROM auto_work_order_diagnostic WHERE request_key=%s
