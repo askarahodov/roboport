@@ -23,10 +23,15 @@ class ImpactTests(unittest.TestCase):
         self.assertEqual(impact(["apps/web/src/pages/staff/Panel.tsx"]),
                          ({"web", "browser-e2e"}, False))
 
-    def test_local_backend_and_scoped_pg(self):
+    def test_runtime_backend_requires_full_pg_even_with_changed_test(self):
         self.assertEqual(impact(["apps/api/roboport_api/auto_mechanic_productivity.py",
                                  "tests/integration/test_pg_auto_mechanic_productivity_http.py"]),
-                         ({"postgres", "api"}, False))
+                         ({"postgres", "api"}, True))
+        for source in ("auto_order_customer_read.py", "auto_workshop_qc.py",
+                       "auto_stock_lot_stocktake.py", "auto_purchase_document_policy.py"):
+            self.assertEqual(impact(["apps/api/roboport_api/" + source,
+                                     "tests/integration/test_pg_auto_new.py"]),
+                             ({"postgres", "api"}, True))
 
     def test_security_ddl_and_ci_are_full(self):
         for path in ("apps/api/alembic/versions/0140_test.py",

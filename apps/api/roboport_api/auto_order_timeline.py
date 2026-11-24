@@ -11,7 +11,7 @@ from uuid import UUID
 
 import psycopg
 
-from .auto_order_customer_read import get_order_customer_summary
+from .auto_order_customer_read import require_order_staff_scope
 from .auto_stock_service import AutoStockDenied
 from .keyset_cursor import decode_cursor, encode_cursor
 from .auto_document_access import require_document_access, DocumentPolicyDenied
@@ -33,7 +33,7 @@ def read_order_timeline(conn: psycopg.Connection, token: str, org: UUID,
     except ValueError as exc:
         raise AutoStockDenied("INVALID_INPUT") from exc
     with conn.transaction():
-        get_order_customer_summary(conn, token, org, loc, order)
+        require_order_staff_scope(conn, token, org, loc, order)
         # Document ACL and not_before apply to events as well as documents.
         # A generic INTAKE/MANAGER workspace grant must not reveal the
         # existence, timestamps or client decisions of forbidden documents.
@@ -58,7 +58,7 @@ def read_order_timeline(conn: psycopg.Connection, token: str, org: UUID,
         sources = (
             ("auto_work_order", "id", "'ORDER_CREATED'", None),
             ("auto_work_order_service", "id", "'SERVICE_SELECTED'", None),
-            ("auto_work_order_inspection", "id", "'INSPECTION_RECORDED'", None),
+            ("auto_work_order_inspection", "id", "'INSPECTION_RECORDED'", "INTAKE_ACT"),
             ("auto_work_order_intake_act", "id", "'INTAKE_ACT_CREATED'", "INTAKE_ACT"),
             ("auto_work_order_intake_act_review", "id",
              "'INTAKE_' || decision", "INTAKE_ACT"),
@@ -68,7 +68,7 @@ def read_order_timeline(conn: psycopg.Connection, token: str, org: UUID,
             ("auto_work_order_execution", "id", "'EXECUTION_STARTED'", None),
             ("auto_work_order_labor_entry", "id", "'LABOR_RECORDED'", None),
             ("auto_work_order_execution_finish", "id", "'EXECUTION_FINISHED'", None),
-            ("auto_work_order_qc_event", "id", "'QC_' || result", None),
+            ("auto_work_order_qc_event", "id", "'QC_' || result", "INTAKE_ACT"),
             ("auto_order_demo_handover_preview", "id", "'PREVIEW_SEALED'", "HANDOVER"),
             ("auto_order_demo_document_event", "id",
              "'DOCUMENT_' || action", "HANDOVER"),
