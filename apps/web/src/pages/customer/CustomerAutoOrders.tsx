@@ -84,7 +84,7 @@ export function CustomerAutoOrders(){
     const controller=new AbortController();
     listAbort.current=controller;const epoch=++generation.current;
     detailAbort.current?.abort();setDetail(null);
-    setStatus('loading');setItems([]);setMore(false);setMessage('');setPending(null);
+    setStatus('loading');setItems([]);setMore(false);setPending(null);
     void (async()=>{
       try{
         let cursor:string|null=null;
@@ -120,24 +120,26 @@ export function CustomerAutoOrders(){
   },[pages,refresh]);
 
   React.useEffect(()=>{
-    setDetail(null);setPending(null);setMessage('');
+    setDetail(null);setPending(null);
     if(!selected||status!=='ready')return;
     const controller=new AbortController();
     detailAbort.current=controller;
+    const epoch=generation.current;
+    const current=()=>!controller.signal.aborted&&epoch===generation.current;
     setDetailStatus('loading');
     void fetch('/api/v1/dev/auto/customer/orders/'+encodeURIComponent(selected),{
       credentials:'include',cache:'no-store',signal:controller.signal,
     }).then(async res=>{
-      if(controller.signal.aborted)return;
+      if(!current())return;
       if([401,403,404].includes(res.status)){
         deny();return;
       }
       if(!res.ok)throw Error('http');
       const data=parseDetail(await res.json());
-      if(controller.signal.aborted)return;
+      if(!current())return;
       if(data.id!==selected)throw Error('mismatched order');
       setDetail(data);setDetailStatus('ready');
-    }).catch(()=>{if(!controller.signal.aborted){
+    }).catch(()=>{if(current()){
       setDetail(null);setDetailStatus('error');
     }});
     return ()=>controller.abort();
@@ -168,10 +170,10 @@ export function CustomerAutoOrders(){
         setMessage(response.status===409?
           'Смета изменилась или по ней уже принято решение. Проверьте текущую версию.':
           'Некорректный запрос на согласование.');
-        setRefresh(n=>n+1);return;
+        setStatus('loading');setRefresh(n=>n+1);return;
       }
       if(!response.ok)throw Error('unknown');
-      setPending(null);setRefresh(n=>n+1);
+      setPending(null);setStatus('loading');setRefresh(n=>n+1);
     }catch{
       if(!current())return;
       setPending({path,body});
@@ -192,7 +194,7 @@ export function CustomerAutoOrders(){
   }
 
   function update(){
-    invalidate();setPages(1);setRefresh(n=>n+1);
+    invalidate();setStatus('loading');setMessage('');setPages(1);setRefresh(n=>n+1);
   }
   return <section aria-label="Мои автомобильные заказ-наряды">
     <h3>История автомобильного обслуживания</h3>
@@ -200,7 +202,7 @@ export function CustomerAutoOrders(){
       наряда, а не ко всем владельцам автомобиля. Реальной оплаты и выдачи нет.</p>
     <p><a href="/docs/#/guides/client.md">Инструкция по заказ-нарядам и сметам</a></p>
     {status==='loading'&&<p role="status">Загрузка собственных заказ-нарядов…</p>}
-    {status==='denied'&&<p role="alert">Доступ к заказ-нарядам запрещён или сессия завершена. Карточка недоступна: доступ мог быть отозван.</p>}
+    {status==='denied'&&<p role="alert">Доступ к заказ-нарядам запрещён или сессия завершена. <span>Карточка недоступна: доступ мог быть отозван.</span></p>}
     {status==='error'&&<p role="alert">Не удалось загрузить заказы. Попробуйте ещё раз.</p>}
     {status==='ready'&&<>
       {items.length===0?<p>Заказ-нарядов с подтверждённой связью пока нет.</p>:
@@ -210,11 +212,12 @@ export function CustomerAutoOrders(){
             {' '}{item.appointment.status==='CANCELED'?'Запись отменена':'Запись действующая'}</span>
           <span>{item.vehicle.vinLast4?'VIN ••••'+item.vehicle.vinLast4:'VIN не указан'}</span>
           <button type="button" aria-label={'Подробнее о заказе '+item.id}
-            aria-expanded={selected===item.id} disabled={busy} onClick={()=>{
+            aria-expanded={selected===item.id} disabled={busy||!!pending} onClick={()=>{
+              detailAbort.current?.abort();setDetail(null);setDetailStatus('loading');setMessage('');
               setSelected(selected===item.id?null:item.id);
             }}>{selected===item.id?'Скрыть заказ':'Подробнее о заказе'}</button>
         </li>)}</ul>}
-      {more&&<button type="button" disabled={busy||!!pending} onClick={()=>{invalidate();setPages(p=>p+1);}}>
+      {more&&<button type="button" disabled={busy||!!pending} onClick={()=>{invalidate();setStatus('loading');setPages(p=>p+1);}}>
         Показать ещё заказ-наряды</button>}
     </>}
     {selected&&status==='ready'&&<section aria-label="Карточка автомобильного заказа"

@@ -358,3 +358,42 @@ test('отказ CSRF скрывает запись и не оставляет �
   await expect(page.getByText('Заказ-наряд '+work,{exact:false})).toHaveCount(0);
   expect(posts).toBe(0);
 });
+
+
+test('запоздалый CSRF не отправляет отмену после отказа при поиске окон',async({page})=>{
+  await auth(page);
+  let csrfStarted=false,slotStarted=false,posts=0;
+  let finishCsrf!:()=>void,finishSlot!:()=>void;
+  const csrfHold=new Promise<void>(resolve=>{finishCsrf=resolve;});
+  const slotHold=new Promise<void>(resolve=>{finishSlot=resolve;});
+  await page.route('**/api/v1/auth/csrf',async route=>{
+    csrfStarted=true;await csrfHold;
+    await route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'});
+  });
+  await page.route('**/api/v1/dev/auto/customer/booking/**',async route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='POST'){posts++;return route.fulfill({status:200,body:'{}'});}
+    if(url.pathname.endsWith('/slots')){
+      slotStarted=true;await slotHold;
+      return route.fulfill({status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+    }
+    const body=url.pathname.endsWith('/resources')?resources:
+      url.pathname.endsWith('/appointments')?{syntheticOnly:true,nextCursor:null,items:[{
+        appointmentId:appointment,organizationId:org,locationId:loc,customerLinkId:link,
+        bookingId:booking,bayId:bay,...first,status:'SCHEDULED',workOrderId:work,
+        timeZone:'Europe/Berlin',canManage:true,serviceIds:[]}]}:{syntheticOnly:true,items:[]};
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
+  });
+  await page.goto('/account/auto-booking');
+  await page.getByRole('button',{name:'Показать свободные окна'}).click();
+  await expect.poll(()=>slotStarted).toBe(true);
+  await page.getByRole('button',{name:'Отменить свою запись'}).click();
+  await expect.poll(()=>csrfStarted).toBe(true);
+  finishSlot();
+  await expect(page.getByRole('alert')).toContainText('Доступ к записи запрещён');
+  const received=page.waitForResponse(res=>res.url().includes('/api/v1/auth/csrf')&&res.status()===200);
+  finishCsrf();await received;
+  await expect(page.getByRole('button',{name:'Повторить прежний запрос'})).toHaveCount(0);
+  await expect(page.getByText('Заказ-наряд '+work,{exact:false})).toHaveCount(0);
+  expect(posts).toBe(0);
+});

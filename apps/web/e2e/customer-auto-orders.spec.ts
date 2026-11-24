@@ -256,3 +256,19 @@ test('отказ CSRF при согласовании скрывает исто�
   await expect(page.getByRole('button',{name:'Повторить то же решение'})).toHaveCount(0);
   expect(posts).toBe(0);
 });
+
+
+test('повторяющийся курсор заказов блокирует весь непроверенный набор',async({page})=>{
+  await auth(page);
+  await page.route('**/api/v1/dev/auto/customer/orders?*',route=>{
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      items:[cursor?{...card,id:'99999999-9999-4999-8999-999999999999'}:card],
+      nextCursor:'same-cursor',syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.goto('/account/auto-orders');
+  await page.getByRole('button',{name:'Показать ещё заказ-наряды'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить заказы');
+  await expect(page.getByText('Synthetic Sedan',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Показать ещё заказ-наряды'})).toHaveCount(0);
+});

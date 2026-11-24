@@ -57,7 +57,7 @@ export function CustomerAutoBooking(){
     invalidate();clearPrivate();setBusy(false);setMessage('');setState('denied');
   }
   function refreshLists(){
-    invalidate();clearPrivate();setBusy(false);
+    invalidate();clearPrivate();setBusy(false);setState('loading');
     setResourcePages(1);setBookingPages(1);setRevision(x=>x+1);
   }
   React.useEffect(()=>()=>{invalidate();},[]);
@@ -69,6 +69,7 @@ export function CustomerAutoBooking(){
     slotRequest.current++;
     setState('loading');setResources([]);setBookings([]);setSlots([]);
     setServices([]);setSelectedServices([]);setTarget(null);setPending(null);
+    setServiceState('');setSlotState('');
     setNextResourceCursor(null);setNextCursor(null);
     const current=()=>!controller.signal.aborted&&generation===epoch.current;
     // Обе коллекции перечитываются с начала. Пустой 200 после отзыва
@@ -283,10 +284,10 @@ export function CustomerAutoBooking(){
       {nextCursor&&<button type="button" disabled={busy||!!pending}
         onClick={()=>void loadMore()}>Показать ещё записи</button>}
       <h4>{target?'Перенос записи':'Новая запись'}</h4>
-      {target&&<button type="button" onClick={()=>{setTarget(null);setSelected('');}}>
+      {target&&<button type="button" disabled={busy||!!pending} onClick={()=>{setTarget(null);setSelected('');}}>
         Отказаться от переноса</button>}
       {choices.length===0?<p>Нет доступных подтверждённых автомобилей и постов.</p>:<>
-        <label>Автомобиль и пост <select aria-label="Автомобиль и пост"
+        <label>Автомобиль и пост <select aria-label="Автомобиль и пост" disabled={busy||!!pending}
           value={selected} onChange={e=>setSelected(e.target.value)}>
           {choices.map(r=><option key={r.customerLinkId+':'+r.bayId}
             value={r.customerLinkId+':'+r.bayId}>
@@ -311,7 +312,7 @@ export function CustomerAutoBooking(){
             {service.title} ({service.durationMinutes} мин.)
           </label>)}
         </fieldset>}
-        <label>День филиала <input aria-label="День филиала" type="date"
+        <label>День филиала <input aria-label="День филиала" type="date" disabled={busy||!!pending}
           value={day} onChange={e=>setDay(e.target.value)}/></label>
         <button type="button" disabled={busy||!!pending||!scoped}
           onClick={()=>void search()}>Показать свободные окна</button>
