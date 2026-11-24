@@ -48,6 +48,7 @@ from .auto_order_service_http import router as auto_order_service_router
 from .auto_intake_act_http import router as auto_intake_act_router
 from .auto_workshop_qc_http import router as auto_workshop_qc_router
 from .auto_work_order_diagnostics_http import router as auto_work_order_diagnostics_router
+from .auto_service_recommendations_http import router as auto_service_recommendations_router
 from .auto_work_order_estimate_http import router as auto_work_order_estimate_router
 from .auto_work_order_execution_http import router as auto_work_order_execution_router
 from .auto_work_order_assignment_http import router as auto_work_order_assignment_router
@@ -114,6 +115,7 @@ app.include_router(auto_order_service_router)
 app.include_router(auto_intake_act_router)
 app.include_router(auto_workshop_qc_router)
 app.include_router(auto_work_order_diagnostics_router)
+app.include_router(auto_service_recommendations_router)
 app.include_router(auto_work_order_estimate_router)
 app.include_router(auto_work_order_execution_router)
 app.include_router(auto_work_order_assignment_router)
