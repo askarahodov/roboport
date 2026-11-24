@@ -599,3 +599,79 @@ async def approve_supplier_return_http(org_id:str,request:Request):
             return _response(request,409,"CONFLICT")
     return JSONResponse(status_code=201,content={"approvalId":str(ident)},
                         headers={"Cache-Control":"no-store"})
+
+
+class InterbranchBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    mode:str="INTERBRANCH"
+    sourceLocationId:UUID
+    destinationLocationId:UUID
+    sourceLotId:UUID
+    destinationLotId:UUID
+    quantity:StrictInt=Field(ge=1,le=1000000000)
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/warehouse/interbranch-transfers")
+def get_interbranch(org_id:str,request:Request,sourceLocationId:str,destinationLocationId:str):
+    from .auto_stock_interbranch_transfer import transfer_workspace
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,src,dst=map(UUID,(org_id,sourceLocationId,destinationLocationId))
+        queries=request.query_params.getlist("q")
+        cursors=request.query_params.getlist("cursor")
+        modes=request.query_params.getlist("mode")
+        mode=modes[0] if modes else "INTERBRANCH"
+        sources=request.query_params.getlist("sourceCursor")
+        destinations=request.query_params.getlist("destinationCursor")
+        if (mode not in ("INTERBRANCH","LOCAL") or (src==dst)!=(mode=="LOCAL")
+            or len(modes)>1 or len(queries)>1 or any(len(v)>1 or (v and not v[0])
+                for v in (cursors,sources,destinations))):
+            raise ValueError("scope")
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            result=transfer_workspace(db,request.cookies.get("rp_session",""),org,src,dst,
+                queries[0] if queries else "",cursors[0] if cursors else None,
+                sources[0] if sources else None,destinations[0] if destinations else None,mode)
+        except AutoStockDenied as exc:
+            return _response(request,422 if str(exc)=="INVALID_INPUT" else 403,
+                             "INVALID_INPUT" if str(exc)=="INVALID_INPUT" else "FORBIDDEN")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/interbranch-transfers")
+async def post_interbranch(org_id:str,request:Request):
+    from .auto_stock_interbranch_transfer import confirm_interbranch_transfer,confirm_local_transfer
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        body=InterbranchBody.model_validate(await request.json())
+        key=_key(request)
+        if (body.mode not in ('INTERBRANCH','LOCAL') or
+            (body.sourceLocationId==body.destinationLocationId)!=(body.mode=='LOCAL') or
+            body.sourceLotId==body.destinationLotId):
+            raise ValueError("scope")
+    except (ValueError,TypeError,ValidationError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            if body.mode=='LOCAL':
+                result=confirm_local_transfer(db,request.cookies.get('rp_session',''),org,
+                    body.sourceLocationId,body.sourceLotId,body.destinationLotId,key,body.quantity)
+            else:
+                result=confirm_interbranch_transfer(db,request.cookies.get('rp_session',''),org,
+                    body.sourceLocationId,body.destinationLocationId,body.sourceLotId,
+                    body.destinationLotId,key,body.quantity)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except (AutoStockConflict,psycopg.errors.UniqueViolation,psycopg.errors.DeadlockDetected):
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(content=result,status_code=200 if result["replayed"] else 201,
+                        headers={"Cache-Control":"no-store"})

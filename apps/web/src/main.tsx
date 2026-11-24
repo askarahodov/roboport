@@ -41,6 +41,7 @@ import { WarehouseReceiving } from './pages/staff/WarehouseReceiving';
 import { WarehouseSupplierOrders } from './pages/staff/WarehouseSupplierOrders';
 import { WarehouseWorkOrders } from './pages/staff/WarehouseWorkOrders';
 import { WarehouseReclassification } from './pages/staff/WarehouseReclassification';
+import { WarehouseInterbranchTransfers } from './pages/staff/WarehouseInterbranchTransfers';
 import { WarehouseSupplierReturns } from './pages/staff/WarehouseSupplierReturns';
 import { WarehouseSerialMovements } from './pages/staff/WarehouseSerialMovements';
 import { AutoUiGallery } from './pages/AutoUiGallery';
@@ -115,6 +116,7 @@ function App() {
         <NavLink to="/staff/warehouse-supplier-orders" end>Закупки (dev)</NavLink>
         <NavLink to="/staff/warehouse-work-orders" end>Выдача (dev)</NavLink>
         <NavLink to="/staff/warehouse-reclassification" end>Пересортица (dev)</NavLink>
+        <NavLink to="/staff/warehouse-interbranch-transfers" end>Перемещения (dev)</NavLink>
         <NavLink to="/staff/warehouse-supplier-returns" end>Возврат поставщику (dev)</NavLink>
         <NavLink to="/staff/warehouse-serial-movements" end>Серии (dev)</NavLink>
       </nav>
@@ -200,6 +202,7 @@ function App() {
       <Route path="/staff/warehouse-supplier-orders" element={<WarehouseSupplierOrders />} />
       <Route path="/staff/warehouse-work-orders" element={<WarehouseWorkOrders />} />
       <Route path="/staff/warehouse-reclassification" element={<WarehouseReclassification />} />
+      <Route path="/staff/warehouse-interbranch-transfers" element={<WarehouseInterbranchTransfers />} />
       <Route path="/staff/warehouse-supplier-returns" element={<WarehouseSupplierReturns />} />
       <Route path="/staff/warehouse-serial-movements" element={<WarehouseSerialMovements />} />
       <Route path="/staff/*" element={<StaffPortal />} />
