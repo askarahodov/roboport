@@ -5,11 +5,21 @@ type Location = {locationId:string;code:string;timeZone:string;disabled:boolean;
 type Bay = {bayId:string;locationId:string;code:string;disabled:boolean;createdAt:string};
 type Shift = {shiftId:string;locationId:string;userId:string;startsAt:string;endsAt:string;canceled:boolean;createdAt:string};
 type Workshop = {syntheticOnly:true;locations:Location[];bays:Bay[];shifts:Shift[];
-  locationsTruncated:boolean;baysTruncated:boolean;shiftsTruncated:boolean};
+  locationsTruncated:boolean;baysTruncated:boolean;shiftsTruncated:boolean;
+  locationsNextCursor?:string;baysNextCursor?:string;shiftsNextCursor?:string};
+type Kind='locations'|'bays'|'shifts';
 type Audit = {eventId:string;locationId:string;actorId:string;entityType:'LOCATION'|'BAY'|'SHIFT';
   entityId:string;action:string;createdAt:string};
 type State = 'idle'|'loading'|'ready'|'denied'|'error';
 type Confirm = {kind:'location'|'bay'|'shift';id:string;locationId:string}|null;
+
+function nextCursor(raw:object, count:number, field='nextCursor'):string|null {
+  const value=(raw as Record<string,unknown>)[field];
+  if(value===undefined)return null;
+  if(typeof value!=='string'||!/^[A-Za-z0-9_-]{1,256}$/.test(value)||count!==100)
+    throw Error('cursor');
+  return value;
+}
 
 function parseWorkshop(raw:unknown):Workshop {
   if(!raw||typeof raw!=='object')throw Error('shape');
@@ -26,6 +36,10 @@ function parseWorkshop(raw:unknown):Workshop {
       Number.isFinite(Date.parse(v.startsAt))&&Number.isFinite(Date.parse(v.endsAt))&&
       Date.parse(v.startsAt)<Date.parse(v.endsAt)&&typeof v.canceled==='boolean'&&
       typeof v.createdAt==='string'))throw Error('shape');
+  for(const kind of ['locations','bays','shifts'] as const){
+    if(Boolean(nextCursor(x,x[kind].length,kind+'NextCursor'))!==x[`${kind}Truncated`])
+      throw Error('incomplete page');
+  }
   return x;
 }
 
@@ -55,6 +69,8 @@ export function AutoOrganizationSetup() {
   const [organization,setOrganization]=React.useState('');
   const [data,setData]=React.useState<Workshop|null>(null);
   const [audit,setAudit]=React.useState<Audit[]>([]);
+  const [auditNext,setAuditNext]=React.useState<string|null>(null);
+  const sequence=React.useRef(0);
   const [state,setState]=React.useState<State>('idle');
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
@@ -74,8 +90,9 @@ export function AutoOrganizationSetup() {
   const validOrg=uuid.test(organization.trim());
 
   async function refresh(org=organization.trim()) {
-    if(!uuid.test(org)){setData(null);setAudit([]);setState('idle');return;}
-    setState('loading');setData(null);setAudit([]);
+    const request=++sequence.current;
+    if(!uuid.test(org)){setData(null);setAudit([]);setAuditNext(null);setState('idle');return;}
+    setState('loading');setData(null);setAudit([]);setAuditNext(null);setConfirm(null);
     try {
       const [response,history]=await Promise.all([
         fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+'/workshop',
@@ -83,29 +100,84 @@ export function AutoOrganizationSetup() {
         fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+'/workshop/audit?limit=100',
           {credentials:'include',cache:'no-store'}),
       ]);
-      if(orgRef.current!==org)return;
+      if(orgRef.current!==org||request!==sequence.current)return;
       if([401,403,404].includes(response.status)||[401,403,404].includes(history.status)){
         setState('denied');return;
       }
       if(!response.ok||!history.ok)throw Error('HTTP');
       const workshop=parseWorkshop(await response.json());
-      const events=parseAudit(await history.json());
-      if(orgRef.current!==org)return;
-      setData(workshop);setAudit(events);
+      const historyBody:unknown=await history.json();
+      const events=parseAudit(historyBody);
+      const next=nextCursor(historyBody as object,events.length);
+      if(orgRef.current!==org||request!==sequence.current)return;
+      setData(workshop);setAudit(events);setAuditNext(next);
       if(!locationId||!workshop.locations.some(x=>x.locationId===locationId&&!x.disabled)){
         setLocationId(workshop.locations.find(x=>!x.disabled)?.locationId??'');
       }
       setState('ready');
     }catch{
-      if(orgRef.current===org)setState('error');
+      if(orgRef.current===org&&request===sequence.current)setState('error');
     }
   }
 
   React.useEffect(()=>{
-    setData(null);setAudit([]);setMessage('');setConfirm(null);setLocationId('');
+    sequence.current++;setData(null);setAudit([]);setAuditNext(null);setMessage('');setConfirm(null);setLocationId('');
+    locationKey.current=null;bayKey.current=null;shiftKey.current=null;
     if(uuid.test(organization.trim()))void refresh(organization.trim());
     else setState('idle');
   },[organization]);
+
+  async function more(kind:Kind|'audit',cursor:string) {
+    if(busy||!data||state!=='ready')return;
+    const org=organization.trim(),request=++sequence.current;
+    setBusy(true);setMessage('');setConfirm(null);
+    try{
+      const query=new URLSearchParams({limit:'100',cursor});
+      if(kind!=='audit')query.set('kind',kind);
+      const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
+        '/workshop/'+(kind==='audit'?'audit':'page')+'?'+query,
+        {credentials:'include',cache:'no-store'});
+      if(orgRef.current!==org||request!==sequence.current)return;
+      if([401,403,404].includes(response.status)){
+        setData(null);setAudit([]);setAuditNext(null);setLocationId('');setState('denied');return;
+      }
+      if(!response.ok)throw Error('HTTP');
+      const raw:unknown=await response.json();
+      if(!raw||typeof raw!=='object'||!('items' in raw)||!Array.isArray(raw.items)||raw.items.length>100)
+        throw Error('shape');
+      const next=nextCursor(raw,raw.items.length);
+      if(next===cursor)throw Error('repeated cursor');
+      if(orgRef.current!==org||request!==sequence.current)return;
+      if(kind==='audit'){
+        const page=parseAudit(raw);
+        const ids=new Set(audit.map(x=>x.eventId));
+        if(page.some(x=>ids.has(x.eventId)))throw Error('duplicate');
+        setAudit([...audit,...page]);setAuditNext(next);
+      }else{
+        const page=parseWorkshop({syntheticOnly:true,locations:[],bays:[],shifts:[],
+          locationsTruncated:false,baysTruncated:false,shiftsTruncated:false,[kind]:raw.items,
+          [kind+'Truncated']:!!next,[kind+'NextCursor']:next??undefined});
+        const merged={...data,[kind]:[...data[kind],...page[kind]],
+          [kind+'Truncated']:!!next,[kind+'NextCursor']:next??undefined};
+        if(kind==='locations'){
+          const ids=new Set(data.locations.map(x=>x.locationId));
+          if(page.locations.some(x=>ids.has(x.locationId)))throw Error('duplicate');
+          if(!locationId)setLocationId(page.locations.find(x=>!x.disabled)?.locationId??'');
+        }else if(kind==='bays'){
+          const ids=new Set(data.bays.map(x=>x.bayId));
+          if(page.bays.some(x=>ids.has(x.bayId)))throw Error('duplicate');
+        }else{
+          const ids=new Set(data.shifts.map(x=>x.shiftId));
+          if(page.shifts.some(x=>ids.has(x.shiftId)))throw Error('duplicate');
+        }
+        setData(merged);
+      }
+    }catch{
+      if(orgRef.current===org&&request===sequence.current){
+        setData(null);setAudit([]);setAuditNext(null);setLocationId('');setState('error');
+      }
+    }finally{setBusy(false);}
+  }
 
   async function execute(path:string,payload:unknown,success:string,keyRef?:React.MutableRefObject<string|null>) {
     const operationOrg=organization.trim();
@@ -124,7 +196,7 @@ export function AutoOrganizationSetup() {
           :[401,403,404].includes(response.status)?'403 — нет полномочий ADMIN этой организации.'
           :response.status===422?'422 — проверьте код, часовой пояс и даты.'
           :'Операция не выполнена ('+response.status+').');
-        if([401,403,404].includes(response.status)){setData(null);setAudit([]);setState('denied');}
+        if([401,403,404].includes(response.status)){sequence.current++;setData(null);setAudit([]);setAuditNext(null);setLocationId('');setState('denied');}
         return;
       }
       setMessage(success);
@@ -140,8 +212,9 @@ export function AutoOrganizationSetup() {
   const iso=(value:string,branchId?:string)=>{
     if(!Number.isFinite(Date.parse(value)))return '—';
     const zone=branchId?data?.locations.find(x=>x.locationId===branchId)?.timeZone:undefined;
-    return new Intl.DateTimeFormat('ru-RU',{...(zone?{timeZone:zone}:{}),
+    const formatted=new Intl.DateTimeFormat('ru-RU',{...(branchId?{timeZone:zone??'UTC'}:{}),
       dateStyle:'short',timeStyle:'short'}).format(new Date(value));
+    return branchId?formatted+' ('+(zone??'UTC')+')':formatted;
   };
 
   return <section className="ui-page crm-workspace" aria-label="Управление организацией и филиалами">
@@ -189,7 +262,7 @@ export function AutoOrganizationSetup() {
             </tr>)}</tbody>
           </table>
         </div>
-        {data.locationsTruncated&&<p>Показаны первые 100 филиалов.</p>}
+        {data.locationsNextCursor&&<button type="button" disabled={busy} onClick={()=>void more('locations',data.locationsNextCursor!)}>Показать ещё филиалы</button>}
       </section>
 
       <section aria-labelledby="bays-title">
@@ -219,7 +292,7 @@ export function AutoOrganizationSetup() {
             </tr>)}</tbody>
           </table>
         </div>
-        {data.baysTruncated&&<p>Показаны первые 100 постов.</p>}
+        {data.baysNextCursor&&<button type="button" disabled={busy} onClick={()=>void more('bays',data.baysNextCursor!)}>Показать ещё посты</button>}
       </section>
 
       <section aria-labelledby="shifts-title">
@@ -260,12 +333,12 @@ export function AutoOrganizationSetup() {
             </tr>)}</tbody>
           </table>
         </div>
-        {data.shiftsTruncated&&<p>Показаны первые 100 смен.</p>}
+        {data.shiftsNextCursor&&<button type="button" disabled={busy} onClick={()=>void more('shifts',data.shiftsNextCursor!)}>Показать ещё смены</button>}
       </section>
 
       <section aria-labelledby="workshop-audit-title">
         <h2 id="workshop-audit-title">Журнал административных операций</h2>
-        <p>Последние 100 событий создания и отключения филиалов/постов и назначения/отмены смен. Журнал неизменяемый.</p>
+        <p>События создания и отключения филиалов/постов и назначения/отмены смен, по 100 записей. Журнал неизменяемый.</p>
         <div className="table-scroll" role="region" aria-label="Журнал административных операций" tabIndex={0}>
           <table><thead><tr><th>Время</th><th>Операция</th><th>Объект</th><th>Актор UUID</th></tr></thead>
             <tbody>{audit.map(x=><tr key={x.eventId}>
@@ -274,6 +347,7 @@ export function AutoOrganizationSetup() {
             </tr>)}</tbody>
           </table>
         </div>
+        {auditNext&&<button type="button" disabled={busy} onClick={()=>void more('audit',auditNext)}>Показать ещё события аудита</button>}
       </section>
     </>}
   </section>;

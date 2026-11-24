@@ -140,3 +140,50 @@ test('organization setup remains keyboard-usable without horizontal page overflo
   await expect(page.locator('main.app')).not.toHaveClass(/dark/);
   await page.screenshot({path:testInfo.outputPath('auto-organization-setup-mobile-390.png'),fullPage:true});
 });
+
+
+
+test('ADMIN reaches later branches bays shifts and audit, then revocation clears structure',async({page})=>{
+  const id=(n:number)=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
+  const stamp='2030-04-10T09:00:00Z';
+  const loc=(n:number)=>({locationId:id(n),code:'BR_'+n,timeZone:'UTC',disabled:false,createdAt:stamp});
+  const bayRow=(n:number)=>({bayId:id(n+1000),locationId:id(n),code:'BAY_'+n,disabled:false,createdAt:stamp});
+  const shiftRow=(n:number)=>({shiftId:id(n+2000),locationId:id(n),userId:id(n+3000),startsAt:stamp,endsAt:'2030-04-10T10:00:00Z',canceled:false,createdAt:stamp});
+  const auditRow=(n:number)=>({eventId:id(n+4000),locationId:id(n),actorId:actor,entityType:'LOCATION',entityId:id(n),action:'LOCATION_CREATED',createdAt:stamp});
+  const first=Array.from({length:100},(_,i)=>i+1);
+  let denied=false;
+  await page.route(api,route=>{
+    const url=new URL(route.request().url()),cursor=url.searchParams.get('cursor');
+    if(denied)return route.fulfill({status:403,contentType:'application/json',body:'{}'});
+    let body:unknown;
+    if(url.pathname.endsWith('/workshop/audit')){
+      body=cursor?{items:[auditRow(101)],nextCursor:'audit_tail'}:{items:first.map(auditRow),nextCursor:'audit_next'};
+    }else if(url.pathname.endsWith('/workshop/page')){
+      const kind=url.searchParams.get('kind');
+      body={items:[kind==='locations'?loc(101):kind==='bays'?bayRow(101):shiftRow(101)]};
+    }else body={syntheticOnly:true,locations:first.map(loc),bays:first.map(bayRow),shifts:first.map(shiftRow),
+      locationsTruncated:true,baysTruncated:true,shiftsTruncated:true,
+      locationsNextCursor:'loc_next',baysNextCursor:'bay_next',shiftsNextCursor:'shift_next'};
+    // The last audit page must have a full page to issue another cursor.
+    if(url.pathname.endsWith('/workshop/audit')&&cursor)
+      body={items:Array.from({length:100},(_,i)=>auditRow(i+101)),nextCursor:'audit_tail'};
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-setup');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(organization);
+  await page.getByRole('button',{name:'Показать ещё филиалы'}).click();
+  await expect(page.getByRole('region',{name:'Список филиалов'}).getByRole('cell',{name:'BR_101',exact:true})).toBeVisible();
+  await page.getByRole('combobox',{name:'Филиал'}).first().selectOption(id(101));
+  await page.getByRole('button',{name:'Показать ещё посты'}).click();
+  await expect(page.getByRole('cell',{name:'BAY_101',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Показать ещё смены'}).click();
+  await expect(page.getByRole('region',{name:'Список смен'}).getByText(id(3101))).toBeVisible();
+  await page.getByRole('button',{name:'Показать ещё события аудита'}).click();
+  await expect(page.getByRole('region',{name:'Журнал административных операций'}).getByRole('row')).toHaveCount(201);
+  denied=true;
+  await page.getByRole('button',{name:'Показать ещё события аудита'}).click();
+  await expect(page.getByRole('alert')).toContainText('роль ADMIN');
+  await expect(page.getByRole('region',{name:'Список филиалов'})).toHaveCount(0);
+  await expect(page.getByRole('region',{name:'Журнал административных операций'})).toHaveCount(0);
+});

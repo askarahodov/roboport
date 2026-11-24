@@ -334,3 +334,72 @@ def test_workshop_admin_api_is_disabled_without_synthetic_flag(monkeypatch):
     assert client.get(path).status_code == 404
     assert client.post(path + "/locations", json={"code": "BRANCH_1",
         "timeZone": "Europe/Berlin"}).status_code == 404
+
+
+
+def test_workshop_admin_can_reach_every_branch_bay_shift_and_audit_page(monkeypatch):
+    from roboport_api.auto_workshop_admin import create_location, create_bay, create_shift
+    from roboport_api.auto_org_staff import grant_staff
+
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d = _scenario()
+    org, other = uuid4(), uuid4()
+    actor, employee = d["manager"], d["intake"]
+    token = d["tokens"][actor]
+    start = datetime.now(timezone.utc) + timedelta(days=10)
+    with psycopg.connect(DSN) as db:
+        for oid in (org, other):
+            db.execute("INSERT INTO auto_organization(id,code,display_name) VALUES(%s,%s,'Synthetic')",
+                       (oid,"ORG_"+oid.hex[:10].upper()))
+            db.execute("""INSERT INTO auto_organization_role_grant
+                       (id,organization_id,user_id,role_code) VALUES(%s,%s,%s,'ADMIN')""",
+                       (uuid4(),oid,actor))
+        grant_staff(db,token,org,employee,"MECHANIC")
+        for i in range(102):
+            loc = create_location(db,token,org,"BR_"+uuid4().hex[:12].upper(),"UTC",str(uuid4()))
+            create_bay(db,token,org,loc,"BAY_1",str(uuid4()))
+            begin = start+timedelta(days=i)
+            create_shift(db,token,org,loc,employee,begin,begin+timedelta(hours=1),str(uuid4()))
+    client=TestClient(app,base_url="https://127.0.0.1")
+    client.cookies.set("rp_session",token)
+    base=f"/api/v1/dev/auto/organizations/{org}/workshop"
+    foreign=f"/api/v1/dev/auto/organizations/{other}/workshop"
+    response=client.get(base)
+    assert response.status_code==200,response.text
+    initial=response.json()
+    cursors={}
+    for kind,key in (("locations","locationId"),("bays","bayId"),("shifts","shiftId")):
+        assert initial[kind+"Truncated"] is True
+        assert len(initial[kind])==100
+        cursor=initial[kind+"NextCursor"]
+        cursors[kind]=cursor
+        params={"kind":kind,"cursor":cursor}
+        tail=client.get(base+"/page",params=params)
+        assert tail.status_code==200,tail.text
+        assert tail.headers["cache-control"]=="no-store"
+        assert len(tail.json()["items"])==2
+        assert "nextCursor" not in tail.json()
+        assert len({x[key] for x in initial[kind]+tail.json()["items"]})==102
+        assert client.get(foreign+"/page",params=params).status_code==422
+        assert client.get(base+"/page",params={**params,"cursor":cursor+"x"}).status_code==422
+        assert client.get(base+"/page?kind="+kind+"&cursor="+cursor+"&cursor="+cursor).status_code==422
+    assert client.get(base+"/page",params={"kind":"bays","cursor":cursors["locations"]}).status_code==422
+    assert client.get(base+"/page",params={"kind":"locations"}).status_code==422
+    history=client.get(base+"/audit").json()
+    first_cursor=history["nextCursor"]
+    events=history["items"]
+    while "nextCursor" in history:
+        history=client.get(base+"/audit",params={"cursor":history["nextCursor"]}).json()
+        events+=history["items"]
+    assert len(events)==306
+    assert len({x["eventId"] for x in events})==306
+    assert client.get(foreign+"/audit",params={"cursor":first_cursor}).status_code==422
+    assert client.get(base+"/audit",params={"cursor":cursors["locations"]}).status_code==422
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+                   WHERE organization_id=%s AND user_id=%s AND role_code='ADMIN'""",(org,actor))
+    for kind,cursor in cursors.items():
+        assert client.get(base+"/page",params={"kind":kind,"cursor":cursor}).status_code==403
+    assert client.get(base+"/audit",params={"cursor":first_cursor}).status_code==403
