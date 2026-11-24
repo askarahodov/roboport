@@ -196,3 +196,78 @@ def test_same_key_parallel_replay_and_competing_choice_versions(monkeypatch):
                        VALUES(%s,%s,'SMS',false,7,%s)""",
                     (uuid4(),d["client_a"],uuid4()),
                 )
+
+
+@pytest.mark.parametrize("kind",["preferences","consent"])
+def test_cross_account_same_key_race_and_current_receipt(monkeypatch,kind):
+    """Два разных аккаунта достигают INSERT с одним глобальным ключом."""
+    from roboport_api import auto_crm_consent,auto_crm_contact_choices
+
+    d,org,loc,bay,foreign,foreign_loc,http,lead=setup(monkeypatch)
+    if kind=="consent":
+        module=auto_crm_consent
+        change=module.change_customer_consent
+        state_name="_customer_state"
+        table="auto_crm_contact_consent_event"
+        endpoint="/api/v1/dev/account/crm-contact-consent"
+    else:
+        module=auto_crm_contact_choices
+        change=module.change_customer_choice
+        state_name="_current"
+        table="auto_crm_contact_choice_event"
+        endpoint=CLIENT_URL
+    actors=[d["client_a"],d["client_b"]]
+    key=uuid4()
+    barrier=Barrier(2)
+    original=getattr(module,state_name)
+
+    def synchronized_state(db,actor):
+        state=original(db,actor)
+        # Обе транзакции прошли поиск ключа; теперь одновременно пишут.
+        if state["revisions"]["SMS"]==0:
+            barrier.wait(timeout=20)
+        return state
+
+    def attempt(actor):
+        try:
+            with psycopg.connect(DSN) as db:
+                result=change(db,d["tokens"][actor],"SMS",True,0,key)
+                return actor,result
+        except LeadConflict as exc:
+            return actor,str(exc)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(module,state_name,synchronized_state)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes=dict(pool.map(attempt,actors))
+    winner=next(actor for actor,result in outcomes.items() if isinstance(result,dict))
+    loser=next(actor for actor in actors if actor!=winner)
+    assert outcomes[loser]=="KEY_REUSED"
+    assert outcomes[winner]["replayed"] is False
+    assert outcomes[winner]["revisions"]["SMS"]==1
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            f"SELECT user_id,enabled,version FROM {table} WHERE request_key=%s",
+            (key,),
+        ).fetchall()==[(winner,True,1)]
+    # HTTP не отдаёт состояние владельца другому аккаунту при повторе ключа.
+    loser_headers=session(http,d,loser)
+    first=payload("SMS",True,0,key)
+    conflict=http.post(endpoint,headers=loser_headers,json=first)
+    assert conflict.status_code==409,conflict.text
+    assert str(winner) not in conflict.text
+    assert http.get(endpoint).json()["revisions"]["SMS"]==0
+    winner_headers=session(http,d,winner)
+    off=http.post(endpoint,headers=winner_headers,json=payload("SMS",False,1))
+    assert off.status_code==201,off.text
+    replay=http.post(endpoint,headers=winner_headers,json=first)
+    assert replay.status_code==200,replay.text
+    assert replay.json()["replayed"] is True
+    assert replay.json()["revisions"]["SMS"]==2
+    assert replay.json()["channels"]["SMS"] is False
+    assert replay.json()["sendAllowed"] is False
+    with psycopg.connect(DSN) as db:
+        assert db.execute(
+            f"SELECT count(*) FROM {table} WHERE user_id=%s AND channel_code='SMS'",
+            (winner,),
+        ).fetchone()==(2,)

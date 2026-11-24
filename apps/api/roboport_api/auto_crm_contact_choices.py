@@ -6,6 +6,8 @@ messaging. Staff see only aggregate booleans for currently authorized leads.
 """
 from uuid import UUID,uuid4
 
+import psycopg
+
 from .session_lookup import session_subject
 from .auto_crm_leads import _authority,_lead,LeadDenied,LeadConflict
 
@@ -69,12 +71,17 @@ def change_customer_choice(conn,token,channel,enabled,expected_revision,key):
         state=_current(conn,actor)
         if expected_revision!=state["revisions"][channel]:
             raise LeadConflict("STALE_REVISION")
-        conn.execute(
-            """INSERT INTO auto_crm_contact_choice_event
-               (id,user_id,channel_code,enabled,version,request_key)
-               VALUES(%s,%s,%s,%s,%s,%s)""",
-            (uuid4(),actor,channel,enabled,expected_revision+1,key),
-        )
+        try:
+            conn.execute(
+                """INSERT INTO auto_crm_contact_choice_event
+                   (id,user_id,channel_code,enabled,version,request_key)
+                   VALUES(%s,%s,%s,%s,%s,%s)""",
+                (uuid4(),actor,channel,enabled,expected_revision+1,key),
+            )
+        except psycopg.errors.UniqueViolation:
+            # Ключ уникален глобально, а advisory lock действует на аккаунт.
+            # Конкурирующий чужой ключ возвращает конфликт без данных владельца.
+            raise LeadConflict("KEY_REUSED") from None
         return {"replayed":False,**_current(conn,actor)}
 
 

@@ -101,11 +101,17 @@ def change_customer_consent(conn,token,channel,enabled,expected_revision,key):
         state=_customer_state(conn,actor)
         if expected_revision!=state["revisions"][channel]:
             raise LeadConflict("STALE_REVISION")
-        conn.execute("""
-          INSERT INTO auto_crm_contact_consent_event
-            (id,user_id,channel_code,purpose_code,enabled,version,evidence_code,request_key)
-          VALUES(%s,%s,%s,%s,%s,%s,'SYNTHETIC_SELF_SERVICE',%s)
-        """,(uuid4(),actor,channel,PURPOSE,enabled,expected_revision+1,key))
+        try:
+            conn.execute("""
+              INSERT INTO auto_crm_contact_consent_event
+                (id,user_id,channel_code,purpose_code,enabled,version,evidence_code,request_key)
+              VALUES(%s,%s,%s,%s,%s,%s,'SYNTHETIC_SELF_SERVICE',%s)
+            """,(uuid4(),actor,channel,PURPOSE,enabled,expected_revision+1,key))
+        except psycopg.errors.UniqueViolation:
+            # Блокировка пользователя не сериализует чужой ключ запроса.
+            # При конкурирующей записи не раскрываем владельца ключа и
+            # откатываем транзакцию через штатный конфликт.
+            raise LeadConflict("KEY_REUSED") from None
         return {"replayed":False,**_customer_state(conn,actor)}
 
 
