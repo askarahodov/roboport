@@ -1,7 +1,11 @@
 """Impact strategy is fail-safe and release-grade main is always full."""
 import unittest
+import subprocess
+from contextlib import chdir
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from scripts.ci_impact import FULL, impact
+from scripts.ci_impact import FULL, changed, impact
 
 
 class ImpactTests(unittest.TestCase):
@@ -29,6 +33,30 @@ class ImpactTests(unittest.TestCase):
     def test_unknown_and_no_diff_fail_closed(self):
         self.assertEqual(impact(["new_unknown_extension.xyz"]), (set(FULL), True))
         self.assertEqual(impact([]), (set(FULL), True))
+
+    def test_rename_of_critical_path_to_docs_keeps_full_impact(self):
+        with TemporaryDirectory() as directory, chdir(directory):
+            def git(*args):
+                return subprocess.check_output(
+                    ["git", *args], text=True, stderr=subprocess.STDOUT,
+                ).strip()
+
+            git("init")
+            old = Path("apps/api/roboport_api/main.py")
+            old.parent.mkdir(parents=True)
+            old.write_text("# synthetic marker\n", encoding="utf-8")
+            git("add", ".")
+            git("-c", "user.name=CI", "-c", "user.email=ci@example.invalid",
+                "commit", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            new = Path("docs/archive.md")
+            new.parent.mkdir()
+            git("mv", str(old), str(new))
+            git("-c", "user.name=CI", "-c", "user.email=ci@example.invalid",
+                "commit", "-m", "rename")
+            paths = changed(base)
+            self.assertEqual(set(paths), {old.as_posix(), new.as_posix()})
+            self.assertEqual(impact(paths), (set(FULL), True))
 
     def test_main_and_manual_are_full_even_for_docs(self):
         self.assertEqual(impact(["docs/README.md"], full=True), (set(FULL), True))
