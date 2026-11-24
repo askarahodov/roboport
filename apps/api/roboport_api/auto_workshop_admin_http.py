@@ -15,7 +15,7 @@ from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_workshop_admin import (
     WorkshopAdminConflict, WorkshopAdminDenied, WorkshopAdminInvalid,
     cancel_shift, create_bay, create_location, create_shift, disable_bay,
-    disable_location, list_workshop, list_workshop_audit,
+    disable_location, list_workshop, list_workshop_audit, list_workshop_page,
 )
 
 router = APIRouter(include_in_schema=False)
@@ -81,6 +81,38 @@ def get_workshop(org_id: str, request: Request):
     return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
 
 
+def _page_params(request: Request):
+    cursors = request.query_params.getlist("cursor")
+    if (len(cursors) > 1 or len(request.query_params.getlist("limit")) > 1
+            or len(request.query_params.getlist("kind")) > 1
+            or (cursors and not cursors[0])):
+        raise WorkshopAdminInvalid("invalid query parameters")
+    return cursors[0] if cursors else None
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/workshop/page")
+def get_workshop_page(org_id: str, request: Request, kind: str, limit: int = 100):
+    dsn = _request_dsn(request)
+    if isinstance(dsn, JSONResponse):
+        return dsn
+    organization = _org(org_id)
+    if organization is None or not 1 <= limit <= 100:
+        return _invalid(request)
+    try:
+        cursor = _page_params(request)
+        if cursor is None:
+            return _invalid(request)
+        with psycopg.connect(dsn) as db:
+            result = list_workshop_page(
+                db, request.cookies.get("rp_session", ""), organization, kind, cursor, limit
+            )
+    except WorkshopAdminDenied:
+        return _denied(request)
+    except WorkshopAdminInvalid:
+        return _invalid(request)
+    return JSONResponse(content=result, headers={"Cache-Control": "no-store"})
+
+
 @router.get("/api/v1/dev/auto/organizations/{org_id}/workshop/audit")
 def get_workshop_audit(org_id: str, request: Request, limit: int = 100):
     dsn = _request_dsn(request)
@@ -92,13 +124,13 @@ def get_workshop_audit(org_id: str, request: Request, limit: int = 100):
     with psycopg.connect(dsn) as db:
         try:
             items = list_workshop_audit(
-                db, request.cookies.get("rp_session", ""), organization, limit
+                db, request.cookies.get("rp_session", ""), organization, limit, _page_params(request)
             )
         except WorkshopAdminDenied:
             return _denied(request)
         except WorkshopAdminInvalid:
             return _invalid(request)
-    return JSONResponse(content={"items": items}, headers={"Cache-Control": "no-store"})
+    return JSONResponse(content=items, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/api/v1/dev/auto/organizations/{org_id}/locations")

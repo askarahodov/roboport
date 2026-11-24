@@ -5,12 +5,14 @@
 """
 from datetime import datetime, timezone, timedelta
 import re
+import hashlib
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 
 from .session_lookup import session_subject
+from .keyset_cursor import encode_cursor, decode_cursor
 from .auto_create_idempotency import (
     AutoIdempotencyConflict, existing as existing_receipt,
     remember as remember_receipt, validated_key,
@@ -77,75 +79,107 @@ def _record(conn: psycopg.Connection, organization: UUID, location: UUID,
     )
 
 
-def list_workshop(conn: psycopg.Connection, token: str,
-                  organization: UUID) -> dict:
-    """Bounded branch, bay and shift registry; identifiers only, no PII."""
-    with conn.transaction():
-        _admin(conn, token, organization)
-        locations = conn.execute(
+def _workshop_scope(organization, kind):
+    return hashlib.sha256(f"workshop:{organization}:{kind}".encode()).hexdigest()[:32]
+
+
+def _read_page(conn, token, organization, kind, limit=100, cursor=None):
+    """Вызывается только внутри транзакции с проверенным ADMIN."""
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise WorkshopAdminInvalid("invalid limit")
+    scope = _workshop_scope(organization, kind)
+    try:
+        after = decode_cursor(cursor, scope, token) if cursor is not None else None
+    except ValueError as exc:
+        raise WorkshopAdminInvalid("invalid cursor") from exc
+    position = (after[0], after[0], after[1]) if after else (None, None, None)
+    params = (organization, *position, limit + 1)
+    if kind == "locations":
+        rows = conn.execute(
             """SELECT id,code,timezone_name,disabled_at,created_at
-               FROM auto_service_location
-               WHERE organization_id=%s
-               ORDER BY code,id LIMIT 101""",
-            (organization,),
+               FROM auto_service_location WHERE organization_id=%s
+                 AND (%s::timestamptz IS NULL OR (created_at,id)>(%s::timestamptz,%s::uuid))
+               ORDER BY created_at,id LIMIT %s""", params,
         ).fetchall()
-        bays = conn.execute(
+        stamp_index = 4
+        items = [{"locationId": str(row[0]), "code": row[1], "timeZone": row[2],
+                  "disabled": row[3] is not None, "createdAt": row[4].isoformat()}
+                 for row in rows[:limit]]
+    elif kind == "bays":
+        rows = conn.execute(
             """SELECT id,location_id,code,disabled_at,created_at
                FROM auto_work_bay WHERE organization_id=%s
-               ORDER BY location_id,code,id LIMIT 101""",
-            (organization,),
+                 AND (%s::timestamptz IS NULL OR (created_at,id)>(%s::timestamptz,%s::uuid))
+               ORDER BY created_at,id LIMIT %s""", params,
         ).fetchall()
-        shifts = conn.execute(
+        stamp_index = 4
+        items = [{"bayId": str(row[0]), "locationId": str(row[1]), "code": row[2],
+                  "disabled": row[3] is not None, "createdAt": row[4].isoformat()}
+                 for row in rows[:limit]]
+    elif kind == "shifts":
+        rows = conn.execute(
             """SELECT id,location_id,user_id,starts_at,ends_at,canceled_at,created_at
                FROM auto_staff_shift WHERE organization_id=%s
-               ORDER BY starts_at DESC,id DESC LIMIT 101""",
-            (organization,),
+                 AND (%s::timestamptz IS NULL OR (starts_at,id)<(%s::timestamptz,%s::uuid))
+               ORDER BY starts_at DESC,id DESC LIMIT %s""", params,
         ).fetchall()
-        return {
-            "syntheticOnly": True,
-            "locations": [
-                {"locationId": str(row[0]), "code": row[1], "timeZone": row[2],
-                 "disabled": row[3] is not None, "createdAt": row[4].isoformat()}
-                for row in locations[:100]
-            ],
-            "locationsTruncated": len(locations) > 100,
-            "bays": [
-                {"bayId": str(row[0]), "locationId": str(row[1]), "code": row[2],
-                 "disabled": row[3] is not None, "createdAt": row[4].isoformat()}
-                for row in bays[:100]
-            ],
-            "baysTruncated": len(bays) > 100,
-            "shifts": [
-                {"shiftId": str(row[0]), "locationId": str(row[1]),
-                 "userId": str(row[2]), "startsAt": row[3].isoformat(),
-                 "endsAt": row[4].isoformat(), "canceled": row[5] is not None,
-                 "createdAt": row[6].isoformat()}
-                for row in shifts[:100]
-            ],
-            "shiftsTruncated": len(shifts) > 100,
-        }
+        stamp_index = 3
+        items = [{"shiftId": str(row[0]), "locationId": str(row[1]),
+                  "userId": str(row[2]), "startsAt": row[3].isoformat(),
+                  "endsAt": row[4].isoformat(), "canceled": row[5] is not None,
+                  "createdAt": row[6].isoformat()} for row in rows[:limit]]
+    elif kind == "audit":
+        rows = conn.execute(
+            """SELECT id,location_id,actor_id,entity_type,entity_id,action,created_at
+               FROM auto_workshop_admin_action WHERE organization_id=%s
+                 AND (%s::timestamptz IS NULL OR (created_at,id)<(%s::timestamptz,%s::uuid))
+               ORDER BY created_at DESC,id DESC LIMIT %s""", params,
+        ).fetchall()
+        stamp_index = 6
+        items = [{"eventId": str(row[0]), "locationId": str(row[1]),
+                  "actorId": str(row[2]), "entityType": row[3],
+                  "entityId": str(row[4]), "action": row[5],
+                  "createdAt": row[6].isoformat()} for row in rows[:limit]]
+    else:
+        raise WorkshopAdminInvalid("invalid list kind")
+    page = {"items": items}
+    if len(rows) > limit:
+        last = rows[limit - 1]
+        page["nextCursor"] = encode_cursor(last[stamp_index], last[0], scope, token)
+    return page
+
+
+def list_workshop(conn: psycopg.Connection, token: str,
+                  organization: UUID) -> dict:
+    """Первая страница каждого списка, единая транзакция ADMIN."""
+    with conn.transaction():
+        _admin(conn, token, organization)
+        result = {"syntheticOnly": True}
+        for kind in ("locations", "bays", "shifts"):
+            page = _read_page(conn, token, organization, kind)
+            result[kind] = page["items"]
+            result[kind + "Truncated"] = "nextCursor" in page
+            if "nextCursor" in page:
+                result[kind + "NextCursor"] = page["nextCursor"]
+        return result
+
+
+def list_workshop_page(conn: psycopg.Connection, token: str,
+                       organization: UUID, kind: str, cursor: str,
+                       limit: int = 100) -> dict:
+    with conn.transaction():
+        _admin(conn, token, organization)
+        if kind not in ("locations", "bays", "shifts") or not cursor:
+            raise WorkshopAdminInvalid("invalid list kind or cursor")
+        return _read_page(conn, token, organization, kind, limit, cursor)
 
 
 def list_workshop_audit(conn: psycopg.Connection, token: str,
-                        organization: UUID, limit: int = 100) -> list[dict]:
-    if type(limit) is not int or not 1 <= limit <= 100:
-        raise WorkshopAdminInvalid("invalid audit limit")
+                        organization: UUID, limit: int = 100,
+                        cursor: str | None = None) -> dict:
     with conn.transaction():
         _admin(conn, token, organization)
-        rows = conn.execute(
-            """SELECT id,location_id,actor_id,entity_type,entity_id,action,created_at
-               FROM auto_workshop_admin_action
-               WHERE organization_id=%s
-               ORDER BY created_at DESC,id DESC LIMIT %s""",
-            (organization, limit),
-        ).fetchall()
-        return [
-            {"eventId": str(row[0]), "locationId": str(row[1]),
-             "actorId": str(row[2]), "entityType": row[3],
-             "entityId": str(row[4]), "action": row[5],
-             "createdAt": row[6].isoformat()}
-            for row in rows
-        ]
+        return _read_page(conn, token, organization, "audit", limit, cursor)
 
 
 def create_location(conn: psycopg.Connection, token: str, organization: UUID,
