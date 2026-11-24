@@ -40,3 +40,14 @@ def receipt_history_date(conn, org, loc, receipt):
     if row is None:
         raise AutoStockDenied("FORBIDDEN")
     return row[0]
+
+
+def require_full_stock_history(conn, token, org, loc, *capabilities):
+    """Полный остаток/сверка включают движения за все периоды.
+    
+    При cutoff нельзя отдавать частичный остаток за полный или менять
+    его через прямой UUID. Разрешение закупочных цен здесь не требуется.
+    Вызывающий отдельно проверяет операционную роль и объект.
+    """
+    if require_purchase_document(conn, token, org, loc, *capabilities) is not None:
+        raise AutoStockDenied("FORBIDDEN")
