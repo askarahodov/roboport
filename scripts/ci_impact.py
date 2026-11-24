@@ -1,7 +1,8 @@
 """Conservative PR impact selection. Main/manual CI remains an unconditional full gate.
 
 Unknown/infra/CI paths fail open to *more* tests, never silently exclude them.
-Only explicitly changed PG integration tests may be selected for scoped runs.
+Only explicitly changed PG integration tests, or the mandatory tests of a
+verified isolated offline package, may be selected for scoped runs.
 """
 from __future__ import annotations
 
@@ -24,8 +25,93 @@ CRITICAL = (
 )
 
 
-def impact(paths: list[str], *, full: bool = False) -> tuple[set[str], bool]:
+# Closed groups of offline tools. Each group lists implementation paths,
+# mandatory contract tests (the API job runs the entire contract suite), and
+# mandatory real PostgreSQL tests. No shared preflight, HTTP, DB authority,
+# restore probe, migration or CI script is included in this allowlist.
+OFFLINE_GROUPS = (
+    (("scripts/auto_migration_provenance_bundle.py",),
+     ("tests/contract/test_auto_migration_provenance_bundle.py",), ()),
+    (("scripts/auto_vehicle_column_mapping.py",),
+     ("tests/contract/test_auto_vehicle_column_mapping.py",), ()),
+    (("scripts/auto_synthetic_xlsx.py", "scripts/auto_synthetic_batch.py"),
+     ("tests/contract/test_auto_synthetic_xlsx.py",
+      "tests/contract/test_auto_synthetic_batch.py"), ()),
+    (("scripts/auto_cutover_export_verify.py",
+      "apps/api/roboport_api/auto_synthetic_cutover_export.py"),
+     ("tests/contract/test_auto_cutover_export_verify.py",),
+     ("tests/integration/test_pg_auto_synthetic_cutover_export.py",)),
+)
+
+
+def _doc_only(path: str) -> bool:
+    # A Markdown file inside a workflow/infra path must not bypass a gate.
+    return path.startswith("docs/") and path.endswith(".md")
+
+
+def _offline_candidate(paths: list[str]):
+    selected = [group for group in OFFLINE_GROUPS
+                if set(paths).intersection(group[0])]
+    if not selected:
+        return None
+    allowed = {path for group in selected for items in group for path in items}
+    if any(path not in allowed and not _doc_only(path) for path in paths):
+        return None
+    return selected
+
+
+def verified_offline_plan(paths: list[str], base: str | None) -> tuple[str, ...] | None:
+    """Return mandatory PG tests for an independently checked offline-only PR.
+
+    Empty tuple means API/contract only; None means no shortcut. Check literal
+    references to every group source stem in BOTH trees (base and HEAD), not
+    only files modified by the PR. Unknown executable consumers, missing
+    tests, unreadable trees and all mixed/shared changes fall back to full.
+    This is an explicit reviewed allowlist, not a general dependency solver.
+    """
+    groups = _offline_candidate(paths)
+    if not groups or not base:
+        return None
+    try:
+        for sources, contracts, integration in groups:
+            allowed = set(sources + contracts + integration)
+            if any(not Path(path).is_file() or Path(path).is_symlink()
+                   for path in allowed):
+                return None
+            for source in sources:
+                stem = Path(source).stem
+                for ref in (base, "HEAD"):
+                    result = subprocess.run(
+                        ["git", "grep", "-z", "-l", "-F", "-e", stem, ref, "--"],
+                        capture_output=True, check=False,
+                    )
+                    if result.returncode not in (0, 1):
+                        return None
+                    for record in result.stdout.split(b"\0"):
+                        if not record:
+                            continue
+                        prefix, separator, raw_path = record.partition(b":")
+                        if not separator or prefix.decode("utf-8") != ref:
+                            return None
+                        path = raw_path.decode("utf-8")
+                        if (path not in allowed and not path.endswith(".md")
+                                and path != "scripts/ci_impact.py"
+                                and path != "tests/bootstrap/test_ci_impact.py"):
+                            return None
+        return tuple(sorted({test for group in groups for test in group[2]}))
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def impact(paths: list[str], *, full: bool = False,
+           offline_plan: tuple[str, ...] | None = None) -> tuple[set[str], bool]:
     if full or not paths:
+        return set(FULL), True
+    if offline_plan is not None and _offline_candidate(paths):
+        return ({"api", "postgres"} if offline_plan else {"api"}), False
+    # A candidate with no independently verified plan is always full, even
+    # if the only changed implementation happens to live under auto_*.py.
+    if _offline_candidate(paths):
         return set(FULL), True
     required: set[str] = set()
     full_pg = False
@@ -72,12 +158,13 @@ def changed(base: str) -> list[str]:
     return [item.decode("utf-8") for item in result.stdout.split(b"\0") if item]
 
 
-def run_integration(paths: list[str], *, full_pg: bool) -> int:
-    tests = sorted(set(
+def run_integration(paths: list[str], *, full_pg: bool,
+                    mandatory_tests: tuple[str, ...] = ()) -> int:
+    tests = sorted(set(mandatory_tests) | set(
         p for p in paths if p.startswith("tests/integration/")
         and p.endswith(".py") and Path(p).is_file()
     ))
-    if full_pg or not tests:
+    if full_pg or not tests or any(not Path(test).is_file() for test in tests):
         tests = ["tests/integration"]
     print("PostgreSQL tests:", *tests, flush=True)
     return subprocess.call([sys.executable, "-m", "pytest", "-q", "-ra", *tests])
@@ -92,11 +179,12 @@ def main() -> int:
     paths = [] if args.full else changed(args.base) if args.base else None
     if paths is None:
         parser.error("either --base or --full must be supplied")
-    selected, full_pg = impact(paths, full=args.full)
+    plan = None if args.full else verified_offline_plan(paths, args.base)
+    selected, full_pg = impact(paths, full=args.full, offline_plan=plan)
     if args.run_integration:
         if "postgres" not in selected:
             raise RuntimeError("PostgreSQL scope is not active")
-        return run_integration(paths, full_pg=full_pg)
+        return run_integration(paths, full_pg=full_pg, mandatory_tests=plan or ())
     lines = [f"{job.replace('-', '_')}={'true' if job in selected else 'false'}"
              for job in JOBS]
     lines.append(f"pg_full={'true' if full_pg else 'false'}")
