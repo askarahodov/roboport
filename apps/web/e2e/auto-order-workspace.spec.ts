@@ -155,23 +155,46 @@ test('assignment tab shows actions only for the locked order',async({page})=>{
 });
 
 test('workspace labels policy-restricted document stages without leaking status',async({page})=>{
-  const restricted={...steps,estimate:'RESTRICTED',technicalDocuments:'RESTRICTED'};
+  let progress={...steps,estimate:'APPROVED',technicalDocuments:'POSTED'};
   await page.route('**/api/v1/dev/auto/organizations/**',route=>{
     const url=new URL(route.request().url());
     if(url.pathname===root+'/workspace')return route.fulfill({
       status:200,contentType:'application/json',
-      body:JSON.stringify({...snapshot(),steps:restricted}),
+      body:JSON.stringify({...snapshot(),steps:progress}),
     });
     if(url.pathname===root+'/services'||
       url.pathname===root.replace('/orders/'+order,'')+'/service-catalog')
-      return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}); 
+      return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
     throw Error('Unexpected API path '+url.pathname);
   });
+  await page.setViewportSize({width:390,height:844});
   await page.goto(pageUrl);
   const table=page.getByRole('table',{name:/Серверная сводка/});
-  await expect(table).toContainText('Смета');
-  await expect(table).toContainText('Технические документы');
+  const estimate=table.getByRole('row').filter({has:page.getByRole('rowheader',{name:'Смета',exact:true})});
+  const documents=table.getByRole('row').filter({has:page.getByRole('rowheader',{name:'Технические документы',exact:true})});
+  const inspection=table.getByRole('row').filter({has:page.getByRole('rowheader',{name:'Первичный осмотр',exact:true})});
+  const intake=table.getByRole('row').filter({has:page.getByRole('rowheader',{name:'Акт приёмки',exact:true})});
+  await expect(estimate.getByRole('cell')).toHaveText('Согласована');
+  await expect(documents.getByRole('cell')).toHaveText('Технически проведён');
+
+  progress={...progress,estimate:'RESTRICTED'};
+  await page.getByRole('button',{name:'Обновить этапы с сервера'}).click();
+  await expect(estimate.getByRole('cell')).toHaveText('Недоступно по правам');
+  await expect(documents.getByRole('cell')).toHaveText('Технически проведён');
+
+  progress={...progress,technicalDocuments:'RESTRICTED'};
+  await page.getByRole('button',{name:'Обновить этапы с сервера'}).click();
+  await expect(documents.getByRole('cell')).toHaveText('Недоступно по правам');
+  await expect(estimate.getByRole('cell')).toHaveText('Недоступно по правам');
   await expect(table.getByText('Недоступно по правам')).toHaveCount(2);
-  await expect(table).not.toContainText('Черновик');
-  await expect(table).not.toContainText('Не создан');
+  await expect(inspection.getByRole('cell')).toHaveText('Не создан');
+  await expect(intake.getByRole('cell')).toHaveText('Не создан');
+  const nav=page.getByRole('navigation',{name:'Разделы рабочего места'});
+  await expect(nav.getByRole('button',{name:'Смета · Недоступно по правам'})).toBeVisible();
+  await expect(nav.getByRole('button',{name:'Сверка и документы · Недоступно по правам'})).toBeVisible();
+  await expect(nav.getByRole('button',{name:'История · Недоступно по правам'})).toBeVisible();
+  await page.setViewportSize({width:1280,height:900});
+  await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
+  await expect(estimate.getByRole('cell')).toHaveText('Недоступно по правам');
+  await expect(documents.getByRole('cell')).toHaveText('Недоступно по правам');
 });
