@@ -25,3 +25,18 @@ def require_purchase_document(conn, token, org, loc, *capabilities, created_at=N
         return cutoff
     except DocumentPolicyDenied:
         raise AutoStockDenied("FORBIDDEN") from None
+
+
+def receipt_history_date(conn, org, loc, receipt):
+    """A linked supplier order may be older than its receipt; honor both."""
+    row = conn.execute("""
+        SELECT least(d.created_at, po.created_at)
+        FROM auto_stock_receipt_document d
+        LEFT JOIN auto_supplier_purchase_receipt pr ON pr.document_id=d.id
+        LEFT JOIN auto_supplier_purchase_order po ON po.id=pr.purchase_id
+          AND po.organization_id=d.organization_id AND po.location_id=d.location_id
+        WHERE d.id=%s AND d.organization_id=%s AND d.location_id=%s
+    """, (receipt, org, loc)).fetchone()
+    if row is None:
+        raise AutoStockDenied("FORBIDDEN")
+    return row[0]

@@ -159,7 +159,11 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
                   selected.quoted_at,selected.expires_at,selected.currency,
                   selected.unit_purchase_minor,actor))
             return ident,shortage
-        return _conflict_errors((conn,actor,insert))
+        result=_conflict_errors((conn,actor,insert))
+        created_at=conn.execute("SELECT created_at FROM auto_supplier_purchase_order WHERE id=%s",
+                                (result[0],)).fetchone()[0]
+        require_purchase_document(conn,token,org,loc,created_at=created_at)
+        return result
 
 
 def record_supplier_delivery(conn: psycopg.Connection, token: str, org: UUID,

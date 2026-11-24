@@ -6,7 +6,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
-from .auto_purchase_document_policy import require_purchase_document
+from .auto_purchase_document_policy import require_purchase_document,receipt_history_date
 
 
 def record_receipt_valuation(conn: psycopg.Connection,token: str,
@@ -40,7 +40,8 @@ def record_receipt_valuation(conn: psycopg.Connection,token: str,
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
         require_purchase_document(conn,token,organization_id,location_id,
-                                  "EDIT","PRICE_PURCHASE",created_at=row[1])
+                                  "EDIT","PRICE_PURCHASE",
+                                  created_at=receipt_history_date(conn,organization_id,location_id,document_id))
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:
             raise AutoStockDenied("FORBIDDEN")

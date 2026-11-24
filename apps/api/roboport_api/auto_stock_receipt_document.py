@@ -4,7 +4,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 from .session_lookup import session_subject
-from .auto_purchase_document_policy import require_purchase_document
+from .auto_purchase_document_policy import require_purchase_document,receipt_history_date
 
 
 def _invoke(conn,token,organization_id,location_id,lot_id,role,sql,args,*,
@@ -50,13 +50,19 @@ def create_receipt_document(conn: psycopg.Connection,token: str,organization_id:
             raise AutoStockDenied("FORBIDDEN")
         # The key may refer to an old receipt. Apply history before replay;
         # a foreign key must not reveal any existing object.
-        old=conn.execute("""SELECT created_at FROM auto_stock_receipt_document
+        old=conn.execute("""SELECT id FROM auto_stock_receipt_document
             WHERE request_id=%s AND organization_id=%s AND location_id=%s
             FOR SHARE""",(request_id,organization_id,location_id)).fetchone()
-        return _invoke(conn,token,organization_id,location_id,lot_id,"WAREHOUSE",
+        created=_invoke(conn,token,organization_id,location_id,lot_id,"WAREHOUSE",
             "SELECT record_auto_stock_receipt_document(%s,%s,%s,%s)",
             (lot_id,request_id,quantity,source_reference),cap="CREATE",
-            created_at=old[0] if old else None)
+            created_at=receipt_history_date(conn,organization_id,location_id,old[0])
+                       if old else None)
+        # Check the returned immutable document as well: a concurrent
+        # idempotent creation may have won after the first lookup.
+        require_purchase_document(conn,token,organization_id,location_id,
+            created_at=receipt_history_date(conn,organization_id,location_id,created))
+        return created
 
 
 def accept_receipt_document(conn: psycopg.Connection,token: str,organization_id: UUID,
@@ -76,7 +82,8 @@ def accept_receipt_document(conn: psycopg.Connection,token: str,organization_id:
             raise AutoStockDenied("FORBIDDEN")
         return _invoke(conn,token,organization_id,location_id,row[0],"MANAGER",
             "SELECT accept_auto_stock_receipt_document(%s,%s)",
-            (document_id,request_id),cap="CLOSE",created_at=row[1])
+            (document_id,request_id),cap="CLOSE",
+            created_at=receipt_history_date(conn,organization_id,location_id,document_id))
 
 
 

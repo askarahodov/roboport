@@ -7,7 +7,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockConflict, AutoStockDenied
-from .auto_purchase_document_policy import require_purchase_document
+from .auto_purchase_document_policy import require_purchase_document,receipt_history_date
 
 SQL_FAILURES=(psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
               psycopg.errors.CheckViolation,psycopg.errors.ForeignKeyViolation)
@@ -64,7 +64,7 @@ def draft_supplier_return(conn:psycopg.Connection,token:str,
         return _run(conn,token,org,loc,"WAREHOUSE",
             "SELECT record_auto_stock_supplier_return_document(%s,%s,%s,%s,%s)",
             (receipt_id,request_id,quantity,reason,supplier_reference),
-            cap="CREATE",created_at=row[1])
+            cap="CREATE",created_at=receipt_history_date(conn,org,loc,receipt_id))
 
 
 def approve_supplier_return(conn:psycopg.Connection,token:str,
@@ -73,7 +73,7 @@ def approve_supplier_return(conn:psycopg.Connection,token:str,
     with conn.transaction():
         if not organization_role_allows(conn,token,org,"MANAGER",loc,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
-        row=conn.execute("""SELECT d.id,least(d.created_at,r.created_at)
+        row=conn.execute("""SELECT d.id,least(d.created_at,r.created_at),r.id
             FROM auto_stock_supplier_return_document d
             JOIN auto_stock_receipt_document r ON r.id=d.source_receipt_id
               AND r.organization_id=d.organization_id AND r.location_id=d.location_id
@@ -82,7 +82,8 @@ def approve_supplier_return(conn:psycopg.Connection,token:str,
         if row is None: raise AutoStockDenied("FORBIDDEN")
         return _run(conn,token,org,loc,"MANAGER",
             "SELECT accept_auto_stock_supplier_return_document(%s,%s)",
-            (document_id,request_id),cap="CLOSE",created_at=row[1])
+            (document_id,request_id),cap="CLOSE",
+            created_at=min(row[1],receipt_history_date(conn,org,loc,row[2])))
 
 
 
