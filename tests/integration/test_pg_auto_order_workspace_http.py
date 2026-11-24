@@ -7,6 +7,7 @@ from roboport_api.auto_order_workspace import read_order_workspace
 from roboport_api.auto_stock_service import AutoStockDenied
 from test_pg_baseline import DSN
 from test_pg_auto_work_order_register_http import setup
+from roboport_api.auto_document_access import publish_policy
 
 
 def test_workspace_reads_actual_stages_not_price_or_personal_data(monkeypatch):
@@ -22,8 +23,8 @@ def test_workspace_reads_actual_stages_not_price_or_personal_data(monkeypatch):
     assert response.headers["x-content-type-options"]=="nosniff"
     expected={
         "services":"EMPTY","inspection":"MISSING","intakeAct":"MISSING",
-        "estimate":"MISSING","execution":"NOT_STARTED","quality":"NOT_CHECKED",
-        "technicalDocuments":"DRAFT",
+        "estimate":"RESTRICTED","execution":"NOT_STARTED","quality":"NOT_CHECKED",
+        "technicalDocuments":"RESTRICTED",
     }
     payload=response.json()
     assert payload=={
@@ -90,3 +91,62 @@ def test_workspace_direct_service_requires_authenticated_identities():
         read_order_workspace(None,"",uuid4(),uuid4(),uuid4())
     with pytest.raises(AutoStockDenied,match="FORBIDDEN"):
         read_order_workspace(None,"test",uuid4(),uuid4(),"not uuid")
+
+
+def test_workspace_redacts_estimate_and_handover_policy_denials(monkeypatch):
+    d,org,loc,_,_,orders,client,_=setup(monkeypatch,count=1)
+    order=orders[0]
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,%s,%s,'MANAGER')""",(uuid4(),org,loc,d["manager"]))
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,NULL,%s,'ADMIN')""",(uuid4(),org,d["manager"]))
+    admin=d["tokens"][d["manager"]]
+    client.cookies.set("rp_session",admin)
+    path=(f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+          f"/orders/{order}/workspace")
+
+    def policy(document,allowed,not_before=None):
+        with psycopg.connect(DSN) as db:
+            publish_policy(
+                db,admin,org,request_key=uuid4(),role="MANAGER",
+                loc=loc,user=None,document=document,cap="READ",
+                allowed=allowed,not_before=not_before,
+            )
+
+    def stages():
+        response=client.get(path)
+        assert response.status_code==200,response.text
+        assert response.json()["releaseAllowed"] is False
+        return response.json()["steps"]
+
+    baseline=stages()
+    assert baseline["estimate"]=="MISSING"
+    assert baseline["technicalDocuments"]=="DRAFT"
+    policy("ESTIMATE",False)
+    assert stages()=={**baseline,"estimate":"RESTRICTED"}
+    policy("HANDOVER",False)
+    assert stages()=={**baseline,"estimate":"RESTRICTED",
+                     "technicalDocuments":"RESTRICTED"}
+
+    # Новая разрешающая политика не отменяет ограничение другого документа.
+    policy("ESTIMATE",True)
+    assert stages()=={**baseline,"technicalDocuments":"RESTRICTED"}
+    with psycopg.connect(DSN) as db:
+        cutoff=db.execute("SELECT created_at + interval '1 second' "
+                          "FROM auto_work_order WHERE id=%s",(order,)).fetchone()[0]
+    policy("ESTIMATE",True,cutoff)
+    assert stages()=={**baseline,"estimate":"RESTRICTED",
+                     "technicalDocuments":"RESTRICTED"}
+    policy("HANDOVER",True)
+    assert stages()=={**baseline,"estimate":"RESTRICTED"}
+
+    # Без права на сам акт нельзя получить даже частичную сводку.
+    policy("INTAKE_ACT",False)
+    denied=client.get(path)
+    assert denied.status_code==403,denied.text
+    assert "steps" not in denied.json()
+    policy("INTAKE_ACT",True)
+    assert stages()=={**baseline,"estimate":"RESTRICTED"}
