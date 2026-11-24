@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 from minio.error import S3Error
-from roboport_api.storage import MinioFileStorage, MAX_SIZE, DOCUMENTS
+from roboport_api.storage import MinioFileStorage, MAX_SIZE, DOCUMENTS, QUARANTINE
 
 
 @pytest.mark.skipif(os.getenv("ROBOport_MINIO_ENDPOINT") != "http://127.0.0.1:9000",
@@ -31,6 +31,16 @@ def test_real_storage_adapter_upload_read_quarantine_and_delete():
     # Storage API cannot read quarantine; documents lookup is denied.
     with pytest.raises(S3Error):
         storage.get(first.key)
+    # Verify actual S3 IAM, not just the adapter's documents-only path.
+    for action in (
+        lambda: storage._client.get_object(QUARANTINE, first.key),
+        lambda: storage._client.stat_object(QUARANTINE, first.key),
+        lambda: list(storage._client.list_objects(QUARANTINE, recursive=True)),
+        lambda: storage._client.remove_object(QUARANTINE, first.key),
+    ):
+        with pytest.raises(S3Error) as denied:
+            action()
+        assert denied.value.code == "AccessDenied"
     assert storage.get(second.key)==b"synthetic-file-2"
     storage.delete(second.key)
     with pytest.raises(S3Error):

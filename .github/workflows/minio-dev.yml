@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "infra/dev/**"
+      - "apps/api/roboport_api/storage.py"
+      - "apps/api/roboport_api/storage_reconcile.py"
       - ".github/workflows/minio-dev.yml"
       - "docs/quality/ISSUE_26_QA_EXECUTION_LEDGER.md"
       - "tests/integration/test_minio_storage.py"
@@ -14,6 +16,11 @@ on:
   push:
     branches: [main]
     paths:
+      - "infra/dev/**"
+      - "apps/api/roboport_api/storage.py"
+      - "apps/api/roboport_api/storage_reconcile.py"
+      - "tests/integration/test_minio_storage.py"
+      - "tests/integration/test_pg_minio_attachment_http.py"
       - ".github/workflows/minio-dev.yml"
       - "tests/integration/test_pg_minio_legacy_restore.py"
       - "scripts/auto_legacy_attachment_restore_probe.py"
@@ -144,25 +151,21 @@ jobs:
         run: |
           set -euo pipefail
           mc() { docker compose -f infra/dev/compose.minio.yml exec -T minio mc "$@"; }
-          # Isolated restore destinations; use a narrowly scoped disposable
-          # policy extending the existing dev app policy, never root in Python.
+          # Separate disposable identity: source read-only, isolated restore
+          # buckets read/write. Never grant restore rights to the app identity.
           for bucket in roboport-documents-restore-dev roboport-quarantine-restore-dev; do
             mc mb root/"$bucket"
             mc anonymous set none root/"$bucket"
           done
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          policy = json.loads(Path("infra/dev/minio-app-policy.json").read_text())
-          for statement in policy["Statement"]:
-              statement["Resource"] += [
-                  item.replace("-dev", "-restore-dev")
-                  for item in statement["Resource"]
-              ]
-          Path("/tmp/roboport-restore-policy.json").write_text(json.dumps(policy))
-          PY
-          cat /tmp/roboport-restore-policy.json | mc admin policy create root roboport-app-restore /dev/stdin
-          mc admin policy attach root roboport-app-restore --user "$MINIO_APP_ACCESS_KEY"
+          RESTORE_KEY="rr$(openssl rand -hex 12)"
+          RESTORE_SECRET="$(openssl rand -hex 24)"
+          echo "::add-mask::$RESTORE_KEY"
+          echo "::add-mask::$RESTORE_SECRET"
+          mc admin user add root "$RESTORE_KEY" "$RESTORE_SECRET"
+          cat infra/dev/minio-restore-policy.json | mc admin policy create root roboport-isolated-restore /dev/stdin
+          mc admin policy attach root roboport-isolated-restore --user "$RESTORE_KEY"
+          export MINIO_RESTORE_ACCESS_KEY="$RESTORE_KEY"
+          export MINIO_RESTORE_SECRET_KEY="$RESTORE_SECRET"
           export ROBOport_RESTORE_PG_CONTAINER="$(docker ps --filter ancestor=postgres:17 --format '{{.ID}}' | head -1)"
           test -n "$ROBOport_RESTORE_PG_CONTAINER"
           PYTHONPATH=apps/api python -m pytest -q tests/integration/test_pg_minio_legacy_restore.py
