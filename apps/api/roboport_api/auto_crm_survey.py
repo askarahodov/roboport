@@ -48,8 +48,17 @@ def _customer(conn,token,org,loc,order):
     try:
         actor=_actor(conn,token)
         row=conn.execute("""
-          SELECT lead_id FROM auto_crm_survey WHERE work_order_id=%s
-        """,(order,)).fetchone()
+          SELECT s.lead_id FROM auto_crm_survey s
+          JOIN auto_work_order w ON w.id=s.work_order_id
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          JOIN auto_vehicle_customer_link p ON p.id=a.customer_link_id
+            AND p.vehicle_id=a.vehicle_id AND p.verified_at IS NOT NULL
+            AND p.verified_by IS NOT NULL AND p.revoked_at IS NULL
+          JOIN account_customer_link acl ON acl.customer_id=p.customer_id
+            AND acl.user_id=%s AND acl.revoked_at IS NULL
+          WHERE w.id=%s AND w.organization_id=%s AND w.location_id=%s
+          FOR SHARE OF p,acl
+        """,(actor,order,org,loc)).fetchone()
         if row:
             conn.execute("SELECT id FROM auto_crm_lead WHERE id=%s FOR UPDATE",(row[0],))
         _scope(conn,token,org,loc,order,customer=True)

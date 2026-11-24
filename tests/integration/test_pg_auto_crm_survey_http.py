@@ -91,3 +91,38 @@ def test_full_survey_closed_order_to_customer_response_and_manager_report(monkey
     session(http,d,d["intake"])
     assert http.get(staff).status_code==403
     assert http.get(report,params=params).json()["total"]==0
+
+
+def test_canceled_survey_never_accepts_response_and_exact_cancel_replay(monkeypatch):
+    d,org,loc,order,act,preview=ready(monkeypatch)
+    root=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+    with psycopg.connect(DSN) as db:
+        appointment=db.execute("SELECT appointment_id FROM auto_work_order WHERE id=%s",(order,)).fetchone()[0]
+        lead=UUID(create_lead(db,d["tokens"][d["intake"]],org,loc,d["link"],"PHONE",uuid4())["leadId"])
+        transition_lead(db,d["tokens"][d["intake"]],org,loc,lead,uuid4(),"QUALIFIED",None,None)
+        transition_lead(db,d["tokens"][d["intake"]],org,loc,lead,uuid4(),"BOOKED",None,appointment)
+        _posted(db,d,org,loc,order,act,preview,"POSTED",d["intake"])
+        _posted(db,d,org,loc,order,act,preview,"CLIENT_ACK",d["client_a"])
+        _posted(db,d,org,loc,order,act,preview,"CLOSED_TECHNICAL",d["intake"])
+    http=TestClient(app,base_url="https://127.0.0.1")
+    staff=root+f"/crm/leads/{lead}/survey"
+    customer=root+f"/orders/{order}/survey/customer"
+    manager=session(http,d,d["intake"])
+    assert http.post(staff,json={"requestKey":str(uuid4()),"action":"INVITE"},headers=manager).status_code==201
+    cancel={"requestKey":str(uuid4()),"action":"CANCEL"}
+    done=http.post(staff,json=cancel,headers=manager)
+    assert done.status_code==201,done.text
+    assert done.json()["survey"]["status"]=="CANCELED"
+    assert http.post(staff,json=cancel,headers=manager).json()["replayed"] is True
+    assert http.post(staff,json={**cancel,"requestKey":str(uuid4())},headers=manager).status_code==409
+    client=session(http,d,d["client_a"])
+    assert http.get(customer).json()["survey"]["status"]=="CANCELED"
+    assert http.post(customer,json={"requestKey":str(uuid4()),"rating":5,"reasonCode":"NONE"},headers=client).status_code==409
+    session(http,d,d["intake"])
+    day=datetime.now(ZoneInfo("Europe/Berlin")).date().isoformat()
+    report=http.get(root+"/crm/survey-report",params={"fromDay":day,"toDay":day}).json()
+    assert report["statuses"]["CANCELED"]==1 and report["averageHundredths"] is None
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+          WHERE organization_id=%s AND user_id=%s AND role_code IN ('MANAGER','INTAKE')""",(org,d["intake"]))
+    assert http.post(staff,json=cancel,headers=manager).status_code==403

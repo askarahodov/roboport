@@ -204,6 +204,6 @@ test('survey report reconciles ratings and clears revoked or corrupt result',asy
   mode='BAD';await load.click();await expect(section.getByText('Не удалось подтвердить сводку.')).toBeVisible();
   await expect(section.getByText('Всего опросов:',{exact:false})).toHaveCount(0);
   mode='OK';await load.click();await expect(section.getByText('Всего опросов:',{exact:false})).toBeVisible();
-  mode='DENIED';await load.click();await expect(section.getByText('Нет доступа к сводке опросов.')).toBeVisible();
+  mode='DENIED';await load.click();await expect(page.getByText('Доступ запрещён: требуется роль руководителя данного филиала.')).toBeVisible();
   await expect(section.getByText('Всего опросов:',{exact:false})).toHaveCount(0);
 });

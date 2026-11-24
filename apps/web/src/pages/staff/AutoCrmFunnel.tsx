@@ -193,6 +193,7 @@ export function AutoCrmFunnel(){
       </div>
       {report.summary.total===0&&<p>Подтверждённых обращений за период нет.</p>}
     </section>}
-    <SurveyReport key={org+':'+loc+':'+from+':'+to} org={org} loc={loc} from={from} to={to} enabled={canLoad}/>
+    {status!=='denied'&&<SurveyReport key={org+':'+loc+':'+from+':'+to} org={org} loc={loc} from={from} to={to}
+      enabled={canLoad} onDenied={()=>{clear();setStatus('denied');}}/>}
   </section>;
 }

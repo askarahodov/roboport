@@ -110,7 +110,7 @@ function validReport(x:Report,from:string,to:string){
     reasons.reduce((sum,k)=>sum+x.reasons[k],0)===x.statuses.ANSWERED&&
     x.averageHundredths===(x.statuses.ANSWERED?Math.floor(ratings.reduce((sum,k)=>sum+Number(k)*x.ratings[k],0)*100/x.statuses.ANSWERED):null);
 }
-export function SurveyReport({org,loc,from,to,enabled}:{org:string;loc:string;from:string;to:string;enabled:boolean}){
+export function SurveyReport({org,loc,from,to,enabled,onDenied}:{org:string;loc:string;from:string;to:string;enabled:boolean;onDenied:()=>void}){
   const [report,setReport]=React.useState<Report|null>(null),[message,setMessage]=React.useState('');
   const [busy,setBusy]=React.useState(false);const ctrl=React.useRef<AbortController|null>(null);
   React.useEffect(()=>()=>ctrl.current?.abort(),[]);
@@ -121,7 +121,7 @@ export function SurveyReport({org,loc,from,to,enabled}:{org:string;loc:string;fr
         encodeURIComponent(loc)+'/crm/survey-report?'+new URLSearchParams({fromDay:from,toDay:to}),
         {credentials:'include',cache:'no-store',signal:c.signal});
       if(c.signal.aborted)return;
-      if([401,403,404].includes(res.status)){setMessage('Нет доступа к сводке опросов.');return;}
+      if([401,403,404].includes(res.status)){setReport(null);onDenied();return;}
       if(res.status===409||res.status===422){setMessage('Сократите период или проверьте даты.');return;}
       if(!res.ok)throw Error('report');
       const data=await res.json();
