@@ -18,14 +18,8 @@ const locale=(time:string,zone:string)=>new Intl.DateTimeFormat('ru-RU',{
 export function CustomerAutoBooking(){
   const [resources,setResources]=React.useState<Resource[]>([]);
   const [nextResourceCursor,setNextResourceCursor]=React.useState<string|null>(null);
-  const [resourceLoading,setResourceLoading]=React.useState(false);
-  const [resourceError,setResourceError]=React.useState('');
-  const resourceRequest=React.useRef(0);
   const [bookings,setBookings]=React.useState<Booking[]>([]);
   const [nextCursor,setNextCursor]=React.useState<string|null>(null);
-  const [pageLoading,setPageLoading]=React.useState(false);
-  const [pageError,setPageError]=React.useState('');
-  const pageRequest=React.useRef(0);
   const [state,setState]=React.useState<'loading'|'ready'|'denied'|'error'>('loading');
   const [selected,setSelected]=React.useState('');
   const [day,setDay]=React.useState(today);
@@ -44,138 +38,107 @@ export function CustomerAutoBooking(){
   const choices=target?resources.filter(r=>r.organizationId===target.organizationId&&
     r.locationId===target.locationId&&r.customerLinkId===target.customerLinkId):resources;
   const scoped=resource&&choices.some(r=>r===resource)?resource:null;
+  const epoch=React.useRef(0);
+  const listAbort=React.useRef<AbortController|null>(null);
+  const [resourcePages,setResourcePages]=React.useState(1);
+  const [bookingPages,setBookingPages]=React.useState(1);
+
+  function invalidate(){
+    epoch.current++;
+    listAbort.current?.abort();
+    slotRequest.current++;
+  }
+  function clearPrivate(){
+    setResources([]);setBookings([]);setNextResourceCursor(null);setNextCursor(null);
+    setSelected('');setTarget(null);setSlots([]);setServices([]);setSelectedServices([]);
+    setPending(null);setServiceState('');setSlotState('');
+  }
+  function deny(){
+    invalidate();clearPrivate();setBusy(false);setMessage('');setState('denied');
+  }
+  function refreshLists(){
+    invalidate();clearPrivate();setBusy(false);setState('loading');
+    setResourcePages(1);setBookingPages(1);setRevision(x=>x+1);
+  }
+  React.useEffect(()=>()=>{invalidate();},[]);
+
   React.useEffect(()=>{
     const controller=new AbortController();
-    pageRequest.current++;
-    resourceRequest.current++;
-    setNextResourceCursor(null);setResourceLoading(false);setResourceError('');
-    setNextCursor(null);setPageLoading(false);setPageError('');
-    setState('loading');setResources([]);setBookings([]);setSlots([]);setTarget(null);
-    void (async()=>{
-      try{
-        const [r,b]=await Promise.all([
-          fetch('/api/v1/dev/auto/customer/booking/resources',{
-            credentials:'include',cache:'no-store',signal:controller.signal}),
-          fetch('/api/v1/dev/auto/customer/booking/appointments',{
-            credentials:'include',cache:'no-store',signal:controller.signal}),
-        ]);
-        if(controller.signal.aborted)return;
-        if([401,403,404].includes(r.status)||[401,403,404].includes(b.status)){
-          setState('denied');return;
+    listAbort.current?.abort();listAbort.current=controller;
+    const generation=++epoch.current;
+    slotRequest.current++;
+    setState('loading');setResources([]);setBookings([]);setSlots([]);
+    setServices([]);setSelectedServices([]);setTarget(null);setPending(null);
+    setServiceState('');setSlotState('');
+    setNextResourceCursor(null);setNextCursor(null);
+    const current=()=>!controller.signal.aborted&&generation===epoch.current;
+    // Обе коллекции перечитываются с начала. Пустой 200 после отзыва
+    // не оставляет ни старой записи, ни старого автомобиля/поста.
+    async function readPages<T>(name:string,count:number,valid:(item:T)=>boolean,key:(item:T)=>string){
+      const rows:T[]=[];const ids=new Set<string>(),cursors=new Set<string>();
+      let cursor:string|null=null;
+      for(let i=0;i<count;i++){
+        const url='/api/v1/dev/auto/customer/booking/'+name+
+          (cursor?'?'+new URLSearchParams({cursor}):'');
+        const res=await fetch(url,{credentials:'include',cache:'no-store',signal:controller.signal});
+        if(!current())throw Error('obsolete');
+        if([401,403,404].includes(res.status)){deny();throw Error('denied');}
+        if(!res.ok)throw Error('page');
+        const raw:unknown=await res.json();
+        if(!current())throw Error('obsolete');
+        if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||raw.syntheticOnly!==true||
+          !('items' in raw)||!Array.isArray(raw.items)||raw.items.length>50||
+          !('nextCursor' in raw)||!(raw.nextCursor===null||
+            (typeof raw.nextCursor==='string'&&/^[A-Za-z0-9_-]{1,256}$/.test(raw.nextCursor)))||
+          !raw.items.every(valid))throw Error('shape');
+        cursor=raw.nextCursor as string|null;
+        if(cursor!==null){
+          if(cursors.has(cursor)||raw.items.length===0)throw Error('cursor');
+          cursors.add(cursor);
         }
-        if(!r.ok||!b.ok)throw Error('request');
-        const rr:unknown=await r.json(),bb:unknown=await b.json();
-        if(!rr||typeof rr!=='object'||!('syntheticOnly' in rr)||rr.syntheticOnly!==true||
-           !('items' in rr)||!Array.isArray(rr.items)||rr.items.length>50||
-           !('nextCursor' in rr)||!(rr.nextCursor===null||
-             (typeof rr.nextCursor==='string'&&rr.nextCursor.length>0&&rr.nextCursor.length<=256))||
-           !rr.items.every((x:Resource)=>uuid.test(x.organizationId)&&uuid.test(x.locationId)&&
-             uuid.test(x.customerLinkId)&&uuid.test(x.bayId)&&typeof x.timeZone==='string'&&
-             x.vehicle&&typeof x.vehicle.make==='string'&&typeof x.vehicle.model==='string')||
-           !bb||typeof bb!=='object'||!('syntheticOnly' in bb)||bb.syntheticOnly!==true||
-           !('items' in bb)||!Array.isArray(bb.items)||bb.items.length>50||
-           !('nextCursor' in bb)||!(bb.nextCursor===null||
-             (typeof bb.nextCursor==='string'&&bb.nextCursor.length>0&&bb.nextCursor.length<=256))||
-           !bb.items.every((x:Booking)=>uuid.test(x.appointmentId)&&uuid.test(x.organizationId)&&
-             uuid.test(x.locationId)&&uuid.test(x.customerLinkId)&&
-             uuid.test(x.bayId)&&uuid.test(x.workOrderId)&&
-             typeof x.startsAt==='string'&&typeof x.endsAt==='string'&&
-             (x.status==='CANCELED'||x.status==='SCHEDULED')&&
-             typeof x.timeZone==='string'&&typeof x.canManage==='boolean'&&
-              Array.isArray(x.serviceIds)&&x.serviceIds.length<=100&&
-              x.serviceIds.every((id:unknown)=>typeof id==='string'&&uuid.test(id))))throw Error('shape');
-        if(controller.signal.aborted)return;
-        const incoming=rr.items as Resource[];
-        setResources(incoming);setNextResourceCursor(rr.nextCursor as string|null);
-        setBookings(bb.items as Booking[]);
-        setNextCursor(bb.nextCursor as string|null);
-        setSelected(old=>incoming.some(x=>old===x.customerLinkId+':'+x.bayId)?
-          old:incoming.length?incoming[0].customerLinkId+':'+incoming[0].bayId:'');
-        setState('ready');
-      }catch{
-        if(!controller.signal.aborted)setState('error');
+        for(const item of raw.items as T[]){
+          const id=key(item);if(!ids.has(id)){ids.add(id);rows.push(item);}
+        }
+        if(cursor===null)break;
       }
-    })();
+      return {rows,cursor};
+    }
+    const resourceValid=(x:Resource)=>!!x&&uuid.test(x.organizationId)&&uuid.test(x.locationId)&&
+      uuid.test(x.customerLinkId)&&uuid.test(x.bayId)&&typeof x.timeZone==='string'&&
+      !!x.vehicle&&typeof x.vehicle.make==='string'&&typeof x.vehicle.model==='string';
+    const bookingValid=(x:Booking)=>!!x&&uuid.test(x.appointmentId)&&uuid.test(x.organizationId)&&
+      uuid.test(x.locationId)&&uuid.test(x.customerLinkId)&&uuid.test(x.bookingId)&&
+      uuid.test(x.bayId)&&uuid.test(x.workOrderId)&&
+      typeof x.startsAt==='string'&&typeof x.endsAt==='string'&&
+      Date.parse(x.endsAt)>Date.parse(x.startsAt)&&
+      (x.status==='CANCELED'||x.status==='SCHEDULED')&&typeof x.timeZone==='string'&&
+      typeof x.canManage==='boolean'&&Array.isArray(x.serviceIds)&&x.serviceIds.length<=100&&
+      x.serviceIds.every(id=>typeof id==='string'&&uuid.test(id));
+    void Promise.all([
+      readPages<Resource>('resources',resourcePages,resourceValid,
+        x=>x.organizationId+':'+x.locationId+':'+x.customerLinkId+':'+x.bayId),
+      readPages<Booking>('appointments',bookingPages,bookingValid,x=>x.appointmentId),
+    ]).then(([r,b])=>{
+      if(!current())return;
+      setResources(r.rows);setBookings(b.rows);
+      setNextResourceCursor(r.cursor);setNextCursor(b.cursor);
+      setSelected(old=>r.rows.some(x=>old===x.customerLinkId+':'+x.bayId)?old:
+        r.rows.length?r.rows[0].customerLinkId+':'+r.rows[0].bayId:'');
+      setState('ready');
+    }).catch(()=>{
+      if(current()){invalidate();clearPrivate();setState('error');}
+    });
     return ()=>controller.abort();
-  },[revision]);
+  },[revision,resourcePages,bookingPages]);
 
-  async function loadMoreResources(){
-    if(!nextResourceCursor||resourceLoading||busy||pending||state!=='ready')return;
-    const requestId=resourceRequest.current;
-    setResourceLoading(true);setResourceError('');
-    try{
-      const response=await fetch('/api/v1/dev/auto/customer/booking/resources?'+
-        new URLSearchParams({cursor:nextResourceCursor}),{
-          credentials:'include',cache:'no-store',
-        });
-      if(requestId!==resourceRequest.current)return;
-      if([401,403,404].includes(response.status)){
-        setResources([]);setBookings([]);setNextResourceCursor(null);
-        setNextCursor(null);setState('denied');return;
-      }
-      if(!response.ok)throw Error('resource pagination');
-      const raw:unknown=await response.json();
-      if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||raw.syntheticOnly!==true||
-        !('items' in raw)||!Array.isArray(raw.items)||raw.items.length>50||
-        !('nextCursor' in raw)||!(raw.nextCursor===null||
-          (typeof raw.nextCursor==='string'&&raw.nextCursor.length>0&&raw.nextCursor.length<=256))||
-        !raw.items.every((x:Resource)=>uuid.test(x.organizationId)&&uuid.test(x.locationId)&&
-          uuid.test(x.customerLinkId)&&uuid.test(x.bayId)&&typeof x.timeZone==='string'&&
-          x.vehicle&&typeof x.vehicle.make==='string'&&typeof x.vehicle.model==='string'))
-        throw Error('resource shape');
-      if(requestId!==resourceRequest.current)return;
-      const incoming=raw.items as Resource[];
-      setResources(old=>{
-        const seen=new Set(old.map(x=>x.organizationId+':'+x.locationId+':'+x.customerLinkId+':'+x.bayId));
-        return [...old,...incoming.filter(x=>!seen.has(
-          x.organizationId+':'+x.locationId+':'+x.customerLinkId+':'+x.bayId))];
-      });
-      setNextResourceCursor(raw.nextCursor as string|null);
-    }catch{
-      if(requestId===resourceRequest.current)
-        setResourceError('Не удалось получить следующую страницу автомобилей и постов.');
-    }finally{
-      if(requestId===resourceRequest.current)setResourceLoading(false);
+  function loadMoreResources(){
+    if(nextResourceCursor&&!busy&&!pending&&state==='ready'){
+      invalidate();setState('loading');setResourcePages(n=>n+1);
     }
   }
-
-  async function loadMore(){
-    if(!nextCursor||pageLoading||busy||pending||state!=='ready')return;
-    const requestId=pageRequest.current;
-    setPageLoading(true);setPageError('');
-    try{
-      const response=await fetch('/api/v1/dev/auto/customer/booking/appointments?'+
-        new URLSearchParams({cursor:nextCursor}),{
-          credentials:'include',cache:'no-store',
-        });
-      if(requestId!==pageRequest.current)return;
-      if([401,403,404].includes(response.status)){
-        setResources([]);setBookings([]);setNextCursor(null);setState('denied');return;
-      }
-      if(!response.ok)throw Error('pagination');
-      const raw:unknown=await response.json();
-      if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||raw.syntheticOnly!==true||
-        !('items' in raw)||!Array.isArray(raw.items)||raw.items.length>50||
-        !('nextCursor' in raw)||!(raw.nextCursor===null||
-          (typeof raw.nextCursor==='string'&&raw.nextCursor.length>0&&raw.nextCursor.length<=256))||
-        !raw.items.every((x:Booking)=>uuid.test(x.appointmentId)&&uuid.test(x.organizationId)&&
-          uuid.test(x.locationId)&&uuid.test(x.customerLinkId)&&uuid.test(x.bayId)&&
-          uuid.test(x.workOrderId)&&typeof x.startsAt==='string'&&typeof x.endsAt==='string'&&
-          (x.status==='CANCELED'||x.status==='SCHEDULED')&&
-          typeof x.timeZone==='string'&&typeof x.canManage==='boolean'&&
-          Array.isArray(x.serviceIds)&&x.serviceIds.length<=100&&
-          x.serviceIds.every((id:unknown)=>typeof id==='string'&&uuid.test(id))))throw Error('shape');
-      if(requestId!==pageRequest.current)return;
-      const incoming=raw.items as Booking[];
-      setBookings(old=>{
-        const seen=new Set(old.map(item=>item.appointmentId));
-        return [...old,...incoming.filter(item=>!seen.has(item.appointmentId))];
-      });
-      setNextCursor(raw.nextCursor as string|null);
-    }catch{
-      if(requestId===pageRequest.current)setPageError('Не удалось загрузить следующую страницу. Повторите.');
-    }finally{
-      if(requestId===pageRequest.current)setPageLoading(false);
+  function loadMore(){
+    if(nextCursor&&!busy&&!pending&&state==='ready'){
+      invalidate();setState('loading');setBookingPages(n=>n+1);
     }
   }
 
@@ -184,15 +147,17 @@ export function CustomerAutoBooking(){
   React.useEffect(()=>{
     const controller=new AbortController();
     setServices([]);setSelectedServices([]);setServiceState('');
-    if(!scoped||target)return ()=>controller.abort();
+    if(state!=='ready'||!scoped||target)return ()=>controller.abort();
+    const generation=epoch.current;
+    const current=()=>!controller.signal.aborted&&generation===epoch.current;
     const query=new URLSearchParams({organizationId:scoped.organizationId,
       locationId:scoped.locationId,customerLinkId:scoped.customerLinkId});
     setServiceState('Загрузка услуг филиала…');
     void fetch('/api/v1/dev/auto/customer/booking/services?'+query,{
       credentials:'include',cache:'no-store',signal:controller.signal,
     }).then(async response=>{
-      if(controller.signal.aborted)return;
-      if([401,403,404].includes(response.status)){setState('denied');setServices([]);return;}
+      if(!current())return;
+      if([401,403,404].includes(response.status)){deny();return;}
       if(!response.ok)throw Error('service catalog');
       const raw:unknown=await response.json();
       if(!raw||typeof raw!=='object'||!('syntheticOnly' in raw)||
@@ -201,13 +166,13 @@ export function CustomerAutoBooking(){
            typeof item.code==='string'&&typeof item.title==='string'&&
            Number.isInteger(item.durationMinutes)&&item.durationMinutes>=5&&
            item.durationMinutes<=1440))throw Error('shape');
-      if(!controller.signal.aborted){setServices(raw.items as Service[]);setServiceState('');}
-    }).catch(()=>{if(!controller.signal.aborted)setServiceState('Не удалось получить каталог услуг.');});
+      if(current()){setServices(raw.items as Service[]);setServiceState('');}
+    }).catch(()=>{if(current())setServiceState('Не удалось получить каталог услуг.');});
     return ()=>controller.abort();
-  },[scoped?.organizationId,scoped?.locationId,scoped?.customerLinkId,target]);
+  },[state,scoped?.organizationId,scoped?.locationId,scoped?.customerLinkId,target]);
 
   async function search(){
-    if(!scoped||busy||pending)return;
+    if(state!=='ready'||!scoped||busy||pending)return;
     const requestId=++slotRequest.current;
     setSlotState('Загрузка окон…');setSlots([]);
     const r=scoped;
@@ -218,7 +183,7 @@ export function CustomerAutoBooking(){
       const resp=await fetch('/api/v1/dev/auto/customer/booking/slots?'+query,{
         credentials:'include',cache:'no-store'});
       if(requestId!==slotRequest.current)return;
-      if([401,403,404].includes(resp.status)){setState('denied');setResources([]);setBookings([]);return;}
+      if([401,403,404].includes(resp.status)){deny();return;}
       if(!resp.ok)throw Error('http');
       const raw:unknown=await resp.json();
       if(!raw||typeof raw!=='object'||!('items' in raw)||!Array.isArray(raw.items)||
@@ -238,32 +203,37 @@ export function CustomerAutoBooking(){
 
   async function mutate(path:string,body:string,key:string|null,known?:Pending){
     if(busy||state!=='ready'||(pending&&!known))return;
+    const generation=epoch.current;
+    const current=()=>generation===epoch.current;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',
         credentials:'include',cache:'no-store'});
+      if(!current())return;
+      if([401,403,404].includes(csrf.status)){deny();return;}
       if(!csrf.ok)throw Error('csrf');
       const value:unknown=await csrf.json();
       if(!value||typeof value!=='object'||!('csrfToken' in value)||
         typeof value.csrfToken!=='string')throw Error('csrf');
+      if(!current())return;
       const result=await fetch(path,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':value.csrfToken,
           ...(key?{'Idempotency-Key':key}:{})},body});
-      if([401,403,404].includes(result.status)){
-        setResources([]);setBookings([]);setState('denied');setPending(null);return;
-      }
+      if(!current())return;
+      if([401,403,404].includes(result.status)){deny();return;}
       if(result.status===409||result.status===422){
         setPending(null);setMessage(result.status===409?
           'Окно занято либо прежний ключ уже недействителен. Обновите список.':
-          'Неверное время или параметры записи.');setRevision(x=>x+1);return;
+          'Неверное время или параметры записи.');refreshLists();return;
       }
       if(!result.ok)throw Error('uncertain result');
       setPending(null);setMessage('Изменение записи принято сервером.');
-      setRevision(x=>x+1);
+      refreshLists();
     }catch{
+      if(!current())return;
       setPending({path,body,key});
       setMessage('Результат неизвестен. Повторите с прежним ключом или обновите список.');
-    }finally{setBusy(false);}
+    }finally{if(current())setBusy(false);}
   }
 
   function selectSlot(slot:Slot){
@@ -311,25 +281,23 @@ export function CustomerAutoBooking(){
               onClick={()=>cancel(b)}>Отменить свою запись</button>
           </div>}
         </li>)}</ul>}
-      {nextCursor&&<button type="button" disabled={pageLoading||busy||!!pending}
-        onClick={()=>void loadMore()}>{pageLoading?'Загрузка…':'Показать ещё записи'}</button>}
-      {pageError&&<p role="alert">{pageError}</p>}
+      {nextCursor&&<button type="button" disabled={busy||!!pending}
+        onClick={()=>void loadMore()}>Показать ещё записи</button>}
       <h4>{target?'Перенос записи':'Новая запись'}</h4>
-      {target&&<button type="button" onClick={()=>{setTarget(null);setSelected('');}}>
+      {target&&<button type="button" disabled={busy||!!pending} onClick={()=>{setTarget(null);setSelected('');}}>
         Отказаться от переноса</button>}
       {choices.length===0?<p>Нет доступных подтверждённых автомобилей и постов.</p>:<>
-        <label>Автомобиль и пост <select aria-label="Автомобиль и пост"
+        <label>Автомобиль и пост <select aria-label="Автомобиль и пост" disabled={busy||!!pending}
           value={selected} onChange={e=>setSelected(e.target.value)}>
           {choices.map(r=><option key={r.customerLinkId+':'+r.bayId}
             value={r.customerLinkId+':'+r.bayId}>
             {r.vehicle.make} {r.vehicle.model} · {r.timeZone} · пост {r.bayId}
           </option>)}
         </select></label>
-        {nextResourceCursor&&<button type="button" disabled={resourceLoading||busy||!!pending}
+        {nextResourceCursor&&<button type="button" disabled={busy||!!pending}
           onClick={()=>void loadMoreResources()}>
-          {resourceLoading?'Загрузка постов…':'Показать ещё автомобили и посты'}
+          Показать ещё автомобили и посты
         </button>}
-        {resourceError&&<p role="alert">{resourceError}</p>}
         {!target&&<fieldset aria-label="Услуги при записи (dev)"><legend>Работы по записи (необязательно)</legend>
           <p>Выберите не более 8 услуг и не более 24 часов суммарно. Поиск учитывает полную длительность. Первоначальный выбор работ не мешает переносу и отмене до начала оформления приёмщиком, осмотра, сметы или складских операций.</p>
           {serviceState&&<p role="status">{serviceState}</p>}
@@ -344,7 +312,7 @@ export function CustomerAutoBooking(){
             {service.title} ({service.durationMinutes} мин.)
           </label>)}
         </fieldset>}
-        <label>День филиала <input aria-label="День филиала" type="date"
+        <label>День филиала <input aria-label="День филиала" type="date" disabled={busy||!!pending}
           value={day} onChange={e=>setDay(e.target.value)}/></label>
         <button type="button" disabled={busy||!!pending||!scoped}
           onClick={()=>void search()}>Показать свободные окна</button>
@@ -357,16 +325,16 @@ export function CustomerAutoBooking(){
         </li>)}</ul>}
       </>}
     </>}
-    {message&&<p role="status">{message}</p>}
-    {pending&&<div role="group" aria-label="Неопределённый результат записи">
+    {state!=='denied'&&message&&<p role="status">{message}</p>}
+    {state==='ready'&&pending&&<div role="group" aria-label="Неопределённый результат записи">
       <button type="button" disabled={busy}
         onClick={()=>void mutate(pending.path,pending.body,pending.key,pending)}>
         Повторить прежний запрос</button>
       <button type="button" disabled={busy} onClick={()=>{
-        setPending(null);setRevision(x=>x+1);
+        refreshLists();
       }}>Перечитать записи</button>
     </div>}
-    {state!=='loading'&&<button type="button" onClick={()=>setRevision(x=>x+1)}>
+    {state!=='loading'&&<button type="button" disabled={busy} onClick={refreshLists}>
       Обновить мои записи</button>}
   </section>;
 }

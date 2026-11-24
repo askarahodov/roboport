@@ -302,6 +302,8 @@ def test_customer_appointments_cursor_more_than_fifty_and_revocation(monkeypatch
     assert foreign.status_code==422 and foreign.json()["code"]=="INVALID_CURSOR"
     assert http.get(url).json()["items"]==[]
     _auth(http,d,d["client_a"])
+    duplicate=http.get(url,params=[("cursor",first["nextCursor"]),("cursor",first["nextCursor"])])
+    assert duplicate.status_code==422 and duplicate.json()["code"]=="INVALID_CURSOR"
     for invalid in ("invalid***", "x"*257, first["nextCursor"]+"A"):
         bad=http.get(url,params={"cursor":invalid})
         assert bad.status_code==422,bad.text
@@ -352,6 +354,8 @@ def test_customer_resource_pages_cover_all_bays_and_recheck_access(monkeypatch):
     assert foreign.json()["code"]=="INVALID_CURSOR"
     assert http.get(root).json()["items"]==[]
     _auth(http,d,d["client_a"])
+    duplicate=http.get(root,params=[("cursor",first["nextCursor"]),("cursor",first["nextCursor"])])
+    assert duplicate.status_code==422 and duplicate.json()["code"]=="INVALID_CURSOR"
     for invalid in ("invalid***","x"*257,first["nextCursor"]+"A"):
         response=http.get(root,params={"cursor":invalid})
         assert response.status_code==422,response.text

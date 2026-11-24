@@ -20,7 +20,6 @@ type Pending={path:string;body:string};
 type Status='loading'|'ready'|'denied'|'error';
 const uid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SIZE=20;
-const MAX_PAGES=25;
 
 function validCard(data:unknown):data is Card{
   if(!data||typeof data!=='object')return false;
@@ -40,7 +39,7 @@ function parsePage(raw:unknown):Page{
   const v=raw as Record<string,unknown>;
   if(v.syntheticOnly!==true||v.releaseAllowed!==false||
      !Array.isArray(v.items)||v.items.length>SIZE||!v.items.every(validCard)||
-     !(v.nextCursor===null||(typeof v.nextCursor==='string'&&v.nextCursor.length<=256))){
+     !(v.nextCursor===null||(typeof v.nextCursor==='string'&&/^[A-Za-z0-9_-]{1,256}$/.test(v.nextCursor)))){
     throw Error('invalid list');
   }
   return v as Page;
@@ -72,23 +71,33 @@ export function CustomerAutoOrders(){
   const [detailStatus,setDetailStatus]=React.useState<Status>('loading');
   const [busy,setBusy]=React.useState(false),[pending,setPending]=React.useState<Pending|null>(null);
   const [message,setMessage]=React.useState('');
+  const generation=React.useRef(0);
+  const listAbort=React.useRef<AbortController|null>(null);
+  const detailAbort=React.useRef<AbortController|null>(null);
+  function invalidate(){generation.current++;listAbort.current?.abort();detailAbort.current?.abort();}
+  function deny(){
+    invalidate();setItems([]);setMore(false);setSelected(null);setDetail(null);
+    setPending(null);setMessage('');setBusy(false);setStatus('denied');setDetailStatus('denied');
+  }
+  React.useEffect(()=>()=>{invalidate();},[]);
   React.useEffect(()=>{
     const controller=new AbortController();
-    setStatus('loading');setItems([]);setMore(false);setMessage('');setPending(null);
+    listAbort.current=controller;const epoch=++generation.current;
+    detailAbort.current?.abort();setDetail(null);
+    setStatus('loading');setItems([]);setMore(false);setPending(null);
     void (async()=>{
       try{
         let cursor:string|null=null;
         const result:Card[]=[];
         let hasNext=false;
+        const cursors=new Set<string>();
         for(let i=0;i<pages;i++){
           const url='/api/v1/dev/auto/customer/orders?limit='+SIZE+
             (cursor?'&cursor='+encodeURIComponent(cursor):'');
           const res=await fetch(url,{credentials:'include',cache:'no-store',
             signal:controller.signal});
-          if([401,403,404].includes(res.status)){
-            if(!controller.signal.aborted){setItems([]);setSelected(null);
-              setDetail(null);setStatus('denied');}return;
-          }
+          if(controller.signal.aborted||epoch!==generation.current)return;
+          if([401,403,404].includes(res.status)){deny();return;}
           if(!res.ok)throw Error('http');
           const data=parsePage(await res.json());
           if(controller.signal.aborted)return;
@@ -97,71 +106,79 @@ export function CustomerAutoOrders(){
           }
           cursor=data.nextCursor;hasNext=cursor!==null;
           if(cursor===null)break;
+          if(cursors.has(cursor)||data.items.length===0)throw Error('cursor');
+          cursors.add(cursor);
         }
         if(controller.signal.aborted)return;
-        setItems(result);setMore(hasNext&&pages<MAX_PAGES);setStatus('ready');
+        setItems(result);setMore(hasNext);setStatus('ready');
         setSelected(previous=>previous&&!result.some(x=>x.id===previous)?null:previous);
       }catch{
-        if(!controller.signal.aborted){setStatus('error');setItems([]);setDetail(null);}
+        if(!controller.signal.aborted){detailAbort.current?.abort();setSelected(null);setStatus('error');setItems([]);setDetail(null);}
       }
     })();
     return ()=>controller.abort();
   },[pages,refresh]);
 
   React.useEffect(()=>{
-    setDetail(null);setPending(null);setMessage('');
-    if(!selected)return;
+    setDetail(null);setPending(null);
+    if(!selected||status!=='ready')return;
     const controller=new AbortController();
+    detailAbort.current=controller;
+    const epoch=generation.current;
+    const current=()=>!controller.signal.aborted&&epoch===generation.current;
     setDetailStatus('loading');
     void fetch('/api/v1/dev/auto/customer/orders/'+encodeURIComponent(selected),{
       credentials:'include',cache:'no-store',signal:controller.signal,
     }).then(async res=>{
-      if(controller.signal.aborted)return;
+      if(!current())return;
       if([401,403,404].includes(res.status)){
-        setDetail(null);setDetailStatus('denied');
-        setRefresh(v=>v+1);return;
+        deny();return;
       }
       if(!res.ok)throw Error('http');
       const data=parseDetail(await res.json());
-      if(controller.signal.aborted)return;
+      if(!current())return;
       if(data.id!==selected)throw Error('mismatched order');
       setDetail(data);setDetailStatus('ready');
-    }).catch(()=>{if(!controller.signal.aborted){
+    }).catch(()=>{if(current()){
       setDetail(null);setDetailStatus('error');
     }});
     return ()=>controller.abort();
-  },[selected,refresh]);
+  },[selected,refresh,status]);
 
   async function act(path:string,body:string){
     if(!detail||busy||status!=='ready')return;
+    const epoch=generation.current;
+    const current=()=>epoch===generation.current;
     setBusy(true);setMessage('');
     try{
       const c=await fetch('/api/v1/auth/csrf',{method:'POST',
         credentials:'include',cache:'no-store'});
+      if(!current())return;
+      if([401,403,404].includes(c.status)){deny();return;}
       if(!c.ok)throw Error('csrf');
       const data:unknown=await c.json();
       if(!data||typeof data!=='object'||!('csrfToken' in data)||
         typeof data.csrfToken!=='string')throw Error('csrf');
+      if(!current())return;
       const response=await fetch(path,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':data.csrfToken},
         body});
-      if([401,403,404].includes(response.status)){
-        setDetail(null);setSelected(null);setItems([]);setStatus('denied');
-        setPending(null);return;
-      }
+      if(!current())return;
+      if([401,403,404].includes(response.status)){deny();return;}
       if(response.status===409||response.status===422){
         setPending(null);
         setMessage(response.status===409?
           'Смета изменилась или по ней уже принято решение. Проверьте текущую версию.':
           'Некорректный запрос на согласование.');
-        setRefresh(n=>n+1);return;
+        setStatus('loading');setRefresh(n=>n+1);return;
       }
       if(!response.ok)throw Error('unknown');
-      setPending(null);setRefresh(n=>n+1);
+      setPending(null);setStatus('loading');setRefresh(n=>n+1);
     }catch{
+      if(!current())return;
       setPending({path,body});
       setMessage('Неизвестный результат. Повторите тот же запрос или перечитайте карточку.');
-    }finally{setBusy(false);}
+    }finally{if(current())setBusy(false);}
   }
 
   function decide(value:'APPROVED'|'DECLINED'){
@@ -177,7 +194,7 @@ export function CustomerAutoOrders(){
   }
 
   function update(){
-    setPages(1);setRefresh(n=>n+1);
+    invalidate();setStatus('loading');setMessage('');setPages(1);setRefresh(n=>n+1);
   }
   return <section aria-label="Мои автомобильные заказ-наряды">
     <h3>История автомобильного обслуживания</h3>
@@ -185,7 +202,7 @@ export function CustomerAutoOrders(){
       наряда, а не ко всем владельцам автомобиля. Реальной оплаты и выдачи нет.</p>
     <p><a href="/docs/#/guides/client.md">Инструкция по заказ-нарядам и сметам</a></p>
     {status==='loading'&&<p role="status">Загрузка собственных заказ-нарядов…</p>}
-    {status==='denied'&&<p role="alert">Доступ к заказ-нарядам запрещён или сессия завершена.</p>}
+    {status==='denied'&&<p role="alert">Доступ к заказ-нарядам запрещён или сессия завершена. <span>Карточка недоступна: доступ мог быть отозван.</span></p>}
     {status==='error'&&<p role="alert">Не удалось загрузить заказы. Попробуйте ещё раз.</p>}
     {status==='ready'&&<>
       {items.length===0?<p>Заказ-нарядов с подтверждённой связью пока нет.</p>:
@@ -195,11 +212,12 @@ export function CustomerAutoOrders(){
             {' '}{item.appointment.status==='CANCELED'?'Запись отменена':'Запись действующая'}</span>
           <span>{item.vehicle.vinLast4?'VIN ••••'+item.vehicle.vinLast4:'VIN не указан'}</span>
           <button type="button" aria-label={'Подробнее о заказе '+item.id}
-            aria-expanded={selected===item.id} onClick={()=>{
+            aria-expanded={selected===item.id} disabled={busy||!!pending} onClick={()=>{
+              detailAbort.current?.abort();setDetail(null);setDetailStatus('loading');setMessage('');
               setSelected(selected===item.id?null:item.id);
             }}>{selected===item.id?'Скрыть заказ':'Подробнее о заказе'}</button>
         </li>)}</ul>}
-      {more&&<button type="button" onClick={()=>setPages(p=>p+1)}>
+      {more&&<button type="button" disabled={busy||!!pending} onClick={()=>{invalidate();setStatus('loading');setPages(p=>p+1);}}>
         Показать ещё заказ-наряды</button>}
     </>}
     {selected&&status==='ready'&&<section aria-label="Карточка автомобильного заказа"
@@ -244,7 +262,7 @@ export function CustomerAutoOrders(){
           <ul>{detail.labor.map(w=><li key={w.serviceId}>
             {w.title}: {w.actualMinutes} мин.</li>)}</ul>}
         <AutoServiceRecommendations key={detail.id} customer scope={{org:detail.organizationId,loc:detail.locationId,order:detail.id}}
-          onDenied={()=>{setDetail(null);setDetailStatus('denied');}}/>
+          onDenied={deny}/>
         <h4>Документы</h4>
         {detail.document?<p>Технический пакет: {detail.document.id}.
           SHA-256: <code>{detail.document.sha256}</code>.
@@ -258,11 +276,11 @@ export function CustomerAutoOrders(){
         <button type="button" disabled={busy} onClick={()=>void act(pending.path,pending.body)}>
           Повторить то же решение</button>
         <button type="button" disabled={busy} onClick={()=>{
-          setPending(null);setRefresh(n=>n+1);
+          setPending(null);update();
         }}>Перечитать карточку</button>
       </div>}
     </section>}
-    {status!=='loading'&&<button type="button" onClick={update}>
+    {status!=='loading'&&<button type="button" disabled={busy} onClick={update}>
       Обновить заказ-наряды</button>}
   </section>;
 }
