@@ -36,6 +36,7 @@ import { AutoWorkExecution } from './pages/staff/AutoWorkExecution';
 import { AutoAssignments } from './pages/staff/AutoAssignments';
 import { AutoDemoClose } from './pages/shared/AutoDemoClose';
 import { WarehouseStocktake } from './pages/staff/WarehouseStocktake';
+import { WarehouseReconciliation } from './pages/staff/WarehouseReconciliation';
 import { WarehouseCatalog } from './pages/staff/WarehouseCatalog';
 import { WarehouseReceiving } from './pages/staff/WarehouseReceiving';
 import { WarehouseSupplierOrders } from './pages/staff/WarehouseSupplierOrders';
@@ -112,6 +113,7 @@ function App() {
         <NavLink to="/staff/auto-assignments" end>Назначения механиков (dev)</NavLink>
         <NavLink to="/staff/auto-demo-close" end>Сверка и пакет (dev)</NavLink>
         <NavLink to="/staff/warehouse-stocktake" end>Инвентаризация (dev)</NavLink>
+        <NavLink to="/staff/warehouse-reconciliation" end>Сверка остатков (dev)</NavLink>
         <NavLink to="/staff/warehouse-catalog" end>Номенклатура (dev)</NavLink>
         <NavLink to="/staff/warehouse-receiving" end>Приход (dev)</NavLink>
         <NavLink to="/staff/warehouse-supplier-orders" end>Закупки (dev)</NavLink>
@@ -200,6 +202,7 @@ function App() {
       <Route path="/account/auto-intake-act" element={<AutoIntakeAct role="client" />} />
       <Route path="/staff/warehouse-catalog" element={<WarehouseCatalog />} />
       <Route path="/staff/warehouse-stocktake" element={<WarehouseStocktake />} />
+      <Route path="/staff/warehouse-reconciliation" element={<WarehouseReconciliation />} />
       <Route path="/staff/warehouse-receiving" element={<WarehouseReceiving />} />
       <Route path="/staff/warehouse-supplier-orders" element={<WarehouseSupplierOrders />} />
       <Route path="/staff/warehouse-work-orders" element={<WarehouseWorkOrders />} />
