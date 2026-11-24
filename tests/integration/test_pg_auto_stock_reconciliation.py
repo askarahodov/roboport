@@ -63,12 +63,12 @@ def test_http_stock_reconciliation_full_lifecycle_and_scope(monkeypatch):
         bin_id=add_bin(db,org,loc,"EXTRA-RECON")
         lot_ids={str(lot)}
         for i in range(51):
-            sku(db,org,loc,article=f"RECON-{i:03}")
+            sku(db,org,loc)
             lot_ids.add(str(add_lot(db,org,loc,item,bin_id,f"RECON-{i:03}")))
         # Увеличиваем число исходных движений, не изменяя резерв исходного наряда.
         for i in range(26):
-            record(db,item,"RECEIPT",1)
-            record(db,item,"COUNT_LOSS",1)
+            record(db,item,"RESERVE",1)
+            record(db,item,"RELEASE",1)
     base=f"/api/v1/dev/auto/organizations/{org}/warehouse/reconciliation"
     params={"locationId":str(loc)}
     with TestClient(app,base_url="https://127.0.0.1") as client:
@@ -106,7 +106,7 @@ def test_http_stock_reconciliation_full_lifecycle_and_scope(monkeypatch):
         assert event_tail["nextCursor"] is None
         all_events=events["items"]+event_tail["items"]
         assert len({x["eventId"] for x in all_events})==len(all_events)
-        assert {"ISSUE","RETURN","RECEIPT","RESERVE","COUNT_LOSS"}<={x["action"] for x in all_events}
+        assert {"ISSUE","RETURN","RECEIPT","RESERVE","RELEASE"}<={x["action"] for x in all_events}
         assert client.get(detail,params={**params,"kind":"events","cursor":lots["nextCursor"]}).status_code==422
         client.cookies.set("rp_session",d["tokens"][d["manager"]])
         assert client.get(base,params=params).status_code==200
