@@ -3,6 +3,7 @@ from uuid import UUID,uuid4
 import hashlib
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .session_lookup import session_subject
 from .keyset_cursor import encode_cursor,decode_cursor
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
@@ -14,13 +15,22 @@ SQL_FAILURES=(psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
               psycopg.errors.DeadlockDetected)
 
 
-def _authority(conn,token,org,loc,role=None):
+def _authority(conn,token,org,loc,role=None,capability=None):
     warehouse=organization_role_allows(conn,token,org,"WAREHOUSE",loc,for_mutation=True)
     manager=organization_role_allows(conn,token,org,"MANAGER",loc,for_mutation=True)
     actor=session_subject(conn,token,for_mutation=True)
     if actor is None or not (warehouse or manager) or (role=="WAREHOUSE" and not warehouse) or (role=="MANAGER" and not manager):
         raise AutoStockDenied("FORBIDDEN")
+    require_full_stock_history(conn,token,org,loc,*((capability,) if capability else ()))
     return actor,warehouse,manager
+
+
+def _permitted(conn,token,org,loc,capability):
+    try:
+        require_full_stock_history(conn,token,org,loc,capability)
+        return True
+    except AutoStockDenied:
+        return False
 
 
 def _note(note):
@@ -38,6 +48,8 @@ def workspace(conn,token,org,loc,query="",status="ALL",cursor=None,lot_cursor=No
     query=query.strip()
     with conn.transaction():
         actor,warehouse,manager=_authority(conn,token,org,loc)
+        can_draft=warehouse and _permitted(conn,token,org,loc,"CREATE")
+        can_close=_permitted(conn,token,org,loc,"CLOSE")
         doc_scope=hashlib.sha256(f"writeoff-doc:{org}:{loc}:{status}".encode()).hexdigest()[:32]
         lot_scope=hashlib.sha256(f"writeoff-lot:{org}:{loc}:{query}".encode()).hexdigest()[:32]
         def position(value,scope):
@@ -58,7 +70,7 @@ def workspace(conn,token,org,loc,query="",status="ALL",cursor=None,lot_cursor=No
             AND (%s='' OR strpos(lower(s.article),lower(%s))>0 OR strpos(lower(l.batch_code),lower(%s))>0)
             AND (%s::timestamptz IS NULL OR (l.created_at,l.id)>(%s::timestamptz,%s::uuid))
           ORDER BY l.created_at,l.id LIMIT 51
-        """,(org,loc,query,query,query,*lot_pos)).fetchall() if warehouse else []
+        """,(org,loc,query,query,query,*lot_pos)).fetchall() if can_draft else []
         rows=conn.execute("""
           SELECT d.id,d.lot_id,s.article,l.batch_code,b.code,d.quantity,d.reason_code,d.note,
                  d.created_by,d.created_at,x.action,x.id,x.note,x.actor_id,x.created_at,
@@ -80,14 +92,14 @@ def workspace(conn,token,org,loc,query="",status="ALL",cursor=None,lot_cursor=No
                 "binCode":bin_code,"quantity":str(qty),"reasonCode":reason,"note":note,
                 "createdBy":str(author),"createdAt":created.isoformat(),
                 "status":{None:"PENDING","APPROVE":"APPROVED","REJECT":"REJECTED","CANCEL":"CANCELED"}[action],
-                "canReview":action is None and manager and author!=actor,
-                "canCancel":action is None and warehouse and author==actor,
+                "canReview":action is None and manager and can_close and author!=actor,
+                "canCancel":action is None and warehouse and can_close and author==actor,
                 "decision":None if decision is None else {"id":str(decision),"note":decision_note,
                     "actorId":str(reviewer),"createdAt":decided.isoformat(),
                     "dispositionId":str(disposition) if disposition else None,
                     "stockEventId":str(event) if event else None,"lotDebitId":str(debit) if debit else None}})
         return {"syntheticOnly":True,"organizationId":str(org),"locationId":str(loc),
-                "canDraft":warehouse,"items":items,
+                "canDraft":can_draft,"items":items,
                 "nextCursor":encode_cursor(rows[49][9],rows[49][0],doc_scope,token) if len(rows)>50 else None,
                 "lots":[{"lotId":str(i),"article":a,"batchCode":batch,"binCode":b,
                     "available":str(max(0,min(allocated,on_hand-reserved)))}
@@ -100,7 +112,7 @@ def draft(conn,token,org,loc,lot,key,quantity,reason,note):
     if type(quantity) is not int or not 1<=quantity<=1000000000 or reason not in REASONS:
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        actor,_,_=_authority(conn,token,org,loc,"WAREHOUSE")
+        actor,_,_=_authority(conn,token,org,loc,"WAREHOUSE","CREATE")
         _lock_key(conn,key)
         prior=conn.execute("""
           SELECT id,organization_id,location_id,lot_id,quantity,reason_code,note,created_by
@@ -128,7 +140,7 @@ def decide(conn,token,org,loc,document,key,action,note):
     if action not in ACTIONS:
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        actor,_,_=_authority(conn,token,org,loc,"WAREHOUSE" if action=="CANCEL" else "MANAGER")
+        actor,_,_=_authority(conn,token,org,loc,"WAREHOUSE" if action=="CANCEL" else "MANAGER","CLOSE")
         _lock_key(conn,key)
         doc=conn.execute("""
           SELECT lot_id,quantity,note,created_by FROM auto_stock_writeoff_document

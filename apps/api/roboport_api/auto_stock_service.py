@@ -45,6 +45,10 @@ def mutate_auto_stock(
             for_mutation=True,
         ):
             raise AutoStockDenied("FORBIDDEN")
+        # Local import avoids a cycle: policy uses AutoStockDenied from here.
+        from .auto_purchase_document_policy import require_full_stock_history
+        require_full_stock_history(conn,token,organization_id,location_id,
+                                   "CREATE" if action=="RECEIPT" else "EDIT")
         # Object ownership is checked after live WAREHOUSE grants; never use
         # caller-provided organization/location as a substitute for SKU scope.
         row = conn.execute(

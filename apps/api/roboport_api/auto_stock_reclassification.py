@@ -5,6 +5,7 @@ All mutation remains synthetic/loopback-only until release/legal gates pass.
 from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 
@@ -19,6 +20,8 @@ def _run(conn, token, organization_id, location_id, role, lot_ids, sql, args, ch
         if not organization_role_allows(conn, token, organization_id, role,
                  location_id, for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,
+                                   "CREATE" if role=="WAREHOUSE" else "CLOSE")
         scoped = conn.execute(
             """SELECT id FROM auto_stock_lot
                WHERE id=ANY(%s::uuid[]) AND organization_id=%s AND location_id=%s
@@ -69,6 +72,7 @@ def approve_reclassification(conn: psycopg.Connection, token: str,
         if not organization_role_allows(conn, token, organization_id, "MANAGER",
                  location_id, for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,"CLOSE")
         doc = conn.execute(
             """SELECT source_lot_id,destination_lot_id
                FROM auto_stock_reclassification_document

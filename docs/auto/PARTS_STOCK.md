@@ -357,3 +357,6 @@ INTAKE_ACT READ (все применимые роли) и WRITE механика
 результат другой ветки. PG17/HTTPS: test_pg_auto_stock_order_serial_policy_http.py.
 Playwright: warehouse-work-orders.spec.ts, warehouse-serial-movements.spec.ts.
 Миграций и расширения production нет.
+
+
+**Завершение операционного складского ACL (#446):** внутренний приход требует SUPPLIER_ORDER READ/CREATE/WRITE, размещение и резерв — READ/EDIT/WRITE, внутреннее списание/возврат и закрытие актов — READ/CLOSE/WRITE. Создание актов пересортицы и списания — READ/CREATE/WRITE, независимое решение (включая отмену) — READ/CLOSE/WRITE; исходные WAREHOUSE/MANAGER и maker-checker обязательны. Список актов доступен с READ без CREATE/CLOSE, но сервер скрывает запрещённые действия и список партий для создания. ABC/XYZ JSON/CSV без цен проверяет полный READ, как и физическая сверка. Cutoff блокирует целиком, поскольку полнота исходных данных не гарантирована. При отказе мутации пересортицы UI очищает идентификаторы/результат и оставляет старый ключ ранее неопределённой операции. PG17: test_pg_auto_stock_remaining_policy_http.py. Без изменения DDL, legal/release gate #119.
