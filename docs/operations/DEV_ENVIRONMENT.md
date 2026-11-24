@@ -139,7 +139,7 @@ npm run test:docs:e2e
 
 ## CI после оптимизации: выбор проверок по риску PR (18.11.2026)
 
-**Полный release gate на `main` и при `workflow_dispatch` НЕ ослабляется:** все пять jobs (`postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`) обязаны успешно завершиться. PG17 выполняет полный integration suite, Alembic downgrade/re-upgrade и архивный backup/restore. Проверка `scripts/check_auto_release_ci.py` по-прежнему отвергает пропущенные обязательные jobs для release SHA.
+**Полный release gate на `main` и при `workflow_dispatch` НЕ ослабляется:** все семь jobs (`impact`, `docs`, `postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`) обязаны успешно завершиться. PG17 выполняет полный integration suite, Alembic downgrade/re-upgrade и архивный backup/restore. Проверка `scripts/check_auto_release_ci.py` по-прежнему отвергает пропущенные обязательные jobs для release SHA.
 
 **Для PR** отдельный быстрый `impact` job проверяет правила (`tests/bootstrap/test_ci_impact.py`) и по `merge-base...HEAD` выбирает нужные jobs; независимая проверка `docs` (ссылки и AutoDealer GAP) запускается всегда. Неизвестные пути, CI, инфраструктура, скрипты, контракты, миграции и критичный auth/ACL/identity/core код запускают **все пять** jobs. Без безопасно вычислимого diff решение — полный CI, а не пропуск.
 

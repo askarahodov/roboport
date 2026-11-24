@@ -6,7 +6,7 @@
 
 ## Что реально подтверждено
 
-- В CI `.github/workflows/ci.yml`: пять jobs — `postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`; PG17 Alembic upgrade→downgrade→upgrade и синтетический `pg_dump/pg_restore` на disposable стенде, контрактные и браузерные тесты, Docsify навигация и ссылки.
+- В CI `.github/workflows/ci.yml`: семь jobs — `impact`, `docs`, `postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`; PG17 Alembic upgrade→downgrade→upgrade и синтетический `pg_dump/pg_restore` на disposable стенде, контрактные и браузерные тесты, Docsify навигация и ссылки.
 - PR [#298](https://github.com/askarahodov/roboport/pull/298): 5/5 CI PASS; merge `3fffbbb4a47a060b7e66659877f535ff59237a1b`. Ранее [#297](https://github.com/askarahodov/roboport/pull/297) аналогично прошёл 5/5. Тесты проверяют dev-контур, не production tenant enforcement.
 - `scripts/check_auto_release_evidence.py` валидирует только структуру восьми категорий JSON и безопасный синтаксис URL/времени. Скрипт **не** проверяет доступность и подлинность evidence, независимость/полномочия подписанта или юридическую допустимость.
 - `docs/operations/SECURITY_RELEASE_GATES.md` прямо запрещает реальные клиентские данные, платежи и внешний запуск без отдельного approval.
@@ -28,7 +28,7 @@
 ## Проверка, воспроизводимая на disposable окружении
 
 1. Сверить exact release commit и отсутствие непроверенных изменений в `main`. Работать только с synthetic fixtures без настоящих ПДн и платежей.
-2. Проверить статус `.github/workflows/ci.yml` на нужном SHA: все **пять** jobs `success`; отчёт приложить с commit SHA, URL и заключением. Контрактные/PG17/browser тесты не пропускать.
+2. Проверить статус `.github/workflows/ci.yml` на нужном SHA: все **семь** jobs `success`; отчёт приложить с commit SHA, URL и заключением. Контрактные/PG17/browser тесты не пропускать.
 3. Проверить миграции и восстановление по postgres job: Alembic upgrade→downgrade→upgrade и `pg_dump/pg_restore` на disposable базе. Отдельно нужен **production-like** rehearsal на авторизованной обезличенной копии, проверка целостности, согласованные RPO/RTO и rollback.
 4. Пройти все пользовательские и operator сценарии, включая отказ доступа чужого tenant, отзыв роли, негативные BOLA, финансовые и документные операции.
 5. Предъявить для **каждой** из восьми категорий оригинальную, проверяемую запись с owner, исходным артефактом, датой/версией и независимым подписантом; сверить с `docs/operations/SECURITY_RELEASE_GATES.md`.
@@ -43,7 +43,7 @@ Issue #119 и production release можно рассматривать к зак
 
 ## Автоматическая проверка происхождения CI для релизного SHA
 
-`python scripts/check_auto_release_ci.py --sha <40-hex-main-commit> --run-id <github-actions-run-id>` проверяет через GitHub API, что указанный прогон относится ровно к нужному SHA, событию `push` основной ветки `main`, стандартному `.github/workflows/ci.yml`, завершился `success`, а все пять jobs (`postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`) присутствуют и завершились `success`. Неполная страница job API (в том числе больше 100 jobs), пропущенные/отменённые проверки, ошибки сети или неверный SHA блокируют результат. Для ограничений GitHub API можно задать `GITHUB_TOKEN` из секретов окружения; значение не логируется.
+`python scripts/check_auto_release_ci.py --sha <40-hex-main-commit> --run-id <github-actions-run-id>` проверяет через GitHub API, что указанный прогон относится ровно к нужному SHA, событию `push` основной ветки `main`, стандартному `.github/workflows/ci.yml`, завершился `success`, а все семь jobs (`impact`, `docs`, `postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`) присутствуют и завершились `success`. Неполная страница job API (в том числе больше 100 jobs), пропущенные/отменённые проверки, ошибки сети или неверный SHA блокируют результат. Для ограничений GitHub API можно задать `GITHUB_TOKEN` из секретов окружения; значение не логируется.
 
 Это только независимая от self-reported JSON проверка *технического* CI run; она не является юридическим/безопасностным одобрением, не подтверждает подпись артефактов и не снимает остальные BLOCKED строки матрицы. `tests/contract/test_auto_release_ci.py` выполняет негативные проверки без сетевых вызовов.
 
@@ -60,7 +60,7 @@ Issue #119 и production release можно рассматривать к зак
 
 ## Консолидированный технический preflight (без production approval)
 
-Команда `python scripts/check_auto_release_preflight.py --sha <release-main-sha> --run-id <actions-run-id> --evidence <local-json>` проверяет структуру восьми evidence gates, точное соответствие CI SHA и всех пяти jobs, а также состояние открытых продуктовых/документационных зависимостей #113, #114, #165, #172, #121, #123, #124 через GitHub API. При сетевой ошибке, недоступном JSON или неполном ответе результат — BLOCKED. Вывод содержит только коды причин, без секретов или содержимого доказательств.
+Команда `python scripts/check_auto_release_preflight.py --sha <release-main-sha> --run-id <actions-run-id> --evidence <local-json>` проверяет структуру восьми evidence gates, точное соответствие CI SHA и всех семи jobs, а также состояние 31 обязательной Issue полного веб-релиза через GitHub API (точный список в [RELEASE_PREFLIGHT](../auto/RELEASE_PREFLIGHT.md)). Проверяются номер, репозиторий, отсутствие признака PR и закрытие именно completed; run attempt повторно сверяется перед завершением. При сетевой ошибке, недоступном JSON или неполном ответе результат — BLOCKED. Вывод содержит только коды причин, без секретов или содержимого доказательств.
 
 Даже при `technicalChecksPassed: true` вывод всегда содержит `verdict: BLOCKED`, `productionApproved: false` и код завершения 1: настоящие юридические, privacy/security и эксплуатационные полномочия и подписи нельзя доказать по данным GitHub и JSON. Этот инструмент предназначен для выявления блокеров; он **не** является командой деплоя или релизным разрешением. Не использовать его как основание для обработки настоящих данных.
 

@@ -13,7 +13,7 @@ import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-REQUIRED_JOBS = frozenset({"postgres", "api", "web", "browser-e2e", "windows-cmd"})
+REQUIRED_JOBS = frozenset({"impact", "docs", "postgres", "api", "web", "browser-e2e", "windows-cmd"})
 REPO = "askarahodov/roboport"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -59,7 +59,10 @@ def validate_run(run: object, jobs: object, expected_sha: str,
         seen[name] = job
     if not REQUIRED_JOBS.issubset(seen):
         problems.append("MISSING_REQUIRED_JOBS")
-    for name in REQUIRED_JOBS & seen.keys():
+    # Изменение состава workflow требует явного обновления release-контракта.
+    if seen.keys() - REQUIRED_JOBS:
+        problems.append("UNEXPECTED_JOB")
+    for name in sorted(REQUIRED_JOBS & seen.keys()):
         job = seen[name]
         if job.get("status") != "completed" or job.get("conclusion") != "success":
             problems.append("UNSUCCESSFUL_" + name)
@@ -68,6 +71,16 @@ def validate_run(run: object, jobs: object, expected_sha: str,
         if job.get("run_id") != run_id or job.get("run_attempt") != attempt:
             problems.append("JOB_RUN_MISMATCH")
     return tuple(problems)
+
+
+def validate_stable_run(before, after, jobs, sha, run_id) -> tuple[str, ...]:
+    """Повторная проверка защищает от новой попытки во время чтения jobs."""
+    errors = set(validate_run(before, jobs, sha, run_id))
+    errors.update(validate_run(after, jobs, sha, run_id))
+    if (type(before) is not dict or type(after) is not dict
+            or before.get("run_attempt") != after.get("run_attempt")):
+        errors.add("RUN_CHANGED_DURING_VERIFICATION")
+    return tuple(sorted(errors))
 
 
 def _json_api(path: str, token: str) -> object:
@@ -93,15 +106,16 @@ def main(argv: list[str] | None = None) -> int:
         run = _json_api(f"/actions/runs/{args.run_id}", os.getenv("GITHUB_TOKEN", ""))
         jobs = _json_api(f"/actions/runs/{args.run_id}/jobs?per_page=100",
                          os.getenv("GITHUB_TOKEN", ""))
+        after = _json_api(f"/actions/runs/{args.run_id}", os.getenv("GITHUB_TOKEN", ""))
     except (HTTPError, URLError, OSError, ValueError) as exc:
         print("BLOCKED: cannot verify remote CI evidence: " + type(exc).__name__,
               file=sys.stderr)
         return 2
-    errors = validate_run(run, jobs, args.sha, args.run_id)
+    errors = validate_stable_run(run, after, jobs, args.sha, args.run_id)
     if errors:
         print("BLOCKED: " + ", ".join(errors), file=sys.stderr)
         return 1
-    print("CI SHA and all five jobs verified. Independent release approvals still required.")
+    print("SHA CI и все семь jobs проверены. Независимое разрешение выпуска обязательно.")
     return 0
 
 

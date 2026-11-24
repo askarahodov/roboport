@@ -16,7 +16,7 @@ def ref(sha=SHA):
 
 
 def evaluate_fixture(*args):
-    return evaluate(*args, ref(), ref())
+    return evaluate(*args, ref(), ref(), run_after=args[1])
 
 
 def fixtures():
@@ -27,11 +27,13 @@ def fixtures():
            "head_branch": "main", "event": "push", "status": "completed",
            "conclusion": "success", "path": ".github/workflows/ci.yml",
            "repository": {"full_name": "askarahodov/roboport"}}
-    jobs = {"total_count": 5,
+    jobs = {"total_count": len(REQUIRED_JOBS),
             "jobs": [{"name": name, "run_id": RUN_ID, "run_attempt": 1,
                       "head_sha": SHA, "status": "completed", "conclusion": "success"}
                      for name in sorted(REQUIRED_JOBS)]}
-    issues = {i: {"state": "closed"} for i in BLOCKING_ISSUES}
+    issues = {i: {"number":i,"state":"closed","state_reason":"completed",
+                  "repository_url":"https://api.github.com/repos/askarahodov/roboport"}
+              for i in BLOCKING_ISSUES}
     return evidence, run, jobs, issues
 
 
@@ -44,7 +46,7 @@ def test_full_technical_preflight_is_never_production_approval():
 def test_each_external_issue_blocks():
     for number in BLOCKING_ISSUES:
         evidence, run, jobs, issues = fixtures()
-        issues[number] = {"state": "open"}
+        issues[number]["state"] = "open"
         result = evaluate_fixture(evidence, run, jobs, issues, SHA, RUN_ID)
         assert f"ISSUE_{number}_NOT_CLOSED" in result["reasons"]
         assert result["technicalChecksPassed"] is False
@@ -58,7 +60,7 @@ def test_evidence_ci_and_missing_issues_fail_closed():
     result = evaluate_fixture(evidence, run, jobs, issues, SHA, RUN_ID)
     assert "privacy_consent" in result["reasons"]
     assert any(x.startswith("CI_UNSUCCESSFUL_") for x in result["reasons"])
-    assert "ISSUE_113_NOT_CLOSED" in result["reasons"]
+    assert "ISSUE_113_NOT_VERIFIED" in result["reasons"]
 
 
 def test_cli_rejects_missing_inputs_before_network(tmp_path):
@@ -92,7 +94,8 @@ def test_stale_green_ci_and_concurrent_new_main_push_fail_closed():
         (ref(),ref("b"*40),"MAIN_MOVED_DURING_PREFLIGHT"),
         ({"ref":"refs/heads/main"},ref(),"MAIN_REF_NOT_VERIFIED"),
     ):
-        result=evaluate(*fixtures(),SHA,RUN_ID,before,after)
+        data=fixtures()
+        result=evaluate(*data,SHA,RUN_ID,before,after,run_after=data[1])
         assert result["verdict"]=="BLOCKED"
         assert result["productionApproved"] is False
         assert result["technicalChecksPassed"] is False
@@ -101,7 +104,8 @@ def test_stale_green_ci_and_concurrent_new_main_push_fail_closed():
 
 def test_blocker_catalog_covers_all_current_full_auto_release_domains():
     assert set(BLOCKING_ISSUES)>={
-        110,111,113,114,115,116,117,119,121,123,124,165,166,170,172,
+        76,92,108,110,111,112,113,114,115,116,117,119,121,123,124,
+        130,131,165,166,167,168,169,170,171,172,439,441,442,445,446,448,
     }
     assert len(set(BLOCKING_ISSUES))==len(BLOCKING_ISSUES)
 
@@ -139,6 +143,7 @@ def test_cli_rechecks_live_main_ref_before_and_after_remote_data(
     assert seen[0]=="/git/ref/heads/main"
     assert seen[-1]=="/git/ref/heads/main"
     assert seen.count("/git/ref/heads/main")==2
+    assert seen.count(f"/actions/runs/{RUN_ID}")==2
 
     seen.clear()
     final_main["sha"]="b"*40
@@ -175,4 +180,29 @@ def test_cli_catches_main_moving_during_checks(tmp_path,monkeypatch,capsys):
     result=json.loads(capsys.readouterr().out)
     assert result["technicalChecksPassed"] is False
     assert "MAIN_MOVED_DURING_PREFLIGHT" in result["reasons"]
+    assert result["productionApproved"] is False
+
+
+def test_closed_issue_must_be_completed_and_match_exact_repository():
+    for field,wrong,reason in (
+        ("state_reason","not_planned","NOT_COMPLETED"),
+        ("state_reason",None,"NOT_COMPLETED"),
+        ("number",999,"NOT_VERIFIED"),
+        ("repository_url","https://api.github.com/repos/other/repo","NOT_VERIFIED"),
+        ("pull_request",{},"NOT_VERIFIED"),
+    ):
+        evidence,run,jobs,issues=fixtures()
+        issues[446][field]=wrong
+        result=evaluate_fixture(evidence,run,jobs,issues,SHA,RUN_ID)
+        assert "ISSUE_446_"+reason in result["reasons"]
+        assert result["technicalChecksPassed"] is False
+        assert result["productionApproved"] is False
+
+
+def test_new_ci_attempt_during_preflight_never_passes():
+    data=fixtures()
+    after={**data[1],"run_attempt":2,"status":"in_progress","conclusion":None}
+    result=evaluate(*data,SHA,RUN_ID,ref(),ref(),run_after=after)
+    assert "CI_RUN_CHANGED_DURING_VERIFICATION" in result["reasons"]
+    assert result["technicalChecksPassed"] is False
     assert result["productionApproved"] is False
