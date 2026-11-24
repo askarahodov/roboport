@@ -71,6 +71,21 @@ def test_plan_from_inspection_to_customer_and_corrected_recommendation(monkeypat
     assert http.get(path+"/customer").status_code==403
     assert http.get(path.replace(str(loc),str(uuid4()))+"/customer").status_code==403
     manager=token(http,d,d["intake"])
+    # Большой неизменяемый каталог не блокирует чтение, отзыв или выбор.
+    with psycopg.connect(DSN) as db:
+        for i in range(101):
+            db.execute("""INSERT INTO auto_service_catalog
+              (id,organization_id,location_id,code,title,duration_minutes)
+              VALUES(%s,%s,%s,%s,%s,30)""",
+              (uuid4(),org,loc,f"AAA-{i:03}","SYNTHETIC EXTRA"))
+    large=http.get(path)
+    assert large.status_code==200 and large.json()["servicesTruncated"] is True
+    assert len(large.json()["services"])==100 and large.json()["items"][0]["id"]==item["id"]
+    found=http.get(path+"/services",params={"q":"test-order-svc"})
+    assert found.status_code==200,found.text
+    assert found.json()["items"]==[{"id":str(service),"code":"TEST-ORDER-SVC","title":"SYNTHETIC INSPECTION"}]
+    assert found.json()["truncated"] is False
+    assert http.get(path+"/services?q=a&q=b").status_code==422
     withdraw=path+"/"+item["id"]+"/withdraw"
     cancel={"requestKey":str(uuid4())}
     assert http.post(withdraw,json=cancel).status_code==403
@@ -83,9 +98,53 @@ def test_plan_from_inspection_to_customer_and_corrected_recommendation(monkeypat
     result=http.post(path,headers=manager,json=corrected)
     assert result.status_code==201,result.text
     assert {r["status"] for r in result.json()["items"]}=={"ACTIVE","WITHDRAWN"}
-    token(http,d,d["client_a"])
+    customer=token(http,d,d["client_a"])
     assert len(http.get(path+"/customer").json()["items"])==2
+    active=next(r for r in result.json()["items"] if r["status"]=="ACTIVE")
+    visit_path=path+"/"+active["id"]+"/visit"
+    assert http.get(path+"/"+item["id"]+"/visit").status_code==409
+    assert http.get(path+"/services",params={"q":"SVC"}).status_code==403
+    options=http.get(visit_path)
+    assert options.status_code==200,options.text
+    bay=options.json()["bays"][0]["id"]
+    windows=http.get(visit_path,params={"bayId":bay,"localDay":due.isoformat()})
+    assert windows.status_code==200,windows.text
+    slot=windows.json()["items"][0]
+    booking={"requestKey":str(uuid4()),"bayId":bay,**slot}
+    assert http.post(visit_path,json=booking).status_code==403
+    token(http,d,d["client_b"])
+    assert http.get(visit_path).status_code==403
+    assert http.post(visit_path,headers=token(http,d,d["client_b"]),json=booking).status_code==403
+    customer=token(http,d,d["client_a"])
+    made=http.post(visit_path,headers=customer,json=booking)
+    assert made.status_code==201,made.text
+    visit=made.json()["visit"]
+    assert visit["status"]=="SCHEDULED" and visit["workOrderId"]!=str(order)
+    replay=http.post(visit_path,headers=customer,json=booking)
+    assert replay.status_code==200 and replay.json()["visit"]==visit
+    assert http.post(visit_path,headers=customer,json={**booking,"requestKey":str(uuid4())}).status_code==409
     with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT service_id,selection_origin FROM auto_work_order_service
+          WHERE work_order_id=%s""",(visit["workOrderId"],)).fetchall()==[(service,"BOOKING")]
+        assert db.execute("SELECT count(*) FROM auto_recommendation_visit WHERE recommendation_id=%s",
+                          (active["id"],)).fetchone()==(1,)
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("DELETE FROM auto_recommendation_visit WHERE recommendation_id=%s",(active["id"],))
+    # Отмена через существующий кабинет сохраняет происхождение и разрешает новый визит.
+    canceled=http.post("/api/v1/dev/auto/customer/booking/appointments/"+visit["appointmentId"]+"/cancel",
+        headers={**customer,"Idempotency-Key":str(uuid4())},json={"organizationId":str(org)})
+    assert canceled.status_code==200,canceled.text
+    current=next(r for r in http.get(path+"/customer").json()["items"] if r["id"]==active["id"])
+    assert current["visit"]["status"]=="CANCELED"
+    assert http.post(visit_path,headers=customer,json=booking).status_code==409
+    new_booking={**booking,"requestKey":str(uuid4())}
+    made_again=http.post(visit_path,headers=customer,json=new_booking)
+    assert made_again.status_code==201,made_again.text
+    assert made_again.json()["visit"]["appointmentId"]!=visit["appointmentId"]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_recommendation_visit WHERE recommendation_id=%s",
+                          (active["id"],)).fetchone()==(2,)
         assert db.execute("SELECT count(*) FROM auto_service_recommendation WHERE work_order_id=%s",
                           (order,)).fetchone()==(2,)
         with pytest.raises(psycopg.errors.RaiseException):
@@ -96,6 +155,8 @@ def test_plan_from_inspection_to_customer_and_corrected_recommendation(monkeypat
                 db.execute("DELETE FROM auto_service_recommendation_withdrawal WHERE recommendation_id=%s",(item["id"],))
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
     assert http.get(path+"/customer").status_code==403
+    assert http.get(visit_path).status_code==403
+    assert http.post(visit_path,headers=customer,json=new_booking).status_code==403
     manager=token(http,d,d["intake"])
     assert http.get(path).status_code==403
     assert http.post(path,headers=manager,json=corrected).status_code==403

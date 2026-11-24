@@ -209,7 +209,7 @@ test('manager records future maintenance, retries the exact request and withdraw
   const requests:string[]=[];
   const plan=()=>({syntheticOnly:true,releaseAllowed:false,sendAllowed:false,
     workOrderId:order,canManage:true,baselineKm:41700,
-    services:[{id:service,code:'SYN-TO',title:'Плановая замена масла'}],items});
+    services:[{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',code:'OTHER',title:'Другая услуга'}],servicesTruncated:true,items});
   await page.route('**/api/v1/auth/csrf',r=>r.fulfill({
     status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
   await page.route('**/api/v1/dev/auto/organizations/**',route=>{
@@ -218,6 +218,11 @@ test('manager records future maintenance, retries the exact request and withdraw
       body:JSON.stringify({...snapshot(),steps:{...steps,inspection:'RECORDED'}})});
     if(path===root+'/services'||path===root.replace('/orders/'+order,'')+'/service-catalog')
       return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+    if(path===root+'/recommendations/services'){
+      expect(new URL(req.url()).searchParams.get('q')).toBe('SYN-TO');
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,workOrderId:order,truncated:false,items:[{id:service,code:'SYN-TO',title:'Плановая замена масла'}]})});
+    }
     if(path===root+'/recommendations'&&req.method()==='GET')
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(plan())});
     if(path===root+'/recommendations'&&req.method()==='POST'){
@@ -242,6 +247,9 @@ test('manager records future maintenance, retries the exact request and withdraw
   await page.goto(pageUrl);
   await page.getByRole('button',{name:/^План следующего ТО ·/}).click();
   const panel=page.getByRole('region',{name:'План следующего обслуживания'});
+  await expect(panel.getByText('Показаны первые 100 совпадений.',{exact:false})).toBeVisible();
+  await panel.getByLabel('Поиск услуги по коду или названию').fill('SYN-TO');
+  await panel.getByRole('button',{name:'Найти услуги'}).click();
   await panel.getByLabel('Услуга для следующего визита').selectOption(service);
   await panel.getByLabel('Рекомендуемая дата').fill(date);
   await panel.getByLabel('Следующий пробег (км, необязательно)').fill('50000');

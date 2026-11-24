@@ -160,9 +160,15 @@ test('no customer auth means no order or quote requests and no private content',
 });
 
 
-test('customer reads own future service plan without staff identifiers or write actions',async({page})=>{
+test('customer books own recommended service, retries exact request and loses access',async({page})=>{
   await auth(page);
-  let denied=false;
+  let denied=false,lost=true;
+  const bay='77777777-7777-4777-8777-777777777777';
+  const slot={startsAt:'2030-07-01T10:00:00Z',endsAt:'2030-07-01T10:30:00Z'};
+  const visit={appointmentId:'88888888-8888-4888-8888-888888888888',workOrderId:'99999999-9999-4999-8999-999999999999',bookingId:bay,status:'SCHEDULED',...slot};
+  const requests:string[]=[];
+  let booked=false;
+  await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
   await page.route('**/api/v1/dev/auto/customer/orders?*',route=>route.fulfill({
     status:200,contentType:'application/json',body:JSON.stringify({
       items:[card],nextCursor:null,syntheticOnly:true,releaseAllowed:false})}));
@@ -177,7 +183,27 @@ test('customer reads own future service plan without staff identifiers or write 
         workOrderId:order,canManage:false,baselineKm:20000,services:[],items:[{
           id:revision,serviceId:service,serviceCode:'SYN-TO',title:'Плановая замена масла',
           reasonCode:'PERIODIC',baselineKm:20000,dueDate:'2030-07-01',dueKm:30000,
-          createdAt:stamp,status:'ACTIVE',withdrawnAt:null}]})});
+          createdAt:stamp,status:'ACTIVE',withdrawnAt:null,visit:booked?visit:null}]})});
+  });
+  await page.route('**/api/v1/dev/auto/organizations/**/recommendations/'+revision+'/visit**',route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='POST'){
+      requests.push(req.postData()??'');
+      expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+      expect(req.postDataJSON()).toMatchObject({bayId:bay,...slot});
+      booked=true;
+      if(lost){lost=false;return route.abort('failed');}
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({syntheticOnly:true,replayed:true,visit})});
+    }
+    if(url.searchParams.has('localDay')){
+      expect(url.searchParams.get('bayId')).toBe(bay);
+      expect(url.searchParams.get('localDay')).toBe('2030-07-01');
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({syntheticOnly:true,timeZone:'UTC',guaranteed:false,items:[slot]})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,timeZone:'UTC',bays:[{id:bay,code:'POST-1'}]})});
   });
   await page.setViewportSize({width:390,height:844});
   await page.goto('/account/auto-orders');
@@ -188,6 +214,18 @@ test('customer reads own future service plan without staff identifiers or write 
   await expect(plan.getByText('2030-07-01',{exact:false})).toBeVisible();
   await expect(plan.getByRole('button',{name:'Сохранить рекомендацию'})).toHaveCount(0);
   await expect(plan.getByRole('button',{name:'Отозвать рекомендацию'})).toHaveCount(0);
+  await plan.getByRole('button',{name:'Записаться по рекомендации'}).click();
+  const picker=plan.getByRole('region',{name:'Запись по рекомендации'});
+  await expect(picker.getByLabel('Пост повторного визита')).toHaveValue(bay);
+  await picker.getByRole('button',{name:'Найти время'}).click();
+  await picker.getByRole('listitem').getByRole('button').click();
+  await picker.getByRole('button',{name:'Подтвердить повторный визит'}).click();
+  await expect(picker.getByText('Результат записи неизвестен.',{exact:false})).toBeVisible();
+  await picker.getByRole('button',{name:'Повторить запись с тем же ключом'}).click();
+  await expect(plan.getByText('Повторный визит записан.')).toBeVisible();
+  expect(requests).toHaveLength(2);expect(requests[1]).toBe(requests[0]);
+  await expect(plan.getByText('Запись оформлена',{exact:false})).toBeVisible();
+  await expect(plan.getByRole('button',{name:'Записаться по рекомендации'})).toHaveCount(0);
   denied=true;
   await plan.getByRole('button',{name:'Обновить рекомендации'}).click();
   await expect(page.getByText('Карточка недоступна: доступ мог быть отозван.')).toBeVisible();
