@@ -24,8 +24,9 @@ SEVERITIES=frozenset(("ROUTINE","SOON","URGENT"))
 
 def _scope(conn,token,org,loc,order,roles,*,write=False):
     try:
+        actor=_actor_and_order(conn,token,org,loc,order,roles)
         _inspection_policy(conn,token,org,loc,order,write_roles=roles if write else ())
-        return _actor_and_order(conn,token,org,loc,order,roles)
+        return actor
     except InspectionDenied:
         raise DiagnosticDenied("FORBIDDEN") from None
 

@@ -110,8 +110,8 @@ def _snapshot(conn, order):
 
 def read_work_order_inspection(conn, token, org, loc, order):
     with conn.transaction():
-        _inspection_policy(conn,token,org,loc,order)
         _actor_and_order(conn,token,org,loc,order,("INTAKE","MECHANIC","MANAGER"))
+        _inspection_policy(conn,token,org,loc,order)
         return _snapshot(conn,order)
 
 
@@ -124,9 +124,9 @@ def submit_work_order_inspection(conn, token, org, loc, order, *,
             or exterior_code not in ("CLEAR","DAMAGE","UNCHECKED")):
         raise InspectionDenied("INVALID_INPUT")
     with conn.transaction():
+        actor=_actor_and_order(conn,token,org,loc,order,("INTAKE",))
         _inspection_policy(conn,token,org,loc,order,write_roles=("INTAKE",),
                            capability="CREATE")
-        actor=_actor_and_order(conn,token,org,loc,order,("INTAKE",))
         old=conn.execute("""
           SELECT odometer_km,fuel_percent,tyres_ok,lights_ok,fluid_leak,exterior_code
           FROM auto_work_order_inspection WHERE work_order_id=%s
@@ -152,8 +152,8 @@ def record_work_order_qc(conn, token, org, loc, order, *,
             or (result=="FAIL" and finding_code not in ("DEFECT","REWORK"))):
         raise InspectionDenied("INVALID_INPUT")
     with conn.transaction():
-        _inspection_policy(conn,token,org,loc,order,write_roles=("MECHANIC",))
         actor=_actor_and_order(conn,token,org,loc,order,("MECHANIC",))
+        _inspection_policy(conn,token,org,loc,order,write_roles=("MECHANIC",))
         inspection=conn.execute("""
           SELECT id,actor_id FROM auto_work_order_inspection
           WHERE work_order_id=%s FOR SHARE
@@ -225,8 +225,8 @@ def record_work_order_qc_rework(conn, token, org, loc, order, *,
                                    "COMPONENT_RECHECK")):
         raise InspectionDenied("INVALID_INPUT")
     with conn.transaction():
-        _inspection_policy(conn,token,org,loc,order,write_roles=("MECHANIC",))
         actor=_actor_and_order(conn,token,org,loc,order,("MECHANIC",))
+        _inspection_policy(conn,token,org,loc,order,write_roles=("MECHANIC",))
         # WorkOrder lock serializes FAIL, rework and PASS.
         previous=conn.execute("""
           SELECT id,work_order_id,fail_event_id,actor_id,action_code

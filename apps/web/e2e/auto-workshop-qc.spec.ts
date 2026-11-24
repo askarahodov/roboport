@@ -221,3 +221,35 @@ test('QC queue refuses revoked branch and tampered response, clears old orders',
   await queue.getByRole('button',{name:'Обновить очередь QC'}).click();
   await expect(queue.getByRole('alert')).toContainText('Нет доступа к очереди');
 });
+
+
+test('QC mutation denial clears selected document and pending queue',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(base,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(req.method()==='POST')return route.fulfill({status:403,
+      contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+    if(url.pathname.endsWith('/inspection-qc/pending'))return route.fulfill({
+      status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,nextOrderId:null,items:[{orderId:order,
+          status:'PENDING_QC',lastFindingCode:'NONE'}]})});
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      status:'PENDING_QC',releaseAllowed:false,
+      inspection:{id:'44444444-4444-4444-8444-444444444444',odometerKm:10000,
+        fuelPercent:60,tyresOk:true,lightsOk:true,fluidLeak:false,
+        exteriorCode:'CLEAR',createdAt:'2030-01-01T10:00:00Z'},
+      qcEvents:[],reworks:[]})});
+  });
+  await page.goto('/staff/auto-workshop-qc');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const queue=page.getByLabel('Очередь нарядов на независимый QC');
+  await queue.getByRole('button',{name:'Обновить очередь QC'}).click();
+  await queue.getByRole('button',{name:'Открыть QC '+order}).click();
+  await expect(page.getByRole('heading',{name:'Состояние: PENDING_QC'})).toBeVisible();
+  await page.getByRole('button',{name:'Записать результат QC'}).click();
+  await expect(page.getByText('Доступ запрещён',{exact:false})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Состояние: PENDING_QC'})).toHaveCount(0);
+  await expect(queue.getByRole('button',{name:'Открыть QC '+order})).toHaveCount(0);
+});

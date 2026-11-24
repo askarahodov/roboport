@@ -124,3 +124,25 @@ test('diagnostic console removes cached findings on revoked scope',async({page})
   await expect(page.getByText('PRIVATE-SYN',{exact:false})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Зафиксировать заключение'})).toHaveCount(0);
 });
+
+
+test('diagnostic write loses CSRF authority and removes cached evidence',async({page})=>{
+  let posts=0;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    if(route.request().method()==='POST')posts++;
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,releaseAllowed:false,
+        inspectionRecorded:true,estimatePublished:false,
+        services:[{serviceId:service,code:'SYN-PRIVATE',title:'Диагностика',durationMinutes:30}],
+        items:[]})});
+  });
+  await page.goto('/staff/auto-diagnostics?'+q);
+  await expect(page.getByRole('button',{name:'Зафиксировать заключение'})).toBeEnabled();
+  await page.getByRole('button',{name:'Зафиксировать заключение'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByRole('heading',{name:'Журнал заключений'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toHaveCount(0);
+  expect(posts).toBe(0);
+});
