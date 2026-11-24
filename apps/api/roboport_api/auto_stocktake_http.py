@@ -675,3 +675,85 @@ async def post_interbranch(org_id:str,request:Request):
             return _response(request,409,"CONFLICT")
     return JSONResponse(content=result,status_code=200 if result["replayed"] else 201,
                         headers={"Cache-Control":"no-store"})
+
+
+class WriteoffDraft(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId:UUID
+    lotId:UUID
+    quantity:StrictInt=Field(ge=1,le=1000000000)
+    reasonCode:str
+    note:str=Field(min_length=3,max_length=240)
+
+
+class WriteoffDecision(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    locationId:UUID
+    action:str
+    note:str=Field(min_length=3,max_length=240)
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/warehouse/writeoffs")
+def get_writeoffs(org_id:str,request:Request,locationId:str):
+    from .auto_stock_writeoff import workspace
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(locationId)
+        fields={name:request.query_params.getlist(name) for name in ("q","status","cursor","lotCursor")}
+        if any(len(v)>1 for v in fields.values()) or any(fields[n]==[""] for n in ("cursor","lotCursor")):
+            raise ValueError("duplicate")
+        def value(name,default=None):
+            return fields[name][0] if fields[name] else default
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            result=workspace(db,request.cookies.get("rp_session",""),org,loc,
+                value("q",""),value("status","ALL"),value("cursor"),value("lotCursor"))
+        except AutoStockDenied as exc:
+            code="INVALID_INPUT" if str(exc)=="INVALID_INPUT" else "FORBIDDEN"
+            return _response(request,422 if code=="INVALID_INPUT" else 403,code)
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+async def _writeoff_mutation(org_id,request,document_id=None):
+    from .auto_stock_writeoff import draft,decide,SQL_FAILURES
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org=UUID(org_id)
+        document=UUID(document_id) if document_id is not None else None
+        data=(WriteoffDecision if document else WriteoffDraft).model_validate(await request.json())
+        key=_key(request)
+    except (ValueError,TypeError,ValidationError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            if document is None:
+                result=draft(db,request.cookies.get("rp_session",""),org,data.locationId,
+                    data.lotId,key,data.quantity,data.reasonCode,data.note)
+            else:
+                result=decide(db,request.cookies.get("rp_session",""),org,data.locationId,
+                    document,key,data.action,data.note)
+        except AutoStockDenied as exc:
+            code="INVALID_INPUT" if str(exc)=="INVALID_INPUT" else "FORBIDDEN"
+            return _response(request,422 if code=="INVALID_INPUT" else 403,code)
+        except (AutoStockConflict,*SQL_FAILURES):
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(content=result,status_code=200 if result["replayed"] else 201,
+                        headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/writeoffs")
+async def draft_writeoff(org_id:str,request:Request):
+    return await _writeoff_mutation(org_id,request)
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/writeoffs/{document_id}/decisions")
+async def decide_writeoff(org_id:str,document_id:str,request:Request):
+    return await _writeoff_mutation(org_id,request,document_id)
