@@ -25,11 +25,13 @@ function parse(raw:unknown):Data{
 export function CustomerCrmContactPreferences(){
   const [data,setData]=React.useState<Data|null>(null);
   const [draft,setDraft]=React.useState<Flags>({CALL:false,EMAIL:false,SMS:false});
-  const [status,setStatus]=React.useState<'loading'|'ready'|'denied'|'error'>('loading');
+  const [status,setStatus]=React.useState<'loading'|'ready'|'denied'|'error'|'conflict'>('loading');
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [busy,setBusy]=React.useState(false);
   const [revision,setRevision]=React.useState(0);
   const [message,setMessage]=React.useState('');
+  const mutation=React.useRef<AbortController|null>(null);
+  React.useEffect(()=>()=>mutation.current?.abort(),[]);
 
   React.useEffect(()=>{
     const controller=new AbortController();
@@ -50,39 +52,57 @@ export function CustomerCrmContactPreferences(){
   },[revision]);
 
   async function submit(item:Pending){
-    if(busy||status!=='ready')return;
+    if(busy||status!=='ready'||mutation.current)return;
+    const controller=new AbortController();mutation.current=controller;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{
-        method:'POST',credentials:'include',cache:'no-store',
+        method:'POST',credentials:'include',cache:'no-store',signal:controller.signal,
       });
+      if(controller.signal.aborted)return;
       if([401,403,404].includes(csrf.status)){
         setData(null);setStatus('denied');setPending(null);return;
       }
       if(!csrf.ok)throw Error('csrf');
       const token:unknown=await csrf.json();
+      if(controller.signal.aborted)return;
       if(!token||typeof token!=='object'||!('csrfToken' in token)||
          typeof token.csrfToken!=='string')throw Error('csrf');
       const response=await fetch(endpoint,{
         method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':token.csrfToken},
-        body:JSON.stringify(item),
+        body:JSON.stringify(item),signal:controller.signal,
       });
+      if(controller.signal.aborted)return;
       if([401,403,404].includes(response.status)){
         setData(null);setStatus('denied');setPending(null);return;
       }
       if(response.status===409){
-        setPending(null);
-        setMessage('Предпочтения изменились. Обновите данные перед новым сохранением.');
-        return;
+        // Устаревшая версия не является подтверждённым состоянием.
+        setData(null);setDraft({CALL:false,EMAIL:false,SMS:false});
+        setPending(null);setStatus('conflict');return;
       }
       if(!response.ok)throw Error('http');
-      const result=parse(await response.json());
+      const raw:unknown=await response.json();
+      if(controller.signal.aborted)return;
+      const result=parse(raw);
+      const replayed=(raw as {replayed?:unknown}).replayed;
+      const current=result.revisions[item.channelCode];
+      // Новый ответ обязан подтвердить точную запись; повтор может вернуть
+      // более свежий журнал после изменения другим сеансом.
+      if((response.status!==201||replayed!==false)&&(response.status!==200||replayed!==true))
+        throw Error('receipt');
+      if(current<item.expectedRevision+1||
+        (replayed===false&&current!==item.expectedRevision+1)||
+        (current===item.expectedRevision+1&&result.channels[item.channelCode]!==item.enabled))
+        throw Error('receipt');
       setData(result);setDraft(result.channels);setPending(null);
-      setMessage('Выбор записан в журнал. Отправка сообщений по-прежнему выключена.');
+      setMessage(current>item.expectedRevision+1?
+        'Запрос уже обработан, но выбор позднее изменён. Показано текущее состояние.':
+        'Выбор записан в журнал. Отправка сообщений по-прежнему выключена.');
     }catch{
-      setMessage('Ответ неизвестен. Используйте только повтор с прежним ключом.');
-    }finally{setBusy(false);}
+      if(!controller.signal.aborted)setMessage('Ответ неизвестен. Используйте только повтор с прежним ключом.');
+    }finally{if(mutation.current===controller){mutation.current=null;if(!controller.signal.aborted)setBusy(false);}}
   }
 
   function save(channel:Channel){
@@ -105,6 +125,8 @@ export function CustomerCrmContactPreferences(){
     {status==='denied'&&<p role="status">Нет доступа к предпочтениям связи.</p>}
     {status==='error'&&<p role="status">Предпочтения связи недоступны.
       <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить чтение</button></p>}
+    {status==='conflict'&&<p role="alert">Предпочтения изменились. Перечитайте текущее состояние перед новым выбором.
+      <button type="button" onClick={()=>setRevision(n=>n+1)}>Обновить предпочтения связи</button></p>}
     {status==='ready'&&data&&<>
       <p>Реальная отправка: запрещена.</p>
       {keys.map(code=><div key={code}>

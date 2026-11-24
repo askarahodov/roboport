@@ -154,3 +154,75 @@ test('staff creates an inert mock once with same-key retry and suppresses it aft
   await expect(panel).toContainText('Подавлено после отзыва');
   await expect(panel).toContainText('Реальная отправка: запрещена.');
 });
+
+
+
+for(const kind of ['consent','preferences'] as const){
+  test('customer '+kind+' confirms receipt, exact retry, conflict recovery and revocation',async({page})=>{
+    const isConsent=kind==='consent';
+    const endpoint=isConsent?consentUrl:'**/api/v1/dev/account/crm-contact-preferences';
+    const scopeName=isConsent?'Тестовое согласие на сервисные уведомления CRM':'Предпочтения способов связи CRM (dev)';
+    const channel=isConsent?'Звонок':'Звонки';
+    const saveName=isConsent?'Сохранить тестовый выбор: Звонок':'Записать выбор: Звонки';
+    const retryName=isConsent?'Повторить с тем же ключом':'Повторить выбор с тем же ключом';
+    const refreshName=isConsent?'Обновить согласие':'Обновить предпочтения связи';
+    let version=0,enabled=false,mode='badReceipt';
+    const posts:any[]=[];
+    const snapshot=()=>({syntheticOnly:true,sendAllowed:false,
+      ...(isConsent?{purposeCode:'SERVICE_UPDATE',legalConsentVerified:false}:{}),
+      channels:{CALL:enabled,EMAIL:false,SMS:false},revisions:{CALL:version,EMAIL:0,SMS:0}});
+    await page.route(endpoint,route=>{
+      if(route.request().method()==='GET')return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify(snapshot())});
+      const payload=route.request().postDataJSON();
+      posts.push(payload);
+      expect(route.request().headers()['x-csrf-token']).toBe('crm-csrf');
+      if(mode==='badReceipt')return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify({...snapshot(),replayed:false})});
+      if(mode==='replay'){
+        expect(payload).toEqual(posts[0]);
+        enabled=false;version=2;
+        return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({...snapshot(),replayed:true})});
+      }
+      if(mode==='conflict'){
+        expect(payload.expectedRevision).toBe(2);
+        enabled=true;version=3;
+        return route.fulfill({status:409,contentType:'application/json',body:'{"code":"STALE_REVISION"}'});
+      }
+      return route.fulfill({status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+    });
+    await page.setViewportSize({width:390,height:844});
+    await page.goto('/account/settings');
+    const panel=page.getByLabel(scopeName);
+    const checkbox=panel.getByLabel(channel,{exact:true});
+    const save=panel.getByRole('button',{name:saveName,exact:true});
+    await expect(checkbox).not.toBeChecked();
+    await checkbox.check();
+    await save.click();
+    await expect(panel).toContainText('Ответ неизвестен.');
+    await expect(save).toBeDisabled();
+    mode='replay';
+    await panel.getByRole('button',{name:retryName,exact:true}).click();
+    await expect(panel).toContainText('Показано текущее состояние.');
+    await expect(checkbox).not.toBeChecked();
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toEqual(posts[0]);
+    mode='conflict';
+    await checkbox.check();
+    await save.click();
+    await expect(panel.getByRole('alert')).toContainText('Перечитайте текущее состояние');
+    await expect(checkbox).toHaveCount(0);
+    await expect(save).toHaveCount(0);
+    await panel.getByRole('button',{name:refreshName,exact:true}).click();
+    await expect(checkbox).toBeChecked();
+    mode='denied';
+    await checkbox.uncheck();
+    await save.click();
+    await expect(checkbox).toHaveCount(0);
+    await expect(panel).toContainText('Нет доступа');
+    expect(posts).toHaveLength(4);
+    expect(posts[3].expectedRevision).toBe(3);
+    expect(posts[3].enabled).toBe(false);
+    expect(posts[3].requestKey).not.toBe(posts[2].requestKey);
+  });
+}
