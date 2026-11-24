@@ -6,6 +6,7 @@ The caller must hold live MANAGER and WAREHOUSE grants for the exact branch.
 from __future__ import annotations
 
 from hashlib import sha256
+from hmac import compare_digest
 import csv
 import io
 import json
@@ -158,10 +159,13 @@ def _synthetic_bundle_counts(raws: dict[str, bytes], organization: str,
             )
             if reader.fieldnames is None or tuple(reader.fieldnames) != columns:
                 raise SyntheticCutoverDenied("INVALID_EXPORT")
-            rows = list(reader)
-            if not 0 < len(rows) <= limit or any(
-                None in row or any(v is None for v in row.values()) for row in rows
-            ):
+            rows = []
+            for row in reader:
+                if (len(rows) >= limit or None in row
+                        or any(v is None for v in row.values())):
+                    raise SyntheticCutoverDenied("INVALID_EXPORT")
+                rows.append(row)
+            if not rows:
                 raise SyntheticCutoverDenied("INVALID_EXPORT")
             return rows
         except (csv.Error, UnicodeError, ValueError):
@@ -203,6 +207,7 @@ def _synthetic_bundle_counts(raws: dict[str, bytes], organization: str,
                 or not 1 <= len(title) <= 120
                 or title != title.strip() or title[0] in "=+-@"
                 or any(c not in SERVICE_TITLE for c in title)
+                or not 1 <= len(duration) <= 4
                 or not duration.isascii() or not duration.isdecimal()
                 or not 5 <= int(duration) <= 1440
                 or str(int(duration)) != duration
@@ -228,6 +233,7 @@ def _synthetic_bundle_counts(raws: dict[str, bytes], organization: str,
                 or not 3 <= len(article) <= 64
                 or any(c not in SAFE_ARTICLE for v in (source, article) for c in v)
                 or source in sources
+                or not 1 <= len(quantity) <= 10
                 or not quantity.isascii() or not quantity.isdecimal()
                 or str(int(quantity)) != quantity
                 or not 0 <= int(quantity) <= 1_000_000_000
@@ -252,41 +258,85 @@ def _synthetic_bundle_counts(raws: dict[str, bytes], organization: str,
     }
 
 
-def verify_synthetic_cutover_export(destination: Path) -> dict:
-    """Verify copied bytes, bounds, inventory and privacy of an offline bundle.
+def _unique_manifest_pairs(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate manifest key")
+        result[key] = value
+    return result
 
-    This is an integrity check, NOT proof of the legal basis or source
-    authenticity. All errors are generic and never reveal source CSV values.
+
+def _invalid_json_constant(value: str) -> None:
+    raise ValueError("invalid manifest constant")
+
+
+def verify_synthetic_cutover_export(
+    destination: Path, *, expected_manifest_sha256: str | None = None,
+    structure_only: bool = False,
+) -> dict:
+    """Read-only verification of private copied bytes against a trusted digest.
+
+    Trusted mode requires the expected manifest SHA-256 from an independent
+    authenticated channel. Diagnostic structure-only mode is explicit and
+    never claims that the manifest matches the sender. Neither mode approves
+    legal origin, production use or a new database import.
     """
+    if (type(structure_only) is not bool
+            or (structure_only and expected_manifest_sha256 is not None)
+            or (not structure_only and (
+                type(expected_manifest_sha256) is not str
+                or len(expected_manifest_sha256) != 64
+                or any(c not in "0123456789abcdef" for c in expected_manifest_sha256)
+            ))):
+        raise SyntheticCutoverDenied("MANIFEST_DIGEST_REQUIRED")
+    directory_fd = None
     try:
-        if (not isinstance(destination, Path) or destination.is_symlink()
-                or not destination.is_dir() or not hasattr(os, "O_NOFOLLOW")
-                or stat.S_IMODE(destination.stat().st_mode) & 0o077):
+        if (not isinstance(destination, Path)
+                or not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY")
+                or os.open not in os.supports_dir_fd
+                or os.listdir not in os.supports_fd):
             raise SyntheticCutoverDenied("INVALID_EXPORT")
-        if {p.name for p in destination.iterdir()} != {
-            "vehicles.csv", "services.csv", "inventory.csv", "manifest.json",
-        }:
+        # Open one directory and resolve each filename relative to that
+        # descriptor: a renamed/replaced path cannot redirect individual reads.
+        directory_fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY
+                               | os.O_NOFOLLOW | os.O_NONBLOCK)
+        directory_meta = os.fstat(directory_fd)
+        if (not stat.S_ISDIR(directory_meta.st_mode)
+                or stat.S_IMODE(directory_meta.st_mode) & 0o077):
+            raise SyntheticCutoverDenied("INVALID_EXPORT")
+        expected_names = {entry[0] for entry in _FILES} | {"manifest.json"}
+        if set(os.listdir(directory_fd)) != expected_names:
             raise SyntheticCutoverDenied("INVALID_EXPORT")
 
         def read(name: str, maximum: int) -> bytes:
-            p = destination / name
-            fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+            fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
+                         dir_fd=directory_fd)
             with os.fdopen(fd, "rb") as stream:
                 meta = os.fstat(stream.fileno())
                 if (not stat.S_ISREG(meta.st_mode)
-                        or stat.S_IMODE(meta.st_mode) & 0o077):
+                        or stat.S_IMODE(meta.st_mode) & 0o077
+                        or meta.st_size > maximum):
                     raise SyntheticCutoverDenied("INVALID_EXPORT")
                 data = stream.read(maximum + 1)
-            if len(data) > maximum:
-                raise SyntheticCutoverDenied("INVALID_EXPORT")
+                after = os.fstat(stream.fileno())
+                if (len(data) > maximum or len(data) != meta.st_size
+                        or (meta.st_size, meta.st_mtime_ns, meta.st_ctime_ns)
+                        != (after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+                    raise SyntheticCutoverDenied("INVALID_EXPORT")
             return data
 
         raw_manifest = read("manifest.json", 8192)
-        doc = json.loads(raw_manifest)
+        actual_sha = sha256(raw_manifest).hexdigest()
+        if not structure_only and not compare_digest(actual_sha, expected_manifest_sha256):
+            raise SyntheticCutoverDenied("INVALID_EXPORT")
+        doc = json.loads(raw_manifest.decode("utf-8"),
+                         object_pairs_hook=_unique_manifest_pairs,
+                         parse_constant=_invalid_json_constant)
         if (type(doc) is not dict or set(doc) != {
             "version","kind","productionApproved","organizationId",
             "locationId","counts","files",
-        } or doc["version"] != 1
+        } or type(doc["version"]) is not int or doc["version"] != 1
                 or doc["kind"] != "SYNTHETIC_CUTOVER_EXPORT"
                 or doc["productionApproved"] is not False
                 or type(doc["counts"]) is not dict
@@ -296,8 +346,6 @@ def verify_synthetic_cutover_export(destination: Path) -> dict:
                 or type(doc["files"]) is not dict
                 or set(doc["files"]) != {entry[0] for entry in _FILES}):
             raise SyntheticCutoverDenied("INVALID_EXPORT")
-        UUID(doc["organizationId"])
-        UUID(doc["locationId"])
         raw_files: dict[str, bytes] = {}
         batch_ids: set[UUID] = set()
         organization = str(UUID(doc["organizationId"]))
@@ -312,7 +360,8 @@ def verify_synthetic_cutover_export(destination: Path) -> dict:
                     or len(entry["sha256"]) != 64
                     or any(c not in "0123456789abcdef" for c in entry["sha256"])
                     or type(entry["bytes"]) is not int
-                    or not 0 < entry["bytes"] <= limit):
+                    or not 0 < entry["bytes"] <= limit
+                    or type(entry["batchId"]) is not str):
                 raise SyntheticCutoverDenied("INVALID_EXPORT")
             batch = UUID(entry["batchId"])
             if str(batch) != entry["batchId"] or batch in batch_ids:
@@ -324,11 +373,24 @@ def verify_synthetic_cutover_export(destination: Path) -> dict:
             raw_files[name] = raw
         if _synthetic_bundle_counts(raw_files, organization, location) != doc["counts"]:
             raise SyntheticCutoverDenied("INVALID_EXPORT")
+        final_meta = destination.lstat()
+        if (not stat.S_ISDIR(final_meta.st_mode)
+                or stat.S_IMODE(final_meta.st_mode) & 0o077
+                or (directory_meta.st_dev, directory_meta.st_ino)
+                != (final_meta.st_dev, final_meta.st_ino)
+                or set(os.listdir(directory_fd)) != expected_names):
+            raise SyntheticCutoverDenied("INVALID_EXPORT")
         return {
-            "ok": True, "mode": "SYNTHETIC_CUTOVER_EXPORT_VERIFIED",
+            "ok": True,
+            "mode": ("SYNTHETIC_CUTOVER_EXPORT_STRUCTURE_ONLY" if structure_only
+                     else "SYNTHETIC_CUTOVER_EXPORT_VERIFIED"),
+            "manifestDigestVerified": not structure_only,
             "files": 4, "counts": doc["counts"], "productionApproved": False,
-            "writes": 0,
-            "manifestSha256": sha256(raw_manifest).hexdigest(),
+            "writes": 0, "manifestSha256": actual_sha,
         }
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except (OSError, ValueError, TypeError, KeyError, AttributeError,
+            UnicodeError, RecursionError, OverflowError):
         raise SyntheticCutoverDenied("INVALID_EXPORT") from None
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
