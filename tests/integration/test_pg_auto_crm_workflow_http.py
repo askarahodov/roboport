@@ -342,3 +342,48 @@ def test_parallel_mock_outbox_for_distinct_leads_sharing_proof_has_no_deadlock(m
         results=[future.result(timeout=20) for future in futures]
     assert all(result["status"]=="MOCK_ONLY" and result["sendAllowed"] is False
                for result in results)
+
+
+def test_complete_mock_history_over_100_and_live_suppression(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    base=crm(org,loc)
+    intake=session(http,d,d["intake"])
+    created=http.post(base+"/leads",headers=intake,json=lead_payload(d))
+    assert created.status_code==201,created.text
+    lead=created.json()["leadId"]
+    path=base+"/leads/"+lead+"/mock-messages"
+    consent="/api/v1/dev/account/crm-contact-consent"
+    client=session(http,d,d["client_a"])
+    assert http.post(consent,headers=client,json={
+        "channelCode":"CALL","enabled":True,"expectedRevision":0,"requestKey":str(uuid4())
+    }).status_code==201
+    manager=session(http,d,d["manager"])
+    ids=set()
+    for i in range(102):
+        created=http.post(path,headers=manager,json={
+            "channelCode":"CALL","templateCode":"SERVICE_UPDATE","requestKey":str(uuid4())})
+        assert created.status_code==201,created.text
+        ids.add(created.json()["messageId"])
+    first=http.get(path).json()
+    assert len(first["items"])==100
+    cursor=first["nextCursor"]
+    tail=http.get(path,params={"cursor":cursor}).json()
+    assert len(tail["items"])==2 and "nextCursor" not in tail
+    assert {x["messageId"] for x in first["items"]+tail["items"]}==ids
+    assert all(x["status"]=="MOCK_ONLY" for x in tail["items"])
+    assert http.get(path,params={"cursor":cursor+"x"}).status_code==422
+    assert http.get(path+"?cursor="+cursor+"&cursor="+cursor).status_code==422
+    assert http.get(crm(foreign,foreign_loc)+"/leads/"+lead+"/mock-messages",
+                    params={"cursor":cursor}).status_code==403
+    client=session(http,d,d["client_a"])
+    assert http.post(consent,headers=client,json={
+        "channelCode":"CALL","enabled":False,"expectedRevision":1,"requestKey":str(uuid4())
+    }).status_code==201
+    session(http,d,d["manager"])
+    suppressed=http.get(path,params={"cursor":cursor})
+    assert suppressed.status_code==200,suppressed.text
+    assert all(x["status"]=="SUPPRESSED" for x in suppressed.json()["items"])
+    session(http,d,d["intake"])
+    assert http.get(path,params={"cursor":cursor}).status_code==422
+    session(http,d,d["client_a"])
+    assert http.get(path,params={"cursor":cursor}).status_code==403

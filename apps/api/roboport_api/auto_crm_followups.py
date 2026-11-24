@@ -5,7 +5,9 @@ No actual calls, messages, timers, consent assertions or customer PII.
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+import hashlib
 import psycopg
+from .keyset_cursor import encode_cursor, decode_cursor
 
 from .auto_crm_leads import _authority, _lead, LeadDenied, LeadConflict
 
@@ -43,20 +45,29 @@ def _task(conn,lead_id,task_id):
     }
 
 
-def list_followups(conn,token,org,loc,lead_id):
+def list_followups(conn,token,org,loc,lead_id,cursor=None):
     if type(lead_id) is not UUID:
         raise LeadDenied("INVALID_INPUT")
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
         _lead(conn,org,loc,lead_id,actor,manager)
+        scope=hashlib.sha256(f"crm-tasks:{org}:{loc}:{lead_id}".encode()).hexdigest()[:32]
+        try:
+            after=decode_cursor(cursor,scope,token) if cursor is not None else None
+        except ValueError:
+            raise LeadDenied("INVALID_INPUT") from None
+        position=(after[0],after[0],after[1]) if after else (None,None,None)
         rows=conn.execute(
-            """SELECT id FROM auto_crm_followup_task
-               WHERE lead_id=%s ORDER BY due_at,id LIMIT 101""",
-            (lead_id,),
+            """SELECT id,due_at FROM auto_crm_followup_task
+               WHERE lead_id=%s AND (%s::timestamptz IS NULL OR
+                 (due_at,id)>(%s::timestamptz,%s::uuid))
+               ORDER BY due_at,id LIMIT 101""",
+            (lead_id,*position),
         ).fetchall()
+        result={"syntheticOnly":True,"items":[_task(conn,lead_id,r[0]) for r in rows[:100]]}
         if len(rows)>100:
-            raise LeadConflict("TASK_LIMIT")
-        return {"syntheticOnly":True,"items":[_task(conn,lead_id,r[0]) for r in rows]}
+            result["nextCursor"]=encode_cursor(rows[99][1],rows[99][0],scope,token)
+        return result
 
 
 def create_followup(conn,token,org,loc,lead_id,key,code,due_at,origin_work_order_id=None):
@@ -87,11 +98,6 @@ def create_followup(conn,token,org,loc,lead_id,key,code,due_at,origin_work_order
             if (existing[1:] != (lead_id,actor,code,due_at,origin_work_order_id)):
                 raise LeadConflict("KEY_REUSED")
             return {"replayed":True,**_task(conn,lead_id,existing[0])}
-        if conn.execute(
-            "SELECT count(*) FROM auto_crm_followup_task WHERE lead_id=%s",
-            (lead_id,),
-        ).fetchone()[0]>=100:
-            raise LeadConflict("TASK_LIMIT")
         ident=uuid4()
         try:
             with conn.transaction():

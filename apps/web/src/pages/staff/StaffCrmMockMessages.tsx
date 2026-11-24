@@ -6,7 +6,7 @@ type Consent={syntheticOnly:true;purposeCode:'SERVICE_UPDATE';
   legalConsentVerified:false;sendAllowed:false;channels:Record<Channel,boolean>};
 type Item={messageId:string;channelCode:Channel;templateCode:Template;
   status:'MOCK_ONLY'|'SUPPRESSED';createdAt:string};
-type Snapshot={syntheticOnly:true;sendAllowed:false;legalConsentVerified:false;items:Item[]};
+type Snapshot={syntheticOnly:true;sendAllowed:false;legalConsentVerified:false;items:Item[];nextCursor?:string|null};
 type Pending={channelCode:Channel;templateCode:Template;requestKey:string};
 const channels:Channel[]=['CALL','EMAIL','SMS'];
 const templates:Template[]=['BOOKING_REMINDER','SERVICE_UPDATE','POST_SERVICE_REVIEW'];
@@ -36,6 +36,8 @@ function parseMessages(raw:unknown):Snapshot{
       ['MOCK_ONLY','SUPPRESSED'].includes(item.status)&&
       typeof item.createdAt==='string'&&!Number.isNaN(Date.parse(item.createdAt))))
     throw Error('messages');
+  if(x.nextCursor!=null&&(typeof x.nextCursor!=='string'||!/^[A-Za-z0-9_-]{1,256}$/.test(x.nextCursor)||x.items.length!==100))throw Error('cursor');
+  if(new Set(x.items.map(item=>item.messageId)).size!==x.items.length)throw Error('messages');
   return x as Snapshot;
 }
 
@@ -44,6 +46,7 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
 }){
   const [consent,setConsent]=React.useState<Consent|null>(null);
   const [messages,setMessages]=React.useState<Item[]>([]);
+  const [next,setNext]=React.useState<string|null>(null);
   const [channel,setChannel]=React.useState<Channel>('CALL');
   const [template,setTemplate]=React.useState<Template>('SERVICE_UPDATE');
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
@@ -52,19 +55,20 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [revision,setRevision]=React.useState(0);
   const controller=React.useRef<AbortController|null>(null);
-  React.useEffect(()=>{setConsent(null);setMessages([]);setStatus('idle');setMessage('');setPending(null);},
+  const mutation=React.useRef<AbortController|null>(null);
+  React.useEffect(()=>{controller.current?.abort();mutation.current?.abort();mutation.current=null;setBusy(false);setConsent(null);setMessages([]);setNext(null);setStatus('idle');setMessage('');setPending(null);},
     [base,leadId]);
-  React.useEffect(()=>()=>controller.current?.abort(),[]);
+  React.useEffect(()=>()=>{controller.current?.abort();mutation.current?.abort();},[]);
 
-  async function load(){
+  async function load(cursor:string|null=null){
     controller.current?.abort();
     const current=new AbortController();controller.current=current;
-    setStatus('loading');setConsent(null);setMessages([]);
+    setStatus('loading');setConsent(null);setMessages([]);setNext(null);
     try{
       const prefix=base+'/'+encodeURIComponent(leadId);
       const [c,m]=await Promise.all([
         fetch(prefix+'/contact-consent',{credentials:'include',cache:'no-store',signal:current.signal}),
-        fetch(prefix+'/mock-messages',{credentials:'include',cache:'no-store',signal:current.signal}),
+        fetch(prefix+'/mock-messages'+(cursor?'?cursor='+encodeURIComponent(cursor):''),{credentials:'include',cache:'no-store',signal:current.signal}),
       ]);
       if(current.signal.aborted)return;
       if([401,403,404].includes(c.status)||[401,403,404].includes(m.status)){
@@ -73,38 +77,44 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
       if(!c.ok||!m.ok)throw Error('http');
       const [cs,ms]=await Promise.all([c.json(),m.json()]);
       const parsedConsent=parseConsent(cs),parsedMessages=parseMessages(ms);
-      if(!current.signal.aborted){setConsent(parsedConsent);setMessages(parsedMessages.items);setStatus('ready');}
+      if(parsedMessages.nextCursor&&parsedMessages.nextCursor===cursor)throw Error('cursor');
+      if(!current.signal.aborted){setConsent(parsedConsent);setMessages(parsedMessages.items);setNext(parsedMessages.nextCursor??null);setStatus('ready');}
     }catch{if(!current.signal.aborted){setConsent(null);setMessages([]);setStatus('error');}}
   }
 
   async function submit(item:Pending){
-    if(busy||status!=='ready')return;
+    if(busy||status!=='ready'||mutation.current)return;
+    const current=new AbortController();mutation.current=current;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',
-        credentials:'include',cache:'no-store'});
+        credentials:'include',cache:'no-store',signal:current.signal});
+      if(current.signal.aborted)return;
       if([401,403,404].includes(csrf.status)){setStatus('denied');setConsent(null);setPending(null);onDenied();return;}
       if(!csrf.ok)throw Error('csrf');
       const value:unknown=await csrf.json();
+      if(current.signal.aborted)return;
       if(!value||typeof value!=='object'||!('csrfToken' in value)||
         typeof value.csrfToken!=='string')throw Error('csrf');
       const response=await fetch(base+'/'+encodeURIComponent(leadId)+'/mock-messages',{
         method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':value.csrfToken},
-        body:JSON.stringify(item),
+        body:JSON.stringify(item),signal:current.signal,
       });
+      if(current.signal.aborted)return;
       if(response.status===409){setPending(null);setMessage('Согласие отсутствует, изменилось или отозвано. Макет не создан.');await load();return;}
       if([401,403,404].includes(response.status)){setStatus('denied');setConsent(null);setPending(null);onDenied();return;}
       if(!response.ok)throw Error('http');
       const result:unknown=await response.json();
+      if(current.signal.aborted)return;
       if(!result||typeof result!=='object'||!('sendAllowed' in result)||
         result.sendAllowed!==false||!('status' in result)||result.status!=='MOCK_ONLY')
         throw Error('shape');
       setPending(null);
       setMessage('Добавлена только инертная запись MOCK_ONLY. Никакой отправки не было.');
       setRevision(n=>n+1);
-    }catch{setMessage('Ответ неизвестен. Повторите макет с тем же ключом.');}
-    finally{setBusy(false);}
+    }catch{if(!current.signal.aborted)setMessage('Ответ неизвестен. Повторите макет с тем же ключом.');}
+    finally{if(mutation.current===current){mutation.current=null;if(!current.signal.aborted)setBusy(false);}}
   }
 
   function create(){
@@ -119,7 +129,7 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
     <h3>Тестовые уведомления — без отправки</h3>
     <p>Макет outbox сохраняет только шаблон и канал. Нет текста, адресата,
       телефона, email, сетевого отправителя или фонового worker. sendAllowed=false всегда.</p>
-    <button type="button" disabled={status==='loading'||busy} onClick={()=>void load()}>
+    <button type="button" disabled={status==='loading'||busy||pending!==null} onClick={()=>void load()}>
       Проверить согласие и очередь</button>
     {status==='loading'&&<p role="status">Проверка…</p>}
     {status==='denied'&&<p role="status">Доступ запрещён. Данные очищены.</p>}
@@ -141,9 +151,10 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
         onClick={create}>Создать инертный макет</button>
       {pending&&<button type="button" disabled={busy}
         onClick={()=>void submit(pending)}>Повторить с тем же ключом</button>}
-      <button type="button" disabled={busy} onClick={()=>setRevision(n=>n+1)}>
+      <button type="button" disabled={busy||pending!==null} onClick={()=>setRevision(n=>n+1)}>
         Обновить после отзыва</button>
       <h4>Журнал макетов</h4>
+      {next&&<button type="button" disabled={busy||pending!==null} onClick={()=>void load(next)}>Следующая страница макетов</button>}
       {messages.length===0?<p>Макетов нет.</p>:<ul>{messages.map(item=><li key={item.messageId}>
         {channelNames[item.channelCode]} · {templateNames[item.templateCode]} · {
           item.status==='MOCK_ONLY'?'Только тест':'Подавлено после отзыва'

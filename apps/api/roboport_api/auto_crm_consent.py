@@ -3,7 +3,9 @@
 This is not legal consent evidence and never sends a message or calls a provider.
 """
 from uuid import UUID,uuid4
+import hashlib
 import psycopg
+from .keyset_cursor import encode_cursor, decode_cursor
 
 from .session_lookup import session_subject
 from .auto_crm_leads import _authority,_lead,LeadDenied,LeadConflict
@@ -189,23 +191,33 @@ def create_mock_message(conn,token,org,loc,lead_id,key,channel,template):
                 "createdAt":row[1].isoformat()}
 
 
-def list_mock_messages(conn,token,org,loc,lead_id):
+def list_mock_messages(conn,token,org,loc,lead_id,cursor=None):
     if type(lead_id) is not UUID:
         raise LeadDenied("INVALID_INPUT")
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
         lead=_lead(conn,org,loc,lead_id,actor,manager)
+        scope=hashlib.sha256(f"crm-mock:{org}:{loc}:{lead_id}".encode()).hexdigest()[:32]
+        try:
+            after=decode_cursor(cursor,scope,token) if cursor is not None else None
+        except ValueError:
+            raise LeadDenied("INVALID_INPUT") from None
+        position=(after[0],after[0],after[1]) if after else (None,None,None)
         flags,event_ids=_snapshot(conn,_lead_customer(conn,lead))
         rows=conn.execute("""
           SELECT id,channel_code,template_code,consent_event_ids,created_at
           FROM auto_crm_mock_outbox
           WHERE lead_id=%s AND organization_id=%s AND location_id=%s
-          ORDER BY created_at DESC,id DESC LIMIT 100
-        """,(lead_id,org,loc)).fetchall()
-        return {"syntheticOnly":True,"sendAllowed":False,
+            AND (%s::timestamptz IS NULL OR (created_at,id)<(%s::timestamptz,%s::uuid))
+          ORDER BY created_at DESC,id DESC LIMIT 101
+        """,(lead_id,org,loc,*position)).fetchall()
+        result={"syntheticOnly":True,"sendAllowed":False,
                 "legalConsentVerified":False,"items":[{
                   "messageId":str(ident),"channelCode":channel,
                   "templateCode":template,
                   "status":"MOCK_ONLY" if flags[channel] and event_ids.get(channel)==snapshot else "SUPPRESSED",
                   "createdAt":stamp.isoformat(),
-                } for ident,channel,template,snapshot,stamp in rows]}
+                } for ident,channel,template,snapshot,stamp in rows[:100]]}
+        if len(rows)>100:
+            result["nextCursor"]=encode_cursor(rows[99][4],rows[99][0],scope,token)
+        return result

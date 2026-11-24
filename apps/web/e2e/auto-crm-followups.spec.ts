@@ -318,3 +318,29 @@ test('CRM task retry preserves key if CSRF refresh fails after uncertain POST',a
   expect(posts).toHaveLength(2);
   expect(posts[0]).toEqual(posts[1]);
 });
+
+
+test('task history reaches later records and revocation hides them',async({page})=>{
+  await leadRoute(page);
+  let denied=false;
+  const tasks=Array.from({length:102},(_,i)=>({...taskItem,
+    taskId:'aaaaaaaa-aaaa-4aaa-8aaa-'+String(i+1).padStart(12,'0')}));
+  await page.route(taskBase,route=>{
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    return route.fulfill({status:denied?403:200,contentType:'application/json',
+      body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({syntheticOnly:true,
+        items:cursor?tasks.slice(100):tasks.slice(0,100),...(cursor?{}:{nextCursor:'task_tail'})})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const panel=page.getByLabel('Задачи по обращению');
+  await expect(panel.locator('ol > li')).toHaveCount(100);
+  await panel.getByRole('button',{name:'Следующая страница задач'}).click();
+  await expect(panel.locator('ol > li')).toHaveCount(2);
+  await panel.getByRole('button',{name:'Обновить задачи'}).click();
+  await expect(panel.locator('ol > li')).toHaveCount(100);
+  denied=true;
+  await panel.getByRole('button',{name:'Следующая страница задач'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(panel).toHaveCount(0);
+});

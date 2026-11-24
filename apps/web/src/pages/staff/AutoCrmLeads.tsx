@@ -80,12 +80,17 @@ function parseFollowup(v:unknown):Followup{
       !validIso(t.event.createdAt)||t.event.action!==t.status))throw Error('task');
   return t;
 }
-function parseFollowups(v:unknown):Followup[]{
+function parseFollowups(v:unknown):{items:Followup[];nextCursor:string|null}{
   if(!v||typeof v!=='object')throw Error('tasks');
-  const obj=v as {syntheticOnly?:unknown;items?:unknown};
+  const obj=v as {syntheticOnly?:unknown;items?:unknown;nextCursor?:unknown};
   if(obj.syntheticOnly!==true||!Array.isArray(obj.items)||obj.items.length>100)
     throw Error('tasks');
-  return obj.items.map(parseFollowup);
+  const next=obj.nextCursor??null;
+  if(next!==null&&(typeof next!=='string'||!/^[A-Za-z0-9_-]{1,256}$/.test(next)||obj.items.length!==100))
+    throw Error('tasks');
+  const items=obj.items.map(parseFollowup);
+  if(new Set(items.map(t=>t.taskId)).size!==items.length)throw Error('tasks');
+  return {items,nextCursor:next};
 }
 type LeadPage={items:Lead[];nextCursor:string|null};
 function parseList(v:unknown):LeadPage{
@@ -124,6 +129,8 @@ export function AutoCrmLeads(){
   const [revision,setRevision]=React.useState(0);
   const [busy,setBusy]=React.useState(false);
   const [tasks,setTasks]=React.useState<Followup[]>([]);
+  const [taskPage,setTaskPage]=React.useState<{key:string;cursor:string|null}>({key:'',cursor:null});
+  const [taskNext,setTaskNext]=React.useState<string|null>(null);
   const [taskStatus,setTaskStatus]=React.useState<'idle'|'loading'|'ready'|'error'>('idle');
   const [taskRevision,setTaskRevision]=React.useState(0);
   const [taskCode,setTaskCode]=React.useState<Followup['taskCode']>('CALL_BACK');
@@ -145,6 +152,8 @@ export function AutoCrmLeads(){
   const [pendingLead,setPendingLead]=React.useState<PendingLeadRequest|null>(null);
   const valid=uuid.test(org)&&uuid.test(loc);
   const scope=org+':'+loc;
+  const taskKey=scope+':'+selected;
+  const taskCursor=taskPage.key===taskKey?taskPage.cursor:null;
   const scopeRef=React.useRef(scope);
   scopeRef.current=scope;
   const [loadedScope,setLoadedScope]=React.useState('');
@@ -175,16 +184,17 @@ export function AutoCrmLeads(){
     return ()=>controller.abort();
   },[org,loc,revision,valid,leadCursor]);
   React.useEffect(()=>{
-    setTaskMessage('');
+    setTaskMessage('');setTaskPage({key:taskKey,cursor:null});setTaskNext(null);
   },[scope,selected]);
   React.useEffect(()=>{
-    setTasks([]);setTaskStatus('idle');
+    setTasks([]);setTaskNext(null);setTaskStatus('idle');
     if(!valid||!selected||loadedScope!==scope||status!=='ready')return;
     const controller=new AbortController();
     setTaskStatus('loading');
     void (async()=>{
       try{
-        const res=await fetch(base+'/'+encodeURIComponent(selected)+'/tasks',{
+        const res=await fetch(base+'/'+encodeURIComponent(selected)+'/tasks'+
+          (taskCursor?'?cursor='+encodeURIComponent(taskCursor):''),{
           credentials:'include',cache:'no-store',signal:controller.signal,
         });
         if(controller.signal.aborted)return;
@@ -193,11 +203,12 @@ export function AutoCrmLeads(){
         }
         if(!res.ok)throw Error('request');
         const list=parseFollowups(await res.json());
-        if(!controller.signal.aborted){setTasks(list);setTaskStatus('ready');}
+        if(list.nextCursor&&list.nextCursor===taskCursor)throw Error('cursor');
+        if(!controller.signal.aborted){setTasks(list.items);setTaskNext(list.nextCursor);setTaskStatus('ready');}
       }catch{if(!controller.signal.aborted)setTaskStatus('error');}
     })();
     return ()=>controller.abort();
-  },[org,loc,selected,loadedScope,status,taskRevision]);
+  },[org,loc,selected,loadedScope,status,taskRevision,taskCursor]);
   React.useEffect(()=>{
     setInbox([]);setInboxNext(null);setInboxStatus('idle');setInboxMessage('');
     if(!valid||loadedScope!==scope||status!=='ready')return;
@@ -494,10 +505,14 @@ export function AutoCrmLeads(){
         <p>Внутренние задачи для ответственного. Без звонков, отправки сообщений
           или автоматических напоминаний клиенту. Срок — локальное время браузера.</p>
         {taskStatus==='loading'&&<p role="status">Чтение задач…</p>}
-        {taskStatus==='error'&&<p role="alert">Не удалось загрузить задачи. Обновите список.</p>}
+        {taskStatus==='error'&&<p role="alert">Не удалось загрузить задачи. Обновите список.
+          <button type="button" disabled={taskBusy||pendingTask!==null}
+            onClick={()=>{setTaskPage({key:taskKey,cursor:null});setTaskRevision(n=>n+1);}}>Начать с первой страницы задач</button></p>}
         {taskStatus==='ready'&&<>
-          <button type="button" disabled={taskBusy}
-            onClick={()=>setTaskRevision(n=>n+1)}>Обновить задачи</button>
+          <button type="button" disabled={taskBusy||pendingTask!==null}
+            onClick={()=>{setTaskPage({key:taskKey,cursor:null});setTaskRevision(n=>n+1);}}>Обновить задачи</button>
+          {taskNext&&<button type="button" disabled={taskBusy||busy||pendingTask!==null||pendingLead!==null}
+            onClick={()=>setTaskPage({key:taskKey,cursor:taskNext})}>Следующая страница задач</button>}
           <ol>{tasks.map(t=><li key={t.taskId}>
             {taskCodeLabels[t.taskCode]} · {new Date(t.dueAt).toLocaleString('ru-RU')} · {taskStatusLabels[t.status]}
             {t.originWorkOrderId&&<> · Наряд: {t.originWorkOrderId}</>}
