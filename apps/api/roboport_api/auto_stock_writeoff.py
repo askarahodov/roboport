@@ -151,6 +151,8 @@ def decide(conn,token,org,loc,document,key,action,note):
             with conn.transaction():
                 disposition=None
                 if action=="APPROVE":
+                    # Блокируем тот же SKU до проверки ключа, что и внутренний ledger.
+                    conn.execute("SELECT s.id FROM auto_stock_sku s JOIN auto_stock_lot l ON l.sku_id=s.id WHERE l.id=%s FOR UPDATE OF s",(doc[0],))
                     # Не присваиваем ранее совершённое внутреннее списание.
                     if conn.execute("SELECT 1 FROM auto_stock_lot_disposition WHERE request_id=%s",(key,)).fetchone():
                         raise AutoStockConflict("CONFLICT")
