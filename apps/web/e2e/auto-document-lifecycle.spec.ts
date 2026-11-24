@@ -144,7 +144,7 @@ test('direct posting denied clears previously loaded handover snapshot',async({p
     ['UUID организации',org],['UUID филиала',loc],['UUID заказ-наряда',order],
   ] as const)await page.getByRole('textbox',{name:label}).fill(value);
   await expect(page.getByText('Статус документа: DRAFT.',{exact:false})).toBeVisible();
-  await page.getByRole('button',{name:/Провести технический/}).click();
+  await page.getByRole('button',{name:'Технически провести документ (MANAGER)'}).click();
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByText('Статус документа: DRAFT.',{exact:false})).toHaveCount(0);
   await expect(page.getByRole('heading',{name:'Сверка сметы (RUB, копейки)'})).toHaveCount(0);

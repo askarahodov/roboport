@@ -333,8 +333,7 @@ def test_intake_act_concurrent_revisions_and_same_owner_previous_visit(monkeypat
     staff=policy("INTAKE","READ",True,current_created.isoformat())
     assert http.get(next_path).json()["previousVisit"] is None
     assert http.get(path).status_code==403
-    first_id=http.get(next_path).json()["latestVersion"]
-    assert first_id==0
+    assert http.get(next_path).json()["latestVersion"]==0
     key=uuid4()
     created=publish(http,staff,next_path,custody(raw),key)
     assert created.status_code==201,created.text

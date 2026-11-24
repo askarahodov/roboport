@@ -145,6 +145,10 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
     'DAMAGE_MISMATCH'|'INVENTORY_MISMATCH'|'OTHER'>('DAMAGE_MISMATCH');
   const valid=[org,loc,order].every(x=>uuid.test(x.trim()));
   const scope=[org.trim(),loc.trim(),order.trim()].join(':');
+  const scopeGeneration=React.useRef({scope,role,epoch:0});
+  if(scopeGeneration.current.scope!==scope||scopeGeneration.current.role!==role){
+    scopeGeneration.current={scope,role,epoch:scopeGeneration.current.epoch+1};
+  }
   const root='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
     '/locations/'+encodeURIComponent(loc.trim())+'/orders/'+encodeURIComponent(order.trim());
   const path=root+'/intake-acts';
@@ -174,18 +178,23 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
   }
   async function submit(request:Pending){
     if(!ready||busy||request.role!==role||request.scope!==scope)return;
+    const epoch=scopeGeneration.current.epoch;
+    const current=()=>epoch===scopeGeneration.current.epoch;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',
         credentials:'include',cache:'no-store'});
+      if(!current())return;
       if([401,403,404].includes(csrf.status)){clearDenied();return;}
       if(!csrf.ok)throw Error('csrf');
       const value:unknown=await csrf.json();
       if(!value||typeof value!=='object'||!('csrfToken' in value)||
         typeof value.csrfToken!=='string')throw Error('csrf');
+      if(!current())return;
       const response=await fetch(request.endpoint,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':value.csrfToken},
         body:request.body});
+      if(!current())return;
       if([401,403,404].includes(response.status)){
         clearDenied();return;
       }
@@ -202,22 +211,27 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
       if(!response.ok)throw Error('unknown');
       setPending(null);setRevision(v=>v+1);
     }catch{
+      if(!current())return;
       setPending(request);
       setMessage('Результат неизвестен. Повторите тот же запрос с исходным ключом.');
     }finally{setBusy(false);}
   }
   async function downloadEvidence(item:Act){
     if(!ready||busy||!uuid.test(item.id))return;
+    const epoch=scopeGeneration.current.epoch;
+    const current=()=>epoch===scopeGeneration.current.epoch;
     setBusy(true);setMessage('');
     try{
       const response=await fetch(path+'/'+encodeURIComponent(item.id)+'/evidence.zip',
         {credentials:'include',cache:'no-store'});
+      if(!current())return;
       if([401,403,404].includes(response.status)){
         clearDenied();return;
       }
       if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/zip')
         throw Error('archive unavailable');
       const archive=await response.blob();
+      if(!current())return;
       if(archive.size===0||archive.size>1024*1024)
         throw Error('archive size');
       const url=URL.createObjectURL(archive);
@@ -230,7 +244,7 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
         link.remove();
       }finally{URL.revokeObjectURL(url);}
     }catch{
-      setMessage('Не удалось выгрузить архив. Повторите загрузку журнала.');
+      if(current())setMessage('Не удалось выгрузить архив. Повторите загрузку журнала.');
     }finally{setBusy(false);}
   }
   const canWrite=role==='staff'&&ready&&data!==null&&!busy&&!pending&&
