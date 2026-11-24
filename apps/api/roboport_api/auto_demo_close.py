@@ -12,7 +12,8 @@ from .auto_work_order_additional import _state as _extra_state
 from .auto_org_authority import organization_role_allows
 from .auto_work_order_stock import mutate_work_order_stock
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
-from .auto_document_access import require_document_access,DocumentPolicyDenied
+from .auto_document_access import DocumentPolicyDenied
+from .auto_handover_policy import require_handover_access
 
 
 class DemoCloseDenied(ValueError):
@@ -31,10 +32,7 @@ def _authority(conn, token, org, loc, order):
             or organization_role_allows(conn,token,org,"WAREHOUSE",loc,for_mutation=True)):
         try:
             _scope(conn,token,org,loc,order,("MANAGER","WAREHOUSE"))
-            require_document_access(conn,token,org,loc,
-                                    ("MANAGER","WAREHOUSE"),"HANDOVER","READ",order=order)
-            require_document_access(conn,token,org,loc,
-                                    ("MANAGER","WAREHOUSE"),"HANDOVER","PRICE_SALES",order=order)
+            require_handover_access(conn,token,org,loc,order)
         except (ExecutionDenied,DocumentPolicyDenied):
             raise DemoCloseDenied("FORBIDDEN") from None
         return
@@ -47,12 +45,7 @@ def _authority(conn, token, org, loc, order):
 def _manager(conn,token,org,loc,order,*,cap="CREATE"):
     try:
         actor=_scope(conn,token,org,loc,order,("MANAGER",))
-        require_document_access(conn,token,org,loc,
-                                ("MANAGER",),"HANDOVER","READ",order=order)
-        require_document_access(conn,token,org,loc,
-                                ("MANAGER",),"HANDOVER",cap,order=order)
-        require_document_access(conn,token,org,loc,
-                                ("MANAGER",),"HANDOVER","PRICE_SALES",order=order)
+        require_handover_access(conn,token,org,loc,order,cap=cap)
         return actor
     except (ExecutionDenied,DocumentPolicyDenied):
         raise DemoCloseDenied("FORBIDDEN") from None
@@ -61,12 +54,7 @@ def _manager(conn,token,org,loc,order,*,cap="CREATE"):
 def _warehouse(conn,token,org,loc,order):
     try:
         actor=_scope(conn,token,org,loc,order,("WAREHOUSE",))
-        require_document_access(conn,token,org,loc,
-                                ("WAREHOUSE",),"HANDOVER","READ",order=order)
-        require_document_access(conn,token,org,loc,
-                                ("WAREHOUSE",),"HANDOVER","PRICE_SALES",order=order)
-        require_document_access(conn,token,org,loc,
-                                ("WAREHOUSE",),"HANDOVER","EDIT",order=order)
+        require_handover_access(conn,token,org,loc,order,cap="EDIT")
         return actor
     except (ExecutionDenied,DocumentPolicyDenied):
         raise DemoCloseDenied("FORBIDDEN") from None

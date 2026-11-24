@@ -314,7 +314,51 @@ def test_intake_act_concurrent_revisions_and_same_owner_previous_visit(monkeypat
     assert history["previousVisit"]["orderId"]==str(order)
     assert history["previousVisit"]["version"]==2
     assert len(history["previousVisit"]["damages"])==1
-    assert publish(http,staff,next_path,custody(raw)).status_code==201
+    # A cutoff that admits the current order must not expose an earlier
+    # visit through either GET or a successful/replayed mutation response.
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["manager"])
+        current_created=db.execute("SELECT created_at FROM auto_work_order WHERE id=%s",
+                                   (other_order,)).fetchone()[0]
+        previous_created=db.execute("SELECT created_at FROM auto_work_order WHERE id=%s",
+                                    (order,)).fetchone()[0]
+        assert previous_created<current_created
+    def policy(role,cap,allowed,cutoff=None):
+        owner=token_as(http,d,d["manager"])
+        result=set_rule(http,policy_url(org),owner,role=role,loc=loc,
+                        document="INTAKE_ACT",cap=cap,allowed=allowed,not_before=cutoff)
+        assert result.status_code==201,result.text
+        return token_as(http,d,d["intake"])
+    staff=policy("INTAKE","READ",True,current_created.isoformat())
+    assert http.get(next_path).json()["previousVisit"] is None
+    assert http.get(path).status_code==403
+    first_id=http.get(next_path).json()["latestVersion"]
+    assert first_id==0
+    key=uuid4()
+    created=publish(http,staff,next_path,custody(raw),key)
+    assert created.status_code==201,created.text
+    assert created.json()["previousVisit"] is None
+    replay=publish(http,staff,next_path,custody(raw),key)
+    assert replay.status_code==200 and replay.json()["previousVisit"] is None
+    staff=policy("MECHANIC","READ",False)
+    assert http.get(next_path).status_code==403
+    assert publish(http,staff,next_path,custody(raw),key).status_code==403
+    staff=policy("MECHANIC","READ",True)
+    staff=policy("INTAKE","EDIT",False)
+    assert publish(http,staff,next_path,custody(raw,condition="MISSING"),version=1).status_code==403
+    staff=policy("INTAKE","EDIT",True)
+    revised=publish(http,staff,next_path,custody(raw,condition="MISSING"),version=1)
+    assert revised.status_code==201,revised.text
+    assert revised.json()["previousVisit"] is None
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_work_order_intake_act WHERE work_order_id=%s",
+                          (other_order,)).fetchone()==(2,)
+    # A customer still sees their own earlier visit, independently of staff ACL.
+    token_as(http,d,d["client_a"])
+    assert http.get(next_path).json()["previousVisit"]["orderId"]==str(order)
+    staff=policy("INTAKE","READ",True)
+    assert http.get(next_path).json()["previousVisit"]["orderId"]==str(order)
 
     # Previous owner must not leak through another verified link on same vehicle.
     with psycopg.connect(DSN) as db:

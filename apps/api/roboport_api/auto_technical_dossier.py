@@ -11,6 +11,7 @@ from zipfile import ZipFile, ZipInfo, ZIP_STORED
 
 from .auto_demo_close import _manager, _state_snapshot, DemoCloseDenied, DemoCloseConflict
 from .auto_work_order_estimate import _client_and_scope, AutoEstimateDenied
+from .auto_org_authority import organization_role_allows
 from .auto_intake_act import (
     export_intake_act_evidence, IntakeActDenied, IntakeActConflict,
 )
@@ -40,11 +41,18 @@ def export_closed_technical_dossier(conn, token, org, loc, order):
     with conn.transaction():
         # Все чтения, включая вложенный ZIP акта, должны видеть один снимок.
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        try:
-            _manager(conn, token, org, loc, order, cap="READ")
-        except DemoCloseDenied:
+        # A denied staff grant must not silently switch to the owner path.
+        # This matches the normal handover read; only a non-staff original
+        # verified customer can use the separate owner authorization.
+        if any(organization_role_allows(conn,token,org,role,loc,for_mutation=True)
+               for role in ("MANAGER","WAREHOUSE")):
             try:
-                _client_and_scope(conn, token, org, loc, order)
+                _manager(conn,token,org,loc,order,cap="READ")
+            except DemoCloseDenied:
+                raise TechnicalDossierDenied("FORBIDDEN") from None
+        else:
+            try:
+                _client_and_scope(conn,token,org,loc,order)
             except AutoEstimateDenied:
                 raise TechnicalDossierDenied("FORBIDDEN") from None
 

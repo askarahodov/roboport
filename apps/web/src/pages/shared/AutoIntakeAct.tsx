@@ -167,12 +167,18 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
     return ()=>ctl.abort();
   },[scope,revision,valid]);
 
+  function clearDenied(){
+    setData(null);setStatus('denied');setPending(null);setLoaded('');
+    setPhotos([]);setDamages([]);setInventory(initialInventory());
+    setPrintActId('');setMessage('');
+  }
   async function submit(request:Pending){
     if(!ready||busy||request.role!==role||request.scope!==scope)return;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',
         credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(csrf.status)){clearDenied();return;}
       if(!csrf.ok)throw Error('csrf');
       const value:unknown=await csrf.json();
       if(!value||typeof value!=='object'||!('csrfToken' in value)||
@@ -181,7 +187,7 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
         headers:{'Content-Type':'application/json','X-CSRF-Token':value.csrfToken},
         body:request.body});
       if([401,403,404].includes(response.status)){
-        setData(null);setStatus('denied');setPending(null);return;
+        clearDenied();return;
       }
       if(response.status===409||response.status===422){
         setPending(null);setMessage(request.role==='client'?
@@ -207,7 +213,7 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
       const response=await fetch(path+'/'+encodeURIComponent(item.id)+'/evidence.zip',
         {credentials:'include',cache:'no-store'});
       if([401,403,404].includes(response.status)){
-        setData(null);setStatus('denied');setPending(null);return;
+        clearDenied();return;
       }
       if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/zip')
         throw Error('archive unavailable');

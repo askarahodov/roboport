@@ -99,6 +99,25 @@ def test_closed_document_dossier_has_all_evidence_and_current_acl(monkeypatch):
             assert evidence.read("photos/1.png")==clean
             assert photographed["files"][0]["sha256"]==sha256(clean).hexdigest()
 
+    # A dual-role price denial also applies to the archive, not just the
+    # normal GET. The customer has a separate verified-owner path.
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    administrator=session(http,d,d["other"])
+    assert set_rule(http,policy_url(org),administrator,role="WAREHOUSE",loc=loc,
+                    document="HANDOVER",cap="PRICE_SALES",allowed=False).status_code==201
+    manager=session(http,d,d["intake"])
+    assert http.get(base).status_code==403
+    forbidden=http.get(endpoint)
+    assert forbidden.status_code==403
+    assert "x-technical-dossier-sha256" not in forbidden.headers
+    session(http,d,d["client_a"])
+    assert http.get(endpoint).content==downloaded.content
+    administrator=session(http,d,d["other"])
+    assert set_rule(http,policy_url(org),administrator,role="WAREHOUSE",loc=loc,
+                    document="HANDOVER",cap="PRICE_SALES",allowed=True).status_code==201
+    manager=session(http,d,d["intake"])
     # Байты детерминированны; собственный клиент получает ту же версию.
     repeated=http.get(endpoint)
     assert repeated.content==downloaded.content
