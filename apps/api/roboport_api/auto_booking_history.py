@@ -2,7 +2,7 @@
 from hashlib import sha256
 
 from .auto_org_authority import organization_role_allows
-from .auto_appointment_service import _customer_scope, AppointmentDenied
+from .auto_appointment_service import _customer_scope, AppointmentDenied, current_appointment_booking
 from .keyset_cursor import encode_cursor,decode_cursor
 
 
@@ -36,12 +36,14 @@ def booking_history(conn,token,org,loc,appointment,*,customer=False,cursor=None)
         """,(appointment,org,loc)).fetchone()
         if row is None:
             raise BookingHistoryDenied("FORBIDDEN")
-        initial,link,order,zone,current=row
+        initial,link,order,zone,_=row
         if customer:
             try:
                 _customer_scope(conn,token,org,loc,link)
             except AppointmentDenied as exc:
                 raise BookingHistoryDenied("FORBIDDEN") from exc
+        # После захвата блокировки повторно разрешаем актуальную бронь.
+        current=current_appointment_booking(conn,appointment)
         scope=sha256(f"booking-history:v1:{org}:{loc}:{appointment}:{customer}".encode()).hexdigest()[:32]
         position=decode_cursor(cursor,scope,token) if cursor is not None else (None,None)
         rows=conn.execute("""

@@ -1,6 +1,4 @@
 """Поиск ресурсов записи и состав неизменяемого комплекса без раскрытия цен."""
-from uuid import UUID
-
 from .auto_org_authority import organization_role_allows
 
 
@@ -36,8 +34,7 @@ def complex_composition(conn,token,org,loc,ident):
         SELECT m.sku_id,m.quantity FROM auto_work_complex_material m
         WHERE m.complex_id=%s ORDER BY m.sku_id
     """,(ident,)).fetchall()
-    if materials:
-        _require(conn,token,org,loc,"WAREHOUSE")
+    _require(conn,token,org,loc,"WAREHOUSE")
     if not 5<=minutes<=1440:
         raise BookingDirectoryDenied("COMPLEX_DURATION_UNAVAILABLE")
     return minutes,materials
@@ -77,11 +74,20 @@ _QUERIES={
 }
 
 
-def directory(conn,token,org,loc,kind,search,after):
+def directory(conn,token,org,loc,kind,search,after,*,customer_link=None):
     if kind not in _QUERIES or type(search) is not str or len(search)>64 or "\x00" in search:
         raise ValueError("INVALID_INPUT")
     with conn.transaction():
-        _require(conn,token,org,loc,"INTAKE")
+        if customer_link is not None:
+            from .auto_appointment_service import _customer_scope,AppointmentDenied
+            if kind!="services":
+                raise BookingDirectoryDenied("FORBIDDEN")
+            try:
+                _customer_scope(conn,token,org,loc,customer_link)
+            except AppointmentDenied as exc:
+                raise BookingDirectoryDenied("FORBIDDEN") from exc
+        else:
+            _require(conn,token,org,loc,"INTAKE")
         if kind=="stock":
             _require(conn,token,org,loc,"WAREHOUSE")
         if kind=="complexes":
@@ -97,6 +103,7 @@ def directory(conn,token,org,loc,kind,search,after):
         rows=conn.execute("SELECT id,label,minutes,available FROM ("+_QUERIES[kind]+"""
           ) d WHERE (%s::uuid IS NULL OR id>%s::uuid)
             AND (strpos(lower(label),lower(%s))>0 OR strpos(id::text,lower(%s))>0 OR %s='')
+            AND (minutes IS NULL OR minutes BETWEEN 5 AND 1440)
           ORDER BY id LIMIT 51
         """,(org,loc,after,after,search,search,search)).fetchall()
         page=rows[:50]

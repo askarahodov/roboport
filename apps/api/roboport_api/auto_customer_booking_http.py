@@ -142,6 +142,29 @@ def get_slots(request: Request, organizationId: str, locationId: str,
                         headers={"Cache-Control":"no-store"})
 
 
+@router.get("/api/v1/dev/auto/customer/booking/service-directory")
+def customer_service_directory(request:Request,organizationId:str,locationId:str,
+                               customerLinkId:str,search:str="",afterId:str|None=None):
+    from .auto_booking_directory import directory,BookingDirectoryDenied
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc,link=map(UUID,(organizationId,locationId,customerLinkId))
+        after=UUID(afterId) if afterId is not None else None
+        if any(len(request.query_params.getlist(k))>1 for k in (
+                "organizationId","locationId","customerLinkId","search","afterId")):
+            raise ValueError("duplicate query")
+        with psycopg.connect(dsn) as db:
+            result=directory(db,request.cookies.get("rp_session",""),org,loc,"services",
+                             search,after,customer_link=link)
+    except BookingDirectoryDenied:
+        return _response(request,403,"FORBIDDEN")
+    except (TypeError,ValueError):
+        return _response(request,422,"INVALID_INPUT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
 @router.get("/api/v1/dev/auto/customer/booking/services")
 def get_booking_services(request: Request, organizationId: str, locationId: str,
                          customerLinkId: str):

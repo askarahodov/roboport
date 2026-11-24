@@ -6,8 +6,8 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const names:Record<Kind,string>={bays:'Посты',vehicles:'Автомобили',employees:'Специалисты',
   services:'Работы',stock:'Складские позиции',complexes:'Комплексы работ'};
 
-export function BookingDirectory({org,loc,kind,disabled,onChoose,onDenied}:{
-  org:string;loc:string;kind:Kind;disabled:boolean;
+export function BookingDirectory({org,loc,kind,disabled,onChoose,onDenied,customerLink}:{
+  org:string;loc:string;kind:Kind;disabled:boolean;customerLink?:string;
   onChoose:(item:DirectoryItem)=>void;onDenied?:()=>void
 }){
   const [open,setOpen]=React.useState(false),[search,setSearch]=React.useState('');
@@ -18,14 +18,16 @@ export function BookingDirectory({org,loc,kind,disabled,onChoose,onDenied}:{
   const denied=React.useRef(onDenied);denied.current=onDenied;
   React.useEffect(()=>{
     setItems([]);setNext(null);setAfter(null);setOpen(false);setSearch('');setSubmitted('');setStatus('');
-  },[org,loc,kind]);
+  },[org,loc,kind,customerLink]);
   React.useEffect(()=>{
     if(!open||!uuid.test(org)||!uuid.test(loc))return;
     const controller=new AbortController();
     setItems([]);setNext(null);setStatus('Поиск…');
-    const query=new URLSearchParams({kind,search:submitted});
+    const query=new URLSearchParams(customerLink?{organizationId:org,locationId:loc,
+      customerLinkId:customerLink,search:submitted}:{kind,search:submitted});
     if(after)query.set('afterId',after);
-    const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
+    const path=customerLink?'/api/v1/dev/auto/customer/booking/service-directory?'+query:
+      '/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
       '/locations/'+encodeURIComponent(loc)+'/booking-directory?'+query;
     void fetch(path,{credentials:'include',cache:'no-store',signal:controller.signal}).then(async res=>{
       if(controller.signal.aborted)return;
@@ -45,7 +47,7 @@ export function BookingDirectory({org,loc,kind,disabled,onChoose,onDenied}:{
       setStatus(raw.items.length?'':'Совпадений нет.');
     }).catch(()=>{if(!controller.signal.aborted)setStatus('Не удалось загрузить справочник.');});
     return ()=>controller.abort();
-  },[org,loc,kind,open,submitted,after,refresh]);
+  },[org,loc,kind,customerLink,open,submitted,after,refresh]);
   return <div aria-label={'Справочник: '+names[kind]}>
     <button type="button" disabled={disabled} onClick={()=>setOpen(x=>!x)}>
       {open?'Закрыть: ':'Найти: '}{names[kind]}</button>

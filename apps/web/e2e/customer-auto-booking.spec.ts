@@ -50,7 +50,10 @@ test('client completes own booking, move, cancel and sees no PII on 390/1280',as
     if(req.method()==='GET'&&url.pathname.endsWith('/slots')){
       expect(url.searchParams.get('localDay')).toBe('2030-01-01');
       expect(url.searchParams.get('customerLinkId')).toBe(link);
-      expect(url.searchParams.getAll('serviceId')).toEqual([service]);
+      if(status==='ACTIVE'){
+        expect(url.searchParams.get('appointmentId')).toBe(appointment);
+        expect(url.searchParams.getAll('serviceId')).toEqual([]);
+      }else expect(url.searchParams.getAll('serviceId')).toEqual([service]);
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
         syntheticOnly:true,timeZone:'Europe/Berlin',guaranteed:false,items:[first,second],
       })});

@@ -1,5 +1,6 @@
 import React from 'react';
 import {BookingHistory} from '../shared/BookingHistory';
+import {BookingDirectory} from '../shared/BookingDirectory';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Resource={organizationId:string;locationId:string;customerLinkId:string;bayId:string;
@@ -308,6 +309,12 @@ export function CustomerAutoBooking(){
         {!target&&<fieldset aria-label="Услуги при записи (dev)"><legend>Работы по записи (необязательно)</legend>
           <p>Выберите не более 8 услуг и не более 24 часов суммарно. Поиск учитывает полную длительность. Первоначальный выбор работ не мешает переносу и отмене до начала оформления приёмщиком, осмотра, сметы или складских операций.</p>
           {serviceState&&<p role="status">{serviceState}</p>}
+          {scoped&&<BookingDirectory key={scoped.customerLinkId+':'+scoped.locationId} kind="services"
+            org={scoped.organizationId} loc={scoped.locationId} customerLink={scoped.customerLinkId}
+            disabled={busy||!!pending} onDenied={deny} onChoose={x=>{
+              if(x.durationMinutes===null)return;
+              setServices(old=>old.some(s=>s.id===x.id)?old:[...old,{id:x.id,code:x.id,title:x.label,durationMinutes:x.durationMinutes!}]);
+            }}/>}
           {services.map(service=><label key={service.id} style={{display:'block'}}>
             <input type="checkbox" aria-label={'Услуга '+service.code}
               checked={selectedServices.includes(service.id)}

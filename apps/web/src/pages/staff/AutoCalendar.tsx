@@ -120,7 +120,12 @@ export function AutoCalendar() {
   const [message,setMessage]=React.useState('');
   const [pending,setPending]=React.useState<{path:string;body:string;key:string;success:string;org:string;location:string}|null>(null);
   const requestScope=React.useRef({org:'',location:''});
-  requestScope.current={org:org.trim(),location:location.trim()};
+  const scopeEpoch=React.useRef(0);
+  if(requestScope.current.org!==org.trim()||requestScope.current.location!==location.trim()){
+    scopeEpoch.current++;
+    requestScope.current={org:org.trim(),location:location.trim()};
+  }
+  React.useEffect(()=>()=>{scopeEpoch.current++;},[]);
   const [revision,setRevision]=React.useState(0);
   const [target,setTarget]=React.useState<string | null>(null);
   const valid=uuid.test(org.trim())&&uuid.test(location.trim())&&validUtcDay(day);
@@ -162,18 +167,20 @@ export function AutoCalendar() {
     return ()=>controller.abort();
   },[org,location,weekStart,revision,weekValid]);
   React.useEffect(()=>{
-    setItems([]);setHasMore(false);setNextCursor(null);setTarget(null);setTimeZone('UTC');
+    setItems([]);setHasMore(false);setNextCursor(null);setTarget(null);setHistoryId(null);setTimeZone('UTC');
     if(!valid){setStatus('idle');return;}
     const controller=new AbortController();
     setStatus('loading');
+    const epoch=scopeEpoch.current;
+    const current=()=>!controller.signal.aborted&&epoch===scopeEpoch.current;
     // Границы локальных суток (в том числе 23/25 часов) вычисляет сервер.
     const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+'/calendar';
     const query=new URLSearchParams({locationId:location.trim(),localDay:day});
     if(cursor){query.set('afterStartsAt',cursor.startsAt);query.set('afterAppointmentId',cursor.appointmentId);}
     void fetch(path+'?'+query,{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async response=>{
-        if(controller.signal.aborted)return;
-        if([401,403,404].includes(response.status)){setMessage('');setStatus('denied');return;}
+        if(!current())return;
+        if([401,403,404].includes(response.status)){denyBooking();return;}
         if(!response.ok)throw new Error();
         const data:unknown=await response.json();
         if(!data||typeof data!=='object'||!('items' in data)||!Array.isArray(data.items)||
@@ -188,12 +195,14 @@ export function AutoCalendar() {
           'nextAppointmentId' in data && typeof data.nextAppointmentId==='string' &&
           uuid.test(data.nextAppointmentId)?{startsAt:data.nextStartsAt,appointmentId:data.nextAppointmentId}:null;
         if(data.hasMore&&!next)throw new Error();
-        if(!controller.signal.aborted){setItems(data.items as Entry[]);setHasMore(data.hasMore);setNextCursor(next);setTimeZone('timeZone' in data ? data.timeZone as string : 'UTC');setStatus('ready');}
-      }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
+        if(current()){setItems(data.items as Entry[]);setHasMore(data.hasMore);setNextCursor(next);setTimeZone('timeZone' in data ? data.timeZone as string : 'UTC');setStatus('ready');}
+      }).catch(()=>{if(current())setStatus('error');});
     return ()=>controller.abort();
   },[org,location,day,revision,valid,cursor]);
   React.useEffect(()=>{
     const controller=new AbortController();
+    const epoch=scopeEpoch.current;
+    const current=()=>!controller.signal.aborted&&epoch===scopeEpoch.current;
     setServices([]);setSelectedServices([]);setServiceMessage('');
     if(!uuid.test(org.trim())||!uuid.test(location.trim()))return ()=>controller.abort();
     setServiceMessage('Загрузка каталога работ…');
@@ -201,7 +210,7 @@ export function AutoCalendar() {
       '/locations/'+encodeURIComponent(location.trim())+'/booking-services',{
         credentials:'include',cache:'no-store',signal:controller.signal,
       }).then(async response=>{
-        if(controller.signal.aborted)return;
+        if(!current())return;
         if(!response.ok)throw Error('catalog');
         const data:unknown=await response.json();
         if(!data||typeof data!=='object'||!('syntheticOnly' in data)||
@@ -210,19 +219,21 @@ export function AutoCalendar() {
             typeof item.code==='string'&&typeof item.title==='string'&&
             Number.isInteger(item.durationMinutes)&&item.durationMinutes>=5&&
             item.durationMinutes<=1440))throw Error('shape');
-        if(!controller.signal.aborted){setServices(data.items as Service[]);setServiceMessage('');}
-      }).catch(()=>{if(!controller.signal.aborted)setServiceMessage('Каталог услуг недоступен.');});
+        if(current()){setServices(data.items as Service[]);setServiceMessage('');}
+      }).catch(()=>{if(current())setServiceMessage('Каталог услуг недоступен.');});
     return ()=>controller.abort();
-  },[org,location]);
+  },[org,location,revision]);
   React.useEffect(()=>{
     const controller=new AbortController();
+    const epoch=scopeEpoch.current;
+    const current=()=>!controller.signal.aborted&&epoch===scopeEpoch.current;
     setStock([]);setMaterials([]);setStockMessage('');
     if(!uuid.test(org.trim())||!uuid.test(location.trim()))return ()=>controller.abort();
     const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
       '/locations/'+encodeURIComponent(location.trim())+'/booking-stock';
     void fetch(url,{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async response=>{
-        if(controller.signal.aborted)return;
+        if(!current())return;
         if(response.status===403){setStockMessage('Для резерва деталей требуются роли INTAKE и WAREHOUSE.');return;}
         if(!response.ok)throw Error('stock');
         const raw:unknown=await response.json();
@@ -231,10 +242,10 @@ export function AutoCalendar() {
           raw.items.length>100||!raw.items.every((item:StockItem)=>
             uuid.test(item.skuId)&&typeof item.article==='string'&&
             Number.isSafeInteger(item.available)&&item.available>=0))throw Error('shape');
-        if(!controller.signal.aborted)setStock(raw.items as StockItem[]);
-      }).catch(()=>{if(!controller.signal.aborted)setStockMessage('Каталог остатков недоступен.');});
+        if(current())setStock(raw.items as StockItem[]);
+      }).catch(()=>{if(current())setStockMessage('Каталог остатков недоступен.');});
     return ()=>controller.abort();
-  },[org,location]);
+  },[org,location,revision]);
   React.useEffect(()=>{
     const controller=new AbortController();
     setOpening(null);setOpeningWindows([]);setClosedText('');
@@ -274,7 +285,7 @@ export function AutoCalendar() {
   },[org,location,openingRevision]);
   function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
   function resetPage(){setCursor(null);setHistory([]);setHistoryId(null);resetSlots();}
-  function denyBooking(){setItems([]);setTarget(null);setForm(empty);setComplex(null);setHistoryId(null);
+  function denyBooking(){scopeEpoch.current++;setBusy(false);setMessage('');setItems([]);setTarget(null);setForm(empty);setComplex(null);setHistoryId(null);
     setSelectedServices([]);setMaterials([]);setServices([]);setStock([]);setPending(null);resetSlots();setStatus('denied');}
   async function saveOpening(){
     if(!opening||openingBusy||busy||!valid)return;
@@ -320,7 +331,7 @@ export function AutoCalendar() {
         setOpeningState('Результат неизвестен. Повторно загрузите график перед изменением.');
     }finally{setOpeningBusy(false);}
   }
-  React.useEffect(()=>{setPending(null);setComplex(null);setHistoryId(null);setForm(empty);resetSlots();},[org,location]);
+  React.useEffect(()=>{setBusy(false);setPending(null);setComplex(null);setHistoryId(null);setForm(empty);resetSlots();},[org,location]);
   async function findSlots(){
     const retained=target?items.find(x=>x.appointmentId===target)?.employeeId:null;
     const effectiveEmployee=target&&clearEmployee?null:(form.employee.trim()||retained||null);
@@ -368,7 +379,8 @@ export function AutoCalendar() {
     }:null);
     if(retry&&(retry.org!==org.trim()||retry.location!==location.trim()))return;
     const submittedScope={org:org.trim(),location:location.trim()};
-    const scopeIsCurrent=()=>requestScope.current.org===submittedScope.org&&
+    const epoch=scopeEpoch.current;
+    const scopeIsCurrent=()=>epoch===scopeEpoch.current&&requestScope.current.org===submittedScope.org&&
       requestScope.current.location===submittedScope.location;
     setBusy(true);setMessage('');
     try{
@@ -398,7 +410,7 @@ export function AutoCalendar() {
       if(!scopeIsCurrent())return;
       if(snapshot){setPending(snapshot);setMessage('Результат запроса неизвестен. Повторите с прежним ключом или обновите календарь перед новой операцией.');}
       else setMessage('Не удалось выполнить запрос. Проверьте сессию.');
-    }finally{setBusy(false);}
+    }finally{if(scopeIsCurrent())setBusy(false);}
   }
   const formatLocal=(instant:string)=>new Intl.DateTimeFormat('ru-RU',{
     timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23',
@@ -615,7 +627,8 @@ export function AutoCalendar() {
         {!target&&<fieldset><legend>Готовый комплекс работ</legend>
           <p>Комплекс требует INTAKE, MANAGER и WAREHOUSE и разрешение на смету; выбирается вместо отдельных работ и материалов.</p>
           <BookingDirectory org={org.trim()} loc={location.trim()} kind="complexes" disabled={busy||!!pending}
-            onChoose={item=>{setComplex(item);setSelectedServices([]);setMaterials([]);resetSlots();}}/>
+            onChoose={item=>{setComplex(item);setSelectedServices([]);setMaterials([]);resetSlots();}}
+            onDenied={()=>{setComplex(null);resetSlots();}}/>
           {complex&&<p>{complex.label} · {complex.durationMinutes} мин. <button type="button"
             disabled={busy||!!pending} onClick={()=>{setComplex(null);resetSlots();}}>Убрать комплекс</button></p>}
         </fieldset>}
@@ -623,7 +636,7 @@ export function AutoCalendar() {
           <p>Не более 8 услуг и 24 часов суммарно. Поиск слотов учитывает полную длительность, а создание проверяет совпадение с выбранным интервалом.</p>
           {serviceMessage&&<p>{serviceMessage}</p>}
           <BookingDirectory org={org.trim()} loc={location.trim()} kind="services" disabled={busy||!!pending}
-            onChoose={x=>{if(x.durationMinutes===null)return;
+            onDenied={denyBooking} onChoose={x=>{if(x.durationMinutes===null)return;
               setServices(old=>old.some(s=>s.id===x.id)?old:[...old,{id:x.id,code:x.id,title:x.label,durationMinutes:x.durationMinutes!}]);
             }}/>
           {services.map(service=><label key={service.id} style={{display:'block'}}>
@@ -642,7 +655,7 @@ export function AutoCalendar() {
             стоимость не рассчитывается, списание не выполняется. Не более восьми SKU.</p>
           {stockMessage&&<p>{stockMessage}</p>}
           <BookingDirectory org={org.trim()} loc={location.trim()} kind="stock" disabled={busy||!!pending}
-            onChoose={x=>{if(x.available===null)return;setStock(old=>[...old.filter(s=>s.skuId!==x.id),
+            onDenied={()=>{setStock([]);setMaterials([]);}} onChoose={x=>{if(x.available===null)return;setStock(old=>[...old.filter(s=>s.skuId!==x.id),
               {skuId:x.id,article:x.label,available:x.available!}]);}}/>
           {stock.filter(x=>x.available>0).map(item=>{
             const chosen=materials.find(x=>x.skuId===item.skuId);
