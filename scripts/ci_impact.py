@@ -107,11 +107,14 @@ def impact(paths: list[str], *, full: bool = False,
            offline_plan: tuple[str, ...] | None = None) -> tuple[set[str], bool]:
     if full or not paths:
         return set(FULL), True
-    if offline_plan is not None and _offline_candidate(paths):
-        return ({"api", "postgres"} if offline_plan else {"api"}), False
-    # A candidate with no independently verified plan is always full, even
-    # if the only changed implementation happens to live under auto_*.py.
-    if _offline_candidate(paths):
+    groups = _offline_candidate(paths)
+    if groups and offline_plan is not None:
+        mandatory = tuple(sorted({test for group in groups for test in group[2]}))
+        if offline_plan == mandatory:
+            return ({"api", "postgres"} if mandatory else {"api"}), False
+    # Any known offline implementation with an unverified or mixed scope
+    # stays full, including the backend module under auto_*.py.
+    if any(set(paths).intersection(group[0]) for group in OFFLINE_GROUPS):
         return set(FULL), True
     required: set[str] = set()
     full_pg = False

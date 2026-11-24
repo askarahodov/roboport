@@ -78,6 +78,16 @@ class ImpactTests(unittest.TestCase):
                 self.assertEqual(impact(paths + [extra], offline_plan=integration),
                                  (set(FULL), True))
 
+    def test_mixed_backend_or_wrong_mandatory_plan_never_skips_pg(self):
+        backend = OFFLINE_GROUPS[-1][0][1]
+        self.assertEqual(impact([backend], offline_plan=()), (set(FULL), True))
+        self.assertEqual(impact([backend, "apps/api/roboport_api/auto_other.py"],
+                                offline_plan=OFFLINE_GROUPS[-1][2]),
+                         (set(FULL), True))
+        paths = [OFFLINE_GROUPS[0][0][0], OFFLINE_GROUPS[-1][0][0]]
+        self.assertEqual(impact(paths, offline_plan=OFFLINE_GROUPS[-1][2]),
+                         ({"api", "postgres"}, False))
+
     def test_verified_offline_scope_checks_base_head_and_required_files(self):
         for sources, contracts, integration in OFFLINE_GROUPS:
             with self.subTest(sources=sources), TemporaryDirectory() as directory, chdir(directory):
