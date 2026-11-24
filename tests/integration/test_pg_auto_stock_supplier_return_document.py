@@ -189,3 +189,69 @@ def test_supplier_return_rejects_malformed_inputs_before_db_access():
                               1, "Возврат по браку", "RMA-123")
     with pytest.raises(AutoStockDenied, match="INVALID_INPUT"):
         approve_supplier_return(db, token, org, loc, str(receipt), request)
+
+
+def test_commercial_reconciliation_receipt_return_provenance_and_live_acl(monkeypatch):
+    from datetime import datetime,timezone
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    from roboport_api.auto_document_access import publish_policy
+    from roboport_api.auto_stock_receipt_document import create_receipt_document,accept_receipt_document
+    from test_pg_auto_document_access_http import admin
+    from test_pg_auto_stock_service import grant
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,sku,lot,receipt=setup_receipt(db,d,3)
+        valuation=value(db,d,org,loc,receipt,vat=601)
+        first=draft(db,d,org,loc,receipt,1)
+        approve(db,d,org,loc,first)
+        second=draft(db,d,org,loc,receipt,2)
+        approve(db,d,org,loc,second)
+        waiting=create_receipt_document(db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),2,"WAITING")
+        accepted=create_receipt_document(db,d["tokens"][d["intake"]],org,loc,lot,uuid4(),1,"UNVALUED")
+        accept_receipt_document(db,d["tokens"][d["manager"]],org,loc,accepted,uuid4())
+        admin(db,org,d["intake"])
+        grant(db,d["manager"],org,loc,"WAREHOUSE")
+    base=f"/api/v1/dev/auto/organizations/{org}/warehouse/reconciliation"
+    detail=base+"/"+str(sku)
+    params={"locationId":str(loc)}
+    with TestClient(app,base_url="https://127.0.0.1") as client:
+        client.cookies.set("rp_session",d["tokens"][d["intake"]])
+        assert client.get(base,params=params).json()["canViewPurchases"] is False
+        assert client.get(detail,params={**params,"kind":"receipts"}).status_code==403
+        client.cookies.set("rp_session",d["tokens"][d["manager"]])
+        assert client.get(base,params=params).json()["canViewPurchases"] is True
+        response=client.get(detail,params={**params,"kind":"receipts"})
+        assert response.status_code==200,response.text
+        assert response.headers["cache-control"]=="no-store"
+        rows={x["documentId"]:x for x in response.json()["items"]}
+        assert rows[str(waiting)]["status"]=="DRAFT" and rows[str(waiting)]["valuation"] is None
+        assert rows[str(accepted)]["status"]=="ACCEPTED" and rows[str(accepted)]["valuation"] is None
+        row=rows[str(receipt)]
+        assert row["status"]=="VALUED"
+        v=row["valuation"]
+        assert (v["id"],v["currency"],v["unitNetMinor"],v["netMinor"],v["vatMinor"],v["grossMinor"])==(str(valuation),"RUB","1250","3750","601","4351")
+        assert (v["returnedQuantity"],v["returnedNetMinor"],v["returnedVatMinor"])==("3","3750","601")
+        returns=client.get(detail,params={**params,"kind":"supplier-returns"}).json()["items"]
+        assert {r["sourceReceiptId"] for r in returns}=={str(receipt)}
+        assert {r["documentId"]:r["attribution"]["vatMinor"] for r in returns}=={str(first):"200",str(second):"401"}
+        assert client.get(base+"/"+str(uuid4()),params={**params,"kind":"receipts"}).status_code==403
+        def policy(cap,allowed,cutoff=None):
+            with psycopg.connect(DSN) as db:
+                publish_policy(db,d["tokens"][d["intake"]],org,request_key=uuid4(),
+                    role="WAREHOUSE",loc=loc,user=d["manager"],document="SUPPLIER_ORDER",
+                    cap=cap,allowed=allowed,not_before=cutoff)
+        policy("PRICE_PURCHASE",False)
+        assert client.get(base,params=params).json()["canViewPurchases"] is False
+        for kind in ("receipts","supplier-returns"):
+            assert client.get(detail,params={**params,"kind":kind}).status_code==403
+        assert client.get(detail,params={**params,"kind":"events"}).status_code==200
+        policy("PRICE_PURCHASE",True)
+        assert client.get(detail,params={**params,"kind":"receipts"}).status_code==200
+        policy("READ",True,datetime.now(timezone.utc))
+        assert client.get(base,params=params).json()["canViewPurchases"] is False
+        assert client.get(detail,params={**params,"kind":"receipts"}).status_code==403
+        assert client.get(detail,params={**params,"kind":"supplier-returns"}).status_code==403
