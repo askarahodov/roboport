@@ -337,3 +337,43 @@ test('CRM journal reauthorizes page request after initial successful page',async
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByLabel('Обращение')).toHaveCount(0);
 });
+
+
+test('CRM staff creates and cancels a closed-order survey with exact retry',async({page})=>{
+  const order='88888888-8888-4888-8888-888888888888';
+  const survey='99999999-9999-4999-8999-999999999999';
+  let state:'NONE'|'OPEN'|'CANCELED'='NONE';let attempt:unknown=null;let lost=true;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}'}));
+  await page.route(path,route=>{
+    const req=route.request();
+    if(req.url().endsWith('/survey')){
+      if(req.method()==='POST'){
+        const data=req.postDataJSON();
+        if(data.action==='INVITE'){
+          if(lost){lost=false;attempt=data;state='OPEN';return route.abort();}
+          expect(data).toEqual(attempt);
+        }else{expect(data.action).toBe('CANCEL');state='CANCELED';}
+      }
+      return route.fulfill({status:req.method()==='POST'&&state==='CANCELED'?201:200,contentType:'application/json',
+        body:JSON.stringify({syntheticOnly:true,sendAllowed:false,releaseAllowed:false,workOrderId:order,
+          eligible:true,replayed:req.method()==='POST'&&state==='OPEN',
+          survey:state==='NONE'?null:{id:survey,createdAt:'2030-01-01T10:00:00Z',expiresAt:'2030-01-31T10:00:00Z',
+            status:state,rating:null,reasonCode:null,resolvedAt:state==='CANCELED'?'2030-01-02T10:00:00Z':null}})});
+    }
+    if(req.url().endsWith('/tasks'))return route.fulfill({status:200,contentType:'application/json',body:'{"syntheticOnly":true,"items":[]}'});
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,items:[item('BOOKED',[event('BOOKED',null,appointment)])]})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');await scope(page);
+  await page.getByLabel('Обращение').selectOption(lead);
+  const section=page.getByRole('region',{name:'Опрос после ремонта'});
+  await section.getByRole('button',{name:'Открыть опрос'}).click();
+  await section.getByRole('button',{name:'Создать опрос в кабинете'}).click();
+  await expect(section.getByText('Результат неизвестен.',{exact:false})).toBeVisible();
+  await section.getByRole('button',{name:'Повторить исходное действие'}).click();
+  await expect(section.getByText('Ожидает ответа')).toBeVisible();
+  await section.getByRole('button',{name:'Отменить опрос'}).click();
+  await expect(section.getByText('Отменён',{exact:true})).toBeVisible();
+  await expect(section.getByRole('button',{name:'Отменить опрос'})).toHaveCount(0);
+});

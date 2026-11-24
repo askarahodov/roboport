@@ -1,5 +1,6 @@
 import React from 'react';
 import { StaffCrmContactPreferences } from './StaffCrmContactPreferences';
+import {ServiceSurvey} from '../shared/ServiceSurvey';
 import { StaffCrmMockMessages } from './StaffCrmMockMessages';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -471,6 +472,10 @@ export function AutoCrmLeads(){
         <StaffCrmMockMessages key={'mock:'+scope+':'+selected} base={base} leadId={selected}
           onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);
             setStatus('denied');}}/>
+        {chosen.status==='BOOKED'&&<ServiceSurvey key={'survey:'+scope+':'+selected}
+          path={base+'/'+encodeURIComponent(selected)+'/survey'} onDenied={()=>{
+            setRows([]);setSelected('');setInbox([]);setTasks([]);setStatus('denied');
+          }}/>}
         <ol>{chosen.events.map(e=><li key={e.id}>{leadStageLabels[e.stageCode]}
           {e.reasonCode?' · '+(leadReasonLabels[e.reasonCode]??'Неизвестная причина'):''}
           {e.appointmentId?' · запись '+e.appointmentId:''}</li>)}</ol>
