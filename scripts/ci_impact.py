@@ -125,8 +125,9 @@ def impact(paths: list[str], *, full: bool = False,
             return set(FULL), True
         if path.startswith("apps/api/roboport_api/"):
             required.update(("postgres", "api"))
-            if not path.split("/")[-1].startswith("auto_"):
-                full_pg = True
+            # Runtime modules can have unchanged transitive consumers.
+            # A newly added test cannot replace the full integration suite.
+            full_pg = True
         elif path.startswith("apps/api/"):
             required.update(("postgres", "api"))
             full_pg = True
