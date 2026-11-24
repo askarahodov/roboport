@@ -17,14 +17,6 @@ from fastapi.responses import JSONResponse, Response
 
 from .auth_http import _mutation_ok
 from .auto_vehicle_claim_http import _request_dsn, _response
-from .auto_synthetic_cutover import (
-    SyntheticCutoverSources, SyntheticCutoverDenied, _authority,
-    rehearse_synthetic_cutover, reconcile_synthetic_cutover,
-)
-from .auto_synthetic_cutover_export import (
-    _synthetic_bundle_counts, export_reconciled_synthetic_cutover,
-    verify_synthetic_cutover_export,
-)
 
 router = APIRouter(include_in_schema=False)
 ROOT = "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/cutover"
@@ -64,6 +56,8 @@ async def _body(request):
 
 def prepare_bundle(body, org, loc, operation):
     """Один строгий формат preview/commit/reconcile/export, без путей пользователя."""
+    from .auto_synthetic_cutover import SyntheticCutoverDenied
+    from .auto_synthetic_cutover_export import _synthetic_bundle_counts
     required = {"syntheticOnly", "files"}
     if operation != "preview":
         required.add("bundleSha256")
@@ -121,6 +115,7 @@ def prepare_bundle(body, org, loc, operation):
 
 
 def _sources(directory, raws, hashes, batches):
+    from .auto_synthetic_cutover import SyntheticCutoverSources
     for name in FILES:
         fd = os.open(directory / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as handle:
@@ -157,6 +152,10 @@ async def cutover(org_id: str, loc_id: str, operation: str, request: Request):
         body = await _body(request)
     except (ValueError, TypeError):
         return _response(request, 422, "INVALID_INPUT")
+    from .auto_synthetic_cutover import (
+        SyntheticCutoverDenied, _authority, rehearse_synthetic_cutover, reconcile_synthetic_cutover,
+    )
+    from .auto_synthetic_cutover_export import export_reconciled_synthetic_cutover, verify_synthetic_cutover_export
     token = request.cookies.get("rp_session", "")
     try:
         with psycopg.connect(dsn) as db:

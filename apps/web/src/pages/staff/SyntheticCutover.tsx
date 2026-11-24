@@ -76,6 +76,7 @@ export function SyntheticCutover(){
     const currentEpoch=++epoch.current,controller=new AbortController();
     request.current=controller;
     const current=()=>currentEpoch===epoch.current&&!controller.signal.aborted;
+    if(operation==='preview'){setReceipt(null);setConfirm(false);}
     setStatus('Выполняется проверка…');
     try{
       const entries=await Promise.all(names.map(async n=>{
@@ -141,9 +142,15 @@ export function SyntheticCutover(){
     <p>Требуются живые роли MANAGER и WAREHOUSE одного филиала и отдельный флаг стенда.</p>
     <button type="button" disabled={!scope||busy} onClick={demo}>Создать искусственный комплект</button>
     <fieldset disabled={busy}><legend>Три исходных CSV (до 1 МБ каждый)</legend>
+      <p>Перед импортом сохраните исходники: искусственный комплект хранится только в памяти страницы.</p>
       {names.map(n=><div key={n}><label>{n} <input key={org+loc+n+(files[n]?.name??'')} type="file" accept=".csv,text/csv"
         onChange={e=>{const file=e.target.files?.[0];invalidate();setFiles(old=>({...old,[n]:file}));}}/></label>
-        <p>{files[n]?files[n]!.name+' · '+files[n]!.size+' байт':'Файл не выбран'}</p></div>)}
+        <p>{files[n]?files[n]!.name+' · '+files[n]!.size+' байт':'Файл не выбран'}</p>
+        {files[n]&&<button type="button" onClick={()=>{
+          const url=URL.createObjectURL(files[n]!);const link=document.createElement('a');
+          link.href=url;link.download=n;document.body.appendChild(link);link.click();link.remove();
+          URL.revokeObjectURL(url);
+        }}>Сохранить {n}</button>}</div>)}
       <label><input type="checkbox" checked={ack} onChange={e=>{invalidate();setAck(e.target.checked);}}/>
         Подтверждаю, что все файлы искусственные, без реальных данных</label>
     </fieldset>
