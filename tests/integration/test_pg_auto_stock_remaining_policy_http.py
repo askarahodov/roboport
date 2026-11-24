@@ -73,9 +73,11 @@ def test_writeoff_and_direct_stock_policy(monkeypatch):
     report=url(org,loc)
     query={"fromMonth":months[0],"toMonth":months[-1]}
     assert http.get(report,params=query).status_code==403
+    assert http.get(report+'/export',params=query).status_code==403
     policy(http,d,org,loc,"MANAGER","READ",True)
     token(http,d,manager)
     assert http.get(report,params=query).status_code==200
+    assert http.get(report+'/export',params=query).status_code==200
     replay=post(http,d,manager,decision,review,approve_key)
     assert replay.status_code==200 and replay.json()["decisionId"]==approved.json()["decisionId"]
     with psycopg.connect(DSN) as db:
