@@ -82,14 +82,26 @@ def get_appointments(request: Request, cursor: str | None = None):
     return JSONResponse(content=result, headers={"Cache-Control":"no-store"})
 
 
+@router.get("/api/v1/dev/auto/customer/booking/appointments/{appointment_id}/history")
+def customer_booking_history(appointment_id:str,request:Request,organizationId:str,locationId:str,
+                             cursor:str|None=None):
+    from .auto_appointment_http import _read_booking_history
+    return _read_booking_history(request,organizationId,locationId,appointment_id,cursor,customer=True)
+
+
 @router.get("/api/v1/dev/auto/customer/booking/slots")
 def get_slots(request: Request, organizationId: str, locationId: str,
-              customerLinkId: str, bayId: str, localDay: str):
+              customerLinkId: str, bayId: str, localDay: str,
+              appointmentId: str | None = None):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
     try:
         org, loc, link, bay = map(UUID, (organizationId, locationId, customerLinkId, bayId))
+        appointment=UUID(appointmentId) if appointmentId is not None else None
+        if any(len(request.query_params.getlist(k))>1 for k in (
+            "organizationId","locationId","customerLinkId","bayId","localDay","appointmentId")):
+            raise ValueError("duplicate slot context")
         selected_services = parse_slot_services(request.query_params.getlist("serviceId"))
         if len(localDay) != 10:
             raise ValueError("invalid local day")
@@ -115,7 +127,7 @@ def get_slots(request: Request, organizationId: str, locationId: str,
                 end = datetime(tomorrow.year,tomorrow.month,tomorrow.day,tzinfo=zone)
                 items = candidate_slots(
                     db, token, org, loc, bay, start,
-                    day_end=end, customer_link=link, service_ids=selected_services,
+                    appointment=appointment, day_end=end, customer_link=link, service_ids=selected_services,
                 )
                 hours_configured = db.execute(
                     """SELECT 1 FROM auto_location_opening_policy
@@ -128,6 +140,29 @@ def get_slots(request: Request, organizationId: str, locationId: str,
                                  "guaranteed":False,"syntheticOnly":True,
                                  "openingHoursConfigured":hours_configured},
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/customer/booking/service-directory")
+def customer_service_directory(request:Request,organizationId:str,locationId:str,
+                               customerLinkId:str,search:str="",afterId:str|None=None):
+    from .auto_booking_directory import directory,BookingDirectoryDenied
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc,link=map(UUID,(organizationId,locationId,customerLinkId))
+        after=UUID(afterId) if afterId is not None else None
+        if any(len(request.query_params.getlist(k))>1 for k in (
+                "organizationId","locationId","customerLinkId","search","afterId")):
+            raise ValueError("duplicate query")
+        with psycopg.connect(dsn) as db:
+            result=directory(db,request.cookies.get("rp_session",""),org,loc,"services",
+                             search,after,customer_link=link)
+    except BookingDirectoryDenied:
+        return _response(request,403,"FORBIDDEN")
+    except (TypeError,ValueError):
+        return _response(request,422,"INVALID_INPUT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
 
 
 @router.get("/api/v1/dev/auto/customer/booking/services")

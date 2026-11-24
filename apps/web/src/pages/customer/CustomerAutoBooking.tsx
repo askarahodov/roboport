@@ -1,4 +1,6 @@
 import React from 'react';
+import {BookingHistory} from '../shared/BookingHistory';
+import {BookingDirectory} from '../shared/BookingDirectory';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Resource={organizationId:string;locationId:string;customerLinkId:string;bayId:string;
@@ -29,6 +31,7 @@ export function CustomerAutoBooking(){
   const [serviceState,setServiceState]=React.useState('');
   const [slotState,setSlotState]=React.useState('');
   const [target,setTarget]=React.useState<Booking|null>(null);
+  const [historyId,setHistoryId]=React.useState<string|null>(null);
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
@@ -50,7 +53,7 @@ export function CustomerAutoBooking(){
   }
   function clearPrivate(){
     setResources([]);setBookings([]);setNextResourceCursor(null);setNextCursor(null);
-    setSelected('');setTarget(null);setSlots([]);setServices([]);setSelectedServices([]);
+    setSelected('');setTarget(null);setHistoryId(null);setSlots([]);setServices([]);setSelectedServices([]);
     setPending(null);setServiceState('');setSlotState('');
   }
   function deny(){
@@ -68,7 +71,7 @@ export function CustomerAutoBooking(){
     const generation=++epoch.current;
     slotRequest.current++;
     setState('loading');setResources([]);setBookings([]);setSlots([]);
-    setServices([]);setSelectedServices([]);setTarget(null);setPending(null);
+    setServices([]);setSelectedServices([]);setTarget(null);setHistoryId(null);setPending(null);
     setServiceState('');setSlotState('');
     setNextResourceCursor(null);setNextCursor(null);
     const current=()=>!controller.signal.aborted&&generation===epoch.current;
@@ -178,7 +181,8 @@ export function CustomerAutoBooking(){
     const r=scoped;
     const query=new URLSearchParams({organizationId:r.organizationId,
       locationId:r.locationId,customerLinkId:r.customerLinkId,bayId:r.bayId,localDay:day});
-    (target?target.serviceIds:selectedServices).forEach(id=>query.append('serviceId',id));
+    if(target)query.set('appointmentId',target.appointmentId);
+    else selectedServices.forEach(id=>query.append('serviceId',id));
     try{
       const resp=await fetch('/api/v1/dev/auto/customer/booking/slots?'+query,{
         credentials:'include',cache:'no-store'});
@@ -269,6 +273,10 @@ export function CustomerAutoBooking(){
           <strong>{locale(b.startsAt,b.timeZone)} — {locale(b.endsAt,b.timeZone)}
             {' '}({b.timeZone})</strong>
           <p>Заказ-наряд {b.workOrderId} · {b.status==='CANCELED'?'Отменена':'Активна'}</p>
+          <button type="button" disabled={busy||!!pending} onClick={()=>setHistoryId(old=>old===b.appointmentId?null:b.appointmentId)}>История записи</button>
+          {historyId===b.appointmentId&&<BookingHistory key={b.appointmentId} appointment={b.appointmentId}
+            path={'/api/v1/dev/auto/customer/booking/appointments/'+b.appointmentId+'/history?'+
+              new URLSearchParams({organizationId:b.organizationId,locationId:b.locationId})} onDenied={deny}/>}
           {b.canManage&&<div>
             <button type="button" disabled={busy||!!pending} onClick={()=>{
               setTarget(b);
@@ -301,6 +309,12 @@ export function CustomerAutoBooking(){
         {!target&&<fieldset aria-label="Услуги при записи (dev)"><legend>Работы по записи (необязательно)</legend>
           <p>Выберите не более 8 услуг и не более 24 часов суммарно. Поиск учитывает полную длительность. Первоначальный выбор работ не мешает переносу и отмене до начала оформления приёмщиком, осмотра, сметы или складских операций.</p>
           {serviceState&&<p role="status">{serviceState}</p>}
+          {scoped&&<BookingDirectory key={scoped.customerLinkId+':'+scoped.locationId} kind="services"
+            org={scoped.organizationId} loc={scoped.locationId} customerLink={scoped.customerLinkId}
+            disabled={busy||!!pending} onDenied={deny} onChoose={x=>{
+              if(x.durationMinutes===null)return;
+              setServices(old=>old.some(s=>s.id===x.id)?old:[...old,{id:x.id,code:x.id,title:x.label,durationMinutes:x.durationMinutes!}]);
+            }}/>}
           {services.map(service=><label key={service.id} style={{display:'block'}}>
             <input type="checkbox" aria-label={'Услуга '+service.code}
               checked={selectedServices.includes(service.id)}

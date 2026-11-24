@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 import hashlib
 import json
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 import psycopg
 from .auto_org_authority import organization_role_allows
 
@@ -93,7 +93,8 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                        request_key: UUID | None = None,
                        customer_mode: bool = False,
                        service_ids: tuple[UUID, ...] = (),
-                       material_items: tuple[tuple[UUID, str, int], ...] = ()
+                       material_items: tuple[tuple[UUID, str, int], ...] = (),
+                       complex_id: UUID | None = None
                        ) -> tuple[UUID, UUID, UUID]:
     if (not all(isinstance(x, UUID) for x in (organization,location,bay,link))
             or (employee is not None and not isinstance(employee, UUID))
@@ -112,6 +113,8 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                    type(item[2]) is not int or not 1 <= item[2] <= 1_000_000_000
                    for item in material_items)
             or len({item[0] for item in material_items}) != len(material_items)
+            or (complex_id is not None and (type(complex_id) is not UUID or customer_mode
+                or request_key is None or service_ids or material_items))
             or (customer_mode and material_items)
             or (material_items and request_key is None)
             or not all(isinstance(t, datetime) and t.tzinfo is not None
@@ -136,7 +139,7 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             """SELECT link.vehicle_id FROM auto_vehicle_customer_link link
                JOIN auto_vehicle_location_binding binding
                  ON binding.vehicle_id=link.vehicle_id
-               WHERE link.id=%s AND link.verified_at IS NOT NULL
+               WHERE link.id=%s AND link.verified_at IS NOT NULL AND link.verified_by IS NOT NULL
                  AND link.revoked_at IS NULL AND binding.location_id=%s
                FOR SHARE OF link, binding""", (link,location),
         ).fetchone()
@@ -148,6 +151,14 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             (bay,organization,location),
         ).fetchone() is None:
             raise AppointmentDenied("bay unavailable")
+        if complex_id is not None:
+            from .auto_booking_directory import complex_composition, BookingDirectoryDenied
+            try:
+                minutes,complex_materials=complex_composition(conn,token,organization,location,complex_id)
+            except BookingDirectoryDenied as exc:
+                raise AppointmentDenied("complex unavailable") from exc
+            if minutes*60>(ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)).total_seconds():
+                raise AppointmentDurationInvalid("complex exceeds reserved interval")
         # Каталог и длительности проверяются в той же транзакции, что бронь:
         # чужая/несуществующая услуга не создаёт ни Appointment, ни WorkOrder.
         if service_ids:
@@ -182,6 +193,8 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             }
             if service_ids:
                 fingerprint_body["services"] = sorted(str(item) for item in service_ids)
+            if complex_id is not None:
+                fingerprint_body["complex"]=str(complex_id)
             if material_items:
                 fingerprint_body["materials"] = sorted(
                     [{"skuId":str(sku),"kind":kind,"quantity":quantity}
@@ -241,6 +254,25 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                     if any(outstanding.get(sku) != qty
                            for sku,_,qty in material_items):
                         raise AppointmentKeyConflict("stock receipt no longer reserved")
+                if complex_id is not None:
+                    from .auto_work_complexes import _priced_scope, ComplexDenied
+                    try:
+                        _priced_scope(conn,token,organization,location,"CREATE",order=existing[3])
+                    except ComplexDenied as exc:
+                        raise AppointmentDenied("complex access revoked") from exc
+                    found=conn.execute("""
+                        SELECT 1 FROM auto_work_order_complex_selection
+                        WHERE work_order_id=%s AND complex_id=%s AND actor_id=%s
+                    """,(existing[3],complex_id,actor)).fetchone()
+                    if not found:
+                        raise AppointmentKeyConflict("complex receipt missing")
+                    outstanding=dict(conn.execute("""
+                        SELECT sku_id,SUM(CASE WHEN action='RESERVE' THEN quantity
+                            WHEN action IN ('ISSUE','RELEASE') THEN -quantity ELSE 0 END)
+                        FROM auto_work_order_stock_event WHERE work_order_id=%s GROUP BY sku_id
+                    """,(existing[3],)).fetchall())
+                    if any(outstanding.get(sku)!=qty for sku,qty in complex_materials):
+                        raise AppointmentKeyConflict("complex material receipt no longer reserved")
                 return existing[1],existing[2],existing[3]
         if starts <= datetime.now(timezone.utc):
             raise AppointmentDenied("appointment must begin in future")
@@ -314,6 +346,16 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
                                VALUES(%s,%s,%s,%s,%s)""",
                             (reserve_id,order,sku,kind,qty),
                         )
+                if complex_id is not None:
+                    from .auto_work_complexes import select_complex, ComplexDenied, ComplexConflict
+                    try:
+                        select_complex(conn,token,organization,location,order,
+                            request_key=uuid5(NAMESPACE_URL,"roboport:booking-complex:"+str(order)),
+                            complex_id=complex_id)
+                    except ComplexDenied as exc:
+                        raise AppointmentDenied("complex access denied") from exc
+                    except ComplexConflict as exc:
+                        raise AppointmentStockUnavailable("complex service or stock unavailable") from exc
         except (psycopg.errors.ExclusionViolation, psycopg.errors.RaiseException,
                 psycopg.errors.DeadlockDetected) as exc:
             if (isinstance(exc,psycopg.errors.RaiseException) and
@@ -362,8 +404,8 @@ def cancel_appointment(conn: psycopg.Connection, token: str,
             conn, token, organization, "INTAKE", scoped[0], for_mutation=True
         ):
             raise AppointmentDenied("organization intake required")
-        # Lock appointment before resolving the latest booking: rescheduling
-        # takes the same lock, so a concurrent cancel cannot target stale data.
+        # Блокируем Appointment до определения последней брони:
+        # перенос и отмена используют одну блокировку.
         conn.execute("SELECT id FROM auto_appointment WHERE id=%s FOR UPDATE", (appointment,))
         if customer_mode:
             _customer_order_pristine(conn, appointment)
@@ -472,7 +514,7 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
             """SELECT 1 FROM auto_vehicle_customer_link link
                JOIN auto_vehicle_location_binding b ON b.vehicle_id=link.vehicle_id
                WHERE link.id=%s AND link.vehicle_id=%s AND link.revoked_at IS NULL
-                 AND link.verified_at IS NOT NULL AND b.location_id=%s
+                 AND link.verified_at IS NOT NULL AND link.verified_by IS NOT NULL AND b.location_id=%s
                FOR SHARE OF link,b""", (a[1],a[2],a[0]),
         ).fetchone()
         if scope is None:

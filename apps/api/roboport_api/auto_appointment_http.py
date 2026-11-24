@@ -29,6 +29,52 @@ class CreateAppointment(BookingInterval):
     employeeId: UUID | None = None
     serviceIds: list[UUID] = Field(default_factory=list, max_length=8)
     materialItems: list[BookingMaterialItem] = Field(default_factory=list, max_length=8)
+    complexId: UUID | None = None
+
+def _read_booking_history(request,org_id,loc_id,appointment_id,cursor,*,customer=False):
+    from .auto_booking_history import booking_history,BookingHistoryDenied
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc,appointment=map(UUID,(org_id,loc_id,appointment_id))
+        if len(request.query_params.getlist("cursor"))>1:
+            raise ValueError("duplicate cursor")
+        with psycopg.connect(dsn) as db:
+            result=booking_history(db,request.cookies.get("rp_session",""),org,loc,appointment,
+                                   customer=customer,cursor=cursor)
+    except BookingHistoryDenied:
+        return _response(request,403,"FORBIDDEN")
+    except (TypeError,ValueError):
+        return _response(request,422,"INVALID_INPUT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/appointments/{appointment_id}/history")
+def staff_booking_history(org_id:str,loc_id:str,appointment_id:str,request:Request,cursor:str|None=None):
+    return _read_booking_history(request,org_id,loc_id,appointment_id,cursor)
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/booking-directory")
+def booking_directory(org_id:str,loc_id:str,request:Request,kind:str,
+                      search:str="",afterId:str|None=None):
+    from .auto_booking_directory import directory,BookingDirectoryDenied
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(loc_id)
+        after=UUID(afterId) if afterId is not None else None
+        if any(len(request.query_params.getlist(k))>1 for k in ("kind","search","afterId")):
+            raise ValueError("duplicate query")
+        with psycopg.connect(dsn) as db:
+            result=directory(db,request.cookies.get("rp_session",""),org,loc,kind,search,after)
+    except BookingDirectoryDenied:
+        return _response(request,403,"FORBIDDEN")
+    except (TypeError,ValueError):
+        return _response(request,422,"INVALID_INPUT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/booking-services")
 def intake_booking_services(org_id: str, loc_id: str, request: Request):
@@ -109,6 +155,8 @@ async def create(org_id: str, request: Request):
     try:
         org=UUID(org_id)
         body=CreateAppointment.model_validate(await request.json())
+        if body.complexId is not None and (body.serviceIds or body.materialItems):
+            raise ValueError("choose either complex or individual items")
         idempotency_header=request.headers.get('Idempotency-Key')
         request_key=UUID(idempotency_header) if idempotency_header is not None else None
     except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
@@ -120,7 +168,7 @@ async def create(org_id: str, request: Request):
             appointment,booking,work_order=create_appointment(
                 db,request.cookies.get("rp_session",""),org,body.locationId,
                 body.bayId,body.customerLinkId,body.startsAt,body.endsAt,body.employeeId,
-                request_key, service_ids=tuple(body.serviceIds),
+                request_key, service_ids=tuple(body.serviceIds), complex_id=body.complexId,
                 material_items=tuple(
                     (item.skuId,item.kind,item.quantity)
                     for item in body.materialItems
@@ -321,7 +369,8 @@ def read_slot_candidates(org_id: str, request: Request, locationId: str,
                          bayId: str, day: str | None = None,
                          localDay: str | None = None,
                          employeeId: str | None = None,
-                         appointmentId: str | None = None):
+                         appointmentId: str | None = None,
+                         employeeMode: str = "retain", complexId: str | None = None):
     from .auto_slot_candidates import candidate_slots, SlotsDenied, parse_slot_services
     from .auto_calendar import local_day_window, CalendarInvalid, CalendarDenied
     from datetime import timezone
@@ -332,6 +381,12 @@ def read_slot_candidates(org_id: str, request: Request, locationId: str,
         org, location, bay = UUID(org_id), UUID(locationId), UUID(bayId)
         employee = UUID(employeeId) if employeeId is not None else None
         appointment = UUID(appointmentId) if appointmentId is not None else None
+        complex_id=UUID(complexId) if complexId is not None else None
+        if (employeeMode not in ("retain","clear") or
+            (employeeMode=="clear" and (appointment is None or employee is not None)) or
+            any(len(request.query_params.getlist(k))>1 for k in (
+                "locationId","bayId","day","localDay","employeeId","appointmentId","employeeMode","complexId"))):
+            raise ValueError("invalid slot context")
         selected_services = parse_slot_services(request.query_params.getlist("serviceId"))
         if (day is None) == (localDay is None):
             raise ValueError("exactly one of day or localDay required")
@@ -352,7 +407,7 @@ def read_slot_candidates(org_id: str, request: Request, locationId: str,
             slots = candidate_slots(
                 db, request.cookies.get("rp_session", ""),
                 org, location, bay, start, employee, appointment, day_end=end,
-                service_ids=selected_services,
+                service_ids=selected_services, clear_employee=employeeMode=="clear", complex_id=complex_id,
             )
             hours_configured = db.execute(
                 """SELECT 1 FROM auto_location_opening_policy

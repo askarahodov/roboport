@@ -235,3 +235,148 @@ def test_outer_transaction_failure_rolls_back_booking_stock_and_outbox(monkeypat
                AND aggregate_id IN (SELECT id FROM auto_appointment WHERE organization_id=%s)""",
             (org,),
         ).fetchone()[0]==0
+
+
+def test_complete_calendar_directory_complex_move_history_and_cancel(monkeypatch):
+    """Один сценарий: выбор ресурсов → комплекс → резерв → перенос → отмена."""
+    from test_pg_auto_work_complexes_http import complex_body
+    d,org,loc,bay,http,part,consumable,foreign_sku,service,_=_ready(monkeypatch)
+    start=(datetime.now(timezone.utc)+timedelta(days=31)).replace(
+        hour=0,minute=0,second=0,microsecond=0)
+    another_bay=uuid4()
+    extra=uuid4()
+    with psycopg.connect(DSN) as db:
+        manager_grant=grant(db,d["intake"],org,loc,"MANAGER")
+        db.execute("""INSERT INTO auto_work_bay(id,organization_id,location_id,code)
+                      VALUES(%s,%s,%s,'SYN-SECOND')""",(another_bay,org,loc))
+        db.execute("""INSERT INTO auto_staff_shift(id,organization_id,location_id,user_id,starts_at,ends_at)
+                      VALUES(%s,%s,%s,%s,%s,%s)""",
+                   (uuid4(),org,loc,d["intake"],start+timedelta(hours=8),start+timedelta(hours=18)))
+        db.execute("""INSERT INTO auto_service_catalog
+            (id,organization_id,location_id,code,title,duration_minutes)
+            VALUES(%s,%s,%s,'SYN-LONG','SYNTHETIC LONG WORK',75)""",(extra,org,loc))
+        for i in range(101):
+            db.execute("""INSERT INTO auto_service_catalog
+                (id,organization_id,location_id,code,title,duration_minutes)
+                VALUES(%s,%s,%s,%s,'SYNTHETIC SEARCH',30)""",
+                (uuid4(),org,loc,f'SYN-SEARCH-{i:03d}'))
+    root=f"/api/v1/dev/auto/organizations/{org}"
+    branch=root+f"/locations/{loc}"
+    directory=branch+"/booking-directory"
+    assert http.get(directory,params={"kind":"bays"}).status_code==403
+    headers=_auth(http,d,d["intake"])
+    for kind,wanted in (("bays",bay),("vehicles",d["link"]),("employees",d["intake"]),("stock",part)):
+        got=http.get(directory,params={"kind":kind})
+        assert got.status_code==200,got.text
+        assert got.headers["cache-control"]=="no-store"
+        assert str(wanted) in [row["id"] for row in got.json()["items"]]
+        assert all(set(row)=={"id","label","durationMinutes","available"} for row in got.json()["items"])
+        assert str(foreign_sku) not in got.text
+    assert http.get(directory,params=[("kind","bays"),("kind","vehicles")]).status_code==422
+    assert http.get(directory,params={"kind":"services","search":"x"*65}).status_code==422
+    seen=[]
+    after=None
+    for _ in range(3):
+        params={"kind":"services","search":"SYN-SEARCH-"}
+        if after:params["afterId"]=after
+        got=http.get(directory,params=params)
+        assert got.status_code==200,got.text
+        seen.extend(x["id"] for x in got.json()["items"])
+        after=got.json()["nextAfterId"]
+    assert after is None and len(seen)==len(set(seen))==101
+    payload=complex_body(service,part,consumable)
+    payload["serviceIds"]=[str(service),str(extra)]
+    defined=http.post(branch+"/work-complexes",headers=headers,json=payload)
+    assert defined.status_code==201,defined.text
+    ident=defined.json()["complex"]["id"]
+    found=http.get(directory,params={"kind":"complexes","search":"SYN-COMPLEX"})
+    assert found.status_code==200 and found.json()["items"]==[{
+        "id":ident,"label":"SYN-COMPLEX · Synthetic repair package",
+        "durationMinutes":105,"available":None}]
+    slots_url=root+"/slot-candidates"
+    slots_params={"locationId":str(loc),"bayId":str(bay),"day":start.date().isoformat(),
+                  "employeeId":str(d["intake"]),"complexId":ident}
+    slots=http.get(slots_url,params=slots_params)
+    assert slots.status_code==200,slots.text
+    assert slots.json()["items"]
+    assert all(datetime.fromisoformat(x["endsAt"])-datetime.fromisoformat(x["startsAt"])
+               ==timedelta(minutes=105) for x in slots.json()["items"])
+    at=start+timedelta(hours=9)
+    body={"locationId":str(loc),"bayId":str(bay),"customerLinkId":str(d["link"]),
+          "employeeId":str(d["intake"]),"complexId":ident,"startsAt":at.isoformat(),
+          "endsAt":(at+timedelta(minutes=105)).isoformat()}
+    create=root+"/appointments"
+    idem={**headers,"Idempotency-Key":str(uuid4())}
+    assert http.post(create,json={**body,"serviceIds":[str(service)]},headers=idem).status_code==422
+    short=http.post(create,json={**body,"endsAt":(at+timedelta(hours=1)).isoformat()},headers=idem)
+    assert short.status_code==422 and short.json()["code"]=="SERVICES_EXCEED_SLOT"
+    created=http.post(create,json=body,headers=idem)
+    assert created.status_code==201,created.text
+    receipt=created.json()
+    assert http.post(create,json=body,headers=idem).json()==receipt
+    order,appointment=receipt["workOrderId"],receipt["appointmentId"]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_work_order_complex_selection WHERE work_order_id=%s",(order,)).fetchone()==(1,)
+        assert db.execute("SELECT count(*) FROM auto_work_order_service WHERE work_order_id=%s",(order,)).fetchone()==(2,)
+        assert balance(db,part)==(2,2)
+        assert balance(db,consumable)==(5,1)
+    later=start+timedelta(hours=12)
+    moving={**headers,"Idempotency-Key":str(uuid4())}
+    context={"locationId":str(loc),"bayId":str(another_bay),"day":start.date().isoformat(),
+             "appointmentId":appointment}
+    candidates=http.get(slots_url,params=context)
+    assert candidates.status_code==200,candidates.text
+    assert candidates.json()["items"]
+    assert all(datetime.fromisoformat(x["endsAt"])-datetime.fromisoformat(x["startsAt"])
+        ==timedelta(minutes=105) and datetime.fromisoformat(x["startsAt"])>=start+timedelta(hours=8)
+        for x in candidates.json()["items"])
+    assert http.get(slots_url,params={**context,"serviceId":str(service)}).status_code==403
+    moved=http.post(create+"/"+appointment+"/reschedule",headers=moving,json={
+        "bayId":str(another_bay),"startsAt":later.isoformat(),
+        "endsAt":(later+timedelta(minutes=105)).isoformat()})
+    assert moved.status_code==200,moved.text
+    history_url=branch+"/appointments/"+appointment+"/history"
+    history=http.get(history_url)
+    assert history.status_code==200,history.text
+    assert history.headers["cache-control"]=="no-store"
+    assert history.json()["workOrderId"]==order
+    assert history.json()["realDelivery"] is False
+    assert [x["state"] for x in history.json()["items"]]==["CURRENT","REPLACED"]
+    assert {x["action"]:x["notificationStatus"] for x in history.json()["items"]}=={
+        "CREATED":"SUPERSEDED","RESCHEDULED":"PENDING"}
+    customer_history=ROOT+"/appointments/"+appointment+"/history"
+    customer_params={"organizationId":str(org),"locationId":str(loc)}
+    _auth(http,d,d["client_b"])
+    assert http.get(customer_history,params=customer_params).status_code==403
+    _auth(http,d,d["client_a"])
+    assert http.get(customer_history,params=customer_params).json()==history.json()
+    customer_dir=http.get(ROOT+"/service-directory",params={
+        **customer_params,"customerLinkId":str(d["link"]),"search":"SYN-SEARCH-"})
+    assert customer_dir.status_code==200 and len(customer_dir.json()["items"])==50
+    assert customer_dir.json()["nextAfterId"]
+    assert http.get(ROOT+"/slots",params={**customer_params,"customerLinkId":str(d["link"]),
+        "bayId":str(another_bay),"localDay":start.date().isoformat(),
+        "appointmentId":appointment}).status_code==403  # Комплекс выбран сотрудником.
+    headers=_auth(http,d,d["intake"])
+    cancel_url=create+"/"+appointment+"/cancel"
+    cancel_headers={**headers,"Idempotency-Key":str(uuid4())}
+    assert http.post(cancel_url,headers=cancel_headers).status_code==409
+    with psycopg.connect(DSN) as db:
+        for sku_id,qty in ((part,2),(consumable,1)):
+            mutate_work_order_stock(db,d["tokens"][d["intake"]],org,loc,UUID(order),
+                                    sku_id,uuid4(),"RELEASE",qty)
+    assert http.post(cancel_url,headers=cancel_headers).status_code==200
+    cancelled=http.get(history_url).json()
+    assert cancelled["items"][0]["state"]=="CANCELED"
+    assert cancelled["cancellation"]["notificationStatus"]=="PENDING"
+    assert {x["notificationStatus"] for x in cancelled["items"]}=={"SUPERSEDED"}
+    with psycopg.connect(DSN) as db:
+        assert balance(db,part)==(2,0) and balance(db,consumable)==(5,0)
+        assert db.execute("SELECT count(*) FROM auto_appointment WHERE organization_id=%s",(org,)).fetchone()==(1,)
+        db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(manager_grant,))
+    assert http.get(directory,params={"kind":"complexes"}).status_code==403
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+    assert http.get(history_url).status_code==403
+    _auth(http,d,d["client_a"])
+    assert http.get(customer_history,params=customer_params).status_code==403

@@ -73,6 +73,25 @@ def test_customer_slots_follow_catalog_duration_and_avoid_occupied_bay(monkeypat
                WHERE aggregate_type='auto_appointment' AND aggregate_id=%s""",
             (created.json()["appointmentId"],),
         ).fetchone()[0] == 1
+    appointment=created.json()["appointmentId"]
+    move_context={**query,"appointmentId":appointment}
+    candidates=http.get(endpoint,params=move_context)
+    assert candidates.status_code==200 and candidates.json()["items"]
+    assert all(datetime.fromisoformat(x["endsAt"])-datetime.fromisoformat(x["startsAt"])
+               ==timedelta(minutes=75) for x in candidates.json()["items"])
+    assert http.get(endpoint,params={**move_context,"serviceId":str(first)}).status_code==403
+    _auth(http,d,d["client_b"])
+    assert http.get(endpoint,params=move_context).status_code==403
+    headers=_auth(http,d,d["client_a"])
+    moved=http.post(ROOT+"/appointments/"+appointment+"/reschedule",json={
+        "organizationId":str(org),"bayId":str(bay),**candidates.json()["items"][0],
+    },headers={**headers,"Idempotency-Key":str(uuid4())})
+    assert moved.status_code==200,moved.text
+    history=http.get(ROOT+"/appointments/"+appointment+"/history",params={
+        "organizationId":str(org),"locationId":str(loc)})
+    assert history.status_code==200,history.text
+    assert history.json()["workOrderId"]==created.json()["workOrderId"]
+    assert [x["action"] for x in history.json()["items"]]==["RESCHEDULED","CREATED"]
 
 
 def test_slot_selection_rejects_foreign_duplicate_and_unverified_identity(monkeypatch):
