@@ -1,12 +1,16 @@
-"""Закрытый план ТО: отдельные рекомендации, не продажи и не бронирование."""
+"""Закрытый план ТО и явно подтверждённая запись клиента на повторный визит."""
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 
 from .auto_workshop_qc import _actor_and_order, InspectionDenied
 from .auto_customer_orders import _actor as customer_actor, CustomerOrderDenied
 from .auto_org_authority import organization_role_allows
+from .auto_appointment_service import (create_appointment, AppointmentDenied,
+    AppointmentConflict, AppointmentKeyConflict, AppointmentDurationInvalid)
+from .auto_slot_candidates import candidate_slots, SlotsDenied
 
 REASONS=("PERIODIC","DEFERRED","FOLLOWUP")
 
@@ -47,7 +51,7 @@ def _scope(conn,token,org,loc,order,*,customer=False,write=False):
       ),a.booking_id) AND b.organization_id=w.organization_id
         AND b.location_id=w.location_id AND b.canceled_at IS NULL
       WHERE w.id=%s AND w.organization_id=%s AND w.location_id=%s
-      FOR SHARE OF w,a,p,l,o,b,binding
+      FOR UPDATE OF w FOR SHARE OF a,p,l,o,b,binding
     """,(order,org,loc)).fetchone()
     if row is None:
         raise RecommendationDenied("FORBIDDEN")
@@ -78,6 +82,7 @@ def _state(conn,org,loc,order,*,can_manage=False,customer=False):
               "dueDate":due.isoformat(),"dueKm":km,"createdAt":created.isoformat(),
               "status":"WITHDRAWN" if withdrawn else "ACTIVE",
               "withdrawnAt":withdrawn.isoformat() if withdrawn else None}
+        item["visit"]=_latest_visit(conn,ident)
         if not customer:
             item.update(actorId=str(actor),withdrawnBy=str(withdrawer) if withdrawer else None)
         items.append(item)
@@ -178,3 +183,114 @@ def withdraw_recommendation(conn,token,org,loc,order,*,key,ident):
         except psycopg.errors.UniqueViolation:
             raise RecommendationConflict("ALREADY_WITHDRAWN") from None
         return {"replayed":False,**_state(conn,org,loc,order,can_manage=True)}
+
+
+def _latest_visit(conn,ident):
+    row=conn.execute("""
+      SELECT a.id,w.id,b.id,b.starts_at,b.ends_at,b.canceled_at
+      FROM auto_recommendation_visit v
+      JOIN auto_appointment a ON a.id=v.appointment_id
+      JOIN auto_work_order w ON w.appointment_id=a.id
+      JOIN auto_bay_booking b ON b.id=COALESCE((
+        SELECT rr.new_booking_id FROM auto_appointment_reschedule rr
+        WHERE rr.appointment_id=a.id ORDER BY rr.created_at DESC,rr.id DESC LIMIT 1
+      ),a.booking_id)
+      WHERE v.recommendation_id=%s ORDER BY v.created_at DESC,v.id DESC LIMIT 1
+    """,(ident,)).fetchone()
+    return None if row is None else {
+        "appointmentId":str(row[0]),"workOrderId":str(row[1]),"bookingId":str(row[2]),
+        "startsAt":row[3].isoformat(),"endsAt":row[4].isoformat(),
+        "status":"CANCELED" if row[5] else "SCHEDULED",
+    }
+
+
+def _booking_context(conn,token,org,loc,order,ident):
+    actor=_scope(conn,token,org,loc,order,customer=True)
+    row=conn.execute("""
+      SELECT r.service_id,a.customer_link_id,l.timezone_name
+      FROM auto_service_recommendation r JOIN auto_work_order w ON w.id=r.work_order_id
+      JOIN auto_appointment a ON a.id=w.appointment_id
+      JOIN auto_service_location l ON l.id=w.location_id
+      WHERE r.id=%s AND r.work_order_id=%s
+    """,(ident,order)).fetchone()
+    if row is None:
+        raise RecommendationDenied("FORBIDDEN")
+    if conn.execute("SELECT 1 FROM auto_service_recommendation_withdrawal WHERE recommendation_id=%s",
+                    (ident,)).fetchone():
+        raise RecommendationConflict("RECOMMENDATION_WITHDRAWN")
+    return actor,*row
+
+
+def repeat_visit_options(conn,token,org,loc,order,ident,*,bay=None,day=None):
+    with conn.transaction():
+        _,service,link,zone=_booking_context(conn,token,org,loc,order,ident)
+        visit=_latest_visit(conn,ident)
+        if visit and visit["status"]=="SCHEDULED":
+            raise RecommendationConflict("VISIT_ALREADY_BOOKED")
+        if bay is None and day is None:
+            bays=conn.execute("""
+              SELECT id,code FROM auto_work_bay
+              WHERE organization_id=%s AND location_id=%s AND disabled_at IS NULL
+              ORDER BY code,id LIMIT 101
+            """,(org,loc)).fetchall()
+            if len(bays)>100:
+                raise RecommendationConflict("BAY_LIMIT")
+            return {"syntheticOnly":True,"timeZone":zone,
+                    "bays":[{"id":str(i),"code":c} for i,c in bays]}
+        if type(bay) is not UUID or type(day) is not date:
+            raise RecommendationDenied("INVALID_INPUT")
+        try:
+            tz=ZoneInfo(zone)
+            start=datetime.combine(day,datetime.min.time(),tzinfo=tz)
+            end=datetime.combine(day+timedelta(days=1),datetime.min.time(),tzinfo=tz)
+            if not datetime.now(tz).date()<=day<=datetime.now(tz).date()+timedelta(days=730):
+                raise RecommendationDenied("INVALID_INPUT")
+            slots=candidate_slots(conn,token,org,loc,bay,start,day_end=end,
+                                  customer_link=link,service_ids=(service,))
+        except (SlotsDenied,ZoneInfoNotFoundError):
+            raise RecommendationDenied("FORBIDDEN") from None
+        except OverflowError:
+            raise RecommendationDenied("INVALID_INPUT") from None
+        return {"syntheticOnly":True,"timeZone":zone,"guaranteed":False,"items":slots}
+
+
+def book_repeat_visit(conn,token,org,loc,order,ident,*,key,bay,starts,ends):
+    if (type(key) is not UUID or type(bay) is not UUID
+        or any(type(x) is not datetime or x.tzinfo is None or x.utcoffset() is None
+               for x in (starts,ends)) or ends<=starts or ends-starts>timedelta(days=1)):
+        raise RecommendationDenied("INVALID_INPUT")
+    with conn.transaction():
+        actor,service,link,_=_booking_context(conn,token,org,loc,order,ident)
+        prior=conn.execute("""
+          SELECT v.recommendation_id,v.actor_id,v.appointment_id,v.booking_id,
+                 b.bay_id,b.starts_at,b.ends_at
+          FROM auto_recommendation_visit v JOIN auto_bay_booking b ON b.id=v.booking_id
+          WHERE v.request_key=%s
+        """,(key,)).fetchone()
+        visit=_latest_visit(conn,ident)
+        if prior:
+            if (prior[0]!=ident or prior[1]!=actor or prior[4:]!=(bay,starts,ends)
+                or not visit or visit["appointmentId"]!=str(prior[2])
+                or visit["bookingId"]!=str(prior[3]) or visit["status"]!="SCHEDULED"):
+                raise RecommendationConflict("KEY_REUSED")
+            return {"replayed":True,"syntheticOnly":True,"visit":visit}
+        if visit and visit["status"]=="SCHEDULED":
+            raise RecommendationConflict("VISIT_ALREADY_BOOKED")
+        try:
+            with conn.transaction():
+                appointment,booking,_=create_appointment(
+                    conn,token,org,loc,bay,link,starts,ends,customer_mode=True,
+                    service_ids=(service,))
+                conn.execute("""
+                  INSERT INTO auto_recommendation_visit
+                    (id,recommendation_id,appointment_id,booking_id,actor_id,request_key)
+                  VALUES(%s,%s,%s,%s,%s,%s)
+                """,(uuid4(),ident,appointment,booking,actor,key))
+        except AppointmentDurationInvalid:
+            raise RecommendationDenied("INVALID_INPUT") from None
+        except AppointmentDenied:
+            raise RecommendationDenied("FORBIDDEN") from None
+        except (AppointmentConflict,AppointmentKeyConflict,psycopg.errors.UniqueViolation,
+                psycopg.errors.RaiseException):
+            raise RecommendationConflict("VISIT_CONFLICT") from None
+        return {"replayed":False,"syntheticOnly":True,"visit":_latest_visit(conn,ident)}

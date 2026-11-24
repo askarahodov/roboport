@@ -114,12 +114,67 @@ def upgrade():
       BEFORE INSERT OR UPDATE OR DELETE ON auto_service_recommendation_withdrawal
       FOR EACH ROW EXECUTE FUNCTION guard_auto_recommendation_withdrawal()
     """)
-    op.execute("REVOKE ALL ON auto_service_recommendation,auto_service_recommendation_withdrawal FROM PUBLIC")
+    op.execute("""
+      CREATE TABLE auto_recommendation_visit (
+        id uuid PRIMARY KEY,
+        recommendation_id uuid NOT NULL REFERENCES auto_service_recommendation(id),
+        appointment_id uuid NOT NULL UNIQUE REFERENCES auto_appointment(id),
+        booking_id uuid NOT NULL REFERENCES auto_bay_booking(id),
+        actor_id uuid NOT NULL REFERENCES app_user(id),
+        request_key uuid NOT NULL UNIQUE,
+        created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+      )
+    """)
+    op.execute("CREATE INDEX ix_auto_recommendation_visit ON auto_recommendation_visit(recommendation_id,created_at,id)")
+    op.execute("""
+      CREATE FUNCTION guard_auto_recommendation_visit() RETURNS trigger
+      LANGUAGE plpgsql AS $f$
+      DECLARE origin record;
+      BEGIN
+        IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'Связь повторного визита неизменяема'; END IF;
+        SELECT w.id,w.organization_id,w.location_id,a.customer_link_id,r.service_id
+          INTO origin
+          FROM auto_service_recommendation r
+          JOIN auto_work_order w ON w.id=r.work_order_id
+          JOIN auto_appointment a ON a.id=w.appointment_id
+          WHERE r.id=NEW.recommendation_id FOR UPDATE OF w;
+        IF NOT FOUND OR EXISTS(
+          SELECT 1 FROM auto_service_recommendation_withdrawal x
+          WHERE x.recommendation_id=NEW.recommendation_id
+        ) OR NOT EXISTS(
+          SELECT 1 FROM auto_appointment a JOIN auto_work_order w ON w.appointment_id=a.id
+          JOIN auto_bay_booking b ON b.id=a.booking_id
+          JOIN auto_work_order_service s ON s.work_order_id=w.id
+          WHERE a.id=NEW.appointment_id AND w.id<>origin.id
+            AND a.organization_id=origin.organization_id AND a.location_id=origin.location_id
+            AND a.customer_link_id=origin.customer_link_id
+            AND b.id=NEW.booking_id AND b.canceled_at IS NULL
+            AND s.service_id=origin.service_id AND s.selection_origin='BOOKING'
+        ) THEN RAISE EXCEPTION 'Несогласованное происхождение повторного визита'; END IF;
+        IF EXISTS(
+          SELECT 1 FROM auto_recommendation_visit v JOIN auto_appointment a ON a.id=v.appointment_id
+          JOIN auto_bay_booking b ON b.id=COALESCE((
+            SELECT rr.new_booking_id FROM auto_appointment_reschedule rr
+            WHERE rr.appointment_id=a.id ORDER BY rr.created_at DESC,rr.id DESC LIMIT 1
+          ),a.booking_id)
+          WHERE v.recommendation_id=NEW.recommendation_id AND b.canceled_at IS NULL
+        ) THEN RAISE EXCEPTION 'У рекомендации уже есть действующая запись'; END IF;
+        RETURN NEW;
+      END $f$
+    """)
+    op.execute("""
+      CREATE TRIGGER auto_recommendation_visit_guard
+      BEFORE INSERT OR UPDATE OR DELETE ON auto_recommendation_visit
+      FOR EACH ROW EXECUTE FUNCTION guard_auto_recommendation_visit()
+    """)
+    op.execute("REVOKE ALL ON auto_service_recommendation,auto_service_recommendation_withdrawal,auto_recommendation_visit FROM PUBLIC")
 
 
 def downgrade():
     if op.get_bind().execute(text("SELECT 1 FROM auto_service_recommendation LIMIT 1")).first():
         raise RuntimeError("История рекомендаций существует: восстановите изолированную резервную копию")
+    op.execute("DROP TABLE auto_recommendation_visit")
+    op.execute("DROP FUNCTION guard_auto_recommendation_visit()")
     op.execute("DROP TABLE auto_service_recommendation_withdrawal")
     op.execute("DROP TABLE auto_service_recommendation")
     op.execute("DROP FUNCTION guard_auto_recommendation_withdrawal()")
