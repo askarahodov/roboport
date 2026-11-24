@@ -8,7 +8,6 @@ import type { AutoDevVehicle } from '../../shared/api/autoDevClient';
 
 type LoadState = 'loading' | 'ready' | 'denied' | 'error';
 const PAGE_SIZE = 20;
-const MAX_PAGES = 501;
 
 export function CustomerVehicles() {
   const [items, setItems] = React.useState<AutoDevVehicle[]>([]);
@@ -75,6 +74,7 @@ export function CustomerVehicles() {
     if (pageIndex === 0) {
       clearDetails();
       setStatus('loading');
+      setPageLoading(false);
       setItems([]);
       setNextCursor(null);
     } else {
@@ -108,20 +108,28 @@ export function CustomerVehicles() {
             throw error;
           }
           if (controller.signal.aborted) return;
+          following=data.nextCursor;
+          if(following!==null){
+            if(seenCursors.has(following))throw Error('Repeated vehicle cursor');
+            seenCursors.add(following);
+          }
           // Server-side фильтр по актуальной связи действует для каждой страницы.
           // Cursor does not shift when newer rows are inserted or revoked.
           for (const item of data.items) {
             if (!fresh.some(existing => existing.id === item.id)) fresh.push(item);
           }
-          following=data.nextCursor;
+          // Invalidate the old visible set as soon as a fresh page arrives.
+          // Do not retain previously authorized rows while a later page stalls.
+          setItems([...fresh]);
           if(following===null)break;
-          if(seenCursors.has(following))throw Error('Repeated vehicle cursor');
-          seenCursors.add(following);
         }
         if (controller.signal.aborted) return;
-        if (selected && !fresh.some(vehicle => vehicle.id === selected.id)) clearDetails();
+        // Close and abort any separately loaded detail on list replacement.
+        // A detail request started during pagination may otherwise outlive
+        // the last authorized page and resurrect an excluded card.
+        clearDetails();
         setItems(fresh);
-        setNextCursor(pageIndex+1<MAX_PAGES?following:null);
+        setNextCursor(following);
         setStatus('ready');
       } catch {
         if (!controller.signal.aborted) {

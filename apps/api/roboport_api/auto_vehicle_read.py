@@ -45,7 +45,7 @@ def owned_vehicles(
 
 
 def owned_vehicle_page(conn, token, *, limit=20, cursor=None):
-    """Signed keyset over immutable creation date and UUID; no cached authority."""
+    """Signed keyset over creation date and UUID; no cached authority."""
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError("invalid limit")
     if session_subject(conn,token) is None:

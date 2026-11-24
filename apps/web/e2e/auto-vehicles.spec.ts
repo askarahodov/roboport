@@ -373,3 +373,31 @@ test('keyset response with repeated cursor is rejected without exposing its seco
   await expect(page.locator('.account-record')).toHaveCount(20);
   await expect(page.getByText('SyntheticMake TestCar 21',{exact:true})).toHaveCount(0);
 });
+
+
+test('cursor failure after partial revoke keeps only freshly authorized rows and retries from start',async({page})=>{
+  await authorized(page);
+  let revoked=false,expired=true;
+  const calls:string[]=[];
+  await page.route(vehiclesUrl,route=>{
+    const q=new URL(route.request().url()).searchParams;
+    const cursor=q.get('cursor');
+    calls.push(cursor??'first');
+    if(cursor&&expired)return route.fulfill({status:422,contentType:'application/json',
+      body:'{"code":"INVALID_INPUT"}'});
+    const items=cursor?[fakeVehicle(22)]:Array.from({length:20},(_,i)=>fakeVehicle(i+(revoked?2:1)));
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items,nextCursor:cursor?null:revoked?'fresh-cursor':'old-cursor'})});
+  });
+  await page.goto('/account/vehicles');
+  await expect(page.getByText('SyntheticMake TestCar 1',{exact:true})).toBeVisible();
+  revoked=true;
+  await page.getByRole('button',{name:'Показать ещё автомобили'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить следующую страницу');
+  await expect(page.getByText('SyntheticMake TestCar 1',{exact:true})).toHaveCount(0);
+  await expect(page.getByText('SyntheticMake TestCar 21',{exact:true})).toBeVisible();
+  expired=false;
+  await page.getByRole('button',{name:'Повторить загрузку страницы'}).click();
+  await expect(page.getByText('Показано автомобилей: 21')).toBeVisible();
+  expect(calls.slice(-2)).toEqual(['first','fresh-cursor']);
+});

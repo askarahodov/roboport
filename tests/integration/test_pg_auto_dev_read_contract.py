@@ -64,6 +64,10 @@ def test_live_auto_dev_read_contract_and_bola(monkeypatch):
     assert first.json()["items"][0]["id"]==str(newer)
     cursor=first.json()["nextCursor"]
     assert cursor
+    exact=http.get(path,params={"paging":"keyset","limit":2})
+    assert exact.status_code==200 and len(exact.json()["items"])==2
+    assert exact.json()["nextCursor"] is None
+    _assert_schema(exact.json(),"AutoVehicleCursorPage")
     with psycopg.connect(DSN) as db:
         newest=add_vehicle()
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE vehicle_id=%s",(newer,))
