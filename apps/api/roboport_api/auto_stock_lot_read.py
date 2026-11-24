@@ -2,6 +2,7 @@
 from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .auto_stock_service import AutoStockDenied
 
 
@@ -23,6 +24,7 @@ def list_stocktake_lots(conn: psycopg.Connection, token: str,
         )
         if not permitted:
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id)
         rows=conn.execute("""
             SELECT l.id,s.article,l.batch_code,b.code,
                    lb.allocated, sb.on_hand,sb.reserved

@@ -202,3 +202,32 @@ test('manager review queue blocks stale counts, revocation, and foreign branch d
   expect(await page.evaluate(()=>document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(1280);
 });
+
+test('stocktake policy denial clears loaded lot, receipt and form',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}'}));
+  let denied=false;
+  await page.route('**/api/v1/dev/auto/organizations/**/stocktake/**',route=>{
+    if(route.request().method()==='POST')return route.fulfill({
+      status:denied?403:201,contentType:'application/json',
+      body:JSON.stringify(denied?{code:'FORBIDDEN'}:{countId:count})});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:[{lotId:lot,article:'SYN-PRIVATE-LOT',batchCode:'LOT-1',
+        binCode:'BIN-A',allocated:3,onHand:5,reserved:1}],nextLotId:null})});
+  });
+  await page.goto('/staff/warehouse-stocktake');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(location);
+  await page.getByRole('button',{name:'Показать партии'}).click();
+  await page.getByRole('button',{name:'Выбрать партию LOT-1'}).click();
+  await page.getByRole('textbox',{name:'Причина пересчёта'}).fill('Проверочный пересчёт');
+  await page.getByRole('button',{name:'Сохранить подсчёт'}).click();
+  await expect(page.getByRole('textbox',{name:'UUID подсчёта'})).toHaveValue(count);
+  denied=true;
+  await page.getByRole('button',{name:'Сохранить подсчёт'}).click();
+  await expect(page.getByRole('status')).toContainText('Доступ запрещён');
+  await expect(page.getByText('SYN-PRIVATE-LOT')).toHaveCount(0);
+  await expect(page.getByRole('textbox',{name:'UUID партии'})).toHaveValue('');
+  await expect(page.getByRole('textbox',{name:'UUID подсчёта'})).toHaveValue('');
+  await expect(page.getByRole('button',{name:'Сохранить подсчёт'})).toBeDisabled();
+});

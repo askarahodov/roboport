@@ -4,6 +4,7 @@ from datetime import datetime,timezone
 from uuid import UUID
 
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .auto_stock_service import AutoStockDenied
 from .auto_document_access import require_document_access,DocumentPolicyDenied
 from .keyset_cursor import encode_cursor,decode_cursor
@@ -15,6 +16,7 @@ def _authority(db,token,org,loc):
     if not any(organization_role_allows(db,token,org,role,loc,for_mutation=True)
                for role in ("WAREHOUSE","MANAGER")):
         raise AutoStockDenied("FORBIDDEN")
+    require_full_stock_history(db,token,org,loc)
 
 
 def _purchase_allowed(db,token,org,loc):

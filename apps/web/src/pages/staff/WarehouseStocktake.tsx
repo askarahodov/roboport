@@ -24,6 +24,8 @@ export function WarehouseStocktake(){
   const [nextCount,setNextCount]=React.useState<string|null>(null);
   const [queueCursor,setQueueCursor]=React.useState<string|null>(null);
   const queueRequest=React.useRef(0);
+  const lotRequest=React.useRef(0);
+  const generation=React.useRef(0);
   const [lotCursor,setLotCursor]=React.useState<string|null>(null);
   const [message,setMessage]=React.useState('');
   const [pending,setPending]=React.useState<Pending|null>(null);
@@ -31,17 +33,27 @@ export function WarehouseStocktake(){
   const context=React.useRef({org:'',location:''});
   context.current={org:org.trim(),location:location.trim()};
   React.useEffect(()=>{
+    generation.current+=1;lotRequest.current+=1;
     queueRequest.current+=1;setQueue([]);setQueueStatus('idle');
     setNextCount(null);setQueueCursor(null);setCountId('');
     setMessage('');setPending(null);setResult(null);setLots([]);
     setLotsStatus('idle');setNextLot(null);setLotCursor(null);
+    setLot('');setActual('0');setReason('');setBusy(false);
   },[org,location]);
+  function deny(){
+    generation.current+=1;lotRequest.current+=1;queueRequest.current+=1;
+    setLots([]);setLotsStatus('idle');setNextLot(null);setLotCursor(null);
+    setQueue([]);setQueueStatus('idle');setNextCount(null);setQueueCursor(null);
+    setLot('');setCountId('');setActual('0');setReason('');
+    setResult(null);setPending(null);setMessage('Доступ запрещён или отозван (403).');
+  }
   const scopeValid=uuid.test(org.trim())&&uuid.test(location.trim());
   const countValid=scopeValid&&uuid.test(lot.trim())&&/^(0|[1-9][0-9]*)$/.test(actual)&&
     Number(actual)<=1000000000&&reason.trim().length>=3&&reason.trim().length<=240;
   const approveValid=scopeValid&&uuid.test(countId.trim());
   async function loadLots(after:string|null=null){
-    if(!scopeValid||lotsStatus==='loading')return;
+    if(!scopeValid||busy||lotsStatus==='loading')return;
+    const seq=++lotRequest.current;
     const requested={org:org.trim(),location:location.trim()};
     setLotsStatus('loading');setLots([]);
     const params=new URLSearchParams({locationId:requested.location,limit:'30'});
@@ -49,8 +61,10 @@ export function WarehouseStocktake(){
     try{
       const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(requested.org)+
         '/stocktake/lots?'+params.toString(),{credentials:'include',cache:'no-store'});
-      if(context.current.org!==requested.org||context.current.location!==requested.location)return;
-      if([401,403,404].includes(response.status)){setLotsStatus('denied');return;}
+      if(seq!==lotRequest.current||context.current.org!==requested.org||context.current.location!==requested.location)return;
+      if([401,403,404].includes(response.status)){
+        deny();setLotsStatus('denied');return;
+      }
       if(!response.ok)throw new Error('unavailable');
       const body:unknown=await response.json();
       if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)||
@@ -64,10 +78,11 @@ export function WarehouseStocktake(){
           })||!('nextLotId' in body)||
           !(body.nextLotId===null||(typeof body.nextLotId==='string'&&uuid.test(body.nextLotId))))
         throw new Error('bad payload');
+      if(seq!==lotRequest.current||context.current.org!==requested.org||context.current.location!==requested.location)return;
       setLots(body.items as LotRow[]);setNextLot(body.nextLotId as string|null);
       setLotCursor(after);setLotsStatus('ready');
-    }catch{if(context.current.org===requested.org&&context.current.location===requested.location)
-      setLotsStatus('error');}
+    }catch{if(seq===lotRequest.current&&context.current.org===requested.org&&context.current.location===requested.location){
+      setNextLot(null);setLotCursor(null);setLot('');setLotsStatus('error');}}
   }
   async function loadPending(after:string|null=null){
     if(!scopeValid||queueStatus==='loading')return;
@@ -104,6 +119,7 @@ export function WarehouseStocktake(){
         })||!(data.nextCountId===null||
              (typeof data.nextCountId==='string'&&uuid.test(data.nextCountId))))
         throw Error('invalid queue');
+      if(seq!==queueRequest.current||context.current.org!==requested.org||context.current.location!==requested.location)return;
       setQueue(data.items as QueueRow[]);
       setQueueCursor(after);
       setNextCount(data.nextCountId as string|null);
@@ -127,24 +143,29 @@ export function WarehouseStocktake(){
         {locationId:location.trim(),countId:countId.trim()}),
     };
     if(snapshot.org!==context.current.org||snapshot.location!==context.current.location)return;
+    const epoch=generation.current;
+    const current=()=>epoch===generation.current&&snapshot.org===context.current.org&&snapshot.location===context.current.location;
     setBusy(true);setMessage('');
     try{
       const token=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
+      if(!current())return;
+      if([401,403,404].includes(token.status)){deny();return;}
       if(!token.ok)throw new Error('csrf');
       const csrf:unknown=await token.json();
       if(!csrf||typeof csrf!=='object'||!('csrfToken' in csrf)||typeof csrf.csrfToken!=='string')throw new Error('csrf');
+      if(!current())return;
       const response=await fetch(snapshot.path,{
         method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':csrf.csrfToken,
           'Idempotency-Key':snapshot.key},
         body:snapshot.body,
       });
-      if(snapshot.org!==context.current.org||snapshot.location!==context.current.location)return;
+      if(!current())return;
+      if([401,403,404].includes(response.status)){deny();return;}
       if(response.status>=500)throw new Error('uncertain');
       if(!response.ok){
         setPending(null);
         setMessage(response.status===409?'Конфликт: остаток изменён, запрос уже применён или превышен допустимый объём (409).':
-          [401,403,404].includes(response.status)?'Доступ запрещён или отозван (403).':
           'Некорректные данные или ошибка операции ('+response.status+').');
         return;
       }
@@ -153,6 +174,7 @@ export function WarehouseStocktake(){
       if(!payload||typeof payload!=='object'||!(field in payload)||
           typeof (payload as Record<string,unknown>)[field]!=='string'||
           !uuid.test((payload as Record<string,string>)[field]))throw new Error('invalid response');
+      if(!current())return;
       const value=(payload as Record<string,string>)[field];
       setResult({[field]:value});setPending(null);
       if(snapshot.kind==='count')setCountId(value);
@@ -166,22 +188,22 @@ export function WarehouseStocktake(){
       setMessage(snapshot.kind==='count'?'Подсчёт сохранён. Остатки пока не изменены.':
         'Расхождение утверждено. Складские проводки записаны. Обновите очередь.');
     }catch{
-      if(snapshot.org===context.current.org&&snapshot.location===context.current.location){
+      if(current()){
         setPending(snapshot);
         setMessage('Результат неизвестен: повторите с тем же ключом. Не отправляйте новый запрос.');
       }
-    }finally{setBusy(false);}
+    }finally{if(current()||epoch+1===generation.current)setBusy(false);}
   }
   return <section className="ui-page" aria-label="Инвентаризация склада">
     <header><h1>Инвентаризация склада (dev)</h1>
       <p>Только синтетический контур. Подсчёт — WAREHOUSE, независимое подтверждение — MANAGER.</p></header>
     <div className="crm-filters">
-      <label>UUID организации <input value={org} onChange={e=>setOrg(e.target.value)} aria-label="UUID организации"/></label>
-      <label>UUID филиала <input value={location} onChange={e=>setLocation(e.target.value)} aria-label="UUID филиала"/></label>
+      <label>UUID организации <input value={org} disabled={busy} onChange={e=>setOrg(e.target.value)} aria-label="UUID организации"/></label>
+      <label>UUID филиала <input value={location} disabled={busy} onChange={e=>setLocation(e.target.value)} aria-label="UUID филиала"/></label>
     </div>
     <section aria-label="Партии филиала">
       <h2>Партии и остатки</h2>
-      <button type="button" disabled={!scopeValid||lotsStatus==='loading'} onClick={()=>void loadLots()}>Показать партии</button>
+      <button type="button" disabled={!scopeValid||busy||lotsStatus==='loading'} onClick={()=>void loadLots()}>Показать партии</button>
       {lotsStatus==='loading'&&<p role="status">Загрузка партий…</p>}
       {lotsStatus==='denied'&&<p role="alert">Нет доступа к партиям этого филиала.</p>}
       {lotsStatus==='error'&&<p role="alert">Не удалось загрузить партии. Повторите запрос.</p>}

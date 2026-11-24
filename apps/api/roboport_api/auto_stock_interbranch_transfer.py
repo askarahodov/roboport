@@ -2,6 +2,7 @@
 from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .session_lookup import session_subject
 from .auto_stock_lot_transfer import transfer_stock_lot
 from .keyset_cursor import encode_cursor,decode_cursor
@@ -23,10 +24,11 @@ def transfer_interbranch_stock(conn: psycopg.Connection, token: str,
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
         # Two distinct branch grants are mandatory, not merely one source grant.
-        for location in (source_location_id,destination_location_id):
+        for location in sorted((source_location_id,destination_location_id),key=str):
             if not organization_role_allows(conn,token,organization_id,
                    "WAREHOUSE",location,for_mutation=True):
                 raise AutoStockDenied("FORBIDDEN")
+            require_full_stock_history(conn,token,organization_id,location,"EDIT")
         matches=conn.execute("""
             SELECT id FROM auto_stock_lot
             WHERE organization_id=%s AND
@@ -50,12 +52,13 @@ def transfer_interbranch_stock(conn: psycopg.Connection, token: str,
             raise AutoStockConflict("CONFLICT") from None
 
 
-def _pair_actor(conn,token,org,src,dst,mode='INTERBRANCH'):
+def _pair_actor(conn,token,org,src,dst,mode='INTERBRANCH',*,write=False):
     if mode not in ('INTERBRANCH','LOCAL') or (src==dst)!=(mode=='LOCAL'):
         raise AutoStockDenied("INVALID_INPUT")
     for loc in sorted({src,dst},key=str):
         if not organization_role_allows(conn,token,org,"WAREHOUSE",loc,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,org,loc,* (("EDIT",) if write else ()))
     actor=session_subject(conn,token,for_mutation=True)
     if actor is None:
         raise AutoStockDenied("FORBIDDEN")
@@ -136,7 +139,7 @@ def transfer_workspace(conn,token,org,src,dst,query="",cursor=None,
 
 def confirm_interbranch_transfer(conn,token,org,src,dst,source,destination,key,quantity):
     with conn.transaction():
-        actor=_pair_actor(conn,token,org,src,dst)
+        actor=_pair_actor(conn,token,org,src,dst,write=True)
         # Сериализуем один ключ до поиска receipt; старый внутренний журнал
         # без автора не может быть присвоен новым HTTP-запросом.
         conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(f"transfer:{key}",))
@@ -161,7 +164,7 @@ def confirm_interbranch_transfer(conn,token,org,src,dst,source,destination,key,q
 
 def confirm_local_transfer(conn,token,org,loc,source,destination,key,quantity):
     with conn.transaction():
-        actor=_pair_actor(conn,token,org,loc,loc,"LOCAL")
+        actor=_pair_actor(conn,token,org,loc,loc,"LOCAL",write=True)
         conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(f"local-transfer:{key}",))
         prior=conn.execute("""
           SELECT t.id,r.actor_id,s.organization_id,s.location_id,t.source_lot_id,

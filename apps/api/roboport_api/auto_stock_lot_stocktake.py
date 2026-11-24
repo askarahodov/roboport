@@ -2,6 +2,7 @@
 from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 from .session_lookup import session_subject
 
@@ -13,6 +14,7 @@ def _run(conn, token, organization_id, location_id, lot_id, sql, args):
             for_mutation=True,
         ):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,"CREATE")
         if conn.execute(
             """SELECT id FROM auto_stock_lot WHERE id=%s
                AND organization_id=%s AND location_id=%s FOR SHARE""",
@@ -58,6 +60,7 @@ def approve_stock_lot_count(conn, token: str, organization_id: UUID,
             conn,token,organization_id,"MANAGER",location_id,for_mutation=True
         ):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,"CLOSE")
         row=conn.execute("""SELECT l.id FROM auto_stock_lot_count c
             JOIN auto_stock_lot l ON l.id=c.lot_id
             WHERE c.id=%s AND l.organization_id=%s AND l.location_id=%s
@@ -107,6 +110,7 @@ def pending_stock_lot_counts(conn, token: str, organization_id: UUID,
             for_mutation=True,
         ):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id)
         rows = conn.execute("""
             SELECT c.id,l.id,s.article,l.batch_code,bin.code,
                    c.expected,c.actual,lb.allocated,c.reason
