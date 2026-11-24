@@ -20,7 +20,7 @@ export function BookingDirectory({org,loc,kind,disabled,onChoose,onDenied,custom
     setItems([]);setNext(null);setAfter(null);setOpen(false);setSearch('');setSubmitted('');setStatus('');
   },[org,loc,kind,customerLink]);
   React.useEffect(()=>{
-    if(!open||!uuid.test(org)||!uuid.test(loc))return;
+    if(!open||!uuid.test(org)||!uuid.test(loc)||(customerLink&&!uuid.test(customerLink)))return;
     const controller=new AbortController();
     setItems([]);setNext(null);setStatus('Поиск…');
     const query=new URLSearchParams(customerLink?{organizationId:org,locationId:loc,

@@ -933,3 +933,70 @@ test('weekly planning: paging, day drilldown, complete CSV and revoked export',a
   expect(await page.evaluate(()=>document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(1280);
 });
+
+
+test('приёмщик находит ресурсы и комплекс, создаёт запись и читает журнал',async({page})=>{
+  const complex='77777777-7777-4777-8777-777777777777';
+  let created=false;let payload:Record<string,unknown>|null=null;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(base,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(url.pathname.endsWith('/booking-directory')){
+      const entries:Record<string,{id:string;label:string;durationMinutes:number|null;available:null}> = {
+        bays:{id:bay,label:'SYN-POST',durationMinutes:null,available:null},
+        vehicles:{id:link,label:'Synthetic Sedan VIN ••••1234',durationMinutes:null,available:null},
+        employees:{id:appointment,label:'SYN-SPECIALIST',durationMinutes:null,available:null},
+        complexes:{id:complex,label:'SYN-PACKAGE',durationMinutes:90,available:null},
+      };
+      const item=entries[url.searchParams.get('kind')??''];
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,items:item?[item]:[],nextAfterId:null})});
+    }
+    if(url.pathname.endsWith('/slot-candidates')){
+      expect(url.searchParams.get('complexId')).toBe(complex);
+      expect(url.searchParams.get('employeeId')).toBe(appointment);
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        guaranteed:false,items:[{startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:30:00Z'}]})});
+    }
+    if(url.pathname.endsWith('/history'))return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,realDelivery:false,deliveryChannel:'DEV_SINK',
+        appointmentId:appointment,workOrderId:work,timeZone:'UTC',nextCursor:null,cancellation:null,
+        items:[{bookingId:bay,bayCode:'SYN-POST',startsAt:'2030-01-01T10:00:00Z',
+          endsAt:'2030-01-01T11:30:00Z',recordedAt:'2029-12-31T10:00:00Z',
+          action:'CREATED',state:'CURRENT',notificationStatus:'PENDING',attempts:0}]})});
+    if(req.method()==='POST'&&url.pathname.endsWith('/appointments')){
+      payload=req.postDataJSON();created=true;
+      return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify({appointmentId:appointment,bookingId:bay,workOrderId:work})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,hasMore:false,items:created&&url.pathname.endsWith('/calendar')?[{
+        appointmentId:appointment,bookingId:bay,bayId:bay,workOrderId:work,employeeId:appointment,
+        startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:30:00Z'}]:[]})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-calendar');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await expect(page.getByText('Записей нет.')).toBeVisible();
+  for(const [kind,label] of [['Посты','SYN-POST'],['Автомобили','Synthetic Sedan VIN ••••1234'],
+    ['Специалисты','SYN-SPECIALIST'],['Комплексы работ','SYN-PACKAGE · 90 мин.']]){
+    await page.getByRole('button',{name:'Найти: '+kind,exact:true}).click();
+    await page.getByRole('button',{name:label,exact:true}).click();
+  }
+  await page.getByRole('button',{name:'Проверить свободные окна (dev)'}).click();
+  await page.getByRole('button',{name:/ISO: 2030-01-01T10:00:00Z/}).click();
+  await page.getByRole('button',{name:'Создать запись'}).click();
+  await expect(page.getByText('Appointment '+appointment+' · WorkOrder '+work)).toBeVisible();
+  expect(payload).toMatchObject({complexId:complex,customerLinkId:link,bayId:bay,employeeId:appointment});
+  expect(payload).not.toHaveProperty('serviceIds');
+  expect(payload).not.toHaveProperty('materialItems');
+  await page.getByRole('button',{name:'История записи',exact:true}).click();
+  const history=page.getByRole('region',{name:'История бронирования'});
+  await expect(history.getByText('Уведомление: ожидает · попыток: 0')).toBeVisible();
+  for(const width of [390,1280,1440]){
+    await page.setViewportSize({width,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+});

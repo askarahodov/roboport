@@ -18,9 +18,7 @@ def booking_history(conn,token,org,loc,appointment,*,customer=False,cursor=None)
         # Блокируем identity: перенос и отмена не меняют историю в середине чтения.
         row=conn.execute("""
             SELECT a.booking_id,a.customer_link_id,w.id,l.timezone_name,
-                COALESCE((SELECT r.new_booking_id FROM auto_appointment_reschedule r
-                    WHERE r.appointment_id=a.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1),
-                    a.booking_id)
+                a.id
             FROM auto_appointment a JOIN auto_work_order w ON w.appointment_id=a.id
               AND w.organization_id=a.organization_id AND w.location_id=a.location_id
             JOIN auto_service_location l ON l.id=a.location_id

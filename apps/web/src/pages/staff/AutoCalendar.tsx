@@ -99,6 +99,7 @@ export function AutoCalendar() {
   const [form,setForm]=React.useState<Form>(empty);
   const [complex,setComplex]=React.useState<DirectoryItem|null>(null);
   const [historyId,setHistoryId]=React.useState<string|null>(null);
+  const [historyLookup,setHistoryLookup]=React.useState('');
   const [services,setServices]=React.useState<Service[]>([]);
   const [selectedServices,setSelectedServices]=React.useState<string[]>([]);
   const [serviceMessage,setServiceMessage]=React.useState('');
@@ -285,7 +286,7 @@ export function AutoCalendar() {
   },[org,location,openingRevision]);
   function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
   function resetPage(){setCursor(null);setHistory([]);setHistoryId(null);resetSlots();}
-  function denyBooking(){scopeEpoch.current++;setBusy(false);setMessage('');setItems([]);setTarget(null);setForm(empty);setComplex(null);setHistoryId(null);
+  function denyBooking(){scopeEpoch.current++;setBusy(false);setMessage('');setItems([]);setHistoryLookup('');setTarget(null);setForm(empty);setComplex(null);setHistoryId(null);
     setSelectedServices([]);setMaterials([]);setServices([]);setStock([]);setPending(null);resetSlots();setStatus('denied');}
   async function saveOpening(){
     if(!opening||openingBusy||busy||!valid)return;
@@ -331,7 +332,7 @@ export function AutoCalendar() {
         setOpeningState('Результат неизвестен. Повторно загрузите график перед изменением.');
     }finally{setOpeningBusy(false);}
   }
-  React.useEffect(()=>{setBusy(false);setPending(null);setComplex(null);setHistoryId(null);setForm(empty);resetSlots();},[org,location]);
+  React.useEffect(()=>{setBusy(false);setPending(null);setComplex(null);setHistoryId(null);setHistoryLookup('');setForm(empty);resetSlots();},[org,location]);
   async function findSlots(){
     const retained=target?items.find(x=>x.appointmentId===target)?.employeeId:null;
     const effectiveEmployee=target&&clearEmployee?null:(form.employee.trim()||retained||null);
@@ -593,13 +594,19 @@ export function AutoCalendar() {
         <strong>{formatLocal(entry.startsAt)} — {formatLocal(entry.endsAt)} ({timeZone})</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
         <p>Специалист: {entry.employeeId??'не назначен'}</p>
-        <button type="button" disabled={busy||!!pending} onClick={()=>setHistoryId(old=>old===entry.appointmentId?null:entry.appointmentId)}>История записи</button>
-        {historyId===entry.appointmentId&&<BookingHistory key={entry.appointmentId} appointment={entry.appointmentId}
-          path={'/api/v1/dev/auto/organizations/'+org.trim()+'/locations/'+location.trim()+'/appointments/'+entry.appointmentId+'/history'} onDenied={denyBooking}/>}
+        <button type="button" disabled={busy||!!pending} onClick={()=>{setHistoryLookup(entry.appointmentId);setHistoryId(old=>old===entry.appointmentId?null:entry.appointmentId);}}>История записи</button>
         <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId,employee:entry.employeeId??''});}}>
           Перенести</button>
         <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget('cancel:'+entry.appointmentId);}}>Отменить запись</button>
       </li>)}</ul>}
+      <fieldset><legend>История действующих и отменённых записей</legend>
+        <label>UUID записи для истории <input value={historyLookup} disabled={busy||!!pending}
+          onChange={e=>{setHistoryLookup(e.target.value);setHistoryId(null);}}/></label>
+        <button type="button" disabled={busy||!!pending||!uuid.test(historyLookup.trim())}
+          onClick={()=>setHistoryId(historyLookup.trim())}>Открыть историю</button>
+        {historyId&&<BookingHistory key={org+':'+location+':'+historyId} appointment={historyId}
+          path={'/api/v1/dev/auto/organizations/'+org.trim()+'/locations/'+location.trim()+'/appointments/'+historyId+'/history'} onDenied={denyBooking}/>}
+      </fieldset>
       <nav aria-label="Страницы календаря">
         <span>Страница {history.length+1}</span>
         {history.length>0&&<button type="button" disabled={busy} onClick={()=>{

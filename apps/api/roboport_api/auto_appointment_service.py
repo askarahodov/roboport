@@ -139,7 +139,7 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             """SELECT link.vehicle_id FROM auto_vehicle_customer_link link
                JOIN auto_vehicle_location_binding binding
                  ON binding.vehicle_id=link.vehicle_id
-               WHERE link.id=%s AND link.verified_at IS NOT NULL
+               WHERE link.id=%s AND link.verified_at IS NOT NULL AND link.verified_by IS NOT NULL
                  AND link.revoked_at IS NULL AND binding.location_id=%s
                FOR SHARE OF link, binding""", (link,location),
         ).fetchone()
@@ -404,8 +404,8 @@ def cancel_appointment(conn: psycopg.Connection, token: str,
             conn, token, organization, "INTAKE", scoped[0], for_mutation=True
         ):
             raise AppointmentDenied("organization intake required")
-        # Lock appointment before resolving the latest booking: rescheduling
-        # takes the same lock, so a concurrent cancel cannot target stale data.
+        # Блокируем Appointment до определения последней брони:
+        # перенос и отмена используют одну блокировку.
         conn.execute("SELECT id FROM auto_appointment WHERE id=%s FOR UPDATE", (appointment,))
         if customer_mode:
             _customer_order_pristine(conn, appointment)
@@ -514,7 +514,7 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
             """SELECT 1 FROM auto_vehicle_customer_link link
                JOIN auto_vehicle_location_binding b ON b.vehicle_id=link.vehicle_id
                WHERE link.id=%s AND link.vehicle_id=%s AND link.revoked_at IS NULL
-                 AND link.verified_at IS NOT NULL AND b.location_id=%s
+                 AND link.verified_at IS NOT NULL AND link.verified_by IS NOT NULL AND b.location_id=%s
                FOR SHARE OF link,b""", (a[1],a[2],a[0]),
         ).fetchone()
         if scope is None:
