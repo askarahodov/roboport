@@ -198,3 +198,64 @@ test('workspace labels policy-restricted document stages without leaking status'
   await expect(estimate.getByRole('cell')).toHaveText('Недоступно по правам');
   await expect(documents.getByRole('cell')).toHaveText('Недоступно по правам');
 });
+
+
+test('manager records future maintenance, retries the exact request and withdraws recommendation',async({page})=>{
+  const service='44444444-4444-4444-8444-444444444444';
+  const id='55555555-5555-4555-8555-555555555555';
+  const stamp='2026-11-24T10:00:00Z';
+  const date=new Date(Date.now()+180*86400000).toISOString().slice(0,10);
+  let items:any[]=[],lost=true;
+  const requests:string[]=[];
+  const plan=()=>({syntheticOnly:true,releaseAllowed:false,sendAllowed:false,
+    workOrderId:order,canManage:true,baselineKm:41700,
+    services:[{id:service,code:'SYN-TO',title:'Плановая замена масла'}],items});
+  await page.route('**/api/v1/auth/csrf',r=>r.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const req=route.request(),path=new URL(req.url()).pathname;
+    if(path===root+'/workspace')return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({...snapshot(),steps:{...steps,inspection:'RECORDED'}})});
+    if(path===root+'/services'||path===root.replace('/orders/'+order,'')+'/service-catalog')
+      return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+    if(path===root+'/recommendations'&&req.method()==='GET')
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(plan())});
+    if(path===root+'/recommendations'&&req.method()==='POST'){
+      const body=req.postDataJSON();requests.push(req.postData()??'');
+      expect(req.headers()['x-csrf-token']).toBe('synthetic-csrf');
+      expect(body).toMatchObject({serviceId:service,reasonCode:'PERIODIC',dueDate:date,dueKm:50000});
+      items=[{id,serviceId:service,serviceCode:'SYN-TO',title:'Плановая замена масла',
+        reasonCode:'PERIODIC',baselineKm:41700,dueDate:date,dueKm:50000,
+        createdAt:stamp,status:'ACTIVE',withdrawnAt:null}];
+      if(lost){lost=false;return route.abort('failed');}
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({...plan(),replayed:true})});
+    }
+    if(path===root+'/recommendations/'+id+'/withdraw'){
+      items=items.map(x=>({...x,status:'WITHDRAWN',withdrawnAt:stamp}));
+      return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify({...plan(),replayed:false})});
+    }
+    throw Error('Unexpected '+path);
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto(pageUrl);
+  await page.getByRole('button',{name:/^План следующего ТО ·/}).click();
+  const panel=page.getByRole('region',{name:'План следующего обслуживания'});
+  await panel.getByLabel('Услуга для следующего визита').selectOption(service);
+  await panel.getByLabel('Рекомендуемая дата').fill(date);
+  await panel.getByLabel('Следующий пробег (км, необязательно)').fill('50000');
+  await panel.getByRole('button',{name:'Сохранить рекомендацию'}).click();
+  await expect(panel.getByText('Результат неизвестен.',{exact:false})).toBeVisible();
+  await panel.getByLabel('Следующий пробег (км, необязательно)').fill('52000');
+  await panel.getByRole('button',{name:'Повторить исходную операцию'}).click();
+  await expect(panel.getByText('Рекомендация записана.')).toBeVisible();
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toBe(requests[0]);
+  await expect(panel.getByRole('listitem')).toContainText(date);
+  await panel.getByRole('button',{name:'Отозвать рекомендацию',exact:true}).click();
+  await panel.getByRole('button',{name:'Подтвердить отзыв рекомендации'}).click();
+  await expect(panel.getByRole('listitem')).toContainText('Отозвана');
+  await expect(panel.getByRole('button',{name:'Отозвать рекомендацию',exact:true})).toHaveCount(0);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});

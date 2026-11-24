@@ -158,3 +158,39 @@ test('no customer auth means no order or quote requests and no private content',
   await expect(page.getByRole('alert')).toContainText('403 — доступ запрещён');
   expect(fetches).toBe(0);
 });
+
+
+test('customer reads own future service plan without staff identifiers or write actions',async({page})=>{
+  await auth(page);
+  let denied=false;
+  await page.route('**/api/v1/dev/auto/customer/orders?*',route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify({
+      items:[card],nextCursor:null,syntheticOnly:true,releaseAllowed:false})}));
+  await page.route('**/api/v1/dev/auto/customer/orders/'+order,route=>route.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify(detail('APPROVED'))}));
+  await page.route('**/api/v1/dev/auto/organizations/**/recommendations/customer',route=>{
+    const path=new URL(route.request().url()).pathname;
+    expect(path).toBe('/api/v1/dev/auto/organizations/'+organization+'/locations/'+location+
+      '/orders/'+order+'/recommendations/customer');
+    return route.fulfill({status:denied?403:200,contentType:'application/json',body:denied?'{}':
+      JSON.stringify({syntheticOnly:true,releaseAllowed:false,sendAllowed:false,
+        workOrderId:order,canManage:false,baselineKm:20000,services:[],items:[{
+          id:revision,serviceId:service,serviceCode:'SYN-TO',title:'Плановая замена масла',
+          reasonCode:'PERIODIC',baselineKm:20000,dueDate:'2030-07-01',dueKm:30000,
+          createdAt:stamp,status:'ACTIVE',withdrawnAt:null}]})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/auto-orders');
+  await page.getByRole('button',{name:'Подробнее о заказе '+order}).click();
+  const plan=page.getByRole('region',{name:'План следующего обслуживания'});
+  await plan.getByRole('button',{name:'Показать рекомендации'}).click();
+  await expect(plan.getByText('Плановая замена масла',{exact:true})).toBeVisible();
+  await expect(plan.getByText('2030-07-01',{exact:false})).toBeVisible();
+  await expect(plan.getByRole('button',{name:'Сохранить рекомендацию'})).toHaveCount(0);
+  await expect(plan.getByRole('button',{name:'Отозвать рекомендацию'})).toHaveCount(0);
+  denied=true;
+  await plan.getByRole('button',{name:'Обновить рекомендации'}).click();
+  await expect(page.getByText('Карточка недоступна: доступ мог быть отозван.')).toBeVisible();
+  await expect(plan).toHaveCount(0);
+  await expect(page.getByText('Плановая замена масла',{exact:true})).toHaveCount(0);
+});
