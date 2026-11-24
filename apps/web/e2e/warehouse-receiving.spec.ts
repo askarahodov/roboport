@@ -287,3 +287,35 @@ test('revoked manager receipt access clears previously displayed immutable suppl
   await expect(page.getByRole('spinbutton',{name:'Закупочная цена за единицу'})).toHaveValue('0');
   await expect(page.getByRole('status').filter({hasText:'Цена и время котировки'})).toHaveCount(0);
 });
+
+
+test('denied receipt mutation clears quote and both document queues',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route('**/warehouse/receipts/pending?*',route=>{
+    const stage=new URL(route.request().url()).searchParams.get('stage');
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,stage,nextDocumentId:null,
+        items:[{documentId:receipt,lotId:lot,article:'PRIVATE-RECEIPT',
+          batchCode:'LOT-A',binCode:'BIN-1',quantity:2,sourceReference:'SUP-9',
+          purchaseQuote:{orderId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            supplierId:'SYNTH-SUP-1',offerId:'OFFLINE-1',currency:'RUB',
+            unitNetMinor:1250,supplierPriceRevision:'PRIVATE-REV',
+            supplierQuotedAt:'2026-11-10T06:00:00Z'}}]})});
+  });
+  await page.route('**/warehouse/receipts/valuation',route=>route.fulfill({
+    status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'}));
+  await page.goto('/staff/warehouse-receiving');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByRole('button',{name:'Показать черновики'}).click();
+  const queue=page.getByLabel('Принятые документы без оценки');
+  await queue.getByRole('button',{name:'Показать документы без оценки'}).click();
+  await queue.getByRole('button',{name:'Выбрать для оценки '+receipt}).click();
+  await expect(page.getByRole('textbox',{name:'Ревизия цены поставщика'})).toHaveValue('PRIVATE-REV');
+  await page.getByRole('button',{name:'Сохранить закупочную стоимость'}).click();
+  await expect(page.getByText('Нет прав WAREHOUSE/MANAGER или доступ отозван.')).toBeVisible();
+  await expect(page.getByText('PRIVATE-RECEIPT')).toHaveCount(0);
+  await expect(page.getByRole('textbox',{name:'Ревизия цены поставщика'})).toHaveValue('');
+  await expect(page.getByRole('textbox',{name:'UUID приходного документа'})).toHaveValue('');
+});

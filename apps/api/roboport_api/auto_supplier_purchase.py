@@ -15,6 +15,7 @@ from .auto_org_authority import organization_role_allows
 from .auto_parts_provider import CatalogError
 from .auto_supplier_offer import parse_supplier_offers
 from .auto_stock_receipt_document import create_receipt_document
+from .auto_purchase_document_policy import require_purchase_document
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 from .session_lookup import session_subject
 from .auto_document_access import (
@@ -85,11 +86,7 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
     selected, snapshot, parsed = _source(offers, supplier, offer_id)
     with conn.transaction():
         actor = _role(conn, token, org, loc)
-        try:
-            require_document_access(conn,token,org,loc,("WAREHOUSE","MANAGER"),
-                                    "SUPPLIER_ORDER","PRICE_PURCHASE")
-        except DocumentPolicyDenied:
-            raise AutoStockDenied("FORBIDDEN") from None
+        require_purchase_document(conn,token,org,loc,"PRICE_PURCHASE")
         scope = conn.execute("""SELECT s.id,s.article FROM auto_stock_lot l
           JOIN auto_stock_sku s ON s.id=l.sku_id
             AND s.organization_id=l.organization_id AND s.location_id=l.location_id
@@ -101,13 +98,14 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
         if any(x.article != article for x in parsed):
             raise AutoStockDenied("INVALID_INPUT")
         old = conn.execute("""SELECT id,work_order_id,lot_id,desired_quantity,
-             offers,selected_supplier,selected_offer,created_by,ordered_quantity
+             offers,selected_supplier,selected_offer,created_by,ordered_quantity,created_at
           FROM auto_supplier_purchase_order WHERE request_id=%s""",
                            (request_id,)).fetchone()
         if old is not None:
             if (old[1:4] == (work_order, lot, desired_quantity) and
                 old[4] == json.loads(snapshot) and old[5:7] == (supplier, offer_id)
                 and old[7] == actor):
+                require_purchase_document(conn,token,org,loc,created_at=old[9])
                 return old[0], old[8]
             raise AutoStockConflict("REPLAY_MISMATCH")
         # Exact replay stays possible after offer expiry; no *new* order may
@@ -175,11 +173,12 @@ def record_supplier_delivery(conn: psycopg.Connection, token: str, org: UUID,
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_role(conn,token,org,loc,cap="EDIT")
-        row=conn.execute("""SELECT id,lot_id,ordered_quantity FROM auto_supplier_purchase_order
+        row=conn.execute("""SELECT id,lot_id,ordered_quantity,created_at FROM auto_supplier_purchase_order
           WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
           (purchase,org,loc)).fetchone()
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
+        require_purchase_document(conn,token,org,loc,created_at=row[3])
         prior=conn.execute("""SELECT p.id,p.document_id,p.purchase_id,p.quantity,
                  p.created_by,d.source_reference
             FROM auto_supplier_purchase_receipt p
@@ -217,11 +216,12 @@ def cancel_supplier_remainder(conn: psycopg.Connection, token: str, org: UUID,
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_role(conn,token,org,loc,cap="CLOSE")
-        row=conn.execute("""SELECT id,ordered_quantity FROM auto_supplier_purchase_order
+        row=conn.execute("""SELECT id,ordered_quantity,created_at FROM auto_supplier_purchase_order
           WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
           (purchase,org,loc)).fetchone()
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
+        require_purchase_document(conn,token,org,loc,created_at=row[2])
         old=conn.execute("""SELECT id,request_id,created_by,canceled_remainder
           FROM auto_supplier_purchase_cancel WHERE purchase_id=%s""",
           (purchase,)).fetchone()

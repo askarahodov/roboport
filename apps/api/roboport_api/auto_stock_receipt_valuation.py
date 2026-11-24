@@ -6,7 +6,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
-from .auto_document_access import require_document_access,DocumentPolicyDenied
+from .auto_purchase_document_policy import require_purchase_document
 
 
 def record_receipt_valuation(conn: psycopg.Connection,token: str,
@@ -32,18 +32,15 @@ def record_receipt_valuation(conn: psycopg.Connection,token: str,
         if not organization_role_allows(conn,token,organization_id,"MANAGER",
                                         location_id,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
-        row=conn.execute("""SELECT d.id FROM auto_stock_receipt_document d
+        row=conn.execute("""SELECT d.id,d.created_at FROM auto_stock_receipt_document d
           JOIN auto_stock_receipt_acceptance a ON a.document_id=d.id
           WHERE d.id=%s AND d.organization_id=%s AND d.location_id=%s
           FOR SHARE OF d,a""",
           (document_id,organization_id,location_id)).fetchone()
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
-        try:
-            require_document_access(conn,token,organization_id,location_id,
-                                    ("MANAGER","WAREHOUSE"),"SUPPLIER_ORDER","PRICE_PURCHASE")
-        except DocumentPolicyDenied:
-            raise AutoStockDenied("FORBIDDEN") from None
+        require_purchase_document(conn,token,organization_id,location_id,
+                                  "EDIT","PRICE_PURCHASE",created_at=row[1])
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:
             raise AutoStockDenied("FORBIDDEN")

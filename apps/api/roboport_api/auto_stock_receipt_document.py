@@ -4,10 +4,11 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 from .session_lookup import session_subject
-from .auto_document_access import require_document_access,DocumentPolicyDenied
+from .auto_purchase_document_policy import require_purchase_document
 
 
-def _invoke(conn,token,organization_id,location_id,lot_id,role,sql,args):
+def _invoke(conn,token,organization_id,location_id,lot_id,role,sql,args,*,
+            cap,created_at=None):
     with conn.transaction():
         if not organization_role_allows(conn,token,organization_id,role,
                                          location_id,for_mutation=True):
@@ -16,6 +17,8 @@ def _invoke(conn,token,organization_id,location_id,lot_id,role,sql,args):
              WHERE id=%s AND organization_id=%s AND location_id=%s FOR SHARE""",
              (lot_id,organization_id,location_id)).fetchone() is None:
             raise AutoStockDenied("FORBIDDEN")
+        require_purchase_document(conn,token,organization_id,location_id,
+                                  cap,created_at=created_at)
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:
             raise AutoStockDenied("FORBIDDEN")
@@ -41,9 +44,19 @@ def create_receipt_document(conn: psycopg.Connection,token: str,organization_id:
         type(source_reference) is not str or
         not 3<=len(source_reference.strip())<=160):
         raise AutoStockDenied("INVALID_INPUT")
-    return _invoke(conn,token,organization_id,location_id,lot_id,"WAREHOUSE",
-        "SELECT record_auto_stock_receipt_document(%s,%s,%s,%s)",
-        (lot_id,request_id,quantity,source_reference))
+    with conn.transaction():
+        if not organization_role_allows(conn,token,organization_id,"WAREHOUSE",
+                                         location_id,for_mutation=True):
+            raise AutoStockDenied("FORBIDDEN")
+        # The key may refer to an old receipt. Apply history before replay;
+        # a foreign key must not reveal any existing object.
+        old=conn.execute("""SELECT created_at FROM auto_stock_receipt_document
+            WHERE request_id=%s AND organization_id=%s AND location_id=%s
+            FOR SHARE""",(request_id,organization_id,location_id)).fetchone()
+        return _invoke(conn,token,organization_id,location_id,lot_id,"WAREHOUSE",
+            "SELECT record_auto_stock_receipt_document(%s,%s,%s,%s)",
+            (lot_id,request_id,quantity,source_reference),cap="CREATE",
+            created_at=old[0] if old else None)
 
 
 def accept_receipt_document(conn: psycopg.Connection,token: str,organization_id: UUID,
@@ -56,14 +69,14 @@ def accept_receipt_document(conn: psycopg.Connection,token: str,organization_id:
         if not organization_role_allows(conn,token,organization_id,"MANAGER",
                                          location_id,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
-        row=conn.execute("""SELECT d.lot_id FROM auto_stock_receipt_document d
+        row=conn.execute("""SELECT d.lot_id,d.created_at FROM auto_stock_receipt_document d
             WHERE d.id=%s AND d.organization_id=%s AND d.location_id=%s
             FOR SHARE""",(document_id,organization_id,location_id)).fetchone()
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
         return _invoke(conn,token,organization_id,location_id,row[0],"MANAGER",
             "SELECT accept_auto_stock_receipt_document(%s,%s)",
-            (document_id,request_id))
+            (document_id,request_id),cap="CLOSE",created_at=row[1])
 
 
 
@@ -87,19 +100,11 @@ def pending_receipt_reviews(conn: psycopg.Connection,token: str,
         if not organization_role_allows(conn,token,organization_id,"MANAGER",
                                          location_id,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
-        # Queue includes actual supplier quotation cost even in accept view.
-        # Denied purchase-price rights may not be bypassed via receiving.
-        try:
-            for cap in ("READ","PRICE_PURCHASE"):
-                cutoff=require_document_access(
-                    conn,token,organization_id,location_id,("MANAGER","WAREHOUSE"),
-                    "SUPPLIER_ORDER",cap)
-                if cutoff is not None:
-                    # This list mixes old and new supplier documents.
-                    # A cutoff would otherwise expose historical quotations.
-                    raise AutoStockDenied("HISTORY_DENIED")
-        except DocumentPolicyDenied:
-            raise AutoStockDenied("FORBIDDEN") from None
+        # Both stages return quote metadata, so read and price permissions
+        # are mandatory. Existing mixed historical queues fail closed.
+        if require_purchase_document(conn,token,organization_id,location_id,
+                                     "PRICE_PURCHASE") is not None:
+            raise AutoStockDenied("FORBIDDEN")
         rows=conn.execute("""
             SELECT d.id,l.id,s.article,l.batch_code,b.code,
                    d.quantity,d.source_reference,
