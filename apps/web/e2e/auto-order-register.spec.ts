@@ -83,3 +83,35 @@ test('revoked register denies and clears previously shown order IDs',async({page
   await expect(page.getByRole('table')).toHaveCount(0);
   await expect(page.getByText(order,{exact:true})).toHaveCount(0);
 });
+
+
+test('register refresh removes previously visible handover stage and filtered rows',async({page})=>{
+  let visible=true;
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const url=new URL(route.request().url());
+    if(url.pathname!==base+'/orders')throw Error('unexpected route '+url);
+    const state=visible?'CLOSED_TECHNICAL':'READY';
+    const filter=url.searchParams.get('stage');
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,releaseAllowed:false,
+        items:filter==='ALL'||filter===state?[{...row(order),stage:state}]:[],
+        nextCursor:null})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-order-register');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const table=page.getByRole('table');
+  await expect(table.getByRole('cell',{name:'Технически закрыт',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Сведения'}).click();
+  visible=false;
+  await page.getByRole('button',{name:'Обновить реестр'}).click();
+  await expect(table.getByRole('cell',{name:'Работы завершены',exact:true})).toBeVisible();
+  await expect(table.getByRole('cell',{name:'Технически закрыт',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('region',{name:'Сведения о выбранном заказ-наряде'})).toHaveCount(0);
+  await page.getByRole('combobox',{name:'Состояние заказ-наряда'}).selectOption('CLOSED_TECHNICAL');
+  await expect(page.getByText('Заказ-наряды по этому фильтру не найдены.')).toBeVisible();
+  await page.setViewportSize({width:1280,height:900});
+  await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
+  await expect(table).toHaveCount(0);
+});

@@ -62,12 +62,26 @@ def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
             )
         except DocumentPolicyDenied:
             raise RegisterDenied("FORBIDDEN") from None
+        # Статусы проведения и решения клиента требуют отдельного HANDOVER READ.
+        # Cutoff проверяется для каждого заказа до фильтрации и пагинации.
+        # При запрете показываем только независимый операционный этап:
+        # сам факт существования скрытого документа не меняет результат.
+        try:
+            handover_cutoff = require_document_access(
+                conn, token, org, loc, ("MANAGER", "WAREHOUSE"),
+                "HANDOVER", "READ",
+            )
+            handover_visible = True
+        except DocumentPolicyDenied:
+            handover_visible, handover_cutoff = False, None
         # Proof, org, branch and current booking are applied in SQL *before*
         # the page limit, so revoked customers and cross-tenant rows cannot
         # influence search results, pagination or counts.
         rows = conn.execute("""
             WITH available AS (
               SELECT w.id, w.created_at, a.id AS appointment_id,
+                     (%s::boolean AND (%s::timestamptz IS NULL
+                        OR w.created_at >= %s::timestamptz)) AS handover_visible,
                      COALESCE((
                        SELECT r.new_booking_id
                        FROM auto_appointment_reschedule r
@@ -97,22 +111,22 @@ def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
                      booking.bay_id,booking.starts_at,booking.ends_at,
                      CASE
                        WHEN booking.canceled_at IS NOT NULL THEN 'CANCELED'
-                       WHEN EXISTS (
+                       WHEN a.handover_visible AND EXISTS (
                          SELECT 1 FROM auto_order_demo_document_event event
                          WHERE event.work_order_id=a.id
                            AND event.action='CLOSED_TECHNICAL'
                        ) THEN 'CLOSED_TECHNICAL'
-                       WHEN EXISTS (
+                       WHEN a.handover_visible AND EXISTS (
                          SELECT 1 FROM auto_order_demo_document_event event
                          WHERE event.work_order_id=a.id
                            AND event.action='CLIENT_DISPUTE'
                        ) THEN 'CLIENT_DISPUTED'
-                       WHEN EXISTS (
+                       WHEN a.handover_visible AND EXISTS (
                          SELECT 1 FROM auto_order_demo_document_event event
                          WHERE event.work_order_id=a.id
                            AND event.action='CLIENT_ACK'
                        ) THEN 'CLIENT_ACKNOWLEDGED'
-                       WHEN EXISTS (
+                       WHEN a.handover_visible AND EXISTS (
                          SELECT 1 FROM auto_order_demo_document_event event
                          WHERE event.work_order_id=a.id
                            AND event.action='POSTED'
@@ -141,7 +155,8 @@ def list_work_orders(conn: psycopg.Connection, token: str, org: UUID, loc: UUID,
                    (created_at,id)<(%s::timestamptz,%s::uuid))
             ORDER BY created_at DESC,id DESC
             LIMIT %s
-        """, (org, loc, history_cutoff, history_cutoff, org, loc,
+        """, (handover_visible, handover_cutoff, handover_cutoff,
+              org, loc, history_cutoff, history_cutoff, org, loc,
               stage, stage, order_id, order_id,
               after[0] if after else None,
               after[0] if after else None,

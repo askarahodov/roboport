@@ -82,3 +82,68 @@ def test_export_fails_closed_when_staff_or_customer_proof_revoked(monkeypatch):
                    (d["link"],))
     value=rows(http.get(path))
     assert len(value)==1
+
+
+def test_export_and_register_hide_handover_status_before_filtering(monkeypatch):
+    from datetime import timedelta
+    from uuid import UUID
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    from roboport_api.auto_document_access import publish_policy
+    from roboport_api.auto_document_lifecycle import record_document_event
+    from test_pg_auto_document_lifecycle_http import ready
+    from test_pg_auto_document_access_http import admin
+    from test_pg_baseline import DSN
+
+    d,org,loc,order,act,preview=ready(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    url=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders"
+    path=url+"/export"
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,%s,%s,'INTAKE')""",(uuid4(),org,loc,d["other"]))
+        cutoff=db.execute("SELECT created_at FROM auto_work_order WHERE id=%s",
+                          (order,)).fetchone()[0]+timedelta(seconds=1)
+        for action,actor in (("POSTED",d["intake"]),("CLIENT_ACK",d["client_a"]),
+                             ("CLOSED_TECHNICAL",d["intake"])):
+            record_document_event(db,d["tokens"][actor],org,loc,order,
+                request_key=uuid4(),action=action,preview_id=UUID(preview["id"]),
+                preview_digest=preview["digest"],intake_act_id=UUID(act["id"]),
+                intake_digest=act["sha256"])
+
+    def assert_visible(expected):
+        result=http.get(url,params={"orderId":str(order)})
+        assert result.status_code==200,result.text
+        assert [(item["workOrderId"],item["stage"])
+                for item in result.json()["items"]]==[(str(order),expected)]
+        exported=rows(http.get(path,params={"orderId":str(order)}))
+        assert len(exported)==2 and exported[1][0]==str(order)
+        assert exported[1][6]==expected
+        for stage in ("POSTED","CLIENT_ACKNOWLEDGED","CLIENT_DISPUTED","CLOSED_TECHNICAL","READY"):
+            filtered=http.get(url,params={"stage":stage})
+            assert filtered.status_code==200,filtered.text
+            assert [item["workOrderId"] for item in filtered.json()["items"]]==(
+                [str(order)] if stage==expected else [])
+            assert filtered.json()["nextCursor"] is None
+            assert len(rows(http.get(path,params={"stage":stage})))==(
+                2 if stage==expected else 1)
+
+    def policy(allowed,not_before=None):
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["other"]],org,
+                request_key=uuid4(),role="MANAGER",loc=loc,user=None,
+                document="HANDOVER",cap="READ",allowed=allowed,
+                not_before=not_before)
+
+    assert_visible("CLOSED_TECHNICAL")
+    policy(False)
+    assert_visible("READY")
+    policy(True,cutoff)
+    assert_visible("READY")
+    policy(True)
+    assert_visible("CLOSED_TECHNICAL")
+    http.cookies.set("rp_session",d["tokens"][d["other"]])
+    assert_visible("READY")
