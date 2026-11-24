@@ -38,6 +38,7 @@ const sectionGuide: Record<string,string> = {
   '/staff/warehouse-stocktake':'warehouse', '/staff/warehouse-receiving':'warehouse',
   '/staff/warehouse-supplier-orders':'warehouse',
   '/staff/warehouse-work-orders':'warehouse', '/staff/warehouse-reclassification':'warehouse',
+  '/staff/warehouse-interbranch-transfers':'warehouse',
   '/staff/warehouse-supplier-returns':'warehouse', '/staff/warehouse-serial-movements':'warehouse',
 };
 const helpUrl = (path: string) => '/docs/#/guides/' + path;
@@ -72,6 +73,7 @@ const sections: { to: string; label: string; roles: Role[] }[] = [
   { to: '/staff/warehouse-supplier-orders', label: 'Заказы поставщикам (dev)', roles: ['STOCK','MANAGER'] },
   { to: '/staff/warehouse-work-orders', label: 'Выдача на заказ-наряд (dev)', roles: ['STOCK','MANAGER'] },
   { to: '/staff/warehouse-reclassification', label: 'Пересортица (dev)', roles: ['STOCK','MANAGER'] },
+  { to: '/staff/warehouse-interbranch-transfers', label: 'Межфилиальные перемещения (dev)', roles: ['STOCK','MANAGER'] },
   { to: '/staff/warehouse-supplier-returns', label: 'Возврат поставщику (dev)', roles: ['STOCK','MANAGER'] },
   { to: '/staff/warehouse-serial-movements', label: 'Серийные запчасти (dev)', roles: ['STOCK','MANAGER'] },
 ];
