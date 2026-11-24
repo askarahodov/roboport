@@ -84,12 +84,17 @@ def get_appointments(request: Request, cursor: str | None = None):
 
 @router.get("/api/v1/dev/auto/customer/booking/slots")
 def get_slots(request: Request, organizationId: str, locationId: str,
-              customerLinkId: str, bayId: str, localDay: str):
+              customerLinkId: str, bayId: str, localDay: str,
+              appointmentId: str | None = None):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
     try:
         org, loc, link, bay = map(UUID, (organizationId, locationId, customerLinkId, bayId))
+        appointment=UUID(appointmentId) if appointmentId is not None else None
+        if any(len(request.query_params.getlist(k))>1 for k in (
+            "organizationId","locationId","customerLinkId","bayId","localDay","appointmentId")):
+            raise ValueError("duplicate slot context")
         selected_services = parse_slot_services(request.query_params.getlist("serviceId"))
         if len(localDay) != 10:
             raise ValueError("invalid local day")
@@ -115,7 +120,7 @@ def get_slots(request: Request, organizationId: str, locationId: str,
                 end = datetime(tomorrow.year,tomorrow.month,tomorrow.day,tzinfo=zone)
                 items = candidate_slots(
                     db, token, org, loc, bay, start,
-                    day_end=end, customer_link=link, service_ids=selected_services,
+                    appointment=appointment, day_end=end, customer_link=link, service_ids=selected_services,
                 )
                 hours_configured = db.execute(
                     """SELECT 1 FROM auto_location_opening_policy

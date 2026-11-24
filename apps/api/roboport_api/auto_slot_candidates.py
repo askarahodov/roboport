@@ -27,13 +27,17 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                     appointment: UUID | None = None,
                     day_end: datetime | None = None,
                     customer_link: UUID | None = None,
-                    service_ids: tuple[UUID, ...] = ()) -> list[dict]:
+                    service_ids: tuple[UUID, ...] = (),
+                    *, clear_employee: bool = False, complex_id: UUID | None = None) -> list[dict]:
     """Кандидаты на UTC либо локальные сутки; бронь не гарантируется."""
     if (not all(isinstance(v, UUID) for v in (org, location, bay))
         or (employee is not None and not isinstance(employee, UUID))
         or (appointment is not None and not isinstance(appointment, UUID))
         or (customer_link is not None and not isinstance(customer_link, UUID))
-        or (customer_link is not None and employee is not None)
+        or type(clear_employee) is not bool
+        or (clear_employee and (employee is not None or appointment is None))
+        or (customer_link is not None and (employee is not None or clear_employee or complex_id is not None))
+        or (complex_id is not None and (not isinstance(complex_id, UUID) or appointment is not None or service_ids))
         or type(service_ids) is not tuple or len(service_ids) > 8
         or any(type(item) is not UUID for item in service_ids)
         or len(set(service_ids)) != len(service_ids)
@@ -71,36 +75,73 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
         """, (bay, org, location)).fetchone()
         if found is None:
             raise SlotsDenied("scoped bay unavailable")
-        # По умолчанию сохраняем старое одночасовое окно. Если переданы
-        # услуги, длительность рассчитывается только по своему каталогу БД.
-        duration_minutes = 60
-        if service_ids:
-            services = conn.execute(
-                """SELECT id,duration_minutes FROM auto_service_catalog
-                   WHERE organization_id=%s AND location_id=%s
-                     AND id = ANY(%s::uuid[]) ORDER BY id FOR SHARE""",
-                (org,location,list(service_ids)),
-            ).fetchall()
-            if len(services) != len(service_ids):
-                raise SlotsDenied("service catalog scope unavailable")
-            duration_minutes = sum(row[1] for row in services)
-            if not 5 <= duration_minutes <= 1440:
-                raise SlotsDenied("selected duration unsupported")
+        # При переносе сервер сам определяет работы и сохраняемого специалиста.
+        # Переданные клиентом идентификаторы не заменяют состав существующего ЗН.
         old_booking = None
+        duration_minutes = 60
         if appointment is not None:
             scoped = conn.execute("""
-                SELECT COALESCE((SELECT r.new_booking_id FROM auto_appointment_reschedule r
-                  WHERE r.appointment_id=a.id
-                  ORDER BY r.created_at DESC,r.id DESC LIMIT 1),a.booking_id)
-                FROM auto_appointment a WHERE a.id=%s AND a.organization_id=%s
-                  AND a.location_id=%s
+                SELECT current.id,w.id,er.employee_id,
+                       EXTRACT(EPOCH FROM current.ends_at-current.starts_at)
+                FROM auto_appointment a
+                JOIN auto_work_order w ON w.appointment_id=a.id
+                  AND w.organization_id=a.organization_id AND w.location_id=a.location_id
+                JOIN auto_vehicle_customer_link proof ON proof.id=a.customer_link_id
+                  AND proof.vehicle_id=a.vehicle_id AND proof.verified_at IS NOT NULL
+                  AND proof.verified_by IS NOT NULL AND proof.revoked_at IS NULL
+                JOIN auto_vehicle_location_binding binding ON binding.vehicle_id=a.vehicle_id
+                  AND binding.location_id=a.location_id
+                JOIN auto_bay_booking current ON current.id=COALESCE((
+                    SELECT r.new_booking_id FROM auto_appointment_reschedule r
+                    WHERE r.appointment_id=a.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1
+                  ),a.booking_id)
+                  AND current.organization_id=a.organization_id
+                  AND current.location_id=a.location_id AND current.canceled_at IS NULL
+                LEFT JOIN auto_employee_reservation er ON er.booking_id=current.id
+                  AND er.canceled_at IS NULL
+                WHERE a.id=%s AND a.organization_id=%s AND a.location_id=%s
                   AND (%s::uuid IS NULL OR a.customer_link_id=%s::uuid)
+                FOR SHARE OF a,w,proof,binding,current
             """, (appointment,org,location,customer_link,customer_link)).fetchone()
-            if scoped is None or conn.execute("""SELECT 1 FROM auto_bay_booking
-                WHERE id=%s AND canceled_at IS NULL AND organization_id=%s
-                  AND location_id=%s""",(scoped[0],org,location)).fetchone() is None:
+            if scoped is None:
                 raise SlotsDenied("scoped active appointment required")
-            old_booking = scoped[0]
+            if customer_link is not None:
+                from .auto_appointment_service import _customer_order_pristine, AppointmentDenied
+                try:
+                    _customer_order_pristine(conn,appointment)
+                except AppointmentDenied as exc:
+                    raise SlotsDenied("appointment already in progress") from exc
+            old_booking, order, retained, original_seconds = scoped
+            employee = None if clear_employee else employee or retained
+            chosen=conn.execute("""
+                SELECT cat.id,cat.duration_minutes FROM auto_work_order_service sel
+                JOIN auto_service_catalog cat ON cat.id=sel.service_id
+                  AND cat.organization_id=sel.organization_id AND cat.location_id=sel.location_id
+                WHERE sel.work_order_id=%s AND sel.organization_id=%s AND sel.location_id=%s
+                ORDER BY cat.id FOR SHARE OF cat
+            """,(order,org,location)).fetchall()
+            if service_ids and set(service_ids)!={row[0] for row in chosen}:
+                raise SlotsDenied("appointment services mismatch")
+            # Без выбранных работ сохраняется длительность исходной брони.
+            # Округляем вверх до минуты, чтобы не обещать укороченный интервал.
+            duration_minutes=sum(row[1] for row in chosen) if chosen else int((original_seconds+59)//60)
+        elif complex_id is not None:
+            from .auto_booking_directory import complex_composition, BookingDirectoryDenied
+            try:
+                duration_minutes,_=complex_composition(conn,token,org,location,complex_id)
+            except BookingDirectoryDenied as exc:
+                raise SlotsDenied("complex unavailable") from exc
+        elif service_ids:
+            services=conn.execute("""
+                SELECT id,duration_minutes FROM auto_service_catalog
+                WHERE organization_id=%s AND location_id=%s
+                  AND id=ANY(%s::uuid[]) ORDER BY id FOR SHARE
+            """,(org,location,list(service_ids))).fetchall()
+            if len(services)!=len(service_ids):
+                raise SlotsDenied("service catalog scope unavailable")
+            duration_minutes=sum(row[1] for row in services)
+        if not 1<=duration_minutes<=1440:
+            raise SlotsDenied("selected duration unsupported")
         rows = conn.execute("""
             WITH candidates AS (
               SELECT s AS starts_at,

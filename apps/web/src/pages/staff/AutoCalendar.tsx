@@ -325,7 +325,10 @@ export function AutoCalendar() {
     const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),localDay:day});
     if(!target)selectedServices.forEach(id=>query.append('serviceId',id));
     if(effectiveEmployee)query.set('employeeId',effectiveEmployee);
-    if(target&&!target.startsWith('cancel:'))query.set('appointmentId',target);
+    if(target&&!target.startsWith('cancel:')){
+      query.set('appointmentId',target);
+      if(clearEmployee)query.set('employeeMode','clear');
+    }
     try{
       const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
         '/slot-candidates?'+query,{credentials:'include',cache:'no-store'});

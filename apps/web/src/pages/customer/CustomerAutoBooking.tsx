@@ -178,7 +178,8 @@ export function CustomerAutoBooking(){
     const r=scoped;
     const query=new URLSearchParams({organizationId:r.organizationId,
       locationId:r.locationId,customerLinkId:r.customerLinkId,bayId:r.bayId,localDay:day});
-    (target?target.serviceIds:selectedServices).forEach(id=>query.append('serviceId',id));
+    if(target)query.set('appointmentId',target.appointmentId);
+    else selectedServices.forEach(id=>query.append('serviceId',id));
     try{
       const resp=await fetch('/api/v1/dev/auto/customer/booking/slots?'+query,{
         credentials:'include',cache:'no-store'});
