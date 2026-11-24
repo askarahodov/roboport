@@ -91,8 +91,11 @@ def staff_crm_mock_messages(org_id:str,loc_id:str,lead_id:str,request:Request):
     dsn,(org,loc,lead)=context
     with psycopg.connect(dsn) as db:
         try:
+            cursors=request.query_params.getlist("cursor")
+            if len(cursors)>1 or (cursors and not cursors[0]):
+                raise LeadDenied("INVALID_INPUT")
             result=list_mock_messages(db,request.cookies.get("rp_session",""),
-                                      org,loc,lead)
+                                      org,loc,lead,cursors[0] if cursors else None)
         except (LeadDenied,LeadConflict) as exc:
             return _error(request,exc)
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})

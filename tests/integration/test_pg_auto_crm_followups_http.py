@@ -192,3 +192,38 @@ def test_concurrent_followup_create_and_competing_terminal_events(monkeypatch):
             "SELECT COUNT(*) FROM auto_crm_followup_event WHERE task_id=%s",
             (task,),
         ).fetchone()==(1,)
+
+
+def test_complete_followup_history_over_100_and_resolve_late_task(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http,lead=setup(monkeypatch)
+    path=scope(org,loc,lead)
+    headers=session(http,d,d["intake"])
+    due=(datetime.now(timezone.utc)+timedelta(days=5)).replace(microsecond=0)
+    ids=set()
+    for i in range(102):
+        created=http.post(path,headers=headers,json={
+            "taskCode":"CALL_BACK","dueAt":due.isoformat(),"requestKey":str(uuid4()),
+        })
+        assert created.status_code==201,created.text
+        ids.add(created.json()["taskId"])
+    first=http.get(path).json()
+    assert len(first["items"])==100
+    cursor=first["nextCursor"]
+    second=http.get(path,params={"cursor":cursor})
+    assert second.status_code==200,second.text
+    tail=second.json()
+    assert len(tail["items"])==2 and "nextCursor" not in tail
+    assert {x["taskId"] for x in first["items"]+tail["items"]}==ids
+    task=tail["items"][0]["taskId"]
+    done=http.post(path+"/"+task+"/events",headers=headers,json={
+        "action":"DONE","requestKey":str(uuid4())})
+    assert done.status_code==201,done.text
+    assert next(x for x in http.get(path,params={"cursor":cursor}).json()["items"]
+                if x["taskId"]==task)["status"]=="DONE"
+    assert http.get(path,params={"cursor":cursor+"x"}).status_code==422
+    assert http.get(path+"?cursor="+cursor+"&cursor="+cursor).status_code==422
+    assert http.get(scope(foreign,foreign_loc,lead),params={"cursor":cursor}).status_code==403
+    session(http,d,d["manager"])
+    assert http.get(path,params={"cursor":cursor}).status_code==422
+    session(http,d,d["client_a"])
+    assert http.get(path,params={"cursor":cursor}).status_code==403
