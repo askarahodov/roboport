@@ -256,9 +256,10 @@ test('staff admin pages grants invitations and both audit logs, denying revoked 
 test('ADMIN denial on any scoped journal clears all identities, forms and late replies',async({page})=>{
   let denied=false;
   let release!:()=>void;
-  let entered!:()=>void;
+  let entered!:()=>void,finished!:()=>void;
   const waiting=new Promise<void>(resolve=>{release=resolve;});
   const started=new Promise<void>(resolve=>{entered=resolve;});
+  const completed=new Promise<void>(resolve=>{finished=resolve;});
   let delayed=false;
   const stamp='2026-11-24T00:00:00Z';
   await page.route(endpoint,async route=>{
@@ -267,7 +268,7 @@ test('ADMIN denial on any scoped journal clears all identities, forms and late r
       if(delayed){entered();await waiting;}
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:[{
         eventId:grant,invitationId:grant,actorId:user,action:'CREATED',targetLogin:'synthetic-late',
-        role:'INTAKE',locationId:null,createdAt:stamp}]} )}).catch(()=>{});
+        role:'INTAKE',locationId:null,createdAt:stamp}]} )}).catch(()=>{}).finally(()=>finished());
     }
     if(path.endsWith('/staff-invitations'))return route.fulfill({
       status:denied?403:200,contentType:'application/json',body:denied?'{}':JSON.stringify({items:[{
@@ -306,6 +307,7 @@ test('ADMIN denial on any scoped journal clears all identities, forms and late r
     await page.getByRole('button',{name:'Проверить доступ заново'}).click();
     await expect(page.getByRole('heading',{name:'Активные назначения'})).toBeVisible();
   }finally{release();}
+  await completed;
   await expect(page.getByText('synthetic-late',{exact:false})).toHaveCount(0);
   await expect(page.getByText('synthetic-existing',{exact:true})).toHaveCount(0);
 });

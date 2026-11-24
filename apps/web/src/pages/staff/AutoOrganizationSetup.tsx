@@ -264,7 +264,7 @@ export function AutoOrganizationSetup() {
     {state==='error'&&<p role="alert">Не удалось загрузить структуру и журнал аудита.</p>}
     {message&&<p role="status" aria-live="polite">{message}</p>}
     {pending&&<div role="group" aria-label="Неподтверждённая операция структуры">
-      <button type="button" disabled={busy||pending!==null} onClick={()=>void execute(pending.path,undefined,pending.success,true,pending)}>Повторить исходную операцию</button>
+      <button type="button" disabled={busy} onClick={()=>void execute(pending.path,undefined,pending.success,true,pending)}>Повторить исходную операцию</button>
       <button type="button" disabled={busy} onClick={()=>{setPending(null);setMessage('Сверьте журнал перед новой операцией.');void refresh();}}>Перечитать структуру</button>
     </div>}
     {state==='ready'&&data&&<>

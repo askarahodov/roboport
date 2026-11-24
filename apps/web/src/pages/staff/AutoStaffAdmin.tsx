@@ -99,6 +99,8 @@ export function AutoStaffAdmin() {
   organizationRef.current = organization.trim();
   const access = React.useRef(new AbortController());
   const effectiveRequest = React.useRef(0);
+  const previewKey=organization.trim()+':'+policyDoc+':'+policyLocation.trim()+':'+policyUser.trim();
+  const previewRef=React.useRef(previewKey);previewRef.current=previewKey;
   const grantRequest = React.useRef<AbortController|null>(null);
   const [denialReason,setDenialReason] = React.useState('');
   const resetAccess = React.useCallback(()=>{
@@ -325,6 +327,7 @@ export function AutoStaffAdmin() {
           : 'Операция не выполнена (' + res.status + ').');
         return;
       }
+      effectiveRequest.current++;setEffective(null);setEffectiveState('idle');
       setMessage(action === 'grant' ? 'Назначение создано.' : 'Доступ сотрудника отозван.');
       auditRequest.current++;setAuditNext(null);setAudit([]);setAuditState('idle');
       setGrantCursor(null);setRefresh(n => n + 1);
@@ -381,7 +384,7 @@ export function AutoStaffAdmin() {
     if(!validOrg||!uuid.test(policyUser.trim())||
        !uuid.test(policyLocation.trim()))return;
     const org=organization.trim(),loc=policyLocation.trim(),user=policyUser.trim();
-    const doc=policyDoc,sequence=++effectiveRequest.current,signal=access.current.signal;
+    const doc=policyDoc,sequence=++effectiveRequest.current,signal=access.current.signal,key=previewKey;
     setEffective(null);setEffectiveState('loading');
     try{
       const q=new URLSearchParams({userId:user,locationId:loc,documentKind:doc});
@@ -389,7 +392,7 @@ export function AutoStaffAdmin() {
         encodeURIComponent(org)+'/access-policies/effective?'+q.toString(),{
           credentials:'include',cache:'no-store',signal,
         });
-      if(signal.aborted||org!==organizationRef.current||sequence!==effectiveRequest.current)return;
+      if(signal.aborted||org!==organizationRef.current||previewRef.current!==key||sequence!==effectiveRequest.current)return;
       if([401,403,404].includes(response.status)){denyAll('403 — предпросмотр недоступен. Проверьте доступ и назначение сотрудника.');return;}
       if(!response.ok)throw Error('http');
       const value:unknown=await response.json();
@@ -400,13 +403,13 @@ export function AutoStaffAdmin() {
         !capabilities.every(cap=>cap in (value.capabilities as object) &&
           typeof (value.capabilities as EffectivePolicy['capabilities'])[cap]?.allowed==='boolean')
       )throw Error('effective');
-      if(signal.aborted||org!==organizationRef.current||sequence!==effectiveRequest.current)return;
+      if(signal.aborted||org!==organizationRef.current||previewRef.current!==key||sequence!==effectiveRequest.current)return;
       const result=value as EffectivePolicy;
       if(result.userId!==user||result.locationId!==loc||result.documentKind!==doc||!Array.isArray(result.roles)||
         !result.roles.length||!result.roles.every(r=>roles.some(role=>role===r)))throw Error('effective');
       setEffective(result);setEffectiveState('ready');
     }catch{
-      if(!signal.aborted&&org===organizationRef.current&&sequence===effectiveRequest.current)setEffectiveState('error');
+      if(!signal.aborted&&org===organizationRef.current&&previewRef.current===key&&sequence===effectiveRequest.current)setEffectiveState('error');
     }
   }
 
@@ -431,6 +434,7 @@ export function AutoStaffAdmin() {
       }
       if(!res.ok)throw Error('unknown');
       setPolicyPending(null);
+      effectiveRequest.current++;setEffective(null);setEffectiveState('idle');
       setPolicyMessage('Ограничение сохранено сервером; прежние версии остались в аудите.');
       await loadPolicies();
     }catch{
@@ -527,9 +531,10 @@ export function AutoStaffAdmin() {
               setInviteMessage('Буфер обмена недоступен. Выделите код вручную.');
               return;
             }
+            const signal=access.current.signal;
             void navigator.clipboard.writeText(inviteToken)
-              .then(()=>setInviteMessage('Код скопирован.'))
-              .catch(()=>setInviteMessage('Не удалось скопировать. Выделите код вручную.'));
+              .then(()=>{if(!signal.aborted)setInviteMessage('Код скопирован.');})
+              .catch(()=>{if(!signal.aborted)setInviteMessage('Не удалось скопировать. Выделите код вручную.');});
           }}>
             Скопировать код</button>
           <a href="/staff/auto-invitation">Страница принятия приглашения</a>
