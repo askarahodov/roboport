@@ -355,7 +355,7 @@ test('запаздывающий ответ списка не возвращае
 });
 
 
-test('keyset response with repeated cursor is rejected without exposing its second page',async({page})=>{
+test('повторяющийся курсор отклоняется без показа второй страницы',async({page})=>{
   await authorized(page);
   await page.route(vehiclesUrl,route=>{
     const query=new URL(route.request().url()).searchParams;
@@ -375,7 +375,7 @@ test('keyset response with repeated cursor is rejected without exposing its seco
 });
 
 
-test('cursor failure after partial revoke keeps only freshly authorized rows and retries from start',async({page})=>{
+test('сбой курсора после частичного отзыва оставляет лишь повторно проверенные строки',async({page})=>{
   await authorized(page);
   let revoked=false,expired=true;
   const calls:string[]=[];

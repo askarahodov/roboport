@@ -45,7 +45,7 @@ def owned_vehicles(
 
 
 def owned_vehicle_page(conn, token, *, limit=20, cursor=None):
-    """Signed keyset over creation date and UUID; no cached authority."""
+    """Подписанный keyset по дате создания и UUID, без кэширования полномочий."""
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError("invalid limit")
     if session_subject(conn,token) is None:
@@ -61,7 +61,7 @@ def owned_vehicle_page(conn, token, *, limit=20, cursor=None):
 
 
 def _owned_rows(conn, token, *, limit, offset=0, position=None):
-    # Session, live ownership, role and result share a single SQL snapshot.
+    # Сессия, действующая связь, роль и результат проверяются в одном снимке SQL.
     stamp,ident=position if position is not None else (None,None)
     return conn.execute(
         """SELECT page.id,page.make,page.model,page.variant,page.model_year,page.vin,page.created_at

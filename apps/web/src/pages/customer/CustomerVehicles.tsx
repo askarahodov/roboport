@@ -114,26 +114,25 @@ export function CustomerVehicles() {
             seenCursors.add(following);
           }
           // Server-side фильтр по актуальной связи действует для каждой страницы.
-          // Cursor does not shift when newer rows are inserted or revoked.
+          // Позиция курсора не смещается при добавлении или отзыве более новых строк.
           for (const item of data.items) {
             if (!fresh.some(existing => existing.id === item.id)) fresh.push(item);
           }
-          // Invalidate the old visible set as soon as a fresh page arrives.
-          // Do not retain previously authorized rows while a later page stalls.
+          // Заменяем прежний видимый набор сразу после получения новой страницы.
+          // Не оставляем старые строки на экране, пока следующая страница задерживается.
           setItems([...fresh]);
           if(following===null)break;
         }
         if (controller.signal.aborted) return;
-        // Close and abort any separately loaded detail on list replacement.
-        // A detail request started during pagination may otherwise outlive
-        // the last authorized page and resurrect an excluded card.
+        // При замене списка закрываем карточку и отменяем отдельный запрос.
+        // Иначе запоздалый ответ может вернуть исключённую из списка машину.
         clearDetails();
         setItems(fresh);
         setNextCursor(following);
         setStatus('ready');
       } catch {
         if (!controller.signal.aborted) {
-          // Keep only pages freshly re-authorized during this attempt.
+          // Оставляем только страницы, права на которые проверены в текущей попытке.
           clearDetails();
           setItems(fresh);
           setNextCursor(null);

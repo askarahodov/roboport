@@ -42,9 +42,9 @@ def test_live_auto_dev_read_contract_and_bola(monkeypatch):
     assert found.json()["items"][0]["vinLast4"] == vin[-4:]
     assert {item["id"] for item in found.json()["items"]} == {str(va)}
 
-    # Keyset mode retains the old offset response verbatim and signs the
-    # continuation against this cookie. A new row ahead of the cursor must
-    # not cause duplicates or skip the existing older vehicle.
+    # Keyset сохраняет прежний формат offset-ответа и привязывает курсор к сессии.
+    # Вставка новой строки перед курсором не должна дублировать или пропускать
+    # существующий более ранний автомобиль.
     from uuid import uuid4
     with psycopg.connect(DSN) as db:
         reviewer=db.execute("SELECT verified_by FROM auto_vehicle_customer_link WHERE vehicle_id=%s",

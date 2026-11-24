@@ -81,7 +81,7 @@ export async function getAutoDevVehicleDetails(
 
 const cursorPattern=/^[A-Za-z0-9_-]{1,256}$/;
 
-/** Keyset read remains private; never treat a cursor as an authorization grant. */
+/** Чтение через keyset остаётся приватным; курсор не предоставляет полномочий. */
 export async function getAutoDevVehicleCursorPage(
   limit:number,cursor:string|null=null,signal?:AbortSignal,
 ):Promise<AutoDevVehicleCursorPage>{
