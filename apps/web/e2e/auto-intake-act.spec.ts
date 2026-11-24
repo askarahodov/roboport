@@ -235,3 +235,29 @@ test('print keeps one page with 20 historic acts at 390 and 1280',async({page},t
       .toBeLessThanOrEqual(width);
   }
 });
+
+
+test('denied intake mutation removes prior visit, versions and print evidence',async({page})=>{
+  const inventory=['KEYS','SPARE_WHEEL','TOOLS','DOCS','CHARGER'].map(itemCode=>
+    ({itemCode,condition:'NOT_CHECKED'}));
+  const old={orderId:'77777777-7777-4777-8777-777777777777',version:1,
+    damages:[{areaCode:'FRONT',damageCode:'SCRATCH',severity:'MINOR'}],
+    inventory,createdAt:'2030-01-01T10:00:00Z'};
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**/intake-acts',route=>
+    route.request().method()==='POST'?route.fulfill({
+      status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'}):
+      route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        ...initial,previousVisit:old,latestVersion:1,
+        items:[{id:actId,version:1,vehicleKind:'PASSENGER',sha256:'a'.repeat(64),
+          createdAt:'2030-01-02T10:00:00Z',actorId:org,damages:[],inventory,photos:[]}]})}));
+  await page.goto('/staff/auto-intake-act?'+query);
+  await expect(page.getByLabel('Сравнение с предыдущим визитом')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Акт №1 · PASSENGER'})).toBeVisible();
+  await page.getByRole('button',{name:'Зафиксировать версию акта'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByLabel('Сравнение с предыдущим визитом')).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:'Акт №1 · PASSENGER'})).toHaveCount(0);
+  await expect(page.locator('body > .intake-act-print-portal')).toHaveCount(0);
+});

@@ -231,9 +231,9 @@ def _authorize(conn,token,org,loc,order,*,allow_client):
     try:
         actor=_actor_and_order(
             conn,token,org,loc,order,("INTAKE","MANAGER","MECHANIC"))
-        require_document_access(conn,token,org,loc,
+        cutoff=require_document_access(conn,token,org,loc,
            ("INTAKE","MANAGER","MECHANIC"),"INTAKE_ACT","READ",order=order)
-        return actor
+        return actor,cutoff
     except DocumentPolicyDenied:
         raise IntakeActDenied("FORBIDDEN") from None
     except InspectionDenied:
@@ -251,10 +251,10 @@ def _authorize(conn,token,org,loc,order,*,allow_client):
     ).fetchone()
     if row is None:
         raise IntakeActDenied("FORBIDDEN")
-    return actor
+    return actor,None
 
 
-def _read(conn,order,org,loc):
+def _read(conn,order,org,loc,*,history_cutoff=None):
     inspection=conn.execute("""
        SELECT id,odometer_km,fuel_percent,exterior_code
        FROM auto_work_order_inspection WHERE work_order_id=%s
@@ -306,6 +306,7 @@ def _read(conn,order,org,loc):
          AND previous_order.location_id=current_order.location_id
          AND previous_order.id<>current_order.id
          AND previous_order.created_at<current_order.created_at
+         AND (%s::timestamptz IS NULL OR previous_order.created_at >= %s::timestamptz)
        JOIN auto_appointment previous_appointment
          ON previous_appointment.id=previous_order.appointment_id
          AND previous_appointment.customer_link_id=current_appointment.customer_link_id
@@ -313,7 +314,7 @@ def _read(conn,order,org,loc):
        JOIN auto_work_order_intake_act p ON p.work_order_id=previous_order.id
        WHERE current_order.id=%s
        ORDER BY previous_order.created_at DESC,p.version DESC LIMIT 1
-    """,(order,)).fetchone()
+    """,(history_cutoff,history_cutoff,order)).fetchone()
     previous=None if before is None else {
        "orderId":str(before[0]),"version":before[1],
        "damages":before[2],"inventory":before[3],
@@ -329,8 +330,8 @@ def _read(conn,order,org,loc):
 
 def read_intake_acts(conn,token,org,loc,order):
     with conn.transaction():
-        _authorize(conn,token,org,loc,order,allow_client=True)
-        return _read(conn,order,org,loc)
+        _,cutoff=_authorize(conn,token,org,loc,order,allow_client=True)
+        return _read(conn,order,org,loc,history_cutoff=cutoff)
 
 
 def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act):
@@ -349,8 +350,13 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
     with conn.transaction():
         try:
             actor=_actor_and_order(conn,token,org,loc,order,("INTAKE",))
+            cutoff=require_document_access(conn,token,org,loc,
+                 ("INTAKE","MANAGER","MECHANIC"),"INTAKE_ACT","READ",order=order)
             require_document_access(conn,token,org,loc,
                                     ("INTAKE",),"INTAKE_ACT","CREATE",order=order)
+            if expected_version>0:
+                require_document_access(conn,token,org,loc,
+                                    ("INTAKE",),"INTAKE_ACT","EDIT",order=order)
         except (InspectionDenied,DocumentPolicyDenied):
             raise IntakeActDenied("FORBIDDEN") from None
         existing=conn.execute("""
@@ -360,9 +366,9 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
         if existing:
             if existing[1:]!=(order,actor,digest,expected_version+1):
                 raise IntakeActConflict("KEY_REUSED")
-            return {"ok":True,"replayed":True,**_read(conn,order,org,loc)}
+            return {"ok":True,"replayed":True,**_read(conn,order,org,loc,history_cutoff=cutoff)}
         _validate(act)  # Enforce new pixel uniqueness only for new versions.
-        snapshot=_read(conn,order,org,loc)
+        snapshot=_read(conn,order,org,loc,history_cutoff=cutoff)
         if snapshot["inspection"] is None:
             raise IntakeActConflict("INSPECTION_REQUIRED")
         if snapshot["locked"]:
@@ -384,7 +390,7 @@ def write_intake_act(conn,token,org,loc,order,*,request_key,expected_version,act
         except (psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
                 psycopg.errors.CheckViolation) as exc:
             raise IntakeActConflict("ACT_CONFLICT") from exc
-        return {"ok":True,"replayed":False,**_read(conn,order,org,loc)}
+        return {"ok":True,"replayed":False,**_read(conn,order,org,loc,history_cutoff=cutoff)}
 
 
 def read_act_photo(conn,token,org,loc,order,act_id,index):
@@ -416,8 +422,8 @@ def export_intake_act_evidence(conn,token,org,loc,order,act_id):
     if any(type(x) is not UUID for x in (org,loc,order,act_id)):
         raise IntakeActInvalid("INVALID_INPUT")
     with conn.transaction():
-        _authorize(conn,token,org,loc,order,allow_client=True)
-        snapshot=_read(conn,order,org,loc)
+        _,cutoff=_authorize(conn,token,org,loc,order,allow_client=True)
+        snapshot=_read(conn,order,org,loc,history_cutoff=cutoff)
         act=next((item for item in snapshot["items"] if item["id"]==str(act_id)),None)
         if act is None:
             raise IntakeActDenied("FORBIDDEN")

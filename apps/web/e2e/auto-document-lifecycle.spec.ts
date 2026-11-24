@@ -125,3 +125,27 @@ test('disputed document cannot show closure; revoked rights erase the workflow',
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByText('Статус документа: CLIENT_DISPUTED.',{exact:false})).toHaveCount(0);
 });
+
+
+test('direct posting denied clears previously loaded handover snapshot',async({page})=>{
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic"}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    if(route.request().method()==='POST')return route.fulfill({
+      status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({...snapshot,documentWorkflow:{
+        syntheticOnly:true,releaseAllowed:false,legalSignatureStatus:'NOT_IMPLEMENTED',
+        status:'DRAFT',intakeAct:{id:actId,version:1,digest:actDigest,clientDecision:'ACKNOWLEDGED'},
+        events:[],canReview:false,canClose:false}})});
+  });
+  await page.goto('/staff/auto-demo-close');
+  for(const [label,value] of [
+    ['UUID организации',org],['UUID филиала',loc],['UUID заказ-наряда',order],
+  ] as const)await page.getByRole('textbox',{name:label}).fill(value);
+  await expect(page.getByText('Статус документа: DRAFT.',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Технически провести документ (MANAGER)'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('Статус документа: DRAFT.',{exact:false})).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:'Сверка сметы (RUB, копейки)'})).toHaveCount(0);
+});

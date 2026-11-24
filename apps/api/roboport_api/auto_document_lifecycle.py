@@ -8,7 +8,8 @@ import psycopg
 
 from .auto_work_order_execution import _scope,ExecutionDenied
 from .auto_work_order_estimate import _client_and_scope,AutoEstimateDenied
-from .auto_document_access import require_document_access,DocumentPolicyDenied
+from .auto_document_access import DocumentPolicyDenied
+from .auto_handover_policy import require_handover_access
 
 
 class DocumentLifecycleDenied(ValueError):
@@ -73,9 +74,8 @@ def record_document_event(conn,token,org,loc,order,*,request_key,action,
         if action in ("POSTED","CLOSED_TECHNICAL"):
             try:
                 actor=_scope(conn,token,org,loc,order,("MANAGER",))
-                require_document_access(conn,token,org,loc,("MANAGER",),
-                    "HANDOVER","CREATE" if action=="POSTED" else "CLOSE",
-                    order=order)
+                require_handover_access(conn,token,org,loc,order,
+                    cap="CREATE" if action=="POSTED" else "CLOSE")
             except (ExecutionDenied,DocumentPolicyDenied):
                 raise DocumentLifecycleDenied("FORBIDDEN") from None
         else:

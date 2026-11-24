@@ -121,6 +121,29 @@ def test_document_full_transition_privacy_immutability_and_replay(monkeypatch):
     assert event(http,base,head,act,preview,"POSTED",
                  actionOverride=True).status_code==422
     assert event(http,base,{},act,preview,"POSTED").status_code==403
+    # The fixture grants MANAGER and WAREHOUSE to the same employee.
+    # Direct POST must not bypass the read/price or second-role write policy.
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    def policy(role,cap,allowed,cutoff=None):
+        owner=session(http,d,d["other"])
+        result=set_rule(http,policy_url(org),owner,role=role,loc=loc,
+                        document="HANDOVER",cap=cap,allowed=allowed,not_before=cutoff)
+        assert result.status_code==201,result.text
+        return session(http,d,d["intake"])
+    for role,cap in (("WAREHOUSE","READ"),("WAREHOUSE","PRICE_SALES"),
+                     ("WAREHOUSE","WRITE"),("MANAGER","CREATE")):
+        head=policy(role,cap,False)
+        assert event(http,base,head,act,preview,"POSTED").status_code==403
+        head=policy(role,cap,True)
+    head=policy("MANAGER","READ",True,"2099-01-01T00:00:00Z")
+    assert http.get(base).status_code==403
+    assert event(http,base,head,act,preview,"POSTED").status_code==403
+    head=policy("MANAGER","READ",True)
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_order_demo_document_event WHERE work_order_id=%s",
+                          (order,)).fetchone()==(0,)
     key=uuid4()
     posting=event(http,base,head,act,preview,"POSTED",key)
     assert posting.status_code==201,posting.text
@@ -129,6 +152,9 @@ def test_document_full_transition_privacy_immutability_and_replay(monkeypatch):
     assert posting.json()["legalSignatureStatus"]=="NOT_IMPLEMENTED"
     assert posting.json()["releaseAllowed"] is False
     assert event(http,base,head,act,preview,"POSTED",key).status_code==200
+    head=policy("WAREHOUSE","READ",False)
+    assert event(http,base,head,act,preview,"POSTED",key).status_code==403
+    head=policy("WAREHOUSE","READ",True)
     assert event(http,base,head,act,preview,"POSTED",key,
                  previewDigest="b"*64).status_code==409
     assert event(http,base,head,act,preview,"POSTED").status_code==409
@@ -147,12 +173,18 @@ def test_document_full_transition_privacy_immutability_and_replay(monkeypatch):
     assert event(http,base,owner,act,preview,"CLIENT_ACK",decision_key,
                  intakeDigest="c"*64).status_code==409
     head=session(http,d,d["intake"])
+    head=policy("WAREHOUSE","CLOSE",False)
+    assert event(http,base,head,act,preview,"CLOSED_TECHNICAL").status_code==403
+    head=policy("WAREHOUSE","CLOSE",True)
     closing_key=uuid4()
     closing=event(http,base,head,act,preview,"CLOSED_TECHNICAL",closing_key)
     assert closing.status_code==201,closing.text
     assert closing.json()["status"]=="CLOSED_TECHNICAL"
     assert closing.json()["releaseAllowed"] is False
     assert event(http,base,head,act,preview,"CLOSED_TECHNICAL",closing_key).status_code==200
+    head=policy("WAREHOUSE","PRICE_SALES",False)
+    assert event(http,base,head,act,preview,"CLOSED_TECHNICAL",closing_key).status_code==403
+    head=policy("WAREHOUSE","PRICE_SALES",True)
     assert event(http,base,head,act,preview,"CLOSED_TECHNICAL").status_code==409
     owner=session(http,d,d["client_a"])
     visible=http.get(base)

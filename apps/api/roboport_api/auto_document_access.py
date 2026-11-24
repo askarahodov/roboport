@@ -243,7 +243,7 @@ def has_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
 ROLE_BASE={
   "INTAKE_ACT":{
     "READ":{"INTAKE","MANAGER","MECHANIC"},
-    "CREATE":{"INTAKE"},
+    "CREATE":{"INTAKE"},"EDIT":{"INTAKE"},
   },
   "ESTIMATE":{
     "READ":{"MANAGER"},"CREATE":{"MANAGER"},"EDIT":{"MANAGER"},
@@ -319,6 +319,10 @@ def preview_employee_document_access(conn,token,org,loc,user,document):
             # его запрет тоже сужает действительное право, как в cost API.
             if document=="FINANCE" and cap=="PRICE_PURCHASE" and "MANAGER" in active:
                 applicable=active & {"MANAGER","CASHIER"}
+            # The handover operational role remains mandatory, but a
+            # second live MANAGER/WAREHOUSE role cannot bypass its DENY.
+            if document=="HANDOVER" and applicable and cap in ("CREATE","EDIT","CLOSE"):
+                applicable=active & {"MANAGER","WAREHOUSE"}
             controls=(cap,"WRITE") if cap in ("CREATE","EDIT","CLOSE") else (cap,)
             matching=[(allowed,stamp) for (role,location,target,rule_cap),(allowed,stamp)
                       in latest.items() if role in applicable and rule_cap in controls]
