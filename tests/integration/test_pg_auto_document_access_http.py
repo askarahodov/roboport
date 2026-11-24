@@ -352,6 +352,24 @@ def test_existing_purchase_order_direct_actions_and_replay_obey_read_history(mon
     assert created.status_code==201,created.text
     endpoint=base+"/"+created.json()["orderId"]
     payload={"locationId":str(loc),"quantity":1,"supplierReference":"POLICY-DELIVERY"}
+    delivery=supplier_post(http,d,d["intake"],endpoint+"/receipts",payload)
+    assert delivery.status_code==201,delivery.text
+    receipt=delivery.json()["documentId"]
+    with psycopg.connect(DSN) as db:
+        created_at=db.execute("SELECT created_at FROM auto_stock_receipt_document WHERE id=%s",
+                              (receipt,)).fetchone()[0]
+        order_at=db.execute("SELECT created_at FROM auto_supplier_purchase_order WHERE id=%s",
+                            (created.json()["orderId"],)).fetchone()[0]
+        assert order_at<created_at
+    from test_pg_auto_receipt_http import send
+    owner=token(http,d,d["manager"])
+    assert set_rule(http,url(org),owner,role="MANAGER",loc=loc,
+        document="SUPPLIER_ORDER",cap="READ",allowed=True,
+        not_before=created_at.isoformat()).status_code==201
+    # The receipt itself is on/after the cutoff, but its supplier order is not.
+    assert send(http,d,d["manager"],
+        f"/api/v1/dev/auto/organizations/{org}/warehouse/receipts/accept",
+        {"locationId":str(loc),"documentId":receipt}).status_code==403
     owner=token(http,d,d["manager"])
     assert set_rule(http,url(org),owner,role="WAREHOUSE",loc=loc,
         document="SUPPLIER_ORDER",cap="READ",allowed=True,
