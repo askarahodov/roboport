@@ -11,17 +11,30 @@ import os
 import sys
 from pathlib import Path
 
-from scripts.check_auto_release_ci import _json_api, validate_run
+from scripts.check_auto_release_ci import REPO, _json_api, validate_stable_run
 from scripts.check_auto_release_evidence import validate_evidence
 
-# Full automotive production scope: brand/licensing, vehicle booking and repair,
-# stock/supply, client consent, payments/fiscalization, tenant bootstrap,
-# cutover and role-specific documentation. Closed issue state alone is never
-# proof of valid evidence or an independent release approval.
+# Полный автомобильный веб-релиз, включая GAP, независимую QA и документацию.
+# #107 — общий эпик; #118 — отдельный мобильный релиз P3.
+# Закрытая Issue не заменяет действительные доказательства и разрешение выпуска.
 BLOCKING_ISSUES = (
-    110, 111, 113, 114, 115, 116, 117, 119, 121, 123, 124,
-    165, 166, 170, 172,
+    76, 92, 108, 110, 111, 112, 113, 114, 115, 116, 117, 119,
+    121, 123, 124, 130, 131, 165, 166, 167, 168, 169, 170, 171, 172,
+    439, 441, 442, 445, 446, 448,
 )
+
+
+def issue_problem(number: int, issue: object) -> str | None:
+    """Не считать закрытым другой объект, PR или отменённую задачу."""
+    if (type(issue) is not dict or issue.get("number") != number
+            or issue.get("repository_url") != "https://api.github.com/repos/" + REPO
+            or "pull_request" in issue):
+        return f"ISSUE_{number}_NOT_VERIFIED"
+    if issue.get("state") != "closed":
+        return f"ISSUE_{number}_NOT_CLOSED"
+    if issue.get("state_reason") != "completed":
+        return f"ISSUE_{number}_NOT_COMPLETED"
+    return None
 
 
 def validate_current_main(before: object, after: object,
@@ -56,15 +69,16 @@ def validate_current_main(before: object, after: object,
 
 def evaluate(evidence: object, run: object, jobs: object,
              issues: dict[int, object], sha: str, run_id: int,
-             main_ref_before: object, main_ref_after: object) -> dict:
+             main_ref_before: object, main_ref_after: object, *, run_after: object) -> dict:
     """Stable, non-sensitive reasons; no evidence contents or tokens logged."""
     failed = list(validate_evidence(evidence))
-    failed.extend("CI_" + reason for reason in validate_run(run, jobs, sha, run_id))
+    failed.extend("CI_" + reason for reason in
+                  validate_stable_run(run, run_after, jobs, sha, run_id))
     failed.extend(validate_current_main(main_ref_before, main_ref_after, sha))
     for number in BLOCKING_ISSUES:
-        issue = issues.get(number)
-        if type(issue) is not dict or issue.get("state") != "closed":
-            failed.append(f"ISSUE_{number}_NOT_CLOSED")
+        problem = issue_problem(number, issues.get(number))
+        if problem:
+            failed.append(problem)
     return {"verdict": "BLOCKED", "technicalChecksPassed": not failed,
             "reasons": sorted(set(failed)),
             "productionApproved": False}
@@ -96,13 +110,14 @@ def main(argv: list[str] | None = None) -> int:
         jobs = _json_api(f"/actions/runs/{args.run_id}/jobs?per_page=100", token)
         issues = {number: _json_api(f"/issues/{number}", token)
                   for number in BLOCKING_ISSUES}
+        run_after = _json_api(f"/actions/runs/{args.run_id}", token)
         ref_after = _json_api("/git/ref/heads/main", token)
     except Exception:
         print(json.dumps({"verdict": "BLOCKED", "reason": "REMOTE_VERIFICATION_FAILED"}))
         return 2
     result = evaluate(
         evidence, run, jobs, issues, args.sha, args.run_id,
-        ref_before, ref_after,
+        ref_before, ref_after, run_after=run_after,
     )
     print(json.dumps(result, sort_keys=True))
     # Even technical PASS is not an authorized production release.

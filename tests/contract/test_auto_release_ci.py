@@ -1,7 +1,7 @@
 """Release CI provenance checks are strict, never approval substitutes."""
 from copy import deepcopy
 
-from scripts.check_auto_release_ci import REQUIRED_JOBS, validate_run, main
+from scripts.check_auto_release_ci import REQUIRED_JOBS, validate_run, validate_stable_run, main
 
 SHA = "a" * 40
 
@@ -17,7 +17,7 @@ def sample():
     return run, {"total_count": len(jobs), "jobs": jobs}
 
 
-def test_verified_main_push_requires_all_five_jobs():
+def test_verified_main_push_requires_all_seven_jobs():
     run, jobs = sample()
     assert validate_run(run, jobs, SHA) == ()
     for name in REQUIRED_JOBS:
@@ -77,3 +77,28 @@ def test_job_identity_must_match_run_and_attempt():
     run, jobs = sample()
     del jobs["jobs"][0]["head_sha"]
     assert "JOB_SHA_MISMATCH" in validate_run(run, jobs, SHA)
+
+
+def test_release_jobs_match_actual_workflow():
+    from pathlib import Path
+    import yaml
+
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[2] /
+                               ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    assert REQUIRED_JOBS == set(workflow["jobs"])
+    assert {"impact","docs","postgres","api","web","browser-e2e","windows-cmd"} == REQUIRED_JOBS
+
+
+def test_unknown_job_and_changed_run_attempt_block():
+    run,jobs=sample()
+    extra=deepcopy(jobs["jobs"][0])
+    extra["name"]="unexpected-job"
+    jobs["jobs"].append(extra)
+    jobs["total_count"]+=1
+    assert "UNEXPECTED_JOB" in validate_run(run,jobs,SHA)
+    run,jobs=sample()
+    assert validate_stable_run(run,deepcopy(run),jobs,SHA,run["id"])==()
+    after={**run,"run_attempt":2,"status":"in_progress","conclusion":None}
+    errors=validate_stable_run(run,after,jobs,SHA,run["id"])
+    assert "RUN_CHANGED_DURING_VERIFICATION" in errors
+    assert "RUN_NOT_VERIFIED" in errors and "JOB_RUN_MISMATCH" in errors

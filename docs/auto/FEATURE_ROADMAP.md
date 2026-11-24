@@ -28,7 +28,7 @@
 | P2. Commercial | CRM/воронка, закупки, несколько складов, деньги, отчёты, импорт | P1 data + WorkOrder | #169, #115, #170, #171, #172 | Сверка первички, отчёты, интеграционные контракты и ссылки на документы |
 | P2/P3. Integrations | OEM/аналоги и нормочасы с лицензиями; телефония, уведомления, ККТ/СБП/ЭДО | Legal + provider access | #111, #169, #170, #119 | Sandbox/contract/failure tests, договоры и compliance |
 | P3. Mobile | iOS/Android поверх версионированного API, безопасный mobile auth | #117 и auth ADR | #118 | E2E авторизации, отзыв токена, parity с web |
-| P0 на всех фазах | Code/QA/docs/release gates | Каждый PR | #119, #121, #123, #124, #173, #92 | PR+main 5/5 CI, docs links, security, browser accessibility, restore |
+| P0 на всех фазах | Code/QA/docs/release gates | Каждый PR | #119, #121, #123, #124, #173, #92 | полный main 7/7 CI, PR по impact, docs links, security, browser accessibility, restore |
 
 **Зависимости по фазам**, не означает, что продвинутый CRM/финансовый учёт можно игнорировать: полный функциональный охват остаётся целью, отдельные интеграции требуют договоров и могут быть блокированы. Задача уровня эпика не закрывается после первого технического прототипа — для каждого вертикального среза создавать небольшие Issues с исполнимым DoD.
 
@@ -167,7 +167,7 @@
 
 ## Проверка актуальности main CI для production gate (current-dev, #119)
 
-`scripts/check_auto_release_preflight.py` теперь не принимает старый успешный GitHub run как текущую готовность: до и после чтения CI/evidence/обязательных issue запрашивает `git/ref/heads/main`, сверяет SHA на стабильность и точное совпадение с проверенным workflow `push` (все пять обязательных job). Stale HEAD, передвинувшийся HEAD, отсутствие/подмена ref fail closed; перечень блокеров полного авто-выпуска дополнен brand/parts/stock/finances/privacy/tenant/release dependencies. Контрактные тесты на подменённый ref, stale SHA и race, CLI без сети в test mocks. [Процедура для ops](RELEASE_PREFLIGHT.md). Прохождение формата evidence и закрытие issue всё ещё не равно независимому legal/security approval, verdict остаётся `BLOCKED`; выпуск #119 НЕ разрешён.
+`scripts/check_auto_release_preflight.py` теперь не принимает старый успешный GitHub run как текущую готовность: до и после чтения CI/evidence/обязательных issue запрашивает `git/ref/heads/main`, сверяет SHA на стабильность и точное совпадение с проверенным workflow `push` (все семь обязательных jobs). Stale HEAD, передвинувшийся HEAD, отсутствие/подмена ref fail closed; перечень блокеров полного авто-выпуска дополнен brand/parts/stock/finances/privacy/tenant/release dependencies. Контрактные тесты на подменённый ref, stale SHA и race, CLI без сети в test mocks. [Процедура для ops](RELEASE_PREFLIGHT.md). Прохождение формата evidence и закрытие issue всё ещё не равно независимому legal/security approval, verdict остаётся `BLOCKED`; выпуск #119 НЕ разрешён.
 
 
 ## Backup/restore автомобильной цепочки в обязательном CI (current-dev, #119)
