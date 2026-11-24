@@ -47,7 +47,7 @@ export function BookingHistory({path,appointment,onDenied}:{path:string;appointm
   },[path,appointment,cursor,refresh]);
   const local=(stamp:string)=>new Intl.DateTimeFormat('ru-RU',{timeZone:data?.timeZone,
     dateStyle:'short',timeStyle:'short'}).format(new Date(stamp));
-  return <section aria-label="История бронирования">
+  return <section aria-label="История бронирования" style={{overflowWrap:'anywhere'}}>
     <h4>История бронирования</h4>
     <p>Уведомления только в DEV_SINK, реальной отправки нет.</p>
     {status&&<p role="status">{status}</p>}

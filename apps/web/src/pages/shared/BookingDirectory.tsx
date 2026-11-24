@@ -48,7 +48,7 @@ export function BookingDirectory({org,loc,kind,disabled,onChoose,onDenied,custom
     }).catch(()=>{if(!controller.signal.aborted)setStatus('Не удалось загрузить справочник.');});
     return ()=>controller.abort();
   },[org,loc,kind,customerLink,open,submitted,after,refresh]);
-  return <div aria-label={'Справочник: '+names[kind]}>
+  return <div aria-label={'Справочник: '+names[kind]} style={{overflowWrap:'anywhere'}}>
     <button type="button" disabled={disabled} onClick={()=>setOpen(x=>!x)}>
       {open?'Закрыть: ':'Найти: '}{names[kind]}</button>
     {open&&<>

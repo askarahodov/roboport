@@ -1,5 +1,6 @@
 """Read-only synthetic candidate slots; database reservation remains authoritative."""
 from datetime import datetime, timedelta, timezone
+from math import ceil
 from uuid import UUID
 
 import psycopg
@@ -124,7 +125,7 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                 raise SlotsDenied("appointment services mismatch")
             # Без выбранных работ сохраняется длительность исходной брони.
             # Округляем вверх до минуты, чтобы не обещать укороченный интервал.
-            duration_minutes=sum(row[1] for row in chosen) if chosen else int((original_seconds+59)//60)
+            duration_minutes=sum(row[1] for row in chosen) if chosen else ceil(original_seconds/60)
         elif complex_id is not None:
             from .auto_booking_directory import complex_composition, BookingDirectoryDenied
             try:
