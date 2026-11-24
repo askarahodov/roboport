@@ -153,6 +153,8 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
     '/locations/'+encodeURIComponent(loc.trim())+'/orders/'+encodeURIComponent(order.trim());
   const path=root+'/intake-acts';
   const ready=status==='ready'&&loaded===scope&&data!==null;
+  // Unmount also invalidates an in-flight evidence download or mutation reply.
+  React.useEffect(()=>()=>{scopeGeneration.current.epoch+=1;},[]);
   React.useEffect(()=>{
     setStatus(valid?'loading':'idle');setLoaded('');setData(null);
     setMessage('');setPending(null);setPhotos([]);setDamages([]);
@@ -169,7 +171,7 @@ export function AutoIntakeAct({role,lockedScope}:{role:'staff'|'client';lockedSc
         if(!ctl.signal.aborted){setLoaded(scope);setData(parsed);setStatus('ready');}
       }).catch(()=>{if(!ctl.signal.aborted)setStatus('error');});
     return ()=>ctl.abort();
-  },[scope,revision,valid]);
+  },[scope,revision,valid,role]);
 
   function clearDenied(){
     setData(null);setStatus('denied');setPending(null);setLoaded('');
