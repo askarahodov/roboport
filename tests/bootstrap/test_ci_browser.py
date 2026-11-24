@@ -16,6 +16,29 @@ SPECS={
     "auto-workshop-qc.spec.ts",
 }
 
+REPORT_SPECS = {
+    "auto-assignments.spec.ts",
+    "auto-branch-cashflow.spec.ts",
+    "auto-closed-contribution.spec.ts",
+    "auto-closed-order-ledger-reconciliation.spec.ts",
+    "auto-crm-funnel.spec.ts",
+    "auto-crm-kanban.spec.ts",
+    "auto-crm-leads.spec.ts",
+    "auto-crm-outcomes.spec.ts",
+    "auto-demo-finance-report.spec.ts",
+    "auto-material-cost-evidence.spec.ts",
+    "auto-mechanic-productivity.spec.ts",
+    "auto-mechanic-shift-comparison.spec.ts",
+    "auto-order-register.spec.ts",
+    "auto-order-workspace.spec.ts",
+    "auto-stock-abc-xyz.spec.ts",
+    "auto-treasury-cashbook.spec.ts",
+    "auto-treasury.spec.ts",
+    "warehouse-catalog.spec.ts",
+    "warehouse-receiving.spec.ts",
+    "warehouse-work-orders.spec.ts",
+}
+
 
 class BrowserImpactTests(unittest.TestCase):
     def test_single_spec_only_runs_that_spec(self):
@@ -42,6 +65,44 @@ class BrowserImpactTests(unittest.TestCase):
              "e2e/auto-order-services.spec.ts",
              "e2e/auto-order-workspace.spec.ts"],
         )
+
+    def test_reporting_domain_includes_related_scenarios(self):
+        page = "apps/web/src/pages/staff/AutoBranchCashflow.tsx"
+        expected = [
+            "e2e/auto-branch-cashflow.spec.ts",
+            "e2e/auto-demo-finance-report.spec.ts",
+            "e2e/auto-treasury-cashbook.spec.ts",
+            "e2e/auto-treasury.spec.ts",
+        ]
+        self.assertEqual(plan([page], available=REPORT_SPECS), expected)
+        self.assertIsNone(plan([page], available=REPORT_SPECS -
+                               {"auto-treasury-cashbook.spec.ts"}))
+
+    def test_related_reporting_changes_union_and_full_fallback(self):
+        pages = [
+            "apps/web/src/pages/staff/AutoMechanicProductivity.tsx",
+            "apps/web/src/pages/staff/AutoMechanicShiftComparison.tsx",
+            "apps/web/src/pages/staff/AutoStockAbcXyz.tsx",
+            "apps/web/e2e/auto-stock-abc-xyz.spec.ts",
+            "docs/auto/REPORTING.md",
+        ]
+        expected = sorted("e2e/" + x for x in (
+            "auto-mechanic-productivity.spec.ts",
+            "auto-mechanic-shift-comparison.spec.ts",
+            "auto-assignments.spec.ts",
+            "auto-stock-abc-xyz.spec.ts",
+            "warehouse-catalog.spec.ts",
+            "warehouse-receiving.spec.ts",
+            "warehouse-work-orders.spec.ts",
+        ))
+        self.assertEqual(plan(pages, available=REPORT_SPECS), expected)
+        self.assertIsNone(plan(pages, full=True, available=REPORT_SPECS))
+        for shared in ("apps/web/src/main.tsx",
+                       "apps/api/roboport_api/auto_document_access.py",
+                       "apps/web/e2e/helpers/setup.ts",
+                       "apps/web/src/pages/staff/UnknownPage.tsx"):
+            with self.subTest(shared=shared):
+                self.assertIsNone(plan(pages+[shared], available=REPORT_SPECS))
 
     def test_unsafe_mixes_and_shared_modules_force_full(self):
         for path in (
@@ -117,6 +178,8 @@ class BrowserImpactTests(unittest.TestCase):
         for source, specs in PAGE_SCENARIOS.items():
             with self.subTest(source=source):
                 self.assertTrue(specs)
+                self.assertTrue((E2E_ROOT.parent.parent.parent / source).is_file(),
+                                f"missing source {source}")
                 for spec in specs:
                     self.assertTrue((E2E_ROOT / spec).is_file(),
                                     f"{source} references missing {spec}")

@@ -62,8 +62,10 @@ def impact(paths: list[str], *, full: bool = False) -> tuple[set[str], bool]:
 
 def changed(base: str) -> list[str]:
     # -z preserves unusual filenames; '--' terminates revision arguments.
+    # Treat a rename as deletion + addition: a critical old path must not
+    # disappear from impact selection when moved to a lightweight path.
     result = subprocess.run(
-        ["git", "diff", "--name-only", "-z", "--diff-filter=ACMRTD",
+        ["git", "diff", "--no-renames", "--name-only", "-z", "--diff-filter=ACMRTD",
          f"{base}...HEAD", "--"],
         check=True, capture_output=True,
     )

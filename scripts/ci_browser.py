@@ -33,6 +33,73 @@ PAGE_SCENARIOS = {
         "auto-order-services.spec.ts", "auto-order-register.spec.ts",
         "auto-order-workspace.spec.ts",
     ),
+    # Изолированные экраны отчётности: соседние сценарии того же домена
+    # включены явно. Изменение маршрутизатора, API, ACL или shared кода
+    # по-прежнему переводит весь PR в полный Playwright.
+    "apps/web/src/pages/staff/AutoBranchCashflow.tsx": (
+        "auto-branch-cashflow.spec.ts",
+        "auto-treasury-cashbook.spec.ts",
+        "auto-treasury.spec.ts",
+        "auto-demo-finance-report.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoTreasuryCashbook.tsx": (
+        "auto-branch-cashflow.spec.ts",
+        "auto-treasury-cashbook.spec.ts",
+        "auto-treasury.spec.ts",
+        "auto-demo-finance-report.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoClosedContribution.tsx": (
+        "auto-closed-contribution.spec.ts",
+        "auto-closed-order-ledger-reconciliation.spec.ts",
+        "auto-material-cost-evidence.spec.ts",
+        "auto-demo-finance-report.spec.ts",
+        "auto-order-register.spec.ts",
+        "auto-order-workspace.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoClosedOrderLedgerReconciliation.tsx": (
+        "auto-closed-contribution.spec.ts",
+        "auto-closed-order-ledger-reconciliation.spec.ts",
+        "auto-material-cost-evidence.spec.ts",
+        "auto-demo-finance-report.spec.ts",
+        "auto-order-register.spec.ts",
+        "auto-order-workspace.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoMaterialCostEvidence.tsx": (
+        "auto-closed-contribution.spec.ts",
+        "auto-closed-order-ledger-reconciliation.spec.ts",
+        "auto-material-cost-evidence.spec.ts",
+        "auto-demo-finance-report.spec.ts",
+        "auto-order-register.spec.ts",
+        "auto-order-workspace.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoMechanicProductivity.tsx": (
+        "auto-mechanic-productivity.spec.ts",
+        "auto-mechanic-shift-comparison.spec.ts",
+        "auto-assignments.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoMechanicShiftComparison.tsx": (
+        "auto-mechanic-productivity.spec.ts",
+        "auto-mechanic-shift-comparison.spec.ts",
+        "auto-assignments.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoStockAbcXyz.tsx": (
+        "auto-stock-abc-xyz.spec.ts",
+        "warehouse-catalog.spec.ts",
+        "warehouse-receiving.spec.ts",
+        "warehouse-work-orders.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoCrmFunnel.tsx": (
+        "auto-crm-funnel.spec.ts",
+        "auto-crm-outcomes.spec.ts",
+        "auto-crm-kanban.spec.ts",
+        "auto-crm-leads.spec.ts",
+    ),
+    "apps/web/src/pages/staff/AutoCrmOutcomes.tsx": (
+        "auto-crm-funnel.spec.ts",
+        "auto-crm-outcomes.spec.ts",
+        "auto-crm-kanban.spec.ts",
+        "auto-crm-leads.spec.ts",
+    ),
 }
 
 def plan(paths: list[str], *, full: bool = False,
