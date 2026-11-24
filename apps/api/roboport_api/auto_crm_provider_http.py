@@ -123,5 +123,7 @@ async def call(org_id:str,loc_id:str,request:Request):
 
 
 @router.get(LEAD+"/mock-calls")
-def calls(org_id:str,loc_id:str,lead_id:str,request:Request):
-    return _run(request,(org_id,loc_id,lead_id),call_history)
+def calls(org_id:str,loc_id:str,lead_id:str,request:Request,cursor:str|None=None):
+    if len(request.query_params.getlist("cursor"))>1:
+        return _response(request,422,"INVALID_INPUT")
+    return _run(request,(org_id,loc_id,lead_id),lambda db,t,*s:call_history(db,t,*s,cursor))

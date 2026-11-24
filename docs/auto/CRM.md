@@ -566,3 +566,43 @@ GET `/crm/leads/{lead}/tasks` и `/crm/leads/{lead}/mock-messages` возвра�
 MANAGER на «Воронка CRM (dev)» задаёт филиал и 1–31 локальный день создания опросов, строит отдельную сводку оценок. Суммы OPEN/ANSWERED/CANCELED/EXPIRED равны total, распределения оценок и причин равны ANSWERED; средняя в сотых долях, округление вниз, null без ответов. Отозванные связи исключаются; свыше 1000 опросов — 409 без частичного отчёта. Нет идентификаторов клиентов/заказов в отчёте. Никакой production статистики.
 
 Закрытые GET/POST `.../crm/leads/{lead}/survey` (requestKey/action INVITE|CANCEL) и `.../orders/{order}/survey/customer` (requestKey/rating/reasonCode), GET `.../crm/survey-report?fromDay=...&toDay=...`. Все POST same-origin CSRF, текущая сессия; no-store. Миграция 0139 добавляет immutable invitation/result и live lineage guard; downgrade только пустого журнала, при наличии данных нужен проверенный restore. sendAllowed=false, releaseAllowed=false. Реальные интеграции и юридическое согласие не подтверждены.
+
+
+## Полная репетиция коммуникаций (рабочий пакет #169, до итоговой приёмки)
+
+В режиме current-dev сохраняется запрет реального вызова. Расширенный API
+четырёх каналов CALL/EMAIL/SMS/MESSENGER использует тот же неизменяемый журнал
+SERVICE_UPDATE и точные consent snapshot. Старые три канала и их HTTP DTO
+сохранены для совместимости. Мессенджер по умолчанию отключён, требуется явное
+согласие каждого активного CLIENT-аккаунта; отзыв необратимо подавляет ранее
+созданный макет, даже после повторного согласия. Контактные предпочтения и
+тестовое согласие остаются различными понятиями.
+
+Приёмщик выбирает «Попытки тестового адаптера» у макета. Четыре offline adapter
+реализуют только фиксированные ответы ACCEPTED, TIMEOUT, RATE_LIMIT, REJECTED.
+TIMEOUT/ RATE_LIMIT допускают следующую попытку, всего до трёх; ACCEPTED и
+REJECTED терминальны. Каждая попытка имеет immutable ordinal, requestKey,
+actor, fixture outcome и время; точный повтор возвращает тот же attemptId
+и ordinal, чужой payload/отозванный snapshot — 409. Нет текстов, номеров,
+сети, провайдерских ключей, фонового worker или фактической отправки.
+MOCK_ACCEPTED не означает доставку. Нельзя запустить реальную коммуникацию
+путём изменения флага.
+
+Входящая телефония: «Зарегистрировать тестовый звонок» использует выбранную
+подтверждённую связь, DISPOSITION MISSED/ANSWERED и искусственный event UUID
+(requestKey). Событие атомарно создаёт или повторно использует PHONE lead
+в том же филиале; повтор event UUID не создаёт ни лида, ни второй записи звонка.
+История на 50 строк, подписанный cursor, live owner/role/proof. Не записывать
+реальные номера, записи разговоров или персональные данные.
+
+Закрытые операции: GET/POST /api/v1/dev/account/crm-provider-consent;
+GET .../crm/leads/{lead}/provider-consent; GET/POST .../provider-messages;
+GET/POST .../provider-messages/{message}/attempts; POST .../crm/mock-calls;
+GET .../crm/leads/{lead}/mock-calls. POST session+CSRF; no-store, 403/409/422.
+Миграция 0140 расширяет только consent/outbox channel checks, добавляет
+два immutable журнала; downgrade допустим только без новых доказательств.
+Откат приложения не удаляет аудит. Реальные поставщики, секреты,
+правовая экспертиза, production ingress и #119 остаются отдельным gate.
+
+**Проверки в пакете:** test_pg_auto_crm_provider_http.py, test_auto_crm_provider.py,
+обновлённые UI-тесты согласия и mock outbox. Результаты ещё не подтверждены.

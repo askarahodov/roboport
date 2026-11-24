@@ -7,7 +7,7 @@ const names:Record<Outcome,string>={ACCEPTED:'Тестовый приём',TIMEO
 const statuses={READY:'Нет попыток',RETRY_AVAILABLE:'Можно повторить',MOCK_ACCEPTED:'Принято тестовым адаптером',MOCK_REJECTED:'Окончательный отказ',EXHAUSTED:'Лимит попыток исчерпан',SUPPRESSED:'Согласие отозвано или изменено'} as const;
 type Status=keyof typeof statuses;
 type State={syntheticOnly:true;sendAllowed:false;realDelivery:false;messageId:string;channelCode:string;providerCode:string;status:Status;
-  attempts:{id:string;ordinal:number;outcome:Outcome;createdAt:string}[];replayed?:boolean};
+  attempts:{id:string;ordinal:number;outcome:Outcome;createdAt:string}[];replayed?:boolean;attemptId?:string;attemptOrdinal?:number};
 type Pending={requestKey:string;outcome:Outcome};
 const stamp=(x:unknown)=>typeof x==='string'&&Number.isFinite(Date.parse(x));
 function parse(raw:unknown,message:string,channel:string):State{
@@ -55,7 +55,7 @@ export function ProviderAttempts({path,message,channel,onDenied}:{path:string;me
       const data=parse(await res.json(),message,channel);
       if(c.signal.aborted)return;
       if(body&&(data.replayed!==(res.status===200)||data.status==='SUPPRESSED'||
-        !data.attempts.some(a=>a.outcome===body.outcome)))throw Error('receipt');
+        !data.attempts.some(a=>a.id===data.attemptId&&a.ordinal===data.attemptOrdinal&&a.outcome===body.outcome)))throw Error('receipt');
       setState(data);setPending(null);
     }catch{if(!c.signal.aborted)setNote(body?'Ответ неизвестен. Повторите тот же запрос.':'Не удалось прочитать попытки.');}
     finally{if(request.current===c){request.current=null;if(!c.signal.aborted)setBusy(false);}}
@@ -77,26 +77,28 @@ export function ProviderAttempts({path,message,channel,onDenied}:{path:string;me
 export function MockCallHistory({path,onDenied}:{path:string;onDenied:()=>void}){
   const [items,setItems]=React.useState<{id:string;disposition:'ANSWERED'|'MISSED';createdAt:string}[]|null>(null);
   const [busy,setBusy]=React.useState(false),[note,setNote]=React.useState('');
+  const [next,setNext]=React.useState<string|null>(null);
   const request=React.useRef<AbortController|null>(null);
   React.useEffect(()=>()=>request.current?.abort(),[]);
-  async function load(){
+  async function load(cursor:string|null=null){
     if(busy)return;request.current?.abort();const c=new AbortController();request.current=c;
-    setItems(null);setBusy(true);setNote('');
+    setItems(null);setNext(null);setBusy(true);setNote('');
     try{
-      const res=await fetch(path,{credentials:'include',cache:'no-store',signal:c.signal});
+      const res=await fetch(path+(cursor?'?cursor='+encodeURIComponent(cursor):''),{credentials:'include',cache:'no-store',signal:c.signal});
       if(c.signal.aborted)return;
       if([401,403,404].includes(res.status)){onDenied();return;}
       if(!res.ok)throw Error('http');
       const raw=await res.json();
-      if(raw.syntheticOnly!==true||raw.realCall!==false||!Array.isArray(raw.items)||raw.items.length>100||
+      if(raw.syntheticOnly!==true||raw.realCall!==false||!Array.isArray(raw.items)||raw.items.length>50||!(raw.nextCursor===null||(typeof raw.nextCursor==='string'&&/^[A-Za-z0-9_-]{1,256}$/.test(raw.nextCursor)&&raw.nextCursor!==cursor&&raw.items.length===50))||
         !raw.items.every((x:{id:string;disposition:string;createdAt:string})=>x&&uuid.test(x.id)&&
           ['ANSWERED','MISSED'].includes(x.disposition)&&stamp(x.createdAt)))throw Error('shape');
-      if(!c.signal.aborted)setItems(raw.items);
+      if(!c.signal.aborted){setItems(raw.items);setNext(raw.nextCursor);}
     }catch{if(!c.signal.aborted)setNote('История звонков недоступна.');}
     finally{if(!c.signal.aborted)setBusy(false);}
   }
   return <section aria-label="История тестовых звонков"><h3>Тестовые звонки</h3>
     <button type="button" disabled={busy} onClick={()=>void load()}>Показать журнал звонков</button>
+    {next&&<button type="button" disabled={busy} onClick={()=>void load(next)}>Следующая страница звонков</button>}
     {items&&(items.length?<ul>{items.map(x=><li key={x.id}>{x.disposition==='MISSED'?'Пропущен':'Принят'} · {new Date(x.createdAt).toLocaleString('ru-RU')}</li>)}</ul>:<p>Звонков нет.</p>)}
     {note&&<p role="status">{note}</p>}
   </section>;

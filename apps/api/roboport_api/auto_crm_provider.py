@@ -4,6 +4,7 @@ No network implementation, credentials, destinations or text; accepted is a
 fixture receipt only. Replays retain identity; revoked consent blocks retries.
 """
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Protocol
 from uuid import UUID,uuid4,uuid5,NAMESPACE_URL
 
@@ -11,6 +12,7 @@ import psycopg
 
 from .auto_crm_leads import _authority,_lead,_proof,_state,create_lead,LeadDenied,LeadConflict
 from .auto_crm_consent import _account_users,_snapshot,_lead_customer,CHANNELS
+from .keyset_cursor import encode_cursor,decode_cursor
 
 
 OUTCOMES=("ACCEPTED","TIMEOUT","RATE_LIMIT","REJECTED")
@@ -91,23 +93,26 @@ def provider_attempt(conn,token,org,loc,lead,message,*,key=None,outcome=None):
             raise LeadDenied("INVALID_INPUT")
         if not active:
             raise LeadConflict("CONSENT_CHANGED")
-        existing=conn.execute("SELECT message_id,actor_id,outcome FROM auto_crm_mock_attempt WHERE request_key=%s",(key,)).fetchone()
+        existing=conn.execute("SELECT message_id,actor_id,outcome,id,ordinal FROM auto_crm_mock_attempt WHERE request_key=%s",(key,)).fetchone()
         if existing:
-            if existing!=(message,actor,outcome):
+            if existing[:3]!=(message,actor,outcome):
                 raise LeadConflict("KEY_REUSED")
-            return {**state,"replayed":True}
+            return {**state,"replayed":True,"attemptId":str(existing[3]),"attemptOrdinal":existing[4]}
         if state["status"] not in ("READY","RETRY_AVAILABLE"):
             raise LeadConflict("TERMINAL")
         result=PROVIDERS[channel].simulate(outcome)
+        ident=uuid4()
+        ordinal=len(state["attempts"])+1
         try:
             with conn.transaction():
                 conn.execute("""
                   INSERT INTO auto_crm_mock_attempt(id,message_id,actor_id,request_key,ordinal,outcome)
                   VALUES(%s,%s,%s,%s,%s,%s)
-                """,(uuid4(),message,actor,key,len(state["attempts"])+1,result.outcome))
+                """,(ident,message,actor,key,ordinal,result.outcome))
         except (psycopg.errors.IntegrityError,psycopg.errors.RaiseException):
             raise LeadConflict("ATTEMPT_CONFLICT") from None
-        return {**_attempts(conn,message,channel,True),"replayed":False}
+        return {**_attempts(conn,message,channel,True),"replayed":False,
+                "attemptId":str(ident),"attemptOrdinal":ordinal}
 
 
 def ingest_call(conn,token,org,loc,link,event,disposition):
@@ -151,16 +156,22 @@ def ingest_call(conn,token,org,loc,link,event,disposition):
         return {**_state(conn,row),"replayed":False}
 
 
-def call_history(conn,token,org,loc,lead):
+def call_history(conn,token,org,loc,lead,cursor=None):
     with conn.transaction():
         _,row=_locked_lead(conn,token,org,loc,lead)
         if row[3]!="PHONE":
             raise LeadDenied("FORBIDDEN")
+        scope=sha256(f"mock-call-history:{org}:{loc}:{lead}".encode()).hexdigest()[:32]
+        try:
+            after=decode_cursor(cursor,scope,token) if cursor is not None else (None,None)
+        except ValueError:
+            raise LeadDenied("INVALID_INPUT") from None
         rows=conn.execute("""
           SELECT id,disposition,created_at FROM auto_crm_mock_call
-          WHERE lead_id=%s ORDER BY created_at DESC,id DESC LIMIT 101
-        """,(lead,)).fetchall()
-        if len(rows)>100:
-            raise LeadConflict("CALL_HISTORY_LIMIT")
+          WHERE lead_id=%s AND (%s::timestamptz IS NULL OR (created_at,id)<(%s::timestamptz,%s::uuid))
+          ORDER BY created_at DESC,id DESC LIMIT 51
+        """,(lead,after[0],after[0],after[1])).fetchall()
+        page=rows[:50]
         return {"syntheticOnly":True,"realCall":False,
-                "items":[{"id":str(i),"disposition":code,"createdAt":stamp.isoformat()} for i,code,stamp in rows]}
+                "items":[{"id":str(i),"disposition":code,"createdAt":stamp.isoformat()} for i,code,stamp in page],
+                "nextCursor":encode_cursor(page[-1][2],page[-1][0],scope,token) if len(rows)>50 else None}
