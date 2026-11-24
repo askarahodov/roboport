@@ -15,7 +15,7 @@ from .auto_org_staff import (
     grant_staff, revoke_staff, list_staff, list_staff_audit,
     create_staff_invitation, list_staff_invitations, revoke_staff_invitation,
     accept_staff_invitation, list_staff_invitation_audit,
-    OrgStaffDenied, OrgStaffConflict,
+    OrgStaffDenied, OrgStaffConflict, OrgStaffPageInvalid,
 )
 
 from .auto_document_access import (
@@ -77,21 +77,35 @@ def remove_staff(org_id: str, grant_id: str, request: Request):
     return JSONResponse(content={"status": result}, headers={"Cache-Control": "no-store"})
 
 
+def _staff_cursor(request):
+    cursors = request.query_params.getlist("cursor")
+    limits = request.query_params.getlist("limit")
+    if len(cursors) > 1 or len(limits) > 1 or (cursors and not cursors[0]):
+        raise OrgStaffPageInvalid("invalid pagination")
+    return cursors[0] if cursors else None
+
+
 @router.get("/api/v1/dev/auto/organizations/{org_id}/staff")
-def get_staff(org_id: str, request: Request):
+def get_staff(org_id: str, request: Request, limit: int = 100):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
     try:
         organization = UUID(org_id)
+        cursor = _staff_cursor(request)
     except (TypeError, ValueError):
+        return _response(request, 422, "INVALID_INPUT")
+    if not 1 <= limit <= 100:
         return _response(request, 422, "INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
-            items = list_staff(db, request.cookies.get("rp_session", ""), organization)
+            items = list_staff(db, request.cookies.get("rp_session", ""), organization,
+                               limit=limit, cursor=cursor)
+        except OrgStaffPageInvalid:
+            return _response(request, 422, "INVALID_INPUT")
         except OrgStaffDenied:
             return _response(request, 403, "FORBIDDEN")
-    return JSONResponse(content={"items": items}, headers={"Cache-Control": "no-store"})
+    return JSONResponse(content=items, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/staff/audit")
@@ -101,6 +115,7 @@ def get_staff_audit(org_id: str, request: Request, limit: int = 100):
         return dsn
     try:
         organization = UUID(org_id)
+        cursor = _staff_cursor(request)
     except (TypeError, ValueError):
         return _response(request, 422, "INVALID_INPUT")
     if not 1 <= limit <= 100:
@@ -108,11 +123,13 @@ def get_staff_audit(org_id: str, request: Request, limit: int = 100):
     with psycopg.connect(dsn) as db:
         try:
             events = list_staff_audit(
-                db, request.cookies.get("rp_session", ""), organization, limit=limit
+                db, request.cookies.get("rp_session", ""), organization, limit=limit, cursor=cursor
             )
+        except OrgStaffPageInvalid:
+            return _response(request, 422, "INVALID_INPUT")
         except OrgStaffDenied:
             return _response(request, 403, "FORBIDDEN")
-    return JSONResponse(content={"items": events}, headers={"Cache-Control": "no-store"})
+    return JSONResponse(content=events, headers={"Cache-Control": "no-store"})
 
 
 
@@ -164,6 +181,7 @@ def get_staff_invitations(org_id: str, request: Request, limit: int = 100):
         return dsn
     try:
         organization = UUID(org_id)
+        cursor = _staff_cursor(request)
     except (TypeError, ValueError):
         return _response(request, 422, "INVALID_INPUT")
     if not 1 <= limit <= 100:
@@ -171,11 +189,13 @@ def get_staff_invitations(org_id: str, request: Request, limit: int = 100):
     with psycopg.connect(dsn) as db:
         try:
             items = list_staff_invitations(
-                db, request.cookies.get("rp_session", ""), organization, limit=limit
+                db, request.cookies.get("rp_session", ""), organization, limit=limit, cursor=cursor
             )
+        except OrgStaffPageInvalid:
+            return _response(request, 422, "INVALID_INPUT")
         except OrgStaffDenied:
             return _response(request, 403, "FORBIDDEN")
-    return JSONResponse(content={"items": items},
+    return JSONResponse(content=items,
                         headers={"Cache-Control": "no-store"})
 
 
@@ -208,6 +228,7 @@ def get_staff_invitation_audit(org_id: str, request: Request, limit: int = 100):
         return dsn
     try:
         organization = UUID(org_id)
+        cursor = _staff_cursor(request)
     except (TypeError, ValueError):
         return _response(request, 422, "INVALID_INPUT")
     if not 1 <= limit <= 100:
@@ -215,11 +236,13 @@ def get_staff_invitation_audit(org_id: str, request: Request, limit: int = 100):
     with psycopg.connect(dsn) as db:
         try:
             events = list_staff_invitation_audit(
-                db, request.cookies.get("rp_session", ""), organization, limit=limit
+                db, request.cookies.get("rp_session", ""), organization, limit=limit, cursor=cursor
             )
+        except OrgStaffPageInvalid:
+            return _response(request, 422, "INVALID_INPUT")
         except OrgStaffDenied:
             return _response(request, 403, "FORBIDDEN")
-    return JSONResponse(content={"items": events},
+    return JSONResponse(content=events,
                         headers={"Cache-Control": "no-store"})
 
 

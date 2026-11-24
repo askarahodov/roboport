@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import psycopg
 
 from .session_lookup import session_subject
+from .keyset_cursor import encode_cursor, decode_cursor
 
 STAFF_ROLES = frozenset({"MANAGER", "INTAKE", "MECHANIC", "WAREHOUSE", "CASHIER"})
 
@@ -22,6 +23,29 @@ class OrgStaffDenied(ValueError):
 
 class OrgStaffConflict(ValueError):
     pass
+
+
+class OrgStaffPageInvalid(ValueError):
+    pass
+
+
+def _page_position(org, token, kind, limit, cursor):
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise OrgStaffPageInvalid("invalid limit")
+    scope = hashlib.sha256(f"staff:{org}:{kind}".encode()).hexdigest()[:32]
+    try:
+        after = decode_cursor(cursor, scope, token) if cursor is not None else None
+    except ValueError as exc:
+        raise OrgStaffPageInvalid("invalid cursor") from exc
+    return scope, (after[0], after[0], after[1]) if after else (None, None, None)
+
+
+def _staff_page(rows, limit, scope, token, stamp_index, items):
+    result = {"items": items}
+    if len(rows) > limit:
+        last = rows[limit - 1]
+        result["nextCursor"] = encode_cursor(last[stamp_index], last[0], scope, token)
+    return result
 
 
 def _membership_lock(
@@ -144,14 +168,16 @@ def revoke_staff(conn: psycopg.Connection, token: str, organization_id: UUID,
         return "REVOKED"
 
 
-def list_staff(conn: psycopg.Connection, token: str, organization_id: UUID) -> list[dict]:
+def list_staff(conn: psycopg.Connection, token: str, organization_id: UUID,
+               *, limit: int = 100, cursor: str | None = None) -> dict:
     """Ограниченный список активных полномочий только для действующего ADMIN организации."""
     if not isinstance(organization_id, UUID):
         raise OrgStaffDenied("invalid organization")
     with conn.transaction():
         _admin(conn, token, organization_id)
+        scope, position = _page_position(organization_id, token, "grants", limit, cursor)
         rows = conn.execute(
-            """SELECT g.id,g.user_id,g.role_code,g.location_id
+            """SELECT g.id,g.user_id,g.role_code,g.location_id,g.created_at
                FROM auto_organization_role_grant g
                JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
                WHERE g.organization_id=%s AND g.revoked_at IS NULL
@@ -160,14 +186,17 @@ def list_staff(conn: psycopg.Connection, token: str, organization_id: UUID) -> l
                    (SELECT 1 FROM auto_service_location l
                     WHERE l.id=g.location_id AND l.organization_id=g.organization_id
                       AND l.disabled_at IS NULL))
-               ORDER BY g.created_at,g.id LIMIT 100""", (organization_id,),
+               AND (%s::timestamptz IS NULL OR (g.created_at,g.id)>(%s::timestamptz,%s::uuid))
+               ORDER BY g.created_at,g.id LIMIT %s""", (organization_id, *position, limit + 1),
         ).fetchall()
-        return [{"grantId":str(g),"userId":str(u),"role":role,
-                 "locationId":str(loc) if loc else None} for g,u,role,loc in rows]
+        return _staff_page(rows, limit, scope, token, 4,
+            [{"grantId":str(g),"userId":str(u),"role":role,
+              "locationId":str(loc) if loc else None} for g,u,role,loc,_ in rows[:limit]])
 
 
 def list_staff_audit(conn: psycopg.Connection, token: str,
-                     organization_id: UUID, *, limit: int = 100) -> list[dict]:
+                     organization_id: UUID, *, limit: int = 100,
+                     cursor: str | None = None) -> dict:
     """Ограниченная история неизменяемых действий только для ADMIN своей организации.
 
     Включает отозванные полномочия и не раскрывает данные другого tenant.
@@ -177,6 +206,7 @@ def list_staff_audit(conn: psycopg.Connection, token: str,
         raise OrgStaffDenied("invalid request")
     with conn.transaction():
         _admin(conn, token, organization_id)
+        scope, position = _page_position(organization_id, token, "grant-audit", limit, cursor)
         rows = conn.execute(
             """SELECT a.id,a.grant_id,a.actor_id,a.action,a.created_at,
                       g.user_id,g.role_code,g.location_id
@@ -184,15 +214,16 @@ def list_staff_audit(conn: psycopg.Connection, token: str,
                JOIN auto_organization_role_grant g
                  ON g.id=a.grant_id AND g.organization_id=a.organization_id
                WHERE a.organization_id=%s
+                 AND (%s::timestamptz IS NULL OR (a.created_at,a.id)<(%s::timestamptz,%s::uuid))
                ORDER BY a.created_at DESC,a.id DESC LIMIT %s""",
-            (organization_id, limit),
+            (organization_id, *position, limit + 1),
         ).fetchall()
-        return [{
+        return _staff_page(rows, limit, scope, token, 4, [{
             "eventId": str(eid), "grantId": str(grant), "actorId": str(actor),
             "action": action, "createdAt": stamp.isoformat(),
             "userId": str(target), "role": role,
             "locationId": str(loc) if loc else None,
-        } for eid, grant, actor, action, stamp, target, role, loc in rows]
+        } for eid, grant, actor, action, stamp, target, role, loc in rows[:limit]])
 
 
 _INVITATION_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,64}$")
@@ -309,22 +340,24 @@ def create_staff_invitation(
 
 def list_staff_invitations(
     conn: psycopg.Connection, token: str, organization_id: UUID,
-    *, limit: int = 100,
-) -> list[dict]:
+    *, limit: int = 100, cursor: str | None = None,
+) -> dict:
     if type(organization_id) is not UUID or type(limit) is not int or not 1 <= limit <= 100:
         raise OrgStaffDenied("invalid request")
     with conn.transaction():
         _admin(conn, token, organization_id)
+        scope, position = _page_position(organization_id, token, "invitations", limit, cursor)
         rows = conn.execute(
             """SELECT id,target_login,role_code,location_id,status,created_at,
                       expires_at,accepted_grant_id
                FROM auto_org_staff_invitation
                WHERE organization_id=%s
+                 AND (%s::timestamptz IS NULL OR (created_at,id)<(%s::timestamptz,%s::uuid))
                ORDER BY created_at DESC,id DESC LIMIT %s""",
-            (organization_id, limit),
+            (organization_id, *position, limit + 1),
         ).fetchall()
         now = conn.execute("SELECT clock_timestamp()").fetchone()[0]
-        return [{
+        return _staff_page(rows, limit, scope, token, 5, [{
             "invitationId": str(ident),
             "targetLogin": login,
             "role": role,
@@ -333,7 +366,7 @@ def list_staff_invitations(
             "createdAt": created.isoformat(),
             "expiresAt": expires_at.isoformat(),
             "grantId": str(grant) if grant else None,
-        } for ident,login,role,location,status,created,expires_at,grant in rows]
+        } for ident,login,role,location,status,created,expires_at,grant in rows[:limit]])
 
 
 def revoke_staff_invitation(
@@ -506,12 +539,13 @@ def accept_staff_invitation(
 
 def list_staff_invitation_audit(
     conn: psycopg.Connection, token: str, organization_id: UUID,
-    *, limit: int = 100,
-) -> list[dict]:
+    *, limit: int = 100, cursor: str | None = None,
+) -> dict:
     if type(organization_id) is not UUID or type(limit) is not int or not 1 <= limit <= 100:
         raise OrgStaffDenied("invalid request")
     with conn.transaction():
         _admin(conn, token, organization_id)
+        scope, position = _page_position(organization_id, token, "invitation-audit", limit, cursor)
         rows = conn.execute(
             """SELECT e.id,e.invitation_id,e.actor_id,e.action,e.created_at,
                       i.target_login,i.role_code,i.location_id
@@ -519,12 +553,13 @@ def list_staff_invitation_audit(
                JOIN auto_org_staff_invitation i
                  ON i.id=e.invitation_id AND i.organization_id=e.organization_id
                WHERE e.organization_id=%s
+                 AND (%s::timestamptz IS NULL OR (e.created_at,e.id)<(%s::timestamptz,%s::uuid))
                ORDER BY e.created_at DESC,e.id DESC LIMIT %s""",
-            (organization_id, limit),
+            (organization_id, *position, limit + 1),
         ).fetchall()
-        return [{
+        return _staff_page(rows, limit, scope, token, 4, [{
             "eventId":str(event_id),"invitationId":str(invitation_id),
             "actorId":str(actor_id),"action":action,"createdAt":created_at.isoformat(),
             "targetLogin":login,"role":role,
             "locationId":str(location) if location else None,
-        } for event_id,invitation_id,actor_id,action,created_at,login,role,location in rows]
+        } for event_id,invitation_id,actor_id,action,created_at,login,role,location in rows[:limit]])
