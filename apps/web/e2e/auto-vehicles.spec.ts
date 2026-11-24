@@ -13,7 +13,7 @@ async function authorized(page: import('@playwright/test').Page) {
 test('автомобили нельзя загрузить без подтверждённой серверной сессии', async ({ page }) => {
   let fetches = 0;
   await page.route(vehiclesUrl, route => { fetches++; return route.fulfill({
-    status: 200, body: '{"items":[]}', contentType: 'application/json',
+    status: 200, body: '{"items":[],"nextCursor":null}', contentType: 'application/json',
   }); });
   await page.goto('/account/vehicles');
   await expect(page.getByRole('alert')).toContainText('403 — доступ запрещён');
@@ -25,7 +25,7 @@ test('автомобили dev: безопасная маска VIN, светл�
   await authorized(page);
   await page.route(vehiclesUrl, route => route.fulfill({
     status: 200, contentType: 'application/json',
-    body: JSON.stringify({ items: [{
+    body: JSON.stringify({ nextCursor:null,items: [{
       id: '11111111-1111-4111-8111-111111111111',
       make: 'SyntheticMake', model: 'TestCar',
       variant: 'Тест', modelYear: 2026, vinLast4: '1234',
@@ -57,7 +57,7 @@ test('машина pending скрыта, ошибка восстанавлива
   let recovered = false;
   await page.route(vehiclesUrl, route => route.fulfill(
     recovered
-      ? { status: 200, contentType: 'application/json', body: '{"items":[]}' }
+      ? { status: 200, contentType: 'application/json', body: '{"items":[],"nextCursor":null}' }
       : { status: 503, contentType: 'application/json', body: '{}' },
   ));
   await page.goto('/account/vehicles');
@@ -90,14 +90,14 @@ test('длинный список: по 20 машин, продолжение, �
   const calls: string[] = [];
   await page.route(vehiclesUrl, route => {
     const url = new URL(route.request().url());
-    const offset = url.searchParams.get('offset') ?? '';
+    const offset = url.searchParams.get('cursor') ?? '0';
     calls.push(offset);
     const items = offset === '0'
       ? Array.from({ length: 20 }, (_, index) => fakeVehicle(index + 1))
       : [fakeVehicle(20), fakeVehicle(21)];
     return route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items,nextCursor:items.length===20?'20':null }),
     });
   });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -117,7 +117,7 @@ test('сбой следующей страницы не стирает перв�
   await authorized(page);
   let fail = true;
   await page.route(vehiclesUrl, route => {
-    const offset = new URL(route.request().url()).searchParams.get('offset');
+    const offset = new URL(route.request().url()).searchParams.get('cursor') ?? '0';
     if (offset === '20' && fail) return route.fulfill({
       status: 503, contentType: 'application/json', body: '{}',
     });
@@ -125,7 +125,7 @@ test('сбой следующей страницы не стирает перв�
       ? Array.from({ length: 20 }, (_, index) => fakeVehicle(index + 1))
       : [fakeVehicle(21)];
     return route.fulfill({
-      status: 200, contentType: 'application/json', body: JSON.stringify({ items }),
+      status: 200, contentType: 'application/json', body: JSON.stringify({ items,nextCursor:items.length===20?'20':null }),
     });
   });
   await page.goto('/account/vehicles');
@@ -144,7 +144,7 @@ test('отозванная account_customer_link скрывает старые �
   let revoked = false;
   const calls: string[] = [];
   await page.route(vehiclesUrl, route => {
-    const offset = new URL(route.request().url()).searchParams.get('offset') ?? '';
+    const offset = new URL(route.request().url()).searchParams.get('cursor') ?? '0';
     calls.push(offset);
     // Именно так работает live backend после отзыва связи: не 403, а 200 {items:[]}.
     const items = revoked ? [] : Array.from(
@@ -152,7 +152,7 @@ test('отозванная account_customer_link скрывает старые �
     );
     return route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items,nextCursor:items.length===20?'20':null }),
     });
   });
   await page.goto('/account/vehicles');
@@ -163,7 +163,7 @@ test('отозванная account_customer_link скрывает старые �
   await expect(page.locator('.account-record')).toHaveCount(0);
   await expect(page.getByText('Показано автомобилей: 20')).toHaveCount(0);
   // Новая подгрузка сначала повторно запрашивает доступные первые 20.
-  // Запрос смещения 20 не требуется, если первая страница уже пуста.
+  // Запрос курсора 20 не требуется, если первая страница уже пуста.
   expect(calls.length).toBeGreaterThanOrEqual(2);
   expect(calls.every(offset => offset === '0')).toBe(true);
 });
@@ -172,14 +172,14 @@ test('частичный отзыв связи удаляет старую ка�
   await authorized(page);
   let revoked = false;
   await page.route(vehiclesUrl, route => {
-    const offset = new URL(route.request().url()).searchParams.get('offset');
+    const offset = new URL(route.request().url()).searchParams.get('cursor') ?? '0';
     const items = !revoked
       ? Array.from({ length: 20 }, (_, index) => fakeVehicle(index + 1))
       : offset === '0'
         ? Array.from({ length: 20 }, (_, index) => fakeVehicle(index + 2))
         : [fakeVehicle(22)];
     return route.fulfill({
-      status: 200, contentType: 'application/json', body: JSON.stringify({ items }),
+      status: 200, contentType: 'application/json', body: JSON.stringify({ items,nextCursor:items.length===20?'20':null }),
     });
   });
   await page.goto('/account/vehicles');
@@ -196,7 +196,7 @@ test('typed SDK отклоняет незаявленный полный VIN д�
   await authorized(page);
   await page.route(vehiclesUrl, route => route.fulfill({
     status: 200, contentType: 'application/json',
-    body: JSON.stringify({ items: [{
+    body: JSON.stringify({ nextCursor:null,items: [{
       id: '11111111-1111-4111-8111-111111111111',
       make: 'Synthetic', model: 'Car', variant: null, modelYear: 2026,
       vinLast4: '1234', vin: 'SYNTHETIC00000001',
@@ -210,7 +210,7 @@ test('typed SDK отклоняет незаявленный полный VIN д�
 test('клиентская справка объясняет пустой список, отзыв и planned функции на мобильном и desktop', async ({ page }) => {
   await authorized(page);
   await page.route(vehiclesUrl, route => route.fulfill({
-    status: 200, contentType: 'application/json', body: '{"items":[]}',
+    status: 200, contentType: 'application/json', body: '{"items":[],"nextCursor":null}',
   }));
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 844 });
@@ -237,7 +237,7 @@ test('карточка подтверждённой машины открыва�
   const id='11111111-1111-4111-8111-111111111111';
   const car={id,make:'SyntheticMake',model:'TestCar',variant:'Demo',modelYear:2026,vinLast4:'1234'};
   await page.route(vehiclesUrl, route=>route.fulfill({
-    status:200,contentType:'application/json',body:JSON.stringify({items:[car]}),
+    status:200,contentType:'application/json',body:JSON.stringify({nextCursor:null,items:[car]}),
   }));
   let calls=0;
   await page.route('**/api/v1/dev/auto/vehicles/'+id, route=>{
@@ -264,7 +264,7 @@ test('отзыв привязки при открытии карточки ск�
   let revoked=false;
   await page.route(vehiclesUrl,route=>route.fulfill({
     status:200,contentType:'application/json',
-    body:JSON.stringify({items:revoked?[]:[{
+    body:JSON.stringify({nextCursor:null,items:revoked?[]:[{
       id,make:'SyntheticMake',model:'TestCar',variant:null,modelYear:2026,vinLast4:'1234',
     }]}),
   }));
@@ -285,7 +285,7 @@ test('полный VIN и чужой UUID в аномальном detail отв�
   const id='11111111-1111-4111-8111-111111111111';
   await page.route(vehiclesUrl,route=>route.fulfill({
     status:200,contentType:'application/json',
-    body:JSON.stringify({items:[{id,make:'Synthetic',model:'Car',variant:null,modelYear:2026,vinLast4:'1234'}]}),
+    body:JSON.stringify({nextCursor:null,items:[{id,make:'Synthetic',model:'Car',variant:null,modelYear:2026,vinLast4:'1234'}]}),
   }));
   await page.route('**/api/v1/dev/auto/vehicles/'+id,route=>route.fulfill({
     status:200,contentType:'application/json',
@@ -304,7 +304,7 @@ test('401 при запросе карточки немедленно скрыв
   const id='11111111-1111-4111-8111-111111111111';
   await page.route(vehiclesUrl,route=>route.fulfill({
     status:200,contentType:'application/json',
-    body:JSON.stringify({items:[{id,make:'Synthetic',model:'Car',variant:null,modelYear:2026,vinLast4:'1234'}]}),
+    body:JSON.stringify({nextCursor:null,items:[{id,make:'Synthetic',model:'Car',variant:null,modelYear:2026,vinLast4:'1234'}]}),
   }));
   await page.route('**/api/v1/dev/auto/vehicles/'+id,route=>route.fulfill({
     status:401,contentType:'application/json',body:'{"code":"UNAUTHENTICATED"}',
@@ -324,7 +324,7 @@ test('запаздывающий ответ списка не возвращае
   let release!:()=>void;
   const hold=new Promise<void>(resolve=>{release=resolve;});
   await page.route(vehiclesUrl,async route=>{
-    const offset=new URL(route.request().url()).searchParams.get('offset');
+    const offset=new URL(route.request().url()).searchParams.get('cursor') ?? '0';
     if(offset==='20'){
       started=true;
       await hold;
@@ -332,7 +332,7 @@ test('запаздывающий ответ списка не возвращае
     try{
       await route.fulfill({
         status:200,contentType:'application/json',
-        body:JSON.stringify({items:offset==='0'?Array.from({length:20},(_,index)=>({
+        body:JSON.stringify({nextCursor:offset==='0'?'20':null,items:offset==='0'?Array.from({length:20},(_,index)=>({
           ...car,id:'00000000-0000-4000-8000-'+(index+1).toString(16).padStart(12,'0'),
         })): [car]}),
       });
@@ -352,4 +352,52 @@ test('запаздывающий ответ списка не возвращае
   await expect(page.locator('.account-record')).toHaveCount(0);
   await expect(page.getByTestId('vehicle-details')).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Показать ещё автомобили'})).toHaveCount(0);
+});
+
+
+test('повторяющийся курсор отклоняется без показа второй страницы',async({page})=>{
+  await authorized(page);
+  await page.route(vehiclesUrl,route=>{
+    const query=new URL(route.request().url()).searchParams;
+    expect(query.get('paging')).toBe('keyset');
+    expect(query.has('offset')).toBe(false);
+    const second=query.has('cursor');
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:Array.from({length:20},(_,i)=>fakeVehicle(i+1+(second?20:0))),
+        nextCursor:'same-cursor'})});
+  });
+  await page.goto('/account/vehicles');
+  await expect(page.locator('.account-record')).toHaveCount(20);
+  await page.getByRole('button',{name:'Показать ещё автомобили'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить следующую страницу');
+  await expect(page.locator('.account-record')).toHaveCount(20);
+  await expect(page.getByText('SyntheticMake TestCar 21',{exact:true})).toHaveCount(0);
+});
+
+
+test('сбой курсора после частичного отзыва оставляет лишь повторно проверенные строки',async({page})=>{
+  await authorized(page);
+  let revoked=false,expired=true;
+  const calls:string[]=[];
+  await page.route(vehiclesUrl,route=>{
+    const q=new URL(route.request().url()).searchParams;
+    const cursor=q.get('cursor');
+    calls.push(cursor??'first');
+    if(cursor&&expired)return route.fulfill({status:422,contentType:'application/json',
+      body:'{"code":"INVALID_INPUT"}'});
+    const items=cursor?[fakeVehicle(22)]:Array.from({length:20},(_,i)=>fakeVehicle(i+(revoked?2:1)));
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items,nextCursor:cursor?null:revoked?'fresh-cursor':'old-cursor'})});
+  });
+  await page.goto('/account/vehicles');
+  await expect(page.getByText('SyntheticMake TestCar 1',{exact:true})).toBeVisible();
+  revoked=true;
+  await page.getByRole('button',{name:'Показать ещё автомобили'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить следующую страницу');
+  await expect(page.getByText('SyntheticMake TestCar 1',{exact:true})).toHaveCount(0);
+  await expect(page.getByText('SyntheticMake TestCar 21',{exact:true})).toBeVisible();
+  expired=false;
+  await page.getByRole('button',{name:'Повторить загрузку страницы'}).click();
+  await expect(page.getByText('Показано автомобилей: 21')).toBeVisible();
+  expect(calls.slice(-2)).toEqual(['first','fresh-cursor']);
 });

@@ -7,6 +7,10 @@ from uuid import UUID
 import psycopg
 
 from .session_tokens import token_digest
+from .session_lookup import session_subject
+from .keyset_cursor import encode_cursor, decode_cursor
+
+_CURSOR_SCOPE = "auto-verified-vehicles:v1"
 
 
 def _vehicle(row) -> dict:
@@ -34,9 +38,33 @@ def owned_vehicles(
         raise ValueError("limit must be 1..50")
     if type(offset) is not int or not 0 <= offset <= 10000:
         raise ValueError("offset must be 0..10000")
-    # Авторизация, отзыв связей и выборка машин в одном SQL snapshot.
-    rows = conn.execute(
-        """SELECT page.id,page.make,page.model,page.variant,page.model_year,page.vin
+    rows = _owned_rows(conn, token, limit=limit, offset=offset)
+    if not rows:
+        return None
+    return [_vehicle(row) for row in rows if row[0] is not None]
+
+
+def owned_vehicle_page(conn, token, *, limit=20, cursor=None):
+    """Подписанный keyset по дате создания и UUID, без кэширования полномочий."""
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("invalid limit")
+    if session_subject(conn,token) is None:
+        return None
+    position=decode_cursor(cursor,_CURSOR_SCOPE,token) if cursor is not None else None
+    rows=_owned_rows(conn,token,limit=limit+1,position=position)
+    if not rows:
+        return None
+    visible=[row for row in rows if row[0] is not None]
+    page=visible[:limit]
+    following=encode_cursor(page[-1][6],page[-1][0],_CURSOR_SCOPE,token) if len(visible)>limit else None
+    return {"items":[_vehicle(row) for row in page],"nextCursor":following}
+
+
+def _owned_rows(conn, token, *, limit, offset=0, position=None):
+    # Сессия, действующая связь, роль и результат проверяются в одном снимке SQL.
+    stamp,ident=position if position is not None else (None,None)
+    return conn.execute(
+        """SELECT page.id,page.make,page.model,page.variant,page.model_year,page.vin,page.created_at
           FROM user_session s
           JOIN app_user u ON u.id=s.user_id AND u.status='ACTIVE'
           LEFT JOIN LATERAL (
@@ -56,17 +84,15 @@ def owned_vehicles(
                     AND (role.expires_at IS NULL OR role.expires_at>now())
                 )
             )
+            AND (%s::timestamptz IS NULL OR (v.created_at,v.id)<(%s::timestamptz,%s::uuid))
             ORDER BY v.created_at DESC, v.id DESC
             LIMIT %s OFFSET %s
           ) page ON TRUE
           WHERE s.token_hash=%s AND s.revoked_at IS NULL
             AND s.idle_expires_at>now() AND s.absolute_expires_at>now()
           ORDER BY page.created_at DESC NULLS LAST,page.id DESC NULLS LAST""",
-        (limit, offset, token_digest(token)),
+        (stamp,stamp,ident,limit,offset,token_digest(token)),
     ).fetchall()
-    if not rows:
-        return None
-    return [_vehicle(row) for row in rows if row[0] is not None]
 
 
 def owned_vehicle(

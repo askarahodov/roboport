@@ -42,6 +42,50 @@ def test_live_auto_dev_read_contract_and_bola(monkeypatch):
     assert found.json()["items"][0]["vinLast4"] == vin[-4:]
     assert {item["id"] for item in found.json()["items"]} == {str(va)}
 
+    # Keyset сохраняет прежний формат offset-ответа и привязывает курсор к сессии.
+    # Вставка новой строки перед курсором не должна дублировать или пропускать
+    # существующий более ранний автомобиль.
+    from uuid import uuid4
+    with psycopg.connect(DSN) as db:
+        reviewer=db.execute("SELECT verified_by FROM auto_vehicle_customer_link WHERE vehicle_id=%s",
+                            (va,)).fetchone()[0]
+        def add_vehicle():
+            ident,link=uuid4(),uuid4()
+            db.execute("INSERT INTO auto_vehicle(id,make,model) VALUES(%s,'Synthetic','Cursor')",(ident,))
+            db.execute("INSERT INTO auto_vehicle_customer_link(id,vehicle_id,customer_id) VALUES(%s,%s,%s)",
+                       (link,ident,ca))
+            db.execute("UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
+                       (reviewer,link))
+            return ident
+        newer=add_vehicle()
+    first=http.get(path,params={"paging":"keyset","limit":1})
+    assert first.status_code==200,first.text
+    _assert_schema(first.json(),"AutoVehicleCursorPage")
+    assert first.json()["items"][0]["id"]==str(newer)
+    cursor=first.json()["nextCursor"]
+    assert cursor
+    exact=http.get(path,params={"paging":"keyset","limit":2})
+    assert exact.status_code==200 and len(exact.json()["items"])==2
+    assert exact.json()["nextCursor"] is None
+    _assert_schema(exact.json(),"AutoVehicleCursorPage")
+    with psycopg.connect(DSN) as db:
+        newest=add_vehicle()
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE vehicle_id=%s",(newer,))
+    next_page=http.get(path,params={"paging":"keyset","limit":1,"cursor":cursor})
+    assert next_page.status_code==200,next_page.text
+    assert next_page.json()=={"items":found.json()["items"],"nextCursor":None}
+    assert http.get(path,params={"paging":"keyset","limit":1}).json()["items"][0]["id"]==str(newest)
+    other=TestClient(app,base_url="https://127.0.0.1")
+    other.cookies.set("rp_session",token_b)
+    assert other.get(path,params={"paging":"keyset","cursor":cursor}).status_code==422
+    for query in ("paging=other","paging=keyset&offset=0","cursor="+cursor,
+                  "paging=keyset&cursor=","paging=keyset&cursor=bad",
+                  "paging=keyset&cursor="+cursor+"&cursor="+cursor,
+                  "paging=keyset&paging=offset"):
+        invalid=http.get(path+"?"+query)
+        assert invalid.status_code==422,query
+        _assert_schema(invalid.json(),"AutoDevError")
+
     detail = http.get(path + "/" + str(va))
     assert detail.status_code == 200
     _assert_schema(detail.json(), "AutoVehicle")
@@ -65,6 +109,8 @@ def test_live_auto_dev_read_contract_and_bola(monkeypatch):
     assert empty.status_code == 200
     assert empty.json() == {"items": []}
     _assert_schema(empty.json(), "AutoVehiclePage")
+    assert http.get(path,params={"paging":"keyset","cursor":cursor}).json()=={
+        "items":[],"nextCursor":None}
     hidden = http.get(path + "/" + str(va))
     assert hidden.status_code == 404
     _assert_schema(hidden.json(), "AutoDevError")
@@ -75,6 +121,7 @@ def test_live_auto_dev_read_contract_and_bola(monkeypatch):
     rejected = http.get(path)
     assert rejected.status_code == 401
     _assert_schema(rejected.json(), "AutoDevError")
+    assert http.get(path,params={"paging":"keyset","cursor":cursor}).status_code==401
 
 
 def test_detail_live_revoke_and_nonpublication(monkeypatch):
