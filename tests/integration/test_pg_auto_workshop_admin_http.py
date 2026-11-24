@@ -397,9 +397,28 @@ def test_workshop_admin_can_reach_every_branch_bay_shift_and_audit_page(monkeypa
     assert len({x["eventId"] for x in events})==306
     assert client.get(foreign+"/audit",params={"cursor":first_cursor}).status_code==422
     assert client.get(base+"/audit",params={"cursor":cursors["locations"]}).status_code==422
+    # Вторая действующая сессия того же ADMIN не наследует подписанный курсор.
+    from test_pg_auto_vehicle_claim_http import new_token, token_digest
+    second_token,second_csrf=new_token(),new_token()
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO user_session
+            (id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+            VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+            (uuid4(),actor,token_digest(second_token),token_digest(second_csrf),
+             now,now+timedelta(minutes=30),now+timedelta(hours=4)))
+    second=TestClient(app,base_url="https://127.0.0.1")
+    second.cookies.set("rp_session",second_token)
+    assert second.get(base).status_code==200
+    for kind,cursor in cursors.items():
+        assert second.get(base+"/page",params={"kind":kind,"cursor":cursor}).status_code==422
+    assert second.get(base+"/audit",params={"cursor":first_cursor}).status_code==422
     with psycopg.connect(DSN) as db:
         db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
                    WHERE organization_id=%s AND user_id=%s AND role_code='ADMIN'""",(org,actor))
-    for kind,cursor in cursors.items():
-        assert client.get(base+"/page",params={"kind":kind,"cursor":cursor}).status_code==403
-    assert client.get(base+"/audit",params={"cursor":first_cursor}).status_code==403
+    for reader in (client,second):
+        assert reader.get(base).status_code==403
+        assert reader.get(base+"/audit").status_code==403
+        for kind,cursor in cursors.items():
+            assert reader.get(base+"/page",params={"kind":kind,"cursor":cursor}).status_code==403
+        assert reader.get(base+"/audit",params={"cursor":first_cursor}).status_code==403

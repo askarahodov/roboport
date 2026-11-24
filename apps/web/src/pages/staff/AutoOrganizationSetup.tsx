@@ -12,6 +12,7 @@ type Audit = {eventId:string;locationId:string;actorId:string;entityType:'LOCATI
   entityId:string;action:string;createdAt:string};
 type State = 'idle'|'loading'|'ready'|'denied'|'error';
 type Confirm = {kind:'location'|'bay'|'shift';id:string;locationId:string}|null;
+type PendingCreate = {org:string;path:string;body:string;key:string;success:string};
 
 function nextCursor(raw:object, count:number, field='nextCursor'):string|null {
   const value=(raw as Record<string,unknown>)[field];
@@ -53,8 +54,9 @@ function parseAudit(raw:unknown):Audit[] {
   return rows;
 }
 
-async function post(url:string,payload?:unknown,idempotencyKey?:string) {
-  const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
+async function post(url:string,body:string|undefined,idempotencyKey:string|undefined,signal:AbortSignal) {
+  const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store',signal});
+  if([401,403,404].includes(csrf.status))return csrf;
   if(!csrf.ok)throw new Error('Сессия недоступна или истекла');
   const value:unknown=await csrf.json();
   if(!value||typeof value!=='object'||!('csrfToken' in value)||
@@ -62,7 +64,7 @@ async function post(url:string,payload?:unknown,idempotencyKey?:string) {
   return fetch(url,{method:'POST',credentials:'include',cache:'no-store',
     headers:{'X-CSRF-Token':value.csrfToken,'Content-Type':'application/json',
       ...(idempotencyKey?{'Idempotency-Key':idempotencyKey}:{})},
-    body:payload===undefined?undefined:JSON.stringify(payload)});
+    body,signal});
 }
 
 export function AutoOrganizationSetup() {
@@ -82,64 +84,73 @@ export function AutoOrganizationSetup() {
   const [startsAt,setStartsAt]=React.useState('');
   const [endsAt,setEndsAt]=React.useState('');
   const [confirm,setConfirm]=React.useState<Confirm>(null);
-  const locationKey=React.useRef<string|null>(null);
-  const bayKey=React.useRef<string|null>(null);
-  const shiftKey=React.useRef<string|null>(null);
+  const [pending,setPending]=React.useState<PendingCreate|null>(null);
+  const access=React.useRef(new AbortController());
   const orgRef=React.useRef('');
   orgRef.current=organization.trim();
   const validOrg=uuid.test(organization.trim());
+  function invalidate(){
+    access.current.abort();access.current=new AbortController();sequence.current++;
+    setData(null);setAudit([]);setAuditNext(null);setConfirm(null);setLocationId('');
+    setPending(null);setBusy(false);setMessage('');
+    setBranchCode('');setTimeZone('UTC');setBayCode('');setEmployeeId('');setStartsAt('');setEndsAt('');
+  }
+  function deny(){invalidate();setState('denied');}
+  React.useEffect(()=>{
+    if(access.current.signal.aborted)access.current=new AbortController();
+    return ()=>access.current.abort();
+  },[]);
 
   async function refresh(org=organization.trim()) {
-    const request=++sequence.current;
+    const request=++sequence.current,signal=access.current.signal;
     if(!uuid.test(org)){setData(null);setAudit([]);setAuditNext(null);setState('idle');return;}
     setState('loading');setData(null);setAudit([]);setAuditNext(null);setConfirm(null);
     try {
       const [response,history]=await Promise.all([
         fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+'/workshop',
-          {credentials:'include',cache:'no-store'}),
+          {credentials:'include',cache:'no-store',signal}),
         fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+'/workshop/audit?limit=100',
-          {credentials:'include',cache:'no-store'}),
+          {credentials:'include',cache:'no-store',signal}),
       ]);
-      if(orgRef.current!==org||request!==sequence.current)return;
+      if(signal.aborted||orgRef.current!==org||request!==sequence.current)return;
       if([401,403,404].includes(response.status)||[401,403,404].includes(history.status)){
-        setState('denied');return;
+        deny();return;
       }
       if(!response.ok||!history.ok)throw Error('HTTP');
       const workshop=parseWorkshop(await response.json());
       const historyBody:unknown=await history.json();
       const events=parseAudit(historyBody);
       const next=nextCursor(historyBody as object,events.length);
-      if(orgRef.current!==org||request!==sequence.current)return;
+      if(signal.aborted||orgRef.current!==org||request!==sequence.current)return;
       setData(workshop);setAudit(events);setAuditNext(next);
       if(!locationId||!workshop.locations.some(x=>x.locationId===locationId&&!x.disabled)){
         setLocationId(workshop.locations.find(x=>!x.disabled)?.locationId??'');
       }
       setState('ready');
     }catch{
-      if(orgRef.current===org&&request===sequence.current)setState('error');
+      if(!signal.aborted&&orgRef.current===org&&request===sequence.current)setState('error');
     }
   }
 
   React.useEffect(()=>{
-    sequence.current++;setData(null);setAudit([]);setAuditNext(null);setMessage('');setConfirm(null);setLocationId('');
-    locationKey.current=null;bayKey.current=null;shiftKey.current=null;
+    invalidate();
     if(uuid.test(organization.trim()))void refresh(organization.trim());
     else setState('idle');
   },[organization]);
 
   async function more(kind:Kind|'audit',cursor:string) {
-    if(busy||!data||state!=='ready')return;
-    const org=organization.trim(),request=++sequence.current;
+    if(busy||pending||!data||state!=='ready')return;
+    const org=organization.trim(),request=++sequence.current,signal=access.current.signal;
     setBusy(true);setMessage('');setConfirm(null);
     try{
       const query=new URLSearchParams({limit:'100',cursor});
       if(kind!=='audit')query.set('kind',kind);
       const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+
         '/workshop/'+(kind==='audit'?'audit':'page')+'?'+query,
-        {credentials:'include',cache:'no-store'});
-      if(orgRef.current!==org||request!==sequence.current)return;
+        {credentials:'include',cache:'no-store',signal});
+      if(signal.aborted||orgRef.current!==org||request!==sequence.current)return;
       if([401,403,404].includes(response.status)){
-        setData(null);setAudit([]);setAuditNext(null);setLocationId('');setState('denied');return;
+        deny();return;
       }
       if(!response.ok)throw Error('HTTP');
       const raw:unknown=await response.json();
@@ -147,7 +158,7 @@ export function AutoOrganizationSetup() {
         throw Error('shape');
       const next=nextCursor(raw,raw.items.length);
       if(next===cursor)throw Error('repeated cursor');
-      if(orgRef.current!==org||request!==sequence.current)return;
+      if(signal.aborted||orgRef.current!==org||request!==sequence.current)return;
       if(kind==='audit'){
         const page=parseAudit(raw);
         const ids=new Set(audit.map(x=>x.eventId));
@@ -173,39 +184,55 @@ export function AutoOrganizationSetup() {
         setData(merged);
       }
     }catch{
-      if(orgRef.current===org&&request===sequence.current){
+      if(!signal.aborted&&orgRef.current===org&&request===sequence.current){
         setData(null);setAudit([]);setAuditNext(null);setLocationId('');setState('error');
       }
-    }finally{setBusy(false);}
+    }finally{if(!signal.aborted)setBusy(false);}
   }
 
-  async function execute(path:string,payload:unknown,success:string,keyRef?:React.MutableRefObject<string|null>) {
-    const operationOrg=organization.trim();
-    if(busy||!uuid.test(operationOrg))return;
-    const requestKey=keyRef?(keyRef.current??crypto.randomUUID()):undefined;
-    if(keyRef)keyRef.current=requestKey??null;
+  async function execute(path:string,payload:unknown,success:string,idempotent=false,retry?:PendingCreate) {
+    const operationOrg=organization.trim(),signal=access.current.signal;
+    if(busy||state!=='ready'||!uuid.test(operationOrg)||
+      (retry?(retry.org!==operationOrg||pending?.key!==retry.key):pending!==null))return;
+    // Повтор привязан не только к ключу, но и к исходным пути и JSON.
+    const operation=retry??(idempotent?{org:operationOrg,path,body:JSON.stringify(payload),
+      key:crypto.randomUUID(),success}:null);
+    if(operation)setPending(operation);
     setBusy(true);setMessage('');
     try {
       const response=await post('/api/v1/dev/auto/organizations/'+
-        encodeURIComponent(operationOrg)+path,payload,requestKey);
-      if(keyRef&&(response.ok||response.status<500))keyRef.current=null;
-      // Не позволяем запоздалому ответу организации A очистить экран B.
-      if(orgRef.current!==operationOrg)return;
+        encodeURIComponent(operationOrg)+(operation?.path??path),
+        operation?.body??(payload===undefined?undefined:JSON.stringify(payload)),operation?.key,signal);
+      if(signal.aborted||orgRef.current!==operationOrg)return;
+      if([401,403,404].includes(response.status)){deny();return;}
+      if(response.status>=500)throw Error('unknown');
       if(!response.ok){
+        setPending(null);
         setMessage(response.status===409?'409 — операция конфликтует с активными записями, сменами или назначениями.'
-          :[401,403,404].includes(response.status)?'403 — нет полномочий ADMIN этой организации.'
           :response.status===422?'422 — проверьте код, часовой пояс и даты.'
           :'Операция не выполнена ('+response.status+').');
-        if([401,403,404].includes(response.status)){sequence.current++;setData(null);setAudit([]);setAuditNext(null);setLocationId('');setState('denied');}
         return;
       }
-      setMessage(success);
-      setConfirm(null);
+      const result:unknown=await response.json();
+      if(signal.aborted||orgRef.current!==operationOrg)return;
+      if(!result||typeof result!=='object')throw Error('receipt');
+      if(operation){
+        const field=operation.path.endsWith('/bays')?'bayId':operation.path.endsWith('/shifts')?'shiftId':'locationId';
+        const id=(result as Record<string,unknown>)[field];
+        if(typeof id!=='string'||!uuid.test(id)||response.status!==201)throw Error('receipt');
+      }else if(!('status' in result)||!(path.endsWith('/cancel')?
+        ['CANCELED','ALREADY_CANCELED']:['DISABLED','ALREADY_DISABLED']).includes(String(result.status)))throw Error('receipt');
+      setPending(null);setMessage(operation?.success??success);setConfirm(null);
       await refresh(operationOrg);
     }catch{
-      if(orgRef.current===operationOrg)
-        setMessage('Ошибка соединения. Проверьте локальный стенд и сессию.');
-    }finally{setBusy(false);}
+      if(!signal.aborted&&orgRef.current===operationOrg){
+        if(operation)setMessage('Результат неизвестен. Повторите исходную операцию с тем же ключом или сначала сверьте структуру.');
+        else{
+          setData(null);setAudit([]);setAuditNext(null);setConfirm(null);setLocationId('');setState('error');
+          setMessage('Результат неизвестен. Обновите структуру перед новым действием.');
+        }
+      }
+    }finally{if(!signal.aborted)setBusy(false);}
   }
   const activeLocations=data?.locations.filter(x=>!x.disabled)??[];
   const locationLabel=(id:string)=>data?.locations.find(x=>x.locationId===id)?.code??id;
@@ -227,20 +254,24 @@ export function AutoOrganizationSetup() {
     <div className="form-grid">
       <label>UUID организации
         <input aria-label="UUID организации" value={organization} disabled={busy}
-          onChange={e=>setOrganization(e.target.value)} placeholder="00000000-0000-4000-8000-000000000000"/>
+          onChange={e=>{if(e.target.value===organization)return;invalidate();setState('idle');setOrganization(e.target.value);}} placeholder="00000000-0000-4000-8000-000000000000"/>
       </label>
-      <button type="button" disabled={!validOrg||state==='loading'||busy} onClick={()=>void refresh()}>
+      <button type="button" disabled={!validOrg||state==='loading'||busy||pending!==null} onClick={()=>void refresh()}>
         Обновить структуру</button>
     </div>
     {state==='loading'&&<p role="status">Загружаем организацию…</p>}
     {state==='denied'&&<p role="alert">Доступ запрещён. Нужна активная сессия и роль ADMIN этой организации.</p>}
     {state==='error'&&<p role="alert">Не удалось загрузить структуру и журнал аудита.</p>}
     {message&&<p role="status" aria-live="polite">{message}</p>}
+    {pending&&<div role="group" aria-label="Неподтверждённая операция структуры">
+      <button type="button" disabled={busy} onClick={()=>void execute(pending.path,undefined,pending.success,true,pending)}>Повторить исходную операцию</button>
+      <button type="button" disabled={busy} onClick={()=>{setPending(null);setMessage('Сверьте журнал перед новой операцией.');void refresh();}}>Перечитать структуру</button>
+    </div>}
     {state==='ready'&&data&&<>
       <section aria-labelledby="branches-title">
         <h2 id="branches-title">Филиалы</h2>
         <p>Часовой пояс задаётся при создании и фиксируется после появления первой смены или брони.</p>
-        <form onSubmit={e=>{e.preventDefault();void execute('/locations',{code:branchCode.trim(),timeZone},'Филиал создан.',locationKey);}}>
+        <form onSubmit={e=>{e.preventDefault();void execute('/locations',{code:branchCode.trim(),timeZone},'Филиал создан.',true);}}>
           <label>Код филиала
             <input value={branchCode} onChange={e=>setBranchCode(e.target.value.toUpperCase())}
               pattern="[A-Z0-9][A-Z0-9_-]{1,31}" minLength={2} maxLength={32} required/>
@@ -248,7 +279,7 @@ export function AutoOrganizationSetup() {
           <label>Часовой пояс IANA
             <input value={timeZone} onChange={e=>setTimeZone(e.target.value)} required/>
           </label>
-          <button type="submit" disabled={busy||!branchCode.trim()||!timeZone.trim()}>Создать филиал</button>
+          <button type="submit" disabled={busy||pending!==null||!branchCode.trim()||!timeZone.trim()}>Создать филиал</button>
         </form>
         <div className="table-scroll" role="region" aria-label="Список филиалов" tabIndex={0}>
           <table><thead><tr><th>Код</th><th>Часовой пояс</th><th>UUID</th><th>Состояние</th><th>Действие</th></tr></thead>
@@ -256,18 +287,18 @@ export function AutoOrganizationSetup() {
               <td>{x.code}</td><td>{x.timeZone}</td><td><code>{x.locationId}</code></td>
               <td>{x.disabled?'Отключён':'Активен'}</td>
               <td>{!x.disabled&&(confirm?.kind==='location'&&confirm.id===x.locationId?
-                <><button type="button" disabled={busy} onClick={()=>void execute('/locations/'+x.locationId+'/disable',undefined,'Филиал отключён.')}>Подтвердить отключение</button>
+                <><button type="button" disabled={busy||pending!==null} onClick={()=>void execute('/locations/'+x.locationId+'/disable',undefined,'Филиал отключён.')}>Подтвердить отключение</button>
                   <button type="button" onClick={()=>setConfirm(null)}>Отмена</button></>:
-                <button type="button" disabled={busy} onClick={()=>setConfirm({kind:'location',id:x.locationId,locationId:x.locationId})}>Отключить</button>)}</td>
+                <button type="button" disabled={busy||pending!==null} onClick={()=>setConfirm({kind:'location',id:x.locationId,locationId:x.locationId})}>Отключить</button>)}</td>
             </tr>)}</tbody>
           </table>
         </div>
-        {data.locationsNextCursor&&<button type="button" disabled={busy} onClick={()=>void more('locations',data.locationsNextCursor!)}>Показать ещё филиалы</button>}
+        {data.locationsNextCursor&&<button type="button" disabled={busy||pending!==null} onClick={()=>void more('locations',data.locationsNextCursor!)}>Показать ещё филиалы</button>}
       </section>
 
       <section aria-labelledby="bays-title">
         <h2 id="bays-title">Рабочие посты</h2>
-        <form onSubmit={e=>{e.preventDefault();void execute('/locations/'+locationId+'/bays',{code:bayCode.trim()},'Рабочий пост создан.',bayKey);}}>
+        <form onSubmit={e=>{e.preventDefault();void execute('/locations/'+locationId+'/bays',{code:bayCode.trim()},'Рабочий пост создан.',true);}}>
           <label>Филиал
             <select value={locationId} onChange={e=>setLocationId(e.target.value)} required>
               <option value="">Выберите филиал</option>
@@ -278,7 +309,7 @@ export function AutoOrganizationSetup() {
             <input value={bayCode} onChange={e=>setBayCode(e.target.value.toUpperCase())}
               pattern="[A-Z0-9][A-Z0-9_-]{1,31}" minLength={2} maxLength={32} required/>
           </label>
-          <button type="submit" disabled={busy||!locationId||!bayCode.trim()}>Создать пост</button>
+          <button type="submit" disabled={busy||pending!==null||!locationId||!bayCode.trim()}>Создать пост</button>
         </form>
         <div className="table-scroll" role="region" aria-label="Список рабочих постов" tabIndex={0}>
           <table><thead><tr><th>Филиал</th><th>Код поста</th><th>UUID</th><th>Состояние</th><th>Действие</th></tr></thead>
@@ -286,20 +317,20 @@ export function AutoOrganizationSetup() {
               <td>{locationLabel(x.locationId)}</td><td>{x.code}</td><td><code>{x.bayId}</code></td>
               <td>{x.disabled?'Отключён':'Активен'}</td>
               <td>{!x.disabled&&(confirm?.kind==='bay'&&confirm.id===x.bayId?
-                <><button type="button" disabled={busy} onClick={()=>void execute('/locations/'+x.locationId+'/bays/'+x.bayId+'/disable',undefined,'Пост отключён.')}>Подтвердить отключение</button>
+                <><button type="button" disabled={busy||pending!==null} onClick={()=>void execute('/locations/'+x.locationId+'/bays/'+x.bayId+'/disable',undefined,'Пост отключён.')}>Подтвердить отключение</button>
                   <button type="button" onClick={()=>setConfirm(null)}>Отмена</button></>:
-                <button type="button" disabled={busy} onClick={()=>setConfirm({kind:'bay',id:x.bayId,locationId:x.locationId})}>Отключить</button>)}</td>
+                <button type="button" disabled={busy||pending!==null} onClick={()=>setConfirm({kind:'bay',id:x.bayId,locationId:x.locationId})}>Отключить</button>)}</td>
             </tr>)}</tbody>
           </table>
         </div>
-        {data.baysNextCursor&&<button type="button" disabled={busy} onClick={()=>void more('bays',data.baysNextCursor!)}>Показать ещё посты</button>}
+        {data.baysNextCursor&&<button type="button" disabled={busy||pending!==null} onClick={()=>void more('bays',data.baysNextCursor!)}>Показать ещё посты</button>}
       </section>
 
       <section aria-labelledby="shifts-title">
         <h2 id="shifts-title">Смены сотрудников</h2>
         <p>Сотрудник должен иметь действующее назначение в этой организации или филиале. Время вводится в ISO 8601 с явным смещением UTC.</p>
         <form onSubmit={e=>{e.preventDefault();void execute('/locations/'+locationId+'/shifts',
-          {userId:employeeId.trim(),startsAt:startsAt.trim(),endsAt:endsAt.trim()},'Смена создана.',shiftKey);}}>
+          {userId:employeeId.trim(),startsAt:startsAt.trim(),endsAt:endsAt.trim()},'Смена создана.',true);}}>
           <label>Филиал
             <select value={locationId} onChange={e=>setLocationId(e.target.value)} required>
               <option value="">Выберите филиал</option>
@@ -317,7 +348,7 @@ export function AutoOrganizationSetup() {
             <input value={endsAt} onChange={e=>setEndsAt(e.target.value)}
               placeholder="2030-04-10T17:00:00+02:00" required/>
           </label>
-          <button type="submit" disabled={busy||!locationId||!uuid.test(employeeId.trim())||
+          <button type="submit" disabled={busy||pending!==null||!locationId||!uuid.test(employeeId.trim())||
             !startsAt.trim()||!endsAt.trim()}>Назначить смену</button>
         </form>
         <div className="table-scroll" role="region" aria-label="Список смен" tabIndex={0}>
@@ -327,13 +358,13 @@ export function AutoOrganizationSetup() {
               <td>{iso(x.startsAt,x.locationId)}</td><td>{iso(x.endsAt,x.locationId)}</td>
               <td>{x.canceled?'Отменена':'Активна'}</td>
               <td>{!x.canceled&&(confirm?.kind==='shift'&&confirm.id===x.shiftId?
-                <><button type="button" disabled={busy} onClick={()=>void execute('/locations/'+x.locationId+'/shifts/'+x.shiftId+'/cancel',undefined,'Смена отменена.')}>Подтвердить отмену</button>
+                <><button type="button" disabled={busy||pending!==null} onClick={()=>void execute('/locations/'+x.locationId+'/shifts/'+x.shiftId+'/cancel',undefined,'Смена отменена.')}>Подтвердить отмену</button>
                   <button type="button" onClick={()=>setConfirm(null)}>Отмена</button></>:
-                <button type="button" disabled={busy} onClick={()=>setConfirm({kind:'shift',id:x.shiftId,locationId:x.locationId})}>Отменить</button>)}</td>
+                <button type="button" disabled={busy||pending!==null} onClick={()=>setConfirm({kind:'shift',id:x.shiftId,locationId:x.locationId})}>Отменить</button>)}</td>
             </tr>)}</tbody>
           </table>
         </div>
-        {data.shiftsNextCursor&&<button type="button" disabled={busy} onClick={()=>void more('shifts',data.shiftsNextCursor!)}>Показать ещё смены</button>}
+        {data.shiftsNextCursor&&<button type="button" disabled={busy||pending!==null} onClick={()=>void more('shifts',data.shiftsNextCursor!)}>Показать ещё смены</button>}
       </section>
 
       <section aria-labelledby="workshop-audit-title">
@@ -347,7 +378,7 @@ export function AutoOrganizationSetup() {
             </tr>)}</tbody>
           </table>
         </div>
-        {auditNext&&<button type="button" disabled={busy} onClick={()=>void more('audit',auditNext)}>Показать ещё события аудита</button>}
+        {auditNext&&<button type="button" disabled={busy||pending!==null} onClick={()=>void more('audit',auditNext)}>Показать ещё события аудита</button>}
       </section>
     </>}
   </section>;

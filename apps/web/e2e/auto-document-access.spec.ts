@@ -329,3 +329,65 @@ test('повреждённый nextBefore без полной страницы �
     await expect(page.getByRole('alert')).toContainText('Ошибка загрузки');
     await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
   });
+
+
+test('ADMIN normalizes UUID preview scope and honors late denial after scope change',async({page})=>{
+  const employee='abcdefab-abcd-4abc-8abc-abcdefabcdef';
+  const branch='abcabcab-abcd-4abc-8abc-abcdefabcdef';
+  let mode:'valid'|'foreign'|'denied'='valid';
+  let release!:()=>void,entered!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  const started=new Promise<void>(resolve=>{entered=resolve;});
+  await page.route('**/api/v1/dev/auto/organizations/**',async route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(url.pathname.endsWith('/staff'))return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:[{grantId:'44444444-4444-4444-8444-444444444444',
+        userId:employee,role:'MANAGER',locationId:branch}]})});
+    if(url.pathname===base)return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[{eventId:'55555555-5555-4555-8555-555555555555',
+        role:'MANAGER',userId:employee,locationId:branch,documentKind:'ESTIMATE',capability:'READ',
+        allowed:false,notBefore:null,actorId:user,createdAt:'2030-01-01T10:00:00Z'}]})});
+    if(url.pathname===base+'/effective'){
+      expect(url.searchParams.get('userId')).toBe(employee);
+      expect(url.searchParams.get('locationId')).toBe(branch);
+      if(mode==='denied'){
+        entered();await gate;
+        return route.fulfill({status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+      }
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,subjectToObjectACL:true,userId:mode==='foreign'?user:employee,
+        locationId:branch,documentKind:'ESTIMATE',roles:['MANAGER'],
+        capabilities:Object.fromEntries(capabilities.map(cap=>[cap,{allowed:true,notBefore:null}]))})});
+    }
+    throw Error('Unexpected '+url.pathname);
+  });
+  await page.goto('/staff/auto-admin');
+  await page.getByLabel('UUID организации').fill(org);
+  await page.getByRole('button',{name:'Показать ограничения документов'}).click();
+  await expect(page.getByText('DENY',{exact:true})).toBeVisible();
+  await page.getByLabel('UUID филиала правила').fill(branch.toUpperCase());
+  await page.getByLabel('UUID сотрудника правила').fill(employee.toUpperCase());
+  const preview=page.getByRole('button',{name:'Проверить эффективные права'});
+  const result=page.getByRole('region',{name:'Результат эффективных прав'});
+  await preview.click();
+  await expect(result).toBeVisible();
+  mode='foreign';
+  await preview.click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось вычислить полномочия');
+  await expect(result).toHaveCount(0);
+  mode='denied';
+  try{
+    await preview.click();
+    await started;
+    await page.getByLabel('Документ политики').selectOption('FINANCE');
+    await expect(page.getByText('DENY',{exact:true})).toBeVisible();
+  }finally{release();}
+  await expect(page.getByRole('alert')).toContainText('предпросмотр недоступен');
+  await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
+  await expect(page.getByText(employee,{exact:false})).toHaveCount(0);
+  await expect(preview).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Назначить',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Проверить доступ заново'}).click();
+  await expect(page.getByRole('heading',{name:'Активные назначения'})).toBeVisible();
+  await expect(page.getByLabel('UUID сотрудника правила')).toHaveValue('');
+});

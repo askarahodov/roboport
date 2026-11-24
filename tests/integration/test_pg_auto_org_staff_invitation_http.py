@@ -395,9 +395,31 @@ def test_staff_admin_lists_complete_pages_with_scoped_cursors(monkeypatch):
         assert admin.get(url+"?limit=2&limit=3").status_code == 422
         assert _client(data, data["intake"]).get(url, params={"cursor": cursor}).status_code == 403
     assert admin.get(base+"/staff/audit", params={"cursor":cursors["/staff"]}).status_code == 422
-    # Отзыв сессии/права должен остановить любую следующую страницу.
+    # Вторая действующая сессия того же ADMIN не наследует подписанный курсор.
+    from test_pg_auto_vehicle_claim_http import new_token, token_digest
+    second_token,second_csrf=new_token(),new_token()
+    now=datetime.now(timezone.utc)
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO user_session
+            (id,user_id,token_hash,csrf_hash,created_at,idle_expires_at,absolute_expires_at)
+            VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+            (uuid4(),actor,token_digest(second_token),token_digest(second_csrf),
+             now,now+timedelta(minutes=30),now+timedelta(hours=4)))
+    second=TestClient(app,base_url="https://127.0.0.1")
+    second.cookies.set("rp_session",second_token)
+    for suffix,cursor in cursors.items():
+        assert second.get(base+suffix).status_code==200
+        assert second.get(base+suffix,params={"cursor":cursor}).status_code==422
+    # Отзыв права должен остановить любое чтение обеих сессий.
+    assert admin.get(base+"/access-policies").status_code==200
+    assert admin.get(base+"/workshop").status_code==200
+    assert admin.get(base+"/workshop/audit").status_code==200
     with psycopg.connect(DSN) as db:
         db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
                    WHERE organization_id=%s AND user_id=%s AND role_code='ADMIN'""", (org_a, actor))
-    for suffix, cursor in cursors.items():
-        assert admin.get(base+suffix, params={"cursor":cursor}).status_code == 403
+    for reader in (admin,second):
+        for suffix,cursor in cursors.items():
+            assert reader.get(base+suffix).status_code==403
+            assert reader.get(base+suffix,params={"cursor":cursor}).status_code==403
+        for suffix in ("/access-policies","/workshop","/workshop/audit"):
+            assert reader.get(base+suffix).status_code==403

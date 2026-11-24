@@ -187,3 +187,52 @@ test('ADMIN reaches later branches bays shifts and audit, then revocation clears
   await expect(page.getByRole('region',{name:'Список филиалов'})).toHaveCount(0);
   await expect(page.getByRole('region',{name:'Журнал административных операций'})).toHaveCount(0);
 });
+
+
+test('workshop retries the exact create after lost receipt and denies all forms on revoke',async({page})=>{
+  let attempt=0,denied=false,created=false;
+  const requests:{key:string;body:string}[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(api,route=>{
+    const req=route.request(),path=new URL(req.url()).pathname;
+    if(denied)return route.fulfill({status:403,contentType:'application/json',body:'{}'});
+    if(path.endsWith('/workshop/audit'))return route.fulfill({
+      status:200,contentType:'application/json',body:'{"items":[]}'});
+    if(path.endsWith('/workshop'))return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,locations:created?[{locationId:location,code:'BRANCH_A',
+        timeZone:'UTC',disabled:false,createdAt:'2030-01-01T00:00:00Z'}]:[],bays:[],shifts:[],
+        locationsTruncated:false,baysTruncated:false,shiftsTruncated:false})});
+    if(req.method()==='POST'&&path.endsWith('/locations')){
+      requests.push({key:req.headers()['idempotency-key'],body:req.postData()??''});
+      created=true;
+      return route.fulfill({status:++attempt===1?503:201,contentType:'application/json',
+        body:attempt===1?'{}':JSON.stringify({locationId:location})});
+    }
+    throw Error('Unexpected '+path);
+  });
+  await page.goto('/staff/auto-setup');
+  await page.getByLabel('UUID организации').fill(organization);
+  await page.getByLabel('Код филиала').fill('BRANCH_A');
+  await page.getByRole('button',{name:'Создать филиал'}).click();
+  const retry=page.getByRole('button',{name:'Повторить исходную операцию'});
+  await expect(retry).toBeVisible();
+  await expect(page.getByText('Результат неизвестен.',{exact:false})).toBeVisible();
+  await page.getByLabel('Код филиала').fill('BRANCH_B');
+  await expect(page.getByRole('button',{name:'Создать филиал'})).toBeDisabled();
+  await retry.click();
+  await expect(page.getByRole('cell',{name:'BRANCH_A',exact:true})).toBeVisible();
+  await expect(retry).toHaveCount(0);
+  expect(requests).toHaveLength(2);
+  expect(requests[0]).toEqual(requests[1]);
+  expect(JSON.parse(requests[1].body).code).toBe('BRANCH_A');
+  denied=true;
+  await page.getByRole('button',{name:'Обновить структуру'}).click();
+  await expect(page.getByRole('alert')).toContainText('роль ADMIN');
+  await expect(page.getByRole('cell',{name:'BRANCH_A',exact:true})).toHaveCount(0);
+  await expect(page.getByLabel('Код филиала')).toHaveCount(0);
+  denied=false;
+  await page.getByRole('button',{name:'Обновить структуру'}).click();
+  await expect(page.getByRole('cell',{name:'BRANCH_A',exact:true})).toBeVisible();
+  await expect(page.getByLabel('Код филиала')).toHaveValue('');
+});
