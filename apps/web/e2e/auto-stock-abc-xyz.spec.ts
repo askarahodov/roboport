@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {readFile} from 'node:fs/promises';
 
 const org='11111111-1111-4111-8111-111111111111';
 const loc='22222222-2222-4222-8222-222222222222';
@@ -43,7 +44,9 @@ function body(from:string,to:string,offset:number){
       grossReturned:5,netPeriod:310,
       classCounts:{A:2,B:1,C:1,X:2,Y:1,Z:1,none:25},
     },
-    items:items.slice(offset,offset+25),
+    // Каждый ответ получает собственные строки и массивы: негативный тест
+    // не должен изменять исходные данные следующего сценария в том же worker.
+    items:items.slice(offset,offset+25).map(row=>({...row,monthlyIssued:[...row.monthlyIssued]})),
   };
 }
 async function scope(page:import('@playwright/test').Page){
@@ -158,6 +161,14 @@ test('manager ABC/XYZ rejects inconsistent and tampered item response fail close
   await load.click();
   await expect(page.getByRole('alert')).toContainText('Не удалось получить ABC/XYZ');
   await expect(page.getByLabel('Результаты ABC XYZ')).toHaveCount(0);
+  // В том же worker новый корректный ответ не зависит от предыдущей порчи.
+  malformed=false;
+  await load.click();
+  const restored=page.getByLabel('Результаты ABC XYZ');
+  await expect(restored).toBeVisible();
+  await expect(restored.getByRole('table').locator('tbody tr').first()).toContainText('SYN-A');
+  await expect(restored.getByRole('table').locator('tbody tr').first()).toContainText('180');
+  expect(items[0].monthlyIssued).toEqual([60,60,60]);
 });
 
 
@@ -214,16 +225,27 @@ test('manager downloads complete scoped CSV and revoke blocks export fail closed
   await expect(page.getByLabel('По месяц')).toHaveValue(months[2]);
   const load=page.getByRole('button',{name:'Построить ABC/XYZ'});
   await expect(load).toBeEnabled();
+  const loaded=page.waitForResponse(response=>{
+    const u=new URL(response.url());
+    return u.pathname.endsWith('/locations/'+loc+'/stock-abc-xyz')&&
+      u.searchParams.get('fromMonth')===months[0]&&
+      u.searchParams.get('toMonth')===months[2]&&u.searchParams.get('offset')==='0';
+  });
   await load.click();
+  expect((await loaded).status()).toBe(200);
   const results=page.getByLabel('Результаты ABC XYZ');
-  // Full browser suite runs many workers; allow a bounded async report render
-  // without mistaking transient worker saturation for a denied result.
-  await expect(results).toBeVisible({timeout:15000});
-  await expect(results.getByRole('table').locator('tbody tr')).toHaveCount(25,{timeout:15000});
+  await expect(results).toBeVisible();
+  await expect(results.getByRole('table').locator('tbody tr')).toHaveCount(25);
   const downloadPromise=page.waitForEvent('download');
   await results.getByRole('button',{name:'Скачать весь отчёт CSV'}).click();
   const download=await downloadPromise;
   expect(download.suggestedFilename()).toBe('auto-stock-abc-xyz.csv');
+  const saved=await download.path();
+  expect(saved).not.toBeNull();
+  const lines=(await readFile(saved!,'utf8')).replace(/^\uFEFF/,'').trimEnd().split(/\r?\n/);
+  expect(lines[0]).toBe('SKU UUID;Артикул;Выдано');
+  expect(lines.slice(1)).toEqual(items.map(row=>row.skuId+';'+row.article+';'+row.grossIssued));
+  expect(new Set(lines.slice(1).map(line=>line.split(';')[0])).size).toBe(29);
   expect(queried).toHaveLength(1);
   expect(queried[0]).toContain('/locations/'+loc+'/stock-abc-xyz/export?');
   expect(queried[0]).toContain('fromMonth='+months[0]);
@@ -232,4 +254,71 @@ test('manager downloads complete scoped CSV and revoke blocks export fail closed
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByLabel('Результаты ABC XYZ')).toHaveCount(0);
   expect(queried).toHaveLength(2);
+});
+
+
+test('ABC/XYZ report reload supersedes pending CSV authorization and prevents late downloads',async({page})=>{
+  let reportStatus=200;
+  let csvStatus=200;
+  let releaseCsv:()=>void=()=>{};
+  let observedCsv:()=>void=()=>{};
+  let entered=new Promise<void>(resolve=>{observedCsv=resolve;});
+  const downloads:string[]=[];
+  page.on('download',download=>downloads.push(download.suggestedFilename()));
+  await page.route(routePath,route=>{
+    const u=new URL(route.request().url());
+    return route.fulfill({status:reportStatus,contentType:'application/json',
+      body:reportStatus===200?JSON.stringify(body(u.searchParams.get('fromMonth')??'',
+        u.searchParams.get('toMonth')??'',Number(u.searchParams.get('offset')??0))):
+        '{"code":"FORBIDDEN"}'});
+  });
+  await page.route('**/stock-abc-xyz/export?*',async route=>{
+    const status=csvStatus;
+    const gate=new Promise<void>(resolve=>{releaseCsv=resolve;});
+    observedCsv();
+    await gate;
+    // Отменённый fetch может отбросить перехваченный ответ.
+    await route.fulfill({status,contentType:status===200?'text/csv; charset=utf-8':'application/json',
+      body:status===200?'SKU UUID;Артикул;Выдано\\r\\nsynthetic;SYN-A;180':'{"code":"FORBIDDEN"}'}).catch(()=>{});
+  });
+  await page.goto('/staff/auto-stock-abc-xyz');
+  await scope(page);
+  const months=completedMonths();
+  await page.getByLabel('С месяца').fill(months[0]);
+  await page.getByLabel('По месяц').fill(months[2]);
+  const load=page.getByRole('button',{name:'Построить ABC/XYZ'});
+  const results=page.getByLabel('Результаты ABC XYZ');
+  const csv=results.getByRole('button',{name:'Скачать весь отчёт CSV'});
+  await load.click();
+  await expect(results).toBeVisible();
+
+  // Экспорт, начатый до отзыва, не должен скачиваться после нового 403.
+  await csv.click();
+  await entered;
+  reportStatus=403;
+  const aborted=page.waitForEvent('requestfailed',request=>
+    new URL(request.url()).pathname.endsWith('/stock-abc-xyz/export'));
+  await load.click();
+  await aborted;
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  releaseCsv();
+  await expect(results).toHaveCount(0);
+  expect(downloads).toEqual([]);
+
+  // Старый отказ не должен очистить новый разрешённый отчёт.
+  reportStatus=200;csvStatus=403;
+  await load.click();
+  await expect(results).toBeVisible();
+  entered=new Promise<void>(resolve=>{observedCsv=resolve;});
+  await csv.click();
+  await entered;
+  const abortedAgain=page.waitForEvent('requestfailed',request=>
+    new URL(request.url()).pathname.endsWith('/stock-abc-xyz/export'));
+  await load.click();
+  await abortedAgain;
+  await expect(results).toBeVisible();
+  releaseCsv();
+  await expect(csv).toBeEnabled();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(downloads).toEqual([]);
 });

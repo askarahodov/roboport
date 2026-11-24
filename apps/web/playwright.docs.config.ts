@@ -2,6 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e-docs',
+  // Раздельные результаты: второй запуск Playwright не удаляет доказательства первого.
+  outputDir: './test-results/docs',
   timeout: 60_000,
   retries: 1,
   use: {

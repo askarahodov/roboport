@@ -117,6 +117,7 @@ export function AutoStockAbcXyz(){
   },[]);
   function clear(){
     active.current?.abort();exportActive.current?.abort();
+    active.current=null;exportActive.current=null;
     setExporting(false);setExportError('');
     setReport(null);setStatus('idle');setOffset(0);
   }
@@ -127,7 +128,12 @@ export function AutoStockAbcXyz(){
   // The scoped server checks this and returns 422 when a local month is open.
   async function load(targetOffset:number){
     if(!valid)return;
-    active.current?.abort();
+    // Повторный расчёт или смена страницы создаёт новое поколение отчёта.
+    // Незавершённый CSV прежнего поколения не должен скачиваться или
+    // восстанавливать устаревший отказ после новой проверки полномочий.
+    active.current?.abort();exportActive.current?.abort();
+    exportActive.current=null;
+    setExporting(false);setExportError('');
     const controller=new AbortController();
     active.current=controller;
     setReport(null);setStatus('loading');
@@ -150,7 +156,7 @@ export function AutoStockAbcXyz(){
     }catch{if(!controller.signal.aborted)setStatus('error');}
   }
   async function downloadCsv(){
-    if(!report||status!=='ready'||exporting)return;
+    if(!report||status!=='ready'||exporting||active.current?.signal.aborted)return;
     exportActive.current?.abort();
     const controller=new AbortController();
     exportActive.current=controller;
