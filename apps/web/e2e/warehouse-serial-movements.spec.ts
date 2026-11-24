@@ -130,3 +130,19 @@ test('serial receipt provenance is an independent two-role UI flow with scope re
   await expect(section).toBeVisible();
   await expect(section.getByText(/Подтверждение: /)).toHaveCount(0);
 });
+
+test('serial movement denial clears serial, destination and previous receipt',async({page})=>{
+  let denied=false;
+  await page.route('**/warehouse/serial-movements/**',route=>route.fulfill({
+    status:denied?403:201,contentType:'application/json',
+    body:JSON.stringify(denied?{code:'FORBIDDEN'}:{movementId:movement})}));
+  await fill(page);
+  await page.getByRole('button',{name:'Выдать серийную деталь'}).click();
+  await expect(page.getByText('UUID движения: '+movement)).toBeVisible();
+  denied=true;
+  await page.getByRole('button',{name:'Вернуть серийную деталь'}).click();
+  await expect(page.getByRole('status')).toContainText('Нет складского доступа');
+  await expect(page.getByRole('textbox',{name:'UUID серийной детали'})).toHaveValue('');
+  await expect(page.getByRole('textbox',{name:'UUID партии назначения'})).toHaveValue('');
+  await expect(page.getByText('UUID движения: '+movement)).toHaveCount(0);
+});

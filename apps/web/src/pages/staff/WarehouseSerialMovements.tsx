@@ -18,6 +18,15 @@ export function WarehouseSerialMovements(){
   const context=React.useRef({organization:'',location:''});
   context.current={organization:organization.trim(),location:location.trim()};
 
+  React.useEffect(()=>{
+    setLast('');setMessage('');
+    if(!pending&&!busy){setSerial('');setOrder('');setDestination('');}
+  },[organization,location]);
+  function deny(retry?:Pending){
+    setLast('');setSerial('');setOrder('');setDestination('');
+    setPending(retry??null);
+    setMessage('Нет складского доступа к исходному и целевому филиалам либо dev API отключён.');
+  }
   const scopeValid=uuid.test(organization.trim())&&uuid.test(location.trim())&&uuid.test(serial.trim());
   async function submit(action:Action,retry?:Pending){
     if(busy||(!retry&&(pending||!scopeValid||
@@ -41,22 +50,26 @@ export function WarehouseSerialMovements(){
     try{
       const responseCsrf=await fetch('/api/v1/auth/csrf',{
         method:'POST',cache:'no-store',credentials:'include'});
+      if([401,403,404].includes(responseCsrf.status)){deny(retry);return;}
       if(!responseCsrf.ok)throw new Error('csrf');
       const csrf:unknown=await responseCsrf.json();
       if(!csrf||typeof csrf!=='object'||!('csrfToken' in csrf)||
          typeof csrf.csrfToken!=='string')throw new Error('csrf');
+      if(snap.organization!==context.current.organization||snap.location!==context.current.location)
+        throw new Error('scope changed');
       const response=await fetch(snap.url,{
         method:'POST',cache:'no-store',credentials:'include',
         headers:{'Content-Type':'application/json','X-CSRF-Token':csrf.csrfToken,
           'Idempotency-Key':snap.key},body:snap.body,
       });
+      if([401,403,404].includes(response.status)){deny(retry);return;}
+      if(snap.organization!==context.current.organization||snap.location!==context.current.location)
+        throw new Error('scope changed');
       if(response.status>=500)throw new Error('server');
       if(!response.ok){
         setPending(null);
         setMessage(response.status===409?
           'Конфликт состояния серийной детали, заказа или уже выполненной операции (409).':
-          [401,403,404].includes(response.status)?
-            'Нет складского доступа к исходному и целевому филиалам либо dev API отключён.':
             'Недопустимый запрос ('+response.status+').');
         return;
       }
@@ -64,6 +77,8 @@ export function WarehouseSerialMovements(){
       if(!data||typeof data!=='object'||!('movementId' in data)||
          typeof data.movementId!=='string'||!uuid.test(data.movementId))
         throw new Error('unknown response');
+      if(snap.organization!==context.current.organization||snap.location!==context.current.location)
+        throw new Error('scope changed');
       setLast(data.movementId);setPending(null);
       setMessage(snap.action==='issue'?'Серийная деталь выдана по заказ-наряду.':
         snap.action==='return'?'Серийная деталь возвращена в исходную партию.':
