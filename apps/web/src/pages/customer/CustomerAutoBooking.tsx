@@ -1,4 +1,5 @@
 import React from 'react';
+import {BookingHistory} from '../shared/BookingHistory';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Resource={organizationId:string;locationId:string;customerLinkId:string;bayId:string;
@@ -29,6 +30,7 @@ export function CustomerAutoBooking(){
   const [serviceState,setServiceState]=React.useState('');
   const [slotState,setSlotState]=React.useState('');
   const [target,setTarget]=React.useState<Booking|null>(null);
+  const [historyId,setHistoryId]=React.useState<string|null>(null);
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
@@ -50,7 +52,7 @@ export function CustomerAutoBooking(){
   }
   function clearPrivate(){
     setResources([]);setBookings([]);setNextResourceCursor(null);setNextCursor(null);
-    setSelected('');setTarget(null);setSlots([]);setServices([]);setSelectedServices([]);
+    setSelected('');setTarget(null);setHistoryId(null);setSlots([]);setServices([]);setSelectedServices([]);
     setPending(null);setServiceState('');setSlotState('');
   }
   function deny(){
@@ -68,7 +70,7 @@ export function CustomerAutoBooking(){
     const generation=++epoch.current;
     slotRequest.current++;
     setState('loading');setResources([]);setBookings([]);setSlots([]);
-    setServices([]);setSelectedServices([]);setTarget(null);setPending(null);
+    setServices([]);setSelectedServices([]);setTarget(null);setHistoryId(null);setPending(null);
     setServiceState('');setSlotState('');
     setNextResourceCursor(null);setNextCursor(null);
     const current=()=>!controller.signal.aborted&&generation===epoch.current;
@@ -270,6 +272,10 @@ export function CustomerAutoBooking(){
           <strong>{locale(b.startsAt,b.timeZone)} — {locale(b.endsAt,b.timeZone)}
             {' '}({b.timeZone})</strong>
           <p>Заказ-наряд {b.workOrderId} · {b.status==='CANCELED'?'Отменена':'Активна'}</p>
+          <button type="button" disabled={busy||!!pending} onClick={()=>setHistoryId(old=>old===b.appointmentId?null:b.appointmentId)}>История записи</button>
+          {historyId===b.appointmentId&&<BookingHistory key={b.appointmentId} appointment={b.appointmentId}
+            path={'/api/v1/dev/auto/customer/booking/appointments/'+b.appointmentId+'/history?'+
+              new URLSearchParams({organizationId:b.organizationId,locationId:b.locationId})} onDenied={deny}/>}
           {b.canManage&&<div>
             <button type="button" disabled={busy||!!pending} onClick={()=>{
               setTarget(b);

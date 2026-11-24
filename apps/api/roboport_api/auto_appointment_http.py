@@ -31,6 +31,30 @@ class CreateAppointment(BookingInterval):
     materialItems: list[BookingMaterialItem] = Field(default_factory=list, max_length=8)
     complexId: UUID | None = None
 
+def _read_booking_history(request,org_id,loc_id,appointment_id,cursor,*,customer=False):
+    from .auto_booking_history import booking_history,BookingHistoryDenied
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc,appointment=map(UUID,(org_id,loc_id,appointment_id))
+        if len(request.query_params.getlist("cursor"))>1:
+            raise ValueError("duplicate cursor")
+        with psycopg.connect(dsn) as db:
+            result=booking_history(db,request.cookies.get("rp_session",""),org,loc,appointment,
+                                   customer=customer,cursor=cursor)
+    except BookingHistoryDenied:
+        return _response(request,403,"FORBIDDEN")
+    except (TypeError,ValueError):
+        return _response(request,422,"INVALID_INPUT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/appointments/{appointment_id}/history")
+def staff_booking_history(org_id:str,loc_id:str,appointment_id:str,request:Request,cursor:str|None=None):
+    return _read_booking_history(request,org_id,loc_id,appointment_id,cursor)
+
+
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/booking-directory")
 def booking_directory(org_id:str,loc_id:str,request:Request,kind:str,
                       search:str="",afterId:str|None=None):

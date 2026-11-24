@@ -1,4 +1,6 @@
 import React from 'react';
+import {BookingDirectory,DirectoryItem} from '../shared/BookingDirectory';
+import {BookingHistory} from '../shared/BookingHistory';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Service={id:string;code:string;title:string;durationMinutes:number};
@@ -95,6 +97,8 @@ export function AutoCalendar() {
   const [history,setHistory]=React.useState<Array<{startsAt:string;appointmentId:string}|null>>([]);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [form,setForm]=React.useState<Form>(empty);
+  const [complex,setComplex]=React.useState<DirectoryItem|null>(null);
+  const [historyId,setHistoryId]=React.useState<string|null>(null);
   const [services,setServices]=React.useState<Service[]>([]);
   const [selectedServices,setSelectedServices]=React.useState<string[]>([]);
   const [serviceMessage,setServiceMessage]=React.useState('');
@@ -269,7 +273,9 @@ export function AutoCalendar() {
     return ()=>controller.abort();
   },[org,location,openingRevision]);
   function resetSlots(){slotRequest.current++;setSlots([]);setSlotsMessage('');setSlotsBusy(false);}
-  function resetPage(){setCursor(null);setHistory([]);resetSlots();}
+  function resetPage(){setCursor(null);setHistory([]);setHistoryId(null);resetSlots();}
+  function denyBooking(){setItems([]);setTarget(null);setForm(empty);setComplex(null);setHistoryId(null);
+    setSelectedServices([]);setMaterials([]);setServices([]);setStock([]);setPending(null);resetSlots();setStatus('denied');}
   async function saveOpening(){
     if(!opening||openingBusy||busy||!valid)return;
     const windows=openingWindows.map(x=>({
@@ -314,7 +320,7 @@ export function AutoCalendar() {
         setOpeningState('Результат неизвестен. Повторно загрузите график перед изменением.');
     }finally{setOpeningBusy(false);}
   }
-  React.useEffect(()=>{setPending(null);},[org,location]);
+  React.useEffect(()=>{setPending(null);setComplex(null);setHistoryId(null);setForm(empty);resetSlots();},[org,location]);
   async function findSlots(){
     const retained=target?items.find(x=>x.appointmentId===target)?.employeeId:null;
     const effectiveEmployee=target&&clearEmployee?null:(form.employee.trim()||retained||null);
@@ -323,7 +329,7 @@ export function AutoCalendar() {
     const requestId=++slotRequest.current;
     setSlotsBusy(true);setSlots([]);setSlotsMessage('');
     const query=new URLSearchParams({locationId:location.trim(),bayId:form.bay.trim(),localDay:day});
-    if(!target)selectedServices.forEach(id=>query.append('serviceId',id));
+    if(!target){if(complex)query.set('complexId',complex.id);else selectedServices.forEach(id=>query.append('serviceId',id));}
     if(effectiveEmployee)query.set('employeeId',effectiveEmployee);
     if(target&&!target.startsWith('cancel:')){
       query.set('appointmentId',target);
@@ -333,7 +339,7 @@ export function AutoCalendar() {
       const response=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
         '/slot-candidates?'+query,{credentials:'include',cache:'no-store'});
       if([401,403,404].includes(response.status)){
-        if(requestId===slotRequest.current)setSlotsMessage('Нет доступа к окнам записи.');
+        if(requestId===slotRequest.current)denyBooking();
         return;
       }
       if(!response.ok)throw new Error();
@@ -367,14 +373,18 @@ export function AutoCalendar() {
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
+      if(!scopeIsCurrent())return;
+      if([401,403,404].includes(csrf.status)){denyBooking();return;}
       if(!csrf.ok)throw new Error('csrf');
       const data:unknown=await csrf.json();
       if(!data||typeof data!=='object'||!('csrfToken' in data)||typeof data.csrfToken!=='string')throw new Error('csrf');
+      if(!scopeIsCurrent())return;
       const response=await fetch(path,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':data.csrfToken,
           ...(snapshot?{'Idempotency-Key':snapshot.key}:{})},
         body:snapshot?snapshot.body:JSON.stringify(payload)});
       if(!scopeIsCurrent())return;
+      if([401,403,404].includes(response.status)){denyBooking();return;}
       if(response.status>=500)throw new Error('uncertain server outcome');
       if(!response.ok){
         const errorBody:unknown=await response.json().catch(()=>null);
@@ -383,7 +393,7 @@ export function AutoCalendar() {
           ? errorBody.code:null;
         setPending(null);setMessage(bookingFailure(response.status,code));return;
       }
-      setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);setSelectedServices([]);setMaterials([]);resetPage();setRevision(n=>n+1);
+      setPending(null);setMessage(success);setTarget(null);setClearEmployee(false);setForm(empty);setComplex(null);setSelectedServices([]);setMaterials([]);resetPage();setRevision(n=>n+1);
     }catch{
       if(!scopeIsCurrent())return;
       if(snapshot){setPending(snapshot);setMessage('Результат запроса неизвестен. Повторите с прежним ключом или обновите календарь перед новой операцией.');}
@@ -398,10 +408,16 @@ export function AutoCalendar() {
     return <div>
       <label>UUID поста <input aria-label="UUID поста" value={form.bay}
         onChange={e=>{resetSlots();setForm(s=>({...s,bay:e.target.value}));}}/></label>
+      <BookingDirectory org={org.trim()} loc={location.trim()} kind="bays" disabled={busy||!!pending}
+        onChoose={x=>{resetSlots();setForm(s=>({...s,bay:x.id}));}} onDenied={denyBooking}/>
       {includeLink&&<label>UUID связи клиента с автомобилем <input aria-label="UUID связи клиента"
         value={form.link} onChange={e=>setForm(s=>({...s,link:e.target.value}))}/></label>}
+      {includeLink&&<BookingDirectory org={org.trim()} loc={location.trim()} kind="vehicles" disabled={busy||!!pending}
+        onChoose={x=>{resetSlots();setForm(s=>({...s,link:x.id}));}} onDenied={denyBooking}/>}
       <label>UUID специалиста (необязательно) <input aria-label="UUID специалиста" disabled={clearEmployee} value={form.employee}
         onChange={e=>{resetSlots();setForm(s=>({...s,employee:e.target.value}));}}/></label>
+      <BookingDirectory org={org.trim()} loc={location.trim()} kind="employees" disabled={busy||!!pending||clearEmployee}
+        onChoose={x=>{resetSlots();setForm(s=>({...s,employee:x.id}));}} onDenied={denyBooking}/>
       {target&&<label><input type="checkbox" aria-label="Снять назначение специалиста" checked={clearEmployee}
         onChange={e=>{resetSlots();setClearEmployee(e.target.checked);}}/> Снять назначение специалиста</label>}
       <button type="button" disabled={slotsBusy||!valid||!uuid.test(form.bay.trim())||
@@ -419,7 +435,7 @@ export function AutoCalendar() {
         onChange={e=>setForm(s=>({...s,ends:e.target.value}))}/></label>
     </div>;
   }
-  const selectedMinutes=services.filter(x=>selectedServices.includes(x.id)).reduce((a,x)=>a+x.durationMinutes,0);
+  const selectedMinutes=complex?.durationMinutes??services.filter(x=>selectedServices.includes(x.id)).reduce((a,x)=>a+x.durationMinutes,0);
   const availableMinutes=validIsoInstant(form.starts)&&validIsoInstant(form.ends)?
     Math.max(0,(Date.parse(form.ends)-Date.parse(form.starts))/60000):60;
   const validMaterials=materials.length<=8&&materials.every(item=>{
@@ -565,6 +581,9 @@ export function AutoCalendar() {
         <strong>{formatLocal(entry.startsAt)} — {formatLocal(entry.endsAt)} ({timeZone})</strong> · пост {entry.bayId}
         <p>Appointment {entry.appointmentId} · WorkOrder {entry.workOrderId}</p>
         <p>Специалист: {entry.employeeId??'не назначен'}</p>
+        <button type="button" disabled={busy||!!pending} onClick={()=>setHistoryId(old=>old===entry.appointmentId?null:entry.appointmentId)}>История записи</button>
+        {historyId===entry.appointmentId&&<BookingHistory key={entry.appointmentId} appointment={entry.appointmentId}
+          path={'/api/v1/dev/auto/organizations/'+org.trim()+'/locations/'+location.trim()+'/appointments/'+entry.appointmentId+'/history'} onDenied={denyBooking}/>}
         <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget(entry.appointmentId);setClearEmployee(false);setForm({...empty,bay:entry.bayId,employee:entry.employeeId??''});}}>
           Перенести</button>
         <button type="button" disabled={busy} onClick={()=>{resetSlots();setTarget('cancel:'+entry.appointmentId);}}>Отменить запись</button>
@@ -590,12 +609,23 @@ export function AutoCalendar() {
           ...(target&&clearEmployee?{employeeId:null}:form.employee.trim()?{employeeId:form.employee.trim()}:{})};
         if(target)void action(base+'/'+target+'/reschedule',payload,'Запись перенесена.');
         else void action(base,{...payload,locationId:location.trim(),customerLinkId:form.link.trim(),
-          serviceIds:selectedServices,materialItems:materials},'Запись создана.');
+          ...(complex?{complexId:complex.id}:{serviceIds:selectedServices,materialItems:materials})},'Запись создана.');
       }}>
         <h2>{target?'Перенести запись':'Новая запись'}</h2>{fields(!target)}
-        {!target&&<fieldset aria-label="Работы в новой записи"><legend>Услуги филиала (необязательно)</legend>
+        {!target&&<fieldset><legend>Готовый комплекс работ</legend>
+          <p>Комплекс требует INTAKE, MANAGER и WAREHOUSE и разрешение на смету; выбирается вместо отдельных работ и материалов.</p>
+          <BookingDirectory org={org.trim()} loc={location.trim()} kind="complexes" disabled={busy||!!pending}
+            onChoose={item=>{setComplex(item);setSelectedServices([]);setMaterials([]);resetSlots();}}/>
+          {complex&&<p>{complex.label} · {complex.durationMinutes} мин. <button type="button"
+            disabled={busy||!!pending} onClick={()=>{setComplex(null);resetSlots();}}>Убрать комплекс</button></p>}
+        </fieldset>}
+        {!target&&!complex&&<fieldset aria-label="Работы в новой записи"><legend>Услуги филиала (необязательно)</legend>
           <p>Не более 8 услуг и 24 часов суммарно. Поиск слотов учитывает полную длительность, а создание проверяет совпадение с выбранным интервалом.</p>
           {serviceMessage&&<p>{serviceMessage}</p>}
+          <BookingDirectory org={org.trim()} loc={location.trim()} kind="services" disabled={busy||!!pending}
+            onChoose={x=>{if(x.durationMinutes===null)return;
+              setServices(old=>old.some(s=>s.id===x.id)?old:[...old,{id:x.id,code:x.id,title:x.label,durationMinutes:x.durationMinutes!}]);
+            }}/>
           {services.map(service=><label key={service.id} style={{display:'block'}}>
             <input type="checkbox" aria-label={'Работа '+service.code}
               checked={selectedServices.includes(service.id)}
@@ -606,11 +636,14 @@ export function AutoCalendar() {
             {service.title} ({service.durationMinutes} мин.)
           </label>)}
         </fieldset>}
-        {!target&&<fieldset aria-label="Товары и расходные материалы для резерва">
+        {!target&&!complex&&<fieldset aria-label="Товары и расходные материалы для резерва">
           <legend>Товары со склада / Материалы (необязательно)</legend>
           <p>Синтетический резерв. Только при двух ролях INTAKE и WAREHOUSE;
             стоимость не рассчитывается, списание не выполняется. Не более восьми SKU.</p>
           {stockMessage&&<p>{stockMessage}</p>}
+          <BookingDirectory org={org.trim()} loc={location.trim()} kind="stock" disabled={busy||!!pending}
+            onChoose={x=>{if(x.available===null)return;setStock(old=>[...old.filter(s=>s.skuId!==x.id),
+              {skuId:x.id,article:x.label,available:x.available!}]);}}/>
           {stock.filter(x=>x.available>0).map(item=>{
             const chosen=materials.find(x=>x.skuId===item.skuId);
             return <div key={item.skuId}>

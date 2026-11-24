@@ -82,6 +82,13 @@ def get_appointments(request: Request, cursor: str | None = None):
     return JSONResponse(content=result, headers={"Cache-Control":"no-store"})
 
 
+@router.get("/api/v1/dev/auto/customer/booking/appointments/{appointment_id}/history")
+def customer_booking_history(appointment_id:str,request:Request,organizationId:str,locationId:str,
+                             cursor:str|None=None):
+    from .auto_appointment_http import _read_booking_history
+    return _read_booking_history(request,organizationId,locationId,appointment_id,cursor,customer=True)
+
+
 @router.get("/api/v1/dev/auto/customer/booking/slots")
 def get_slots(request: Request, organizationId: str, locationId: str,
               customerLinkId: str, bayId: str, localDay: str,

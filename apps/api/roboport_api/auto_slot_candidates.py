@@ -81,8 +81,8 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
         duration_minutes = 60
         if appointment is not None:
             scoped = conn.execute("""
-                SELECT current.id,w.id,er.employee_id,
-                       EXTRACT(EPOCH FROM current.ends_at-current.starts_at)
+                SELECT cur.id,w.id,er.employee_id,
+                       EXTRACT(EPOCH FROM cur.ends_at-cur.starts_at)
                 FROM auto_appointment a
                 JOIN auto_work_order w ON w.appointment_id=a.id
                   AND w.organization_id=a.organization_id AND w.location_id=a.location_id
@@ -91,17 +91,17 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
                   AND proof.verified_by IS NOT NULL AND proof.revoked_at IS NULL
                 JOIN auto_vehicle_location_binding binding ON binding.vehicle_id=a.vehicle_id
                   AND binding.location_id=a.location_id
-                JOIN auto_bay_booking current ON current.id=COALESCE((
+                JOIN auto_bay_booking cur ON cur.id=COALESCE((
                     SELECT r.new_booking_id FROM auto_appointment_reschedule r
                     WHERE r.appointment_id=a.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1
                   ),a.booking_id)
-                  AND current.organization_id=a.organization_id
-                  AND current.location_id=a.location_id AND current.canceled_at IS NULL
-                LEFT JOIN auto_employee_reservation er ON er.booking_id=current.id
+                  AND cur.organization_id=a.organization_id
+                  AND cur.location_id=a.location_id AND cur.canceled_at IS NULL
+                LEFT JOIN auto_employee_reservation er ON er.booking_id=cur.id
                   AND er.canceled_at IS NULL
                 WHERE a.id=%s AND a.organization_id=%s AND a.location_id=%s
                   AND (%s::uuid IS NULL OR a.customer_link_id=%s::uuid)
-                FOR SHARE OF a,w,proof,binding,current
+                FOR SHARE OF a,w,proof,binding,cur
             """, (appointment,org,location,customer_link,customer_link)).fetchone()
             if scoped is None:
                 raise SlotsDenied("scoped active appointment required")
