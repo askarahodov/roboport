@@ -118,3 +118,65 @@ def test_concurrent_transfer_single_source_serialization():
         _,_,_,sa,sb,la,lb,_,_=ctx
         assert balance(second,sa)==(0,0) and balance(second,sb)==(1,0)
         assert allocated(second,la)==0 and allocated(second,lb)==1
+
+
+def test_http_interbranch_workflow_receipt_history_replay_and_revoke(monkeypatch):
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    from test_pg_auto_stock_reclassification_http import post
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,src,dst,sa,sb,la,lb,sg,dg=setup(db,d,5)
+        article=db.execute("SELECT article FROM auto_stock_sku WHERE id=%s",(sa,)).fetchone()[0]
+        record(db,sa,"RESERVE",2)
+        grant(db,d["manager"],org,src)
+        grant(db,d["manager"],org,dst)
+    base=f"/api/v1/dev/auto/organizations/{org}/warehouse/interbranch-transfers"
+    params={"sourceLocationId":str(src),"destinationLocationId":str(dst),"q":article}
+    body={"sourceLocationId":str(src),"destinationLocationId":str(dst),
+          "sourceLotId":str(la),"destinationLotId":str(lb),"quantity":3}
+    with TestClient(app,base_url="https://127.0.0.1") as client:
+        assert client.get(base,params=params).status_code==403
+        client.cookies.set("rp_session",d["tokens"][d["intake"]])
+        initial=client.get(base,params=params)
+        assert initial.status_code==200,initial.text
+        assert initial.headers["cache-control"]=="no-store"
+        assert initial.json()["source"]["items"][0]["available"]=="3"
+        assert initial.json()["destination"]["items"][0]["lotId"]==str(lb)
+        assert initial.json()["items"]==[]
+        assert client.get(base,params={**params,"destinationLocationId":str(uuid4())}).status_code==403
+        assert client.get(base,params={**params,"cursor":"broken"}).status_code==422
+        assert post(client,d,d["intake"],base,body,csrf=False).status_code==403
+        assert post(client,d,d["intake"],base,{**body,"quantity":True}).status_code==422
+        assert post(client,d,d["intake"],base,{**body,"quantity":4}).status_code==409
+        key=uuid4()
+        receipt=post(client,d,d["intake"],base,body,key)
+        assert receipt.status_code==201,receipt.text
+        ident=receipt.json()["transferId"]
+        assert receipt.json()["replayed"] is False
+        replay=post(client,d,d["intake"],base,body,key)
+        assert replay.status_code==200 and replay.json()=={**receipt.json(),"replayed":True}
+        assert post(client,d,d["intake"],base,{**body,"quantity":1},key).status_code==409
+        assert post(client,d,d["manager"],base,body,key).status_code==409
+        client.cookies.set("rp_session",d["tokens"][d["intake"]])
+        page=client.get(base,params=params).json()
+        assert page["source"]["items"][0]["available"]=="0"
+        assert page["destination"]["items"][0]["allocated"]=="3"
+        row=page["items"][0]
+        assert row["transferId"]==ident and row["actorId"]==str(d["intake"])
+        assert row["quantity"]=="3" and row["article"]==article
+        with psycopg.connect(DSN) as db:
+            assert balance(db,sa)==(2,2) and balance(db,sb)==(3,0)
+            assert allocated(db,la)==2 and allocated(db,lb)==3
+            assert db.execute("""SELECT debit_stock_id::text,credit_stock_id::text
+              FROM auto_stock_interbranch_transfer WHERE id=%s""",(ident,)).fetchone()==(
+                row["debitStockId"],row["creditStockId"])
+            with pytest.raises(psycopg.errors.RaiseException):
+                with db.transaction():
+                    db.execute("DELETE FROM auto_stock_transfer_receipt WHERE transfer_id=%s",(ident,))
+            db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(dg,))
+        assert client.get(base,params=params).status_code==403
+        assert post(client,d,d["intake"],base,body,key).status_code==403
