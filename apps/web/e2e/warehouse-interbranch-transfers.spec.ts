@@ -11,9 +11,9 @@ test('warehouse confirms interbranch transfer, exact retry, refreshed ledger and
   let sent=false,denied=false,lost=true;
   const requests:{key:string;body:string}[]=[];
   const lot={article:'SYN-TO',batchCode:'BATCH',binCode:'BIN'};
-  const snapshot=()=>({syntheticOnly:true,
-    source:{truncated:false,items:[{...lot,lotId:la,allocated:sent?'2':'5',available:sent?'0':'3'}]},
-    destination:{truncated:false,items:[{...lot,lotId:lb,allocated:sent?'3':'0',available:sent?'3':'0'}]},
+  const snapshot=()=>({syntheticOnly:true,mode:'INTERBRANCH',
+    source:{truncated:false,nextCursor:null,items:[{...lot,lotId:la,allocated:sent?'2':'5',available:sent?'0':'3'}]},
+    destination:{truncated:false,nextCursor:null,items:[{...lot,lotId:lb,allocated:sent?'3':'0',available:sent?'3':'0'}]},
     items:sent?[{transferId:ident,createdAt:'2030-01-01T10:00:00Z',sourceLotId:la,destinationLotId:lb,
       article:lot.article,quantity:'3',actorId:org,debitStockId:src,creditStockId:dst}]:[],nextCursor:null});
   await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"csrf"}'}));
@@ -60,4 +60,53 @@ test('warehouse confirms interbranch transfer, exact retry, refreshed ledger and
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByText('SYN-TO · 3 ед.',{exact:true})).toHaveCount(0);
   await expect(page.getByLabel('Исходная партия')).toHaveCount(0);
+});
+
+
+test('warehouse selects late lots independently and moves within branch without physical stock events',async({page})=>{
+  const late='77777777-7777-4777-8777-777777777777';
+  const other='88888888-8888-4888-8888-888888888888';
+  const make=(i:number)=>({lotId:'aaaaaaaa-aaaa-4aaa-8aaa-'+String(i).padStart(12,'0'),
+    article:'SYN-TO',batchCode:'BATCH-'+i,binCode:'BIN-A',allocated:'0',available:'0'});
+  const filler=Array.from({length:50},(_,i)=>make(i+1));
+  const source={...make(51),lotId:late,allocated:'2',available:'2'};
+  const destination={...make(52),lotId:other,binCode:'BIN-B'};
+  let posted=false;
+  await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"csrf"}'}));
+  await page.route('**/warehouse/interbranch-transfers**',route=>{
+    const req=route.request(),q=new URL(req.url()).searchParams;
+    if(req.method()==='POST'){
+      expect(req.postDataJSON()).toEqual({mode:'LOCAL',sourceLocationId:src,destinationLocationId:src,
+        sourceLotId:late,destinationLotId:other,quantity:1});
+      posted=true;
+      return route.fulfill({status:201,contentType:'application/json',
+        body:JSON.stringify({syntheticOnly:true,transferId:ident,replayed:false})});
+    }
+    expect(q.get('mode')).toBe('LOCAL');expect(q.get('destinationLocationId')).toBe(src);
+    const side=(key:string,lot:typeof source)=>q.has(key)?
+      {items:[lot],truncated:false,nextCursor:null}:
+      {items:filler,truncated:true,nextCursor:key+'-tail'};
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,mode:'LOCAL',source:side('sourceCursor',source),
+      destination:side('destinationCursor',destination),nextCursor:null,
+      items:posted?[{transferId:ident,createdAt:'2030-01-01T10:00:00Z',
+        sourceLotId:late,destinationLotId:other,article:'SYN-TO',quantity:'1',
+        actorId:org,debitAllocationId:src,creditAllocationId:dst}]:[]})});
+  });
+  await page.goto('/staff/warehouse-interbranch-transfers');
+  await page.getByLabel('Вид перемещения').selectOption('LOCAL');
+  await page.getByLabel('UUID организации').fill(org);
+  await page.getByLabel('UUID филиала отправления').fill(src);
+  await page.getByRole('button',{name:'Загрузить партии и журнал'}).click();
+  await page.getByRole('button',{name:'Следующие исходные партии'}).click();
+  await page.getByLabel('Исходная партия').selectOption(late);
+  await page.getByRole('button',{name:'Следующие целевые партии'}).click();
+  await expect(page.getByLabel('Исходная партия')).toHaveValue(late);
+  await page.getByLabel('Целевая партия того же артикула').selectOption(other);
+  await page.getByRole('button',{name:'Подготовить перемещение'}).click();
+  await page.getByRole('button',{name:'Подтвердить перемещение'}).click();
+  await expect(page.getByText('Перемещение подтверждено:',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Загрузить партии и журнал'}).click();
+  await page.getByText('Связанные проводки',{exact:true}).click();
+  await expect(page.getByText('Снятие размещения '+src+' · размещение '+dst)).toBeVisible();
 });

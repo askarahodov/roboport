@@ -177,6 +177,48 @@ def test_http_interbranch_workflow_receipt_history_replay_and_revoke(monkeypatch
             with pytest.raises(psycopg.errors.RaiseException):
                 with db.transaction():
                     db.execute("DELETE FROM auto_stock_transfer_receipt WHERE transfer_id=%s",(ident,))
+            src_bin=add_bin(db,org,src,"EXTRA-SRC")
+            dst_bin=add_bin(db,org,dst,"EXTRA-DST")
+            src_lots={str(la)}
+            dst_lots={str(lb)}
+            for i in range(51):
+                src_lots.add(str(add_lot(db,org,src,sa,src_bin,f"EXTRA-{i:03}")))
+                dst_lots.add(str(add_lot(db,org,dst,sb,dst_bin,f"EXTRA-{i:03}")))
+            local_lot=next(iter(src_lots-{str(la)}))
+        first=client.get(base,params=params).json()
+        assert len(first["source"]["items"])==len(first["destination"]["items"])==50
+        sc=first["source"]["nextCursor"]
+        dc=first["destination"]["nextCursor"]
+        second=client.get(base,params={**params,"sourceCursor":sc,"destinationCursor":dc})
+        assert second.status_code==200,second.text
+        tail=second.json()
+        for side,expected in (("source",src_lots),("destination",dst_lots)):
+            assert len(tail[side]["items"])==2 and tail[side]["nextCursor"] is None
+            assert {x["lotId"] for x in first[side]["items"]+tail[side]["items"]}==expected
+        assert client.get(base,params={**params,"sourceCursor":dc}).status_code==422
+        assert client.get(base,params={**params,"sourceCursor":sc,"q":"different"}).status_code==422
+        local_params={**params,"mode":"LOCAL","destinationLocationId":str(src)}
+        assert client.get(base,params={**local_params,"sourceCursor":sc}).status_code==422
+        local_body={**body,"mode":"LOCAL","destinationLocationId":str(src),
+                    "destinationLotId":local_lot,"quantity":1}
+        local_key=uuid4()
+        local=post(client,d,d["intake"],base,local_body,local_key)
+        assert local.status_code==201,local.text
+        assert post(client,d,d["intake"],base,local_body,local_key).status_code==200
+        local_history=client.get(base,params=local_params).json()
+        local_row=local_history["items"][0]
+        assert local_row["transferId"]==local.json()["transferId"]
+        assert "debitStockId" not in local_row and "debitAllocationId" in local_row
+        assert local_row["actorId"]==str(d["intake"])
+        with psycopg.connect(DSN) as db:
+            assert balance(db,sa)==(2,2) and balance(db,sb)==(3,0)
+            assert allocated(db,la)==1 and allocated(db,local_lot)==1
             db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(dg,))
         assert client.get(base,params=params).status_code==403
         assert post(client,d,d["intake"],base,body,key).status_code==403
+        # Локальная операция остаётся разрешена только в исходном филиале.
+        assert client.get(base,params=local_params).status_code==200
+        with psycopg.connect(DSN) as db:
+            db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(sg,))
+        assert client.get(base,params=local_params).status_code==403
+        assert post(client,d,d["intake"],base,local_body,local_key).status_code==403
