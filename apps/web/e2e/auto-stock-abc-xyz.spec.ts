@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {readFile} from 'node:fs/promises';
 
 const org='11111111-1111-4111-8111-111111111111';
 const loc='22222222-2222-4222-8222-222222222222';
@@ -43,7 +44,9 @@ function body(from:string,to:string,offset:number){
       grossReturned:5,netPeriod:310,
       classCounts:{A:2,B:1,C:1,X:2,Y:1,Z:1,none:25},
     },
-    items:items.slice(offset,offset+25),
+    // Каждый ответ получает собственные строки и массивы: негативный тест
+    // не должен изменять исходные данные следующего сценария в том же worker.
+    items:items.slice(offset,offset+25).map(row=>({...row,monthlyIssued:[...row.monthlyIssued]})),
   };
 }
 async function scope(page:import('@playwright/test').Page){
@@ -158,6 +161,14 @@ test('manager ABC/XYZ rejects inconsistent and tampered item response fail close
   await load.click();
   await expect(page.getByRole('alert')).toContainText('Не удалось получить ABC/XYZ');
   await expect(page.getByLabel('Результаты ABC XYZ')).toHaveCount(0);
+  // В том же worker новый корректный ответ не зависит от предыдущей порчи.
+  malformed=false;
+  await load.click();
+  const restored=page.getByLabel('Результаты ABC XYZ');
+  await expect(restored).toBeVisible();
+  await expect(restored.getByRole('table').locator('tbody tr').first()).toContainText('SYN-A');
+  await expect(restored.getByRole('table').locator('tbody tr').first()).toContainText('180');
+  expect(items[0].monthlyIssued).toEqual([60,60,60]);
 });
 
 
@@ -229,6 +240,12 @@ test('manager downloads complete scoped CSV and revoke blocks export fail closed
   await results.getByRole('button',{name:'Скачать весь отчёт CSV'}).click();
   const download=await downloadPromise;
   expect(download.suggestedFilename()).toBe('auto-stock-abc-xyz.csv');
+  const saved=await download.path();
+  expect(saved).not.toBeNull();
+  const lines=(await readFile(saved!,'utf8')).replace(/^\uFEFF/,'').trimEnd().split(/\r?\n/);
+  expect(lines[0]).toBe('SKU UUID;Артикул;Выдано');
+  expect(lines.slice(1)).toEqual(items.map(row=>row.skuId+';'+row.article+';'+row.grossIssued));
+  expect(new Set(lines.slice(1).map(line=>line.split(';')[0])).size).toBe(29);
   expect(queried).toHaveLength(1);
   expect(queried[0]).toContain('/locations/'+loc+'/stock-abc-xyz/export?');
   expect(queried[0]).toContain('fromMonth='+months[0]);
