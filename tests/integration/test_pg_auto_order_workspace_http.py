@@ -103,19 +103,50 @@ def test_workspace_redacts_estimate_and_handover_policy_denials(monkeypatch):
         db.execute("""INSERT INTO auto_organization_role_grant
           (id,organization_id,location_id,user_id,role_code)
           VALUES(%s,%s,NULL,%s,'ADMIN')""",(uuid4(),org,d["manager"]))
-        admin=d["tokens"][d["manager"]]
-        for document in ("ESTIMATE","HANDOVER"):
+    admin=d["tokens"][d["manager"]]
+    client.cookies.set("rp_session",admin)
+    path=(f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+          f"/orders/{order}/workspace")
+
+    def policy(document,allowed,not_before=None):
+        with psycopg.connect(DSN) as db:
             publish_policy(
                 db,admin,org,request_key=uuid4(),role="MANAGER",
                 loc=loc,user=None,document=document,cap="READ",
-                allowed=False,not_before=None,
+                allowed=allowed,not_before=not_before,
             )
-    client.cookies.set("rp_session",d["tokens"][d["manager"]])
-    path=(f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
-          f"/orders/{order}/workspace")
-    response=client.get(path)
-    assert response.status_code==200,response.text
-    assert response.json()["steps"]["estimate"]=="RESTRICTED"
-    assert response.json()["steps"]["technicalDocuments"]=="RESTRICTED"
-    assert response.json()["steps"]["intakeAct"]=="MISSING"
-    assert response.json()["releaseAllowed"] is False
+
+    def stages():
+        response=client.get(path)
+        assert response.status_code==200,response.text
+        assert response.json()["releaseAllowed"] is False
+        return response.json()["steps"]
+
+    baseline=stages()
+    assert baseline["estimate"]=="MISSING"
+    assert baseline["technicalDocuments"]=="DRAFT"
+    policy("ESTIMATE",False)
+    assert stages()=={**baseline,"estimate":"RESTRICTED"}
+    policy("HANDOVER",False)
+    assert stages()=={**baseline,"estimate":"RESTRICTED",
+                     "technicalDocuments":"RESTRICTED"}
+
+    # Новая разрешающая политика не отменяет ограничение другого документа.
+    policy("ESTIMATE",True)
+    assert stages()=={**baseline,"technicalDocuments":"RESTRICTED"}
+    with psycopg.connect(DSN) as db:
+        cutoff=db.execute("SELECT created_at + interval '1 second' "
+                          "FROM auto_work_order WHERE id=%s",(order,)).fetchone()[0]
+    policy("ESTIMATE",True,cutoff)
+    assert stages()=={**baseline,"estimate":"RESTRICTED",
+                     "technicalDocuments":"RESTRICTED"}
+    policy("HANDOVER",True)
+    assert stages()=={**baseline,"estimate":"RESTRICTED"}
+
+    # Без права на сам акт нельзя получить даже частичную сводку.
+    policy("INTAKE_ACT",False)
+    denied=client.get(path)
+    assert denied.status_code==403,denied.text
+    assert "steps" not in denied.json()
+    policy("INTAKE_ACT",True)
+    assert stages()=={**baseline,"estimate":"RESTRICTED"}
