@@ -184,3 +184,26 @@ test('CRM funnel CSV: whole manager aggregate, fresh scope and 403 revoke',async
   expect(await page.evaluate(()=>document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(1280);
 });
+
+
+test('survey report reconciles ratings and clears revoked or corrupt result',async({page})=>{
+  let mode:'OK'|'BAD'|'DENIED'='OK';
+  await page.route('**/crm/survey-report?*',route=>{
+    if(mode==='DENIED')return route.fulfill({status:403,body:'{}'});
+    const url=new URL(route.request().url());
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,sendAllowed:false,releaseAllowed:false,fromDay:url.searchParams.get('fromDay'),
+      toDay:url.searchParams.get('toDay'),timeZone:'Europe/Berlin',total:3,
+      statuses:{OPEN:1,ANSWERED:2,CANCELED:0,EXPIRED:0},ratings:{'1':0,'2':0,'3':1,'4':0,'5':1},
+      reasons:{QUALITY:1,TIMING:0,COMMUNICATION:0,NONE:1,OTHER:0},averageHundredths:mode==='BAD'?500:400})});
+  });
+  await page.goto('/staff/auto-crm-funnel');await scope(page);
+  const section=page.getByRole('region',{name:'Сводка опросов'});
+  const load=section.getByRole('button',{name:'Построить сводку опросов'});
+  await load.click();await expect(section.getByText('Всего опросов: 3. Средняя оценка: 4.')).toBeVisible();
+  mode='BAD';await load.click();await expect(section.getByText('Не удалось подтвердить сводку.')).toBeVisible();
+  await expect(section.getByText('Всего опросов:',{exact:false})).toHaveCount(0);
+  mode='OK';await load.click();await expect(section.getByText('Всего опросов:',{exact:false})).toBeVisible();
+  mode='DENIED';await load.click();await expect(section.getByText('Нет доступа к сводке опросов.')).toBeVisible();
+  await expect(section.getByText('Всего опросов:',{exact:false})).toHaveCount(0);
+});

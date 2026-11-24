@@ -272,3 +272,41 @@ test('повторяющийся курсор заказов блокирует 
   await expect(page.getByText('Synthetic Sedan',{exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Показать ещё заказ-наряды'})).toHaveCount(0);
 });
+
+
+test('customer answers own survey, verifies receipt and loses access on revoke',async({page})=>{
+  await auth(page);
+  let answered=false,revoke=false;
+  await page.route('**/api/v1/dev/auto/customer/orders?*',route=>route.fulfill({status:200,contentType:'application/json',
+    body:JSON.stringify({items:[card],nextCursor:null,syntheticOnly:true,releaseAllowed:false})}));
+  await page.route('**/api/v1/dev/auto/customer/orders/'+order,route=>route.fulfill({status:200,contentType:'application/json',
+    body:JSON.stringify(detail('APPROVED'))}));
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"mock"}'}));
+  await page.route('**/survey/customer',route=>{
+    const req=route.request();
+    if(revoke)return route.fulfill({status:403,body:'{}'});
+    if(req.method()==='POST'){
+      expect(req.postDataJSON()).toMatchObject({rating:4,reasonCode:'TIMING'});
+      answered=true;
+    }
+    return route.fulfill({status:req.method()==='POST'?201:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,sendAllowed:false,releaseAllowed:false,workOrderId:order,eligible:true,replayed:false,
+      survey:{id:revision,createdAt:'2030-01-01T10:00:00Z',expiresAt:'2030-01-31T10:00:00Z',
+        status:answered?'ANSWERED':'OPEN',rating:answered?4:null,reasonCode:answered?'TIMING':null,
+        resolvedAt:answered?'2030-01-02T10:00:00Z':null}})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/auto-orders');
+  await page.getByRole('button',{name:'Подробнее о заказе '+order}).click();
+  const section=page.getByRole('region',{name:'Опрос после ремонта'});
+  await section.getByRole('button',{name:'Открыть опрос'}).click();
+  await section.getByLabel('Оценка',{exact:true}).selectOption('4');
+  await section.getByLabel('Причина',{exact:true}).selectOption('TIMING');
+  await section.getByRole('button',{name:'Подтвердить оценку'}).click();
+  await expect(section.getByText('Оценка: 4 из 5.',{exact:false})).toBeVisible();
+  await page.setViewportSize({width:1280,height:844});
+  revoke=true;
+  await section.getByRole('button',{name:'Обновить опрос'}).click();
+  await expect(section).toHaveCount(0);
+  await expect(page.getByText('Оценка: 4 из 5.',{exact:false})).toHaveCount(0);
+});
