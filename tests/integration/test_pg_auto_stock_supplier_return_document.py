@@ -251,7 +251,33 @@ def test_commercial_reconciliation_receipt_return_provenance_and_live_acl(monkey
         assert client.get(detail,params={**params,"kind":"events"}).status_code==200
         policy("PRICE_PURCHASE",True)
         assert client.get(detail,params={**params,"kind":"receipts"}).status_code==200
+        # READ history is distinct from PRICE_PURCHASE. This reconciliation
+        # is an all-time ledger, not a date-filtered report: exposing the
+        # aggregate, lots or events would disclose forbidden history.
         policy("READ",True,datetime.now(timezone.utc))
-        assert client.get(base,params=params).json()["canViewPurchases"] is False
-        assert client.get(detail,params={**params,"kind":"receipts"}).status_code==403
-        assert client.get(detail,params={**params,"kind":"supplier-returns"}).status_code==403
+        denied=client.get(base,params=params)
+        assert denied.status_code==403,denied.text
+        assert denied.headers["cache-control"]=="no-store"
+        assert "canViewPurchases" not in denied.json()
+        assert "items" not in denied.json() and "summary" not in denied.json()
+        for kind in ("lots","events","receipts","supplier-returns"):
+            denied=client.get(detail,params={**params,"kind":kind})
+            assert denied.status_code==403,denied.text
+            assert denied.headers["cache-control"]=="no-store"
+            assert "items" not in denied.json()
+            assert str(receipt) not in denied.text and str(valuation) not in denied.text
+
+        # A later ALLOW without cutoff restores the original complete ledger;
+        # the restriction must never alter quantities or accepted valuation.
+        policy("READ",True)
+        restored=client.get(base,params=params)
+        assert restored.status_code==200,restored.text
+        assert restored.json()["canViewPurchases"] is True
+        assert client.get(detail,params={**params,"kind":"events"}).status_code==200
+        assert client.get(detail,params={**params,"kind":"lots"}).status_code==200
+        restored_receipts=client.get(detail,params={**params,"kind":"receipts"})
+        assert restored_receipts.status_code==200,restored_receipts.text
+        assert {x["documentId"]:x for x in restored_receipts.json()["items"]}==rows
+        restored_returns=client.get(detail,params={**params,"kind":"supplier-returns"})
+        assert restored_returns.status_code==200,restored_returns.text
+        assert restored_returns.json()["items"]==returns
