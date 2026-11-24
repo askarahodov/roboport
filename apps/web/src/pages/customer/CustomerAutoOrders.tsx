@@ -1,4 +1,5 @@
 import React from 'react';
+import {AutoServiceRecommendations} from '../shared/AutoServiceRecommendations';
 
 type Vehicle={make:string;model:string;modelYear:number|null;vinLast4:string|null};
 type Appointment={startsAt:string;endsAt:string;status:'SCHEDULED'|'CANCELED'};
@@ -242,6 +243,8 @@ export function CustomerAutoOrders(){
         {detail.labor.length===0?<p>Фактических работ пока нет.</p>:
           <ul>{detail.labor.map(w=><li key={w.serviceId}>
             {w.title}: {w.actualMinutes} мин.</li>)}</ul>}
+        <AutoServiceRecommendations key={detail.id} customer scope={{org:detail.organizationId,loc:detail.locationId,order:detail.id}}
+          onDenied={()=>{setDetail(null);setDetailStatus('denied');}}/>
         <h4>Документы</h4>
         {detail.document?<p>Технический пакет: {detail.document.id}.
           SHA-256: <code>{detail.document.sha256}</code>.

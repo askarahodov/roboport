@@ -1,12 +1,12 @@
 """План следующего обслуживания автомобиля, отдельный от сметы и брони.
 
-Revision ID: 0136_auto_service_recommendations
+Revision ID: 0136_auto_service_recommend
 Revises: 0135_auto_org_staff_invitation
 """
 from alembic import op
 from sqlalchemy import text
 
-revision="0136_auto_service_recommendations"
+revision="0136_auto_service_recommend"
 down_revision="0135_auto_org_staff_invitation"
 branch_labels=None
 depends_on=None
@@ -70,7 +70,7 @@ def upgrade():
         JOIN auto_service_catalog s ON s.id=NEW.service_id
           AND s.organization_id=w.organization_id AND s.location_id=w.location_id
         WHERE w.id=NEW.work_order_id
-        FOR UPDATE OF w;
+        FOR UPDATE OF w FOR SHARE OF a,p,binding,o,l,b,i,s;
         IF NOT FOUND OR NEW.baseline_km<>origin.odometer_km
            OR NEW.service_code<>origin.code OR NEW.service_title<>origin.title
            OR NEW.due_date<=(NEW.created_at AT TIME ZONE 'UTC')::date

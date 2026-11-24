@@ -47,7 +47,7 @@ def _scope(conn,token,org,loc,order,*,customer=False,write=False):
       ),a.booking_id) AND b.organization_id=w.organization_id
         AND b.location_id=w.location_id AND b.canceled_at IS NULL
       WHERE w.id=%s AND w.organization_id=%s AND w.location_id=%s
-      FOR SHARE OF a,p,l,o,b,binding
+      FOR SHARE OF w,a,p,l,o,b,binding
     """,(order,org,loc)).fetchone()
     if row is None:
         raise RecommendationDenied("FORBIDDEN")
