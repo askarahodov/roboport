@@ -99,7 +99,7 @@ export function AutoStaffAdmin() {
   organizationRef.current = organization.trim();
   const access = React.useRef(new AbortController());
   const effectiveRequest = React.useRef(0);
-  const previewKey=organization.trim()+':'+policyDoc+':'+policyLocation.trim()+':'+policyUser.trim();
+  const previewKey=organization.trim()+':'+policyDoc+':'+policyLocation.trim().toLowerCase()+':'+policyUser.trim().toLowerCase();
   const previewRef=React.useRef(previewKey);previewRef.current=previewKey;
   const grantRequest = React.useRef<AbortController|null>(null);
   const [denialReason,setDenialReason] = React.useState('');
@@ -172,8 +172,9 @@ export function AutoStaffAdmin() {
       const response=await fetch('/api/v1/dev/auto/organizations/'+
         encodeURIComponent(currentOrg)+'/staff-invitations?limit=100'+cursorSuffix(cursor),
         {credentials:'include',cache:'no-store',signal});
-      if(signal.aborted||organizationRef.current!==currentOrg||sequence!==inviteRequest.current)return;
+      if(signal.aborted||organizationRef.current!==currentOrg)return;
       if([401,403,404].includes(response.status)){denyAll('403 — список приглашений недоступен. Доступ запрещён.');return;}
+      if(sequence!==inviteRequest.current)return;
       if(!response.ok)throw new Error();
       const body:unknown=await response.json();
       if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)||
@@ -262,8 +263,9 @@ export function AutoStaffAdmin() {
       const response=await fetch('/api/v1/dev/auto/organizations/'+
         encodeURIComponent(org)+'/staff-invitations/audit?limit=100'+cursorSuffix(cursor),
         {credentials:'include',cache:'no-store',signal});
-      if(signal.aborted||organizationRef.current!==org||sequence!==inviteAuditRequest.current)return;
+      if(signal.aborted||organizationRef.current!==org)return;
       if([401,403,404].includes(response.status)){denyAll('403 — журнал приглашений недоступен. Доступ запрещён.');return;}
+      if(sequence!==inviteAuditRequest.current)return;
       if(!response.ok)throw new Error();
       const body:unknown=await response.json();
       if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)||
@@ -291,8 +293,9 @@ export function AutoStaffAdmin() {
       const response = await fetch('/api/v1/dev/auto/organizations/' +
         encodeURIComponent(currentOrg) + '/staff/audit?limit=' + auditLimit + cursorSuffix(cursor),
         { credentials: 'include', cache: 'no-store',signal });
-      if(signal.aborted||organizationRef.current!==currentOrg||sequence!==auditRequest.current)return;
+      if(signal.aborted||organizationRef.current!==currentOrg)return;
       if ([401,403,404].includes(response.status)) { denyAll('403 — Доступ к журналу запрещён.'); return; }
+      if(sequence!==auditRequest.current)return;
       if (!response.ok) throw new Error();
       const body: unknown = await response.json();
       if (!body || typeof body !== 'object' || !('items' in body) || !Array.isArray(body.items) ||
@@ -348,10 +351,11 @@ export function AutoStaffAdmin() {
         encodeURIComponent(org)+'/access-policies?'+q.toString(),{
           credentials:'include',cache:'no-store',signal,
         });
-      if(signal.aborted||organizationRef.current!==org||sequence!==policyRequest.current)return;
+      if(signal.aborted||organizationRef.current!==org)return;
       if([401,403,404].includes(res.status)){
         denyAll('403 — журнал ограничений недоступен. Доступ запрещён.');return;
       }
+      if(sequence!==policyRequest.current)return;
       if(!res.ok)throw Error('HTTP');
       const value:unknown=await res.json();
       if(!value||typeof value!=='object'||!('syntheticOnly' in value)||
@@ -383,7 +387,7 @@ export function AutoStaffAdmin() {
   async function loadEffective(){
     if(!validOrg||!uuid.test(policyUser.trim())||
        !uuid.test(policyLocation.trim()))return;
-    const org=organization.trim(),loc=policyLocation.trim(),user=policyUser.trim();
+    const org=organization.trim(),loc=policyLocation.trim().toLowerCase(),user=policyUser.trim().toLowerCase();
     const doc=policyDoc,sequence=++effectiveRequest.current,signal=access.current.signal,key=previewKey;
     setEffective(null);setEffectiveState('loading');
     try{
@@ -392,8 +396,11 @@ export function AutoStaffAdmin() {
         encodeURIComponent(org)+'/access-policies/effective?'+q.toString(),{
           credentials:'include',cache:'no-store',signal,
         });
-      if(signal.aborted||org!==organizationRef.current||previewRef.current!==key||sequence!==effectiveRequest.current)return;
+      if(signal.aborted||org!==organizationRef.current)return;
+      // Отказ текущего поколения важнее смены параметров предпросмотра.
+      // Устаревший успешный ответ, напротив, не должен менять новый scope.
       if([401,403,404].includes(response.status)){denyAll('403 — предпросмотр недоступен. Проверьте доступ и назначение сотрудника.');return;}
+      if(previewRef.current!==key||sequence!==effectiveRequest.current)return;
       if(!response.ok)throw Error('http');
       const value:unknown=await response.json();
       if(!value||typeof value!=='object'||!('syntheticOnly' in value)||
@@ -405,7 +412,9 @@ export function AutoStaffAdmin() {
       )throw Error('effective');
       if(signal.aborted||org!==organizationRef.current||previewRef.current!==key||sequence!==effectiveRequest.current)return;
       const result=value as EffectivePolicy;
-      if(result.userId!==user||result.locationId!==loc||result.documentKind!==doc||!Array.isArray(result.roles)||
+      if(typeof result.userId!=='string'||result.userId.toLowerCase()!==user||
+        typeof result.locationId!=='string'||result.locationId.toLowerCase()!==loc||
+        result.documentKind!==doc||!Array.isArray(result.roles)||
         !result.roles.length||!result.roles.every(r=>roles.some(role=>role===r)))throw Error('effective');
       setEffective(result);setEffectiveState('ready');
     }catch{
