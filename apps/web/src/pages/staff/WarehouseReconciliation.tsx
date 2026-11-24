@@ -6,14 +6,18 @@ const cursor=(v:unknown):v is string|null=>v===null||typeof v==='string'&&/^[A-Z
 const counts=['total','discrepancies','unallocated','reserved','outOfStock','filtered'] as const;
 const fields=['onHand','reserved','allocated','unallocated','available'] as const;
 const statuses={ALL:'Все артикулы',DISCREPANCY:'Расхождения',UNALLOCATED:'Неразмещённые',RESERVED:'Есть резерв',OUT_OF_STOCK:'Нет свободного остатка'} as const;
-const actions:Record<string,string>={RECEIPT:'Приход',RESERVE:'Резерв',RELEASE:'Освобождение резерва',ISSUE:'Выдача',RETURN:'Возврат',COUNT_GAIN:'Излишек',COUNT_LOSS:'Недостача',TRANSFER_IN:'Перемещение: приход',TRANSFER_OUT:'Перемещение: расход',WRITE_OFF:'Списание',SUPPLIER_RETURN:'Возврат поставщику'};
+const actions:Record<string,string>={RECEIPT:'Приход',RESERVE:'Резерв',RELEASE:'Освобождение резерва',ISSUE:'Выдача',RETURN:'Возврат',COUNT_GAIN:'Излишек',COUNT_LOSS:'Недостача',TRANSFER_IN:'Перемещение: приход',TRANSFER_OUT:'Перемещение: расход',WRITE_OFF:'Списание',SUPPLIER_RETURN:'Возврат поставщику',RECLASS_IN:'Пересортица: приход',RECLASS_OUT:'Пересортица: расход'};
 type Status=keyof typeof statuses;
-type Kind='lots'|'events';
+type Kind='lots'|'events'|'receipts'|'supplier-returns';
+const detailLabels:Record<Kind,string>={lots:'Партии',events:'Физические движения и резервы',receipts:'Приходы и входящая оценка', 'supplier-returns':'Возвраты поставщику'};
 type Row={skuId:string;article:string;onHand:string;reserved:string;allocated:string;unallocated:string;available:string;discrepancy:boolean};
-type Report={syntheticOnly:true;organizationId:string;locationId:string;summary:Record<typeof counts[number],number>;items:Row[];nextCursor:string|null};
+type Report={syntheticOnly:true;organizationId:string;locationId:string;canViewPurchases:boolean;summary:Record<typeof counts[number],number>;items:Row[];nextCursor:string|null};
 type Lot={lotId:string;createdAt:string;batchCode:string;binCode:string;allocated:string};
 type Event={eventId:string;createdAt:string;action:string;quantity:string};
-type Detail={syntheticOnly:true;organizationId:string;locationId:string;skuId:string;kind:Kind;items:(Lot|Event)[];nextCursor:string|null};
+type Valuation={id:string;currency:string;unitNetMinor:string;netMinor:string;vatMinor:string;grossMinor:string;sourceRevision:string;quotedAt:string;returnedQuantity:string;returnedNetMinor:string;returnedVatMinor:string};
+type Receipt={documentId:string;createdAt:string;lotId:string;sourceReference:string;quantity:string;status:'DRAFT'|'ACCEPTED'|'VALUED';acceptanceId:string|null;acceptedAt:string|null;valuation:Valuation|null;pendingReturnCount:number};
+type SupplierReturn={documentId:string;createdAt:string;sourceReceiptId:string;lotId:string;quantity:string;supplierReference:string;reason:string;status:'DRAFT'|'ACCEPTED';acceptanceId:string|null;acceptedAt:string|null;dispositionId:string|null;attribution:{currency:string;netMinor:string;vatMinor:string}|null};
+type Detail={syntheticOnly:true;organizationId:string;locationId:string;skuId:string;kind:Kind;items:(Lot|Event|Receipt|SupplierReturn)[];nextCursor:string|null};
 const stamp=(v:unknown)=>typeof v==='string'&&Number.isFinite(Date.parse(v));
 function scoped(raw:unknown,org:string,loc:string){
   if(!raw||typeof raw!=='object')throw Error('shape');
@@ -24,7 +28,7 @@ function scoped(raw:unknown,org:string,loc:string){
 function parseReport(raw:unknown,org:string,loc:string):Report{
   scoped(raw,org,loc);
   const d=raw as Report;
-  if(!d.summary||!counts.every(k=>Number.isSafeInteger(d.summary[k])&&d.summary[k]>=0&&d.summary[k]<=d.summary.total)||
+  if(typeof d.canViewPurchases!=='boolean'||!d.summary||!counts.every(k=>Number.isSafeInteger(d.summary[k])&&d.summary[k]>=0&&d.summary[k]<=d.summary.total)||
     d.items.length>d.summary.filtered||!d.items.every(x=>{
       if(!x||!ident(x.skuId)||typeof x.article!=='string'||!fields.every(k=>integer(x[k]))||typeof x.discrepancy!=='boolean')return false;
       const [on,res,alloc,unalloc,avail]=fields.map(k=>BigInt(x[k]));
@@ -32,13 +36,36 @@ function parseReport(raw:unknown,org:string,loc:string):Report{
     })||new Set(d.items.map(x=>x.skuId)).size!==d.items.length)throw Error('report');
   return d;
 }
+const nonnegative=(v:unknown):v is string=>integer(v)&&BigInt(v)>=0n;
+const currency=(v:unknown)=>typeof v==='string'&&/^[A-Z]{3}$/.test(v);
+function validReceipt(x:Receipt){
+  if(!ident(x.documentId)||!ident(x.lotId)||typeof x.sourceReference!=='string'||!nonnegative(x.quantity)||BigInt(x.quantity)<=0n||
+    !Number.isSafeInteger(x.pendingReturnCount)||x.pendingReturnCount<0)return false;
+  if(x.status==='DRAFT')return x.acceptanceId===null&&x.acceptedAt===null&&x.valuation===null;
+  if(!ident(x.acceptanceId)||!stamp(x.acceptedAt))return false;
+  if(x.status==='ACCEPTED')return x.valuation===null;
+  const v=x.valuation;
+  return x.status==='VALUED'&&!!v&&ident(v.id)&&currency(v.currency)&&typeof v.sourceRevision==='string'&&stamp(v.quotedAt)&&
+    [v.unitNetMinor,v.netMinor,v.vatMinor,v.grossMinor,v.returnedQuantity,v.returnedNetMinor,v.returnedVatMinor].every(nonnegative)&&
+    BigInt(v.netMinor)===BigInt(v.unitNetMinor)*BigInt(x.quantity)&&BigInt(v.grossMinor)===BigInt(v.netMinor)+BigInt(v.vatMinor)&&
+    BigInt(v.returnedQuantity)<=BigInt(x.quantity)&&BigInt(v.returnedNetMinor)===BigInt(v.unitNetMinor)*BigInt(v.returnedQuantity)&&BigInt(v.returnedVatMinor)<=BigInt(v.vatMinor);
+}
+function validReturn(x:SupplierReturn){
+  if(!ident(x.documentId)||!ident(x.sourceReceiptId)||!ident(x.lotId)||!nonnegative(x.quantity)||BigInt(x.quantity)<=0n||
+    typeof x.supplierReference!=='string'||typeof x.reason!=='string')return false;
+  if(x.status==='DRAFT')return x.acceptanceId===null&&x.acceptedAt===null&&x.dispositionId===null&&x.attribution===null;
+  return x.status==='ACCEPTED'&&ident(x.acceptanceId)&&stamp(x.acceptedAt)&&ident(x.dispositionId)&&!!x.attribution&&
+    currency(x.attribution.currency)&&nonnegative(x.attribution.netMinor)&&nonnegative(x.attribution.vatMinor);
+}
 function parseDetail(raw:unknown,org:string,loc:string,sku:string,kind:Kind):Detail{
   scoped(raw,org,loc);
   const d=raw as Detail;
   if(d.skuId!==sku||d.kind!==kind||!d.items.every(x=>x&&stamp(x.createdAt)&&
-    (kind==='lots'?'lotId' in x&&ident(x.lotId)&&typeof x.batchCode==='string'&&typeof x.binCode==='string'&&integer(x.allocated):
-      'eventId' in x&&ident(x.eventId)&&typeof x.action==='string'&&Object.hasOwn(actions,x.action)&&integer(x.quantity)&&BigInt(x.quantity)>0n))||
-    new Set(d.items.map(x=>'lotId' in x?x.lotId:x.eventId)).size!==d.items.length)throw Error('detail');
+    (kind==='lots'?'lotId' in x&&'batchCode' in x&&ident(x.lotId)&&typeof x.batchCode==='string'&&typeof x.binCode==='string'&&integer(x.allocated):
+    kind==='events'?'eventId' in x&&ident(x.eventId)&&typeof x.action==='string'&&Object.hasOwn(actions,x.action)&&integer(x.quantity)&&BigInt(x.quantity)>0n:
+    kind==='receipts'?'sourceReference' in x&&validReceipt(x):
+    'sourceReceiptId' in x&&validReturn(x)))||
+    new Set(d.items.map(x=>'documentId' in x?x.documentId:'lotId' in x?x.lotId:x.eventId)).size!==d.items.length)throw Error('detail');
   return d;
 }
 export function WarehouseReconciliation(){
@@ -120,16 +147,29 @@ export function WarehouseReconciliation(){
           <p>Физический: {number(x.onHand)} · резерв: {number(x.reserved)} · размещено: {number(x.allocated)} · не размещено: {number(x.unallocated)} · доступно: {number(x.available)}</p>
           <button type="button" disabled={busy} onClick={()=>void open(x,'lots')}>Партии {x.article}</button>{' '}
           <button type="button" disabled={busy} onClick={()=>void open(x,'events')}>Движения {x.article}</button>
+          {report.canViewPurchases&&<>{' '}<button type="button" disabled={busy} onClick={()=>void open(x,'receipts')}>Приходы и оценка {x.article}</button>{' '}
+            <button type="button" disabled={busy} onClick={()=>void open(x,'supplier-returns')}>Возвраты поставщику {x.article}</button></>}
         </li>)}</ul>}
         {report.nextCursor&&<button type="button" disabled={busy} onClick={()=>void load(report.nextCursor)}>Следующие артикулы</button>}
         {page&&<button type="button" disabled={busy} onClick={()=>void load()}>Первые артикулы</button>}
       </section>
     </>}
     {selected&&detail&&<section aria-label="Детализация артикула">
-      <h2>{selected.article}: {detail.kind==='lots'?'Партии':'Физические движения и резервы'}</h2>
+      <h2>{selected.article}: {detailLabels[detail.kind]}</h2>
       <p>Детализация прочитана отдельным запросом, остатки могут измениться после сводки.</p>
-      {detail.items.length===0?<p>Записей нет.</p>:<ul>{detail.items.map(x=>'lotId' in x?
-        <li key={x.lotId}>{x.batchCode} · {x.binCode} · размещено {number(x.allocated)}<p>Партия {x.lotId}</p></li>:
+      {(detail.kind==='receipts'||detail.kind==='supplier-returns')&&<p>Суммы в минимальных денежных единицах исходной валюты. Это входящая оценка и атрибуция возврата, не себестоимость остатка, налоговый расчёт или выплата.</p>}
+      {detail.items.length===0?<p>Записей нет.</p>:<ul>{detail.items.map(x=>'sourceReference' in x?
+        <li key={x.documentId}><strong>{x.sourceReference} · {number(x.quantity)} ед. · {x.status==='VALUED'?'Оценён':x.status==='ACCEPTED'?'Принят':'Черновик'}</strong>
+          <p>Приход {x.documentId} · партия {x.lotId}</p>
+          {x.acceptanceId&&<p>Приёмка {x.acceptanceId}</p>}
+          {x.valuation&&<><p>Закупка {number(x.valuation.netMinor)} · входной НДС {number(x.valuation.vatMinor)} · всего {number(x.valuation.grossMinor)} ({x.valuation.currency})</p>
+            <p>Цена за единицу {number(x.valuation.unitNetMinor)} · оценка {x.valuation.id} · источник {x.valuation.sourceRevision} · {new Date(x.valuation.quotedAt).toLocaleString('ru-RU')}</p>
+            <p>Подтверждённые возвраты: {number(x.valuation.returnedQuantity)} ед. · стоимость {number(x.valuation.returnedNetMinor)} · НДС {number(x.valuation.returnedVatMinor)} ({x.valuation.currency})</p></>}
+          <p>Ожидают подтверждения: {x.pendingReturnCount}</p></li>:
+        'sourceReceiptId' in x?<li key={x.documentId}><strong>{x.supplierReference} · {number(x.quantity)} ед. · {x.status==='ACCEPTED'?'Подтверждён':'Черновик'}</strong>
+          <p>Возврат {x.documentId} · исходный приход {x.sourceReceiptId} · партия {x.lotId}</p><p>{x.reason}</p>
+          {x.attribution&&<p>Атрибутировано: стоимость {number(x.attribution.netMinor)} · НДС {number(x.attribution.vatMinor)} ({x.attribution.currency}) · списание {x.dispositionId}</p>}</li>:
+        'batchCode' in x?<li key={x.lotId}>{x.batchCode} · {x.binCode} · размещено {number(x.allocated)}<p>Партия {x.lotId}</p></li>:
         <li key={x.eventId}>{actions[x.action]} · {number(x.quantity)} · {new Date(x.createdAt).toLocaleString('ru-RU')}<p>Событие {x.eventId}</p></li>)}</ul>}
       {detail.nextCursor&&<button type="button" disabled={busy} onClick={()=>void open(selected,detail.kind,detail.nextCursor)}>Следующая страница детализации</button>}
       {detailPage&&<button type="button" disabled={busy} onClick={()=>void open(selected,detail.kind)}>Первая страница детализации</button>}

@@ -16,12 +16,14 @@ test('warehouse reconciliation filters and drills down to movements, denies stal
     if(url.pathname.endsWith('/'+sku)){
       const kind=url.searchParams.get('kind');
       const items=kind==='lots'?[{lotId:lot,createdAt:stamp,batchCode:'BATCH',binCode:'BIN',allocated:'2'}]:
-        [{eventId:event,createdAt:stamp,action:'RETURN',quantity:'1'}];
+        [{eventId:event,createdAt:stamp,action:'RETURN',quantity:'1'},
+         {eventId:'66666666-6666-4666-8666-666666666666',createdAt:stamp,action:'RECLASS_IN',quantity:'1'},
+         {eventId:'77777777-7777-4777-8777-777777777777',createdAt:stamp,action:'RECLASS_OUT',quantity:'1'}];
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({...scoped,skuId:sku,kind,items,nextCursor:null})});
     }
     const empty=url.searchParams.get('status')==='DISCREPANCY';
     return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({...scoped,
-      summary:{total:1,discrepancies:0,unallocated:0,reserved:1,outOfStock:0,filtered:empty?0:1},
+      canViewPurchases:false,summary:{total:1,discrepancies:0,unallocated:0,reserved:1,outOfStock:0,filtered:empty?0:1},
       items:empty?[]:[row],nextCursor:null})});
   });
   await page.setViewportSize({width:390,height:844});
@@ -34,6 +36,9 @@ test('warehouse reconciliation filters and drills down to movements, denies stal
   await expect(page.getByText('BATCH · BIN · размещено 2')).toBeVisible();
   await page.getByRole('button',{name:'Движения SYN-PART'}).click();
   await expect(page.getByText('Событие '+event)).toBeVisible();
+  await expect(page.getByText('Пересортица: приход · 1',{exact:false})).toBeVisible();
+  await expect(page.getByText('Пересортица: расход · 1',{exact:false})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Приходы и оценка SYN-PART'})).toHaveCount(0);
   await page.getByLabel('Фильтр сверки').selectOption('DISCREPANCY');
   await page.getByRole('button',{name:'Обновить сверку'}).click();
   await expect(page.getByText('Нет артикулов по выбранному фильтру.')).toBeVisible();
