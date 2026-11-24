@@ -133,17 +133,17 @@ export function SyntheticCutover(){
       }
     }finally{if(current()){running.current=false;setBusy(false);}}
   }
-  return <section aria-label="Синтетический импорт" style={{maxWidth:'60rem',margin:'2rem auto',overflowWrap:'anywhere'}}>
+  return <section aria-label="Синтетический импорт" style={{maxWidth:'60rem',width:'100%',minWidth:0,boxSizing:'border-box',margin:'2rem auto',overflowWrap:'anywhere'}}>
     <h1>Импорт данных автосервиса (dev)</h1>
     <p>Только изолированный синтетический стенд. Реальные VIN, клиенты, история, документы и платежи запрещены.
       Предварительная проверка не разрешает production и не гарантирует отсутствие конфликтов в базе.</p>
-    <label>UUID организации <input value={org} disabled={busy} onChange={e=>{invalidate(true);setOrg(e.target.value);}}/></label>{' '}
-    <label>UUID филиала <input value={loc} disabled={busy} onChange={e=>{invalidate(true);setLoc(e.target.value);}}/></label>
+    <label>UUID организации <input style={{maxWidth:'100%',boxSizing:'border-box'}} value={org} disabled={busy} onChange={e=>{invalidate(true);setOrg(e.target.value);}}/></label>{' '}
+    <label>UUID филиала <input style={{maxWidth:'100%',boxSizing:'border-box'}} value={loc} disabled={busy} onChange={e=>{invalidate(true);setLoc(e.target.value);}}/></label>
     <p>Требуются живые роли MANAGER и WAREHOUSE одного филиала и отдельный флаг стенда.</p>
     <button type="button" disabled={!scope||busy} onClick={demo}>Создать искусственный комплект</button>
-    <fieldset disabled={busy}><legend>Три исходных CSV (до 1 МБ каждый)</legend>
+    <fieldset disabled={busy} style={{minInlineSize:0,maxWidth:'100%',boxSizing:'border-box'}}><legend>Три исходных CSV (до 1 МБ каждый)</legend>
       <p>Перед импортом сохраните исходники: искусственный комплект хранится только в памяти страницы.</p>
-      {names.map(n=><div key={n}><label>{n} <input key={org+loc+n+(files[n]?.name??'')} type="file" accept=".csv,text/csv"
+      {names.map(n=><div key={n}><label>{n} <input key={org+loc+n+(files[n]?.name??'')} type="file" accept=".csv,text/csv" style={{display:"block",width:"100%",minWidth:0,maxWidth:"100%",boxSizing:"border-box"}}
         onChange={e=>{const file=e.target.files?.[0];invalidate();setFiles(old=>({...old,[n]:file}));}}/></label>
         <p>{files[n]?files[n]!.name+' · '+files[n]!.size+' байт':'Файл не выбран'}</p>
         {files[n]&&<button type="button" onClick={()=>{

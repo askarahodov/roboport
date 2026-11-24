@@ -48,9 +48,14 @@ test('репетиция импорта: подтверждение, повто�
   await expect(page.getByText('Подтверждён повтор без новых записей.')).toBeVisible();
   await page.getByRole('button',{name:'Сверить с БД'}).click();
   await expect(page.getByText('Исходники, staging и активированные объекты сверены.')).toBeVisible();
-  for(const width of [390,1280]){
+  for(const width of [390,1280,1440]){
     await page.setViewportSize({width,height:844});
     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    for(const input of await page.locator('input[type=file]').all()){
+      const bounds=await input.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(width);
+    }
   }
   const download=page.waitForEvent('download');
   await page.getByRole('button',{name:'Скачать проверенный ZIP'}).click();
