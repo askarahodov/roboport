@@ -124,6 +124,13 @@ def test_timeline_document_policy_deny_and_cutoff_exclude_sources(monkeypatch):
     denied=sourced_sql()
     assert "FROM auto_work_order_intake_act item" not in denied
     assert "FROM auto_work_order_intake_act_review item" not in denied
+    assert "FROM auto_work_order_inspection item" not in denied
+    assert "FROM auto_work_order_qc_event item" not in denied
+    client.cookies.set("rp_session", intake_token)
+    root = f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}"
+    assert client.get(root + "/customer").status_code == 403
+    assert client.get(root + "/timeline").status_code == 200
+    assert client.get(root + "/inspection-qc").status_code == 403
     with psycopg.connect(DSN) as db:
         publish_policy(db,manager_token,org,request_key=uuid4(),
             role="INTAKE",loc=loc,user=None,document="INTAKE_ACT",cap="READ",
@@ -131,9 +138,37 @@ def test_timeline_document_policy_deny_and_cutoff_exclude_sources(monkeypatch):
                 2099,1,1,tzinfo=__import__("datetime").timezone.utc))
     cutoff=sourced_sql()
     assert "FROM auto_work_order_intake_act item" not in cutoff
+    assert "FROM auto_work_order_inspection item" not in cutoff
+    assert "FROM auto_work_order_qc_event item" not in cutoff
+    assert client.get(root + "/customer").status_code == 403
+    assert client.get(root + "/timeline").status_code == 200
     with psycopg.connect(DSN) as db:
         publish_policy(db,manager_token,org,request_key=uuid4(),
             role="INTAKE",loc=loc,user=None,document="INTAKE_ACT",cap="READ",
             allowed=True,not_before=None)
     allowed=sourced_sql()
     assert "FROM auto_work_order_intake_act item" in allowed
+
+    assert "FROM auto_work_order_inspection item" in allowed
+    assert "FROM auto_work_order_qc_event item" in allowed
+    assert client.get(root + "/customer").status_code == 200
+    # A real protected event must not leak via the timeline after a new deny.
+    with psycopg.connect(DSN) as db:
+        inspected=uuid4()
+        db.execute("""INSERT INTO auto_work_order_inspection
+            (id,work_order_id,organization_id,location_id,actor_id,
+             odometer_km,fuel_percent,tyres_ok,lights_ok,fluid_leak,exterior_code)
+            VALUES(%s,%s,%s,%s,%s,100,40,TRUE,TRUE,FALSE,'CLEAR')""",
+            (inspected,order,org,loc,d["intake"]))
+    before=client.get(root + "/timeline",params={"limit":1})
+    assert before.status_code==200,before.text
+    assert before.json()["items"][0]["evidenceId"]==str(inspected)
+    with psycopg.connect(DSN) as db:
+        publish_policy(db,manager_token,org,request_key=uuid4(),
+            role="INTAKE",loc=loc,user=None,document="INTAKE_ACT",
+            cap="READ",allowed=False,not_before=None)
+    after=client.get(root + "/timeline",params={"limit":1})
+    assert after.status_code==200,after.text
+    assert [item["action"] for item in after.json()["items"]]==["ORDER_CREATED"]
+    assert after.json()["nextCursor"] is None
+    assert str(inspected) not in after.text
