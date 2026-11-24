@@ -38,6 +38,7 @@ from .auto_mechanic_productivity import router as auto_mechanic_productivity_rou
 from .auto_material_cost_evidence import router as auto_material_cost_evidence_router
 from .auto_stock_abc_xyz import router as auto_stock_abc_xyz_router
 from .auto_sku_catalog_http import router as auto_sku_catalog_router
+from .auto_cutover_http import router as auto_cutover_router
 from .auto_opening_hours_http import router as auto_opening_hours_router
 from .auto_stocktake_http import router as auto_stocktake_router
 from .auto_stock_reconciliation_http import router as auto_stock_reconciliation_router
@@ -107,6 +108,7 @@ app.include_router(auto_mechanic_productivity_router)
 app.include_router(auto_material_cost_evidence_router)
 app.include_router(auto_stock_abc_xyz_router)
 app.include_router(auto_sku_catalog_router)
+app.include_router(auto_cutover_router)
 app.include_router(auto_opening_hours_router)
 app.include_router(auto_stocktake_router)
 app.include_router(auto_stock_reconciliation_router)

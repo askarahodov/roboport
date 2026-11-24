@@ -300,8 +300,15 @@ test('customer answers own survey, verifies receipt and loses access on revoke',
   await page.getByRole('button',{name:'Подробнее о заказе '+order}).click();
   const section=page.getByRole('region',{name:'Опрос после ремонта'});
   await section.getByRole('button',{name:'Открыть опрос'}).click();
-  await section.getByLabel('Оценка',{exact:true}).selectOption('4');
-  await section.getByLabel('Причина',{exact:true}).selectOption('TIMING');
+  await expect(section.getByText('Ожидает ответа',{exact:true})).toBeVisible();
+  const rating=section.getByRole('combobox',{name:'Оценка',exact:true});
+  const reason=section.getByRole('combobox',{name:'Причина',exact:true});
+  await expect(rating).toBeEnabled();
+  await expect(reason).toBeEnabled();
+  await rating.selectOption('4');
+  await reason.selectOption('TIMING');
+  await expect(rating).toHaveValue('4');
+  await expect(reason).toHaveValue('TIMING');
   await section.getByRole('button',{name:'Подтвердить оценку'}).click();
   await expect(section.getByText('Оценка: 4 из 5.',{exact:false})).toBeVisible();
   await page.setViewportSize({width:1280,height:844});

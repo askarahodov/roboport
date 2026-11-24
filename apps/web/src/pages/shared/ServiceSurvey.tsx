@@ -85,9 +85,9 @@ export function ServiceSurvey({customer=false,path,order,onDenied}:{customer?:bo
       onClick={()=>void execute({requestKey:crypto.randomUUID(),action:'CANCEL'})}>Отменить опрос</button>}
     {customer&&survey?.status==='OPEN'&&<fieldset disabled={busy||!!pending} style={{minInlineSize:0}}>
       <legend>Оцените обслуживание</legend>
-      <label>Оценка <select value={rating} onChange={e=>setRating(Number(e.target.value))}>
+      <label>Оценка <select aria-label="Оценка" value={rating} onChange={e=>setRating(Number(e.target.value))}>
         {[1,2,3,4,5].map(n=><option key={n} value={n}>{n}</option>)}</select></label>
-      <label>Причина <select value={reason} onChange={e=>setReason(e.target.value as Reason)}>
+      <label>Причина <select aria-label="Причина" value={reason} onChange={e=>setReason(e.target.value as Reason)}>
         {reasons.map(n=><option key={n} value={n}>{labels[n]}</option>)}</select></label>
       <button type="button" onClick={()=>void execute({requestKey:crypto.randomUUID(),rating,reasonCode:reason})}>Подтвердить оценку</button>
     </fieldset>}
