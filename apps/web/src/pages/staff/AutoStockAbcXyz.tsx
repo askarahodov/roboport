@@ -128,9 +128,9 @@ export function AutoStockAbcXyz(){
   // The scoped server checks this and returns 422 when a local month is open.
   async function load(targetOffset:number){
     if(!valid)return;
-    // Reloading or paging starts a new report generation. A pending CSV
-    // belongs to the previous generation and must not download or restore
-    // an obsolete denial after a new authorization result.
+    // Повторный расчёт или смена страницы создаёт новое поколение отчёта.
+    // Незавершённый CSV прежнего поколения не должен скачиваться или
+    // восстанавливать устаревший отказ после новой проверки полномочий.
     active.current?.abort();exportActive.current?.abort();
     exportActive.current=null;
     setExporting(false);setExportError('');

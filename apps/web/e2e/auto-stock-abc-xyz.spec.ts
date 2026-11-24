@@ -260,7 +260,7 @@ test('ABC/XYZ report reload supersedes pending CSV authorization and prevents la
     const gate=new Promise<void>(resolve=>{releaseCsv=resolve;});
     observedCsv();
     await gate;
-    // Aborted fetches may discard the intercepted response.
+    // Отменённый fetch может отбросить перехваченный ответ.
     await route.fulfill({status,contentType:status===200?'text/csv; charset=utf-8':'application/json',
       body:status===200?'SKU UUID;Артикул;Выдано\\r\\nsynthetic;SYN-A;180':'{"code":"FORBIDDEN"}'}).catch(()=>{});
   });
@@ -275,7 +275,7 @@ test('ABC/XYZ report reload supersedes pending CSV authorization and prevents la
   await load.click();
   await expect(results).toBeVisible();
 
-  // An export started before revoke must not download after fresh 403.
+  // Экспорт, начатый до отзыва, не должен скачиваться после нового 403.
   await csv.click();
   await entered;
   reportStatus=403;
@@ -288,7 +288,7 @@ test('ABC/XYZ report reload supersedes pending CSV authorization and prevents la
   await expect(results).toHaveCount(0);
   expect(downloads).toEqual([]);
 
-  // Old denial cannot erase a newer successfully authorized report.
+  // Старый отказ не должен очистить новый разрешённый отчёт.
   reportStatus=200;csvStatus=403;
   await load.click();
   await expect(results).toBeVisible();
