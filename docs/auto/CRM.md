@@ -208,8 +208,8 @@ POST /api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/leads/{lead}/tasks
 {"requestKey":"<UUID>","action":"DONE"}
 ```
 
-Чтение ограничено 100 задачами на одно обращение, без тихого
-отбрасывания истории. POST требует действующую сессию, same-origin и
+Чтение постранично: до 100 задач на страницу, без тихого
+отбрасывания истории; продолжение доступно по nextCursor. POST требует действующую сессию, same-origin и
 CSRF. Возвращаемый объект содержит `taskId`, `ownerId`,
 `creatorId`, код задачи, `dueAt`, `status` и immutable
 `event` с ответственным и датой события — **только для персонала
