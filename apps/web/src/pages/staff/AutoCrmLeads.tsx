@@ -507,7 +507,7 @@ export function AutoCrmLeads(){
         {taskStatus==='loading'&&<p role="status">Чтение задач…</p>}
         {taskStatus==='error'&&<p role="alert">Не удалось загрузить задачи. Обновите список.
           <button type="button" disabled={taskBusy||pendingTask!==null}
-            onClick={()=>{setTaskPage({key:taskKey,cursor:null});setTaskRevision(n=>n+1);}}>Начать с первой страницы задач</button></p>
+            onClick={()=>{setTaskPage({key:taskKey,cursor:null});setTaskRevision(n=>n+1);}}>Начать с первой страницы задач</button></p>}
         {taskStatus==='ready'&&<>
           <button type="button" disabled={taskBusy||pendingTask!==null}
             onClick={()=>{setTaskPage({key:taskKey,cursor:null});setTaskRevision(n=>n+1);}}>Обновить задачи</button>
