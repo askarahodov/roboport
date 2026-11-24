@@ -1,4 +1,5 @@
 import React from 'react';
+import {SurveyReport} from '../shared/ServiceSurvey';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const day=/^\d{4}-\d{2}-\d{2}$/;
@@ -192,5 +193,6 @@ export function AutoCrmFunnel(){
       </div>
       {report.summary.total===0&&<p>Подтверждённых обращений за период нет.</p>}
     </section>}
+    <SurveyReport key={org+':'+loc+':'+from+':'+to} org={org} loc={loc} from={from} to={to} enabled={canLoad}/>
   </section>;
 }

@@ -77,7 +77,7 @@ def upgrade():
           PERFORM id FROM auto_crm_lead WHERE id=invitation.lead_id FOR UPDATE;
           PERFORM id FROM auto_work_order WHERE id=invitation.work_order_id FOR UPDATE;
           SELECT * INTO origin FROM auto_crm_survey_live_scope(invitation.work_order_id,invitation.lead_id);
-          IF NEW.created_at>=invitation.created_at+interval '30 days' THEN
+          IF NEW.created_at>=invitation.created_at+interval '720 hours' THEN
             RAISE EXCEPTION 'Survey expired';
           END IF;
         END IF;

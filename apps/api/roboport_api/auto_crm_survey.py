@@ -72,7 +72,7 @@ def _state(conn,order,lead=None):
         """,(order,lead,lead)).fetchone()
         if row:
             ident,created,action,rating,reason,answered=row
-            deadline=created+timedelta(days=30)
+            deadline=created.astimezone(timezone.utc)+timedelta(days=30)
             survey={"id":str(ident),"createdAt":created.isoformat(),"expiresAt":deadline.isoformat(),
                     "status":action or ("EXPIRED" if datetime.now(timezone.utc)>=deadline else "OPEN"),
                     "rating":rating,"reasonCode":reason,"resolvedAt":answered.isoformat() if answered else None}
@@ -109,7 +109,8 @@ def customer_survey(conn,token,org,loc,order,*,key=None,rating=None,reason=None)
     with conn.transaction():
         actor=_customer(conn,token,org,loc,order)
         if key is None:
-            return _state(conn,order)
+            state=_state(conn,order)
+            return {**state,"eligible":state["survey"] is not None}
         if type(rating) is not int or not 1<=rating<=5 or reason not in REASONS:
             raise LeadDenied("INVALID_INPUT")
         return _finish(conn,actor,order,None,key,"ANSWERED",rating,reason)
@@ -173,7 +174,7 @@ def survey_report(conn,token,org,loc,first,last):
         reasons={reason:0 for reason in REASONS}
         now=datetime.now(timezone.utc)
         for created,action,rating,reason in rows:
-            status=action or ("EXPIRED" if now>=created+timedelta(days=30) else "OPEN")
+            status=action or ("EXPIRED" if now>=created.astimezone(timezone.utc)+timedelta(days=30) else "OPEN")
             statuses[status]+=1
             if status=="ANSWERED":
                 ratings[str(rating)]+=1

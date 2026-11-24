@@ -1,4 +1,5 @@
 import React from 'react';
+import {ServiceSurvey} from '../shared/ServiceSurvey';
 import {AutoServiceRecommendations} from '../shared/AutoServiceRecommendations';
 
 type Vehicle={make:string;model:string;modelYear:number|null;vinLast4:string|null};
@@ -263,6 +264,8 @@ export function CustomerAutoOrders(){
             {w.title}: {w.actualMinutes} мин.</li>)}</ul>}
         <AutoServiceRecommendations key={detail.id} customer scope={{org:detail.organizationId,loc:detail.locationId,order:detail.id}}
           onDenied={deny}/>
+        <ServiceSurvey key={'survey:'+detail.id} customer path={'/api/v1/dev/auto/organizations/'+detail.organizationId+
+          '/locations/'+detail.locationId+'/orders/'+detail.id+'/survey/customer'} order={detail.id} onDenied={deny}/>
         <h4>Документы</h4>
         {detail.document?<p>Технический пакет: {detail.document.id}.
           SHA-256: <code>{detail.document.sha256}</code>.
