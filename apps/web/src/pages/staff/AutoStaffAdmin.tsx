@@ -30,15 +30,16 @@ function cursorSuffix(cursor:string|null):string {
   return cursor ? '&cursor='+encodeURIComponent(cursor) : '';
 }
 
-async function mutate(url: string, payload: unknown) {
-  const csrf = await fetch('/api/v1/auth/csrf', { method: 'POST', credentials: 'include', cache: 'no-store' });
+async function mutate(url: string, payload: unknown, signal:AbortSignal) {
+  const csrf = await fetch('/api/v1/auth/csrf', { method: 'POST', credentials: 'include', cache: 'no-store', signal });
+  if ([401,403,404].includes(csrf.status)) return csrf;
   if (!csrf.ok) throw new Error('Сессия недоступна или истекла');
   const data: unknown = await csrf.json();
   if (!data || typeof data !== 'object' || !('csrfToken' in data) ||
       typeof data.csrfToken !== 'string') throw new Error('Не удалось проверить CSRF');
   return fetch(url, { method: 'POST', credentials: 'include', cache: 'no-store',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': data.csrfToken },
-    body: JSON.stringify(payload) });
+    body: JSON.stringify(payload), signal });
 }
 
 export function AutoStaffAdmin() {
@@ -96,38 +97,55 @@ export function AutoStaffAdmin() {
   const validOrg = uuid.test(organization.trim());
   const organizationRef = React.useRef(organization.trim());
   organizationRef.current = organization.trim();
-  React.useEffect(() => {
+  const access = React.useRef(new AbortController());
+  const effectiveRequest = React.useRef(0);
+  const grantRequest = React.useRef<AbortController|null>(null);
+  const [denialReason,setDenialReason] = React.useState('');
+  const resetAccess = React.useCallback(()=>{
+    // Единое поколение авторизации: старые запросы не могут восстановить
+    // журнал или секрет после отказа либо перехода между организациями.
+    access.current.abort();access.current=new AbortController();
+    grantRequest.current?.abort();
     auditRequest.current++;inviteRequest.current++;inviteAuditRequest.current++;
-    setGrantCursor(null);setGrantNext(null);setAuditNext(null);setInviteNext(null);setInviteAuditNext(null);
+    policyRequest.current++;effectiveRequest.current++;
+    setItems([]);setGrantNext(null);setAuditNext(null);setInviteNext(null);setInviteAuditNext(null);
     setConfirmId(null);setAudit([]);setAuditState('idle');setMessage('');
     setInvitations([]);setInviteState('idle');setInviteToken('');setInviteMessage('');
     setInviteConfirmId(null);setInviteAudit([]);setInviteAuditState('idle');
-    policyRequest.current++;
     setPolicyEvents([]);setPolicyCursor(null);setPolicyTrail([]);
     setPolicyNextBefore(null);setPolicyState('idle');
     setPolicyPending(null);setPolicyMessage('');
-  }, [organization]);
-  React.useEffect(()=>{
     setEffective(null);setEffectiveState('idle');
+    setBusy(false);setInviteBusy(false);setPolicyBusy(false);
+    setUser('');setLocation('');setInviteLogin('');setInviteLocation('');
+    setPolicyUser('');setPolicyLocation('');setPolicyDate('');
+  },[]);
+  const denyAll = React.useCallback((reason='Доступ запрещён или dev API отключён.')=>{
+    resetAccess();setDenialReason(reason);setState('denied');
+  },[resetAccess]);
+  React.useEffect(()=>{
+    if(access.current.signal.aborted)access.current=new AbortController();
+    return ()=>{access.current.abort();grantRequest.current?.abort();};
+  },[]);
+  React.useEffect(()=>{
+    resetAccess();setGrantCursor(null);setDenialReason('');
+  },[organization,resetAccess]);
+  React.useEffect(()=>{
+    effectiveRequest.current++;setEffective(null);setEffectiveState('idle');
   },[organization,policyDoc,policyLocation,policyUser]);
 
   React.useEffect(() => {
     if (!validOrg) { setItems([]); setState('idle'); return; }
-    const controller = new AbortController();
+    const controller = new AbortController();grantRequest.current=controller;
+    const signal=access.current.signal;
     setItems([]);setGrantNext(null);setConfirmId(null); setState('loading');
     void (async () => {
       try {
         const response = await fetch('/api/v1/dev/auto/organizations/' + encodeURIComponent(organization.trim()) + '/staff' +
           (grantCursor?.org===organization.trim()?'?cursor='+encodeURIComponent(grantCursor.cursor):''),
           { credentials: 'include', cache: 'no-store', signal: controller.signal });
-        if (controller.signal.aborted) return;
-        if ([401, 403, 404].includes(response.status)) {
-          auditRequest.current++;inviteRequest.current++;inviteAuditRequest.current++;policyRequest.current++;
-          setAudit([]);setAuditNext(null);setAuditState('idle');setInvitations([]);setInviteNext(null);setInviteState('idle');
-          setInviteAudit([]);setInviteAuditNext(null);setInviteAuditState('idle');setInviteToken('');
-          setPolicyEvents([]);setPolicyNextBefore(null);setPolicyTrail([]);setPolicyCursor(null);setPolicyState('idle');
-          setEffective(null);setEffectiveState('idle');setState('denied');return;
-        }
+        if (controller.signal.aborted||signal.aborted) return;
+        if ([401, 403, 404].includes(response.status)) {denyAll();return;}
         if (!response.ok) throw new Error();
         const data: unknown = await response.json();
         if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)
@@ -137,23 +155,23 @@ export function AutoStaffAdmin() {
             && 'role' in item && typeof item.role === 'string' && staffRoles.some(r => r === item.role)
             && 'locationId' in item && (item.locationId === null || typeof item.locationId === 'string' && uuid.test(item.locationId)))) throw new Error();
         const next=readNextCursor(data,data.items.length,100);
-        if (!controller.signal.aborted) { setItems(data.items as Grant[]);setGrantNext(next); setState('ready'); }
-      } catch { if (!controller.signal.aborted) setState('error'); }
+        if (!controller.signal.aborted&&!signal.aborted) { setItems(data.items as Grant[]);setGrantNext(next); setState('ready'); }
+      } catch { if (!controller.signal.aborted&&!signal.aborted) setState('error'); }
     })();
     return () => controller.abort();
-  }, [organization, refresh, validOrg,grantCursor]);
+  }, [organization, refresh, validOrg,grantCursor,denyAll]);
 
   const loadInvitations = React.useCallback(async (cursor:string|null=null) => {
     if (!validOrg) return;
     const currentOrg=organization.trim();
-    const sequence=++inviteRequest.current;
+    const sequence=++inviteRequest.current,signal=access.current.signal;
     setInviteNext(null);setInvitations([]);setInviteState('loading');
     try {
       const response=await fetch('/api/v1/dev/auto/organizations/'+
         encodeURIComponent(currentOrg)+'/staff-invitations?limit=100'+cursorSuffix(cursor),
-        {credentials:'include',cache:'no-store'});
-      if(organizationRef.current!==currentOrg||sequence!==inviteRequest.current)return;
-      if([401,403,404].includes(response.status)){setInviteToken('');setInviteState('denied');return;}
+        {credentials:'include',cache:'no-store',signal});
+      if(signal.aborted||organizationRef.current!==currentOrg||sequence!==inviteRequest.current)return;
+      if([401,403,404].includes(response.status)){denyAll('403 — список приглашений недоступен. Доступ запрещён.');return;}
       if(!response.ok)throw new Error();
       const body:unknown=await response.json();
       if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)||
@@ -169,10 +187,10 @@ export function AutoStaffAdmin() {
             (v.grantId===null||typeof v.grantId==='string'&&uuid.test(v.grantId));
         }))throw new Error();
       const next=readNextCursor(body,body.items.length,100);
-      if(organizationRef.current!==currentOrg||sequence!==inviteRequest.current)return;
+      if(signal.aborted||organizationRef.current!==currentOrg||sequence!==inviteRequest.current)return;
       setInviteNext(next);setInvitations(body.items as StaffInvitation[]);setInviteState('ready');
-    }catch{if(organizationRef.current===currentOrg&&sequence===inviteRequest.current)setInviteState('error');}
-  },[organization,validOrg]);
+    }catch{if(!signal.aborted&&organizationRef.current===currentOrg&&sequence===inviteRequest.current)setInviteState('error');}
+  },[organization,validOrg,denyAll]);
 
   // Список приглашений загружается по явному действию администратора:
   // открытие старого экрана назначений не должно создавать побочные запросы.
@@ -181,17 +199,17 @@ export function AutoStaffAdmin() {
     event.preventDefault();
     if(inviteBusy||!validOrg||!inviteLogin.trim()||
        inviteLocation.trim()&&!uuid.test(inviteLocation.trim()))return;
-    const org=organization.trim();
+    const org=organization.trim(),signal=access.current.signal;
     setInviteBusy(true);setInviteMessage('');setInviteToken('');
     try{
       const response=await mutate('/api/v1/dev/auto/organizations/'+
         encodeURIComponent(org)+'/staff-invitations',{
           targetLogin:inviteLogin.trim().toLowerCase(),role:inviteRole,
           locationId:inviteLocation.trim()||null,expiresInDays:inviteDays,
-        });
-      if(org!==organizationRef.current)return;
+        },signal);
+      if(signal.aborted||org!==organizationRef.current)return;
       if(response.status===409){setInviteMessage('409 — активное назначение или приглашение уже существует.');return;}
-      if([401,403,404].includes(response.status)){setInviteMessage('403 — приглашение не разрешено сервером.');return;}
+      if([401,403,404].includes(response.status)){denyAll('403 — приглашение не разрешено сервером. Доступ запрещён.');return;}
       if(response.status===422){setInviteMessage('422 — проверьте логин, роль, филиал и срок действия.');return;}
       if(!response.ok)throw new Error();
       const value:unknown=await response.json();
@@ -201,47 +219,49 @@ export function AutoStaffAdmin() {
         !/^[A-Za-z0-9_-]{40,64}$/.test(value.token)||
         !('expiresAt' in value)||typeof value.expiresAt!=='string'||
         !Number.isFinite(Date.parse(value.expiresAt)))throw new Error();
+      if(signal.aborted||org!==organizationRef.current)return;
       setInviteToken(value.token);
       setInviteMessage('Приглашение создано. Одноразовый код показан только сейчас.');
       inviteAuditRequest.current++;setInviteAudit([]);setInviteAuditNext(null);setInviteAuditState('idle');
       await loadInvitations();
     }catch{
-      if(org===organizationRef.current)
+      if(!signal.aborted&&org===organizationRef.current)
         setInviteMessage('Результат неизвестен. Проверьте список; при необходимости отзовите приглашение и создайте новое.');
-    }finally{setInviteBusy(false);}
+    }finally{if(!signal.aborted)setInviteBusy(false);}
   }
 
   async function revokeInvitation(invitationId:string) {
     if(inviteBusy||!validOrg)return;
-    const org=organization.trim();
+    const org=organization.trim(),signal=access.current.signal;
     setInviteBusy(true);setInviteMessage('');
     try{
       const response=await mutate('/api/v1/dev/auto/organizations/'+
-        encodeURIComponent(org)+'/staff-invitations/'+encodeURIComponent(invitationId)+'/revoke',{});
-      if(org!==organizationRef.current)return;
-      if([401,403,404].includes(response.status)){setInviteMessage('403 — отзыв приглашения не разрешён.');return;}
+        encodeURIComponent(org)+'/staff-invitations/'+encodeURIComponent(invitationId)+'/revoke',{},signal);
+      if(signal.aborted||org!==organizationRef.current)return;
+      if([401,403,404].includes(response.status)){denyAll('403 — отзыв приглашения не разрешён. Доступ запрещён.');return;}
       if(!response.ok)throw new Error();
       const value=await response.json() as {status?:string};
+      if(signal.aborted||org!==organizationRef.current)return;
       setInviteConfirmId(null);
       setInviteMessage(value.status==='REVOKED'?'Приглашение отозвано.':'Приглашение уже закрыто: '+String(value.status));
       inviteAuditRequest.current++;setInviteAudit([]);setInviteAuditNext(null);setInviteAuditState('idle');
       await loadInvitations();
     }catch{
-      if(org===organizationRef.current)setInviteMessage('Не удалось подтвердить отзыв. Перечитайте список приглашений.');
-    }finally{setInviteBusy(false);}
+      if(!signal.aborted&&org===organizationRef.current)setInviteMessage('Не удалось подтвердить отзыв. Перечитайте список приглашений.');
+    }finally{if(!signal.aborted)setInviteBusy(false);}
   }
 
   async function loadInvitationAudit(cursor:string|null=null) {
     if(!validOrg)return;
     const org=organization.trim();
-    const sequence=++inviteAuditRequest.current;
+    const sequence=++inviteAuditRequest.current,signal=access.current.signal;
     setInviteAuditNext(null);setInviteAudit([]);setInviteAuditState('loading');
     try{
       const response=await fetch('/api/v1/dev/auto/organizations/'+
         encodeURIComponent(org)+'/staff-invitations/audit?limit=100'+cursorSuffix(cursor),
-        {credentials:'include',cache:'no-store'});
-      if(organizationRef.current!==org||sequence!==inviteAuditRequest.current)return;
-      if([401,403,404].includes(response.status)){setInviteAuditState('denied');return;}
+        {credentials:'include',cache:'no-store',signal});
+      if(signal.aborted||organizationRef.current!==org||sequence!==inviteAuditRequest.current)return;
+      if([401,403,404].includes(response.status)){denyAll('403 — журнал приглашений недоступен. Доступ запрещён.');return;}
       if(!response.ok)throw new Error();
       const body:unknown=await response.json();
       if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)||
@@ -255,22 +275,22 @@ export function AutoStaffAdmin() {
             typeof v.createdAt==='string'&&Number.isFinite(Date.parse(v.createdAt));
         }))throw new Error();
       const next=readNextCursor(body,body.items.length,100);
-      if(organizationRef.current!==org||sequence!==inviteAuditRequest.current)return;
+      if(signal.aborted||organizationRef.current!==org||sequence!==inviteAuditRequest.current)return;
       setInviteAuditNext(next);setInviteAudit(body.items as InvitationEvent[]);setInviteAuditState('ready');
-    }catch{if(organizationRef.current===org&&sequence===inviteAuditRequest.current)setInviteAuditState('error');}
+    }catch{if(!signal.aborted&&organizationRef.current===org&&sequence===inviteAuditRequest.current)setInviteAuditState('error');}
   }
 
   async function loadAudit(cursor:string|null=null) {
     if (!validOrg) return;
     const currentOrg = organization.trim();
-    const sequence=++auditRequest.current;
+    const sequence=++auditRequest.current,signal=access.current.signal;
     setAuditNext(null);setAudit([]); setAuditState('loading');
     try {
       const response = await fetch('/api/v1/dev/auto/organizations/' +
         encodeURIComponent(currentOrg) + '/staff/audit?limit=' + auditLimit + cursorSuffix(cursor),
-        { credentials: 'include', cache: 'no-store' });
-      if(organizationRef.current!==currentOrg||sequence!==auditRequest.current)return;
-      if ([401,403,404].includes(response.status)) { setAuditState('denied'); return; }
+        { credentials: 'include', cache: 'no-store',signal });
+      if(signal.aborted||organizationRef.current!==currentOrg||sequence!==auditRequest.current)return;
+      if ([401,403,404].includes(response.status)) { denyAll('403 — Доступ к журналу запрещён.'); return; }
       if (!response.ok) throw new Error();
       const body: unknown = await response.json();
       if (!body || typeof body !== 'object' || !('items' in body) || !Array.isArray(body.items) ||
@@ -286,16 +306,19 @@ export function AutoStaffAdmin() {
             'locationId' in e && (e.locationId === null ||
               typeof e.locationId === 'string' && uuid.test(e.locationId)))) throw new Error();
       const next=readNextCursor(body,body.items.length,auditLimit);
-      if(organizationRef.current!==currentOrg||sequence!==auditRequest.current)return;
+      if(signal.aborted||organizationRef.current!==currentOrg||sequence!==auditRequest.current)return;
       setAuditNext(next);setAudit(body.items as AuditEvent[]); setAuditState('ready');
-    } catch { if(organizationRef.current===currentOrg&&sequence===auditRequest.current) setAuditState('error'); }
+    } catch { if(!signal.aborted&&organizationRef.current===currentOrg&&sequence===auditRequest.current) setAuditState('error'); }
   }
 
   async function execute(path: string, payload: unknown, action: 'grant'|'revoke') {
     if (busy || !validOrg) return;
+    const signal=access.current.signal;
     setBusy(true); setMessage('');
     try {
-      const res = await mutate(path, payload);
+      const res = await mutate(path, payload,signal);
+      if(signal.aborted)return;
+      if([401,403,404].includes(res.status)){denyAll('403 — операция не разрешена сервером. Доступ запрещён.');return;}
       if (!res.ok) {
         setMessage(res.status === 409 ? '409 — такое активное назначение уже существует.'
           : [401,403,404].includes(res.status) ? '403 — операция не разрешена сервером.'
@@ -305,14 +328,14 @@ export function AutoStaffAdmin() {
       setMessage(action === 'grant' ? 'Назначение создано.' : 'Доступ сотрудника отозван.');
       auditRequest.current++;setAuditNext(null);setAudit([]);setAuditState('idle');
       setGrantCursor(null);setRefresh(n => n + 1);
-    } catch { setMessage('Ошибка соединения. Проверьте локальный стенд и сессию.'); }
-    finally { setBusy(false); }
+    } catch { if(!signal.aborted)setMessage('Ошибка соединения. Проверьте локальный стенд и сессию.'); }
+    finally { if(!signal.aborted)setBusy(false); }
   }
 
 
   async function loadPolicies(cursor:string|null=null,trail:string[]=[]){
     if(!validOrg)return;
-    const org=organization.trim(),sequence=++policyRequest.current;
+    const org=organization.trim(),sequence=++policyRequest.current,signal=access.current.signal;
     setPolicyEvents([]);setPolicyNextBefore(null);
     setPolicyState('loading');setPolicyMessage('');
     try{
@@ -320,13 +343,11 @@ export function AutoStaffAdmin() {
       if(cursor)q.set('before',cursor);
       const res=await fetch('/api/v1/dev/auto/organizations/'+
         encodeURIComponent(org)+'/access-policies?'+q.toString(),{
-          credentials:'include',cache:'no-store',
+          credentials:'include',cache:'no-store',signal,
         });
-      if(organizationRef.current!==org||sequence!==policyRequest.current)return;
+      if(signal.aborted||organizationRef.current!==org||sequence!==policyRequest.current)return;
       if([401,403,404].includes(res.status)){
-        setPolicyState('denied');setEffective(null);setEffectiveState('denied');
-        setPolicyPending(null);setPolicyTrail([]);setPolicyCursor(null);
-        return;
+        denyAll('403 — журнал ограничений недоступен. Доступ запрещён.');return;
       }
       if(!res.ok)throw Error('HTTP');
       const value:unknown=await res.json();
@@ -347,11 +368,12 @@ export function AutoStaffAdmin() {
             (p.notBefore===null||typeof p.notBefore==='string'&&
               Number.isFinite(Date.parse(p.notBefore)));
         }))throw Error('INVALID_POLICY');
+      if(signal.aborted||organizationRef.current!==org||sequence!==policyRequest.current)return;
       setPolicyEvents(value.items as PolicyEvent[]);
       setPolicyNextBefore('nextBefore' in value ? value.nextBefore as string : null);
       setPolicyTrail(trail);setPolicyCursor(cursor);setPolicyState('ready');
     }catch{
-      if(organizationRef.current===org&&sequence===policyRequest.current)
+      if(!signal.aborted&&organizationRef.current===org&&sequence===policyRequest.current)
         setPolicyState('error');
     }
   }
@@ -359,16 +381,16 @@ export function AutoStaffAdmin() {
     if(!validOrg||!uuid.test(policyUser.trim())||
        !uuid.test(policyLocation.trim()))return;
     const org=organization.trim(),loc=policyLocation.trim(),user=policyUser.trim();
-    const doc=policyDoc;
+    const doc=policyDoc,sequence=++effectiveRequest.current,signal=access.current.signal;
     setEffective(null);setEffectiveState('loading');
     try{
       const q=new URLSearchParams({userId:user,locationId:loc,documentKind:doc});
       const response=await fetch('/api/v1/dev/auto/organizations/'+
         encodeURIComponent(org)+'/access-policies/effective?'+q.toString(),{
-          credentials:'include',cache:'no-store',
+          credentials:'include',cache:'no-store',signal,
         });
-      if(org!==organizationRef.current)return;
-      if([401,403,404].includes(response.status)){setEffectiveState('denied');return;}
+      if(signal.aborted||org!==organizationRef.current||sequence!==effectiveRequest.current)return;
+      if([401,403,404].includes(response.status)){denyAll('403 — предпросмотр недоступен. Проверьте доступ и назначение сотрудника.');return;}
       if(!response.ok)throw Error('http');
       const value:unknown=await response.json();
       if(!value||typeof value!=='object'||!('syntheticOnly' in value)||
@@ -378,24 +400,27 @@ export function AutoStaffAdmin() {
         !capabilities.every(cap=>cap in (value.capabilities as object) &&
           typeof (value.capabilities as EffectivePolicy['capabilities'])[cap]?.allowed==='boolean')
       )throw Error('effective');
-      setEffective(value as EffectivePolicy);setEffectiveState('ready');
+      if(signal.aborted||org!==organizationRef.current||sequence!==effectiveRequest.current)return;
+      const result=value as EffectivePolicy;
+      if(result.userId!==user||result.locationId!==loc||result.documentKind!==doc||!Array.isArray(result.roles)||
+        !result.roles.length||!result.roles.every(r=>roles.some(role=>role===r)))throw Error('effective');
+      setEffective(result);setEffectiveState('ready');
     }catch{
-      if(org===organizationRef.current)setEffectiveState('error');
+      if(!signal.aborted&&org===organizationRef.current&&sequence===effectiveRequest.current)setEffectiveState('error');
     }
   }
 
   async function executePolicy(pending:PendingPolicy){
     if(policyBusy||pending.org!==organizationRef.current||!validOrg)return;
+    const signal=access.current.signal;
     setPolicyBusy(true);setPolicyMessage('');
     try{
       const res=await mutate('/api/v1/dev/auto/organizations/'+
-        encodeURIComponent(pending.org)+'/access-policies',JSON.parse(pending.body));
-      if(pending.org!==organizationRef.current)return;
+        encodeURIComponent(pending.org)+'/access-policies',JSON.parse(pending.body),signal);
+      if(signal.aborted||pending.org!==organizationRef.current)return;
       if(res.status===409||res.status===422||[401,403,404].includes(res.status)){
         if([401,403,404].includes(res.status)){
-          policyRequest.current++;setPolicyEvents([]);setPolicyNextBefore(null);
-          setPolicyTrail([]);setPolicyCursor(null);
-          setPolicyState('denied');setEffective(null);setEffectiveState('denied');
+          denyAll('403 — только ADMIN данной организации может менять ограничения. Доступ запрещён.');return;
         }
         setPolicyPending(null);
         setPolicyMessage(res.status===409?
@@ -409,11 +434,11 @@ export function AutoStaffAdmin() {
       setPolicyMessage('Ограничение сохранено сервером; прежние версии остались в аудите.');
       await loadPolicies();
     }catch{
-      if(pending.org===organizationRef.current){
+      if(!signal.aborted&&pending.org===organizationRef.current){
         setPolicyPending(pending);
         setPolicyMessage('Результат изменения неизвестен. Повторите исходный запрос с тем же ключом.');
       }
-    }finally{setPolicyBusy(false);}
+    }finally{if(!signal.aborted)setPolicyBusy(false);}
   }
   function savePolicy(){
     if(!validOrg||policyBusy||policyPending||
@@ -431,13 +456,14 @@ export function AutoStaffAdmin() {
   return <section aria-label="Сотрудники организации (dev)" style={{maxWidth:'76rem',margin:'2rem auto',overflowWrap:'anywhere'}}>
     <h1>Сотрудники организации</h1>
     <p>Только локальный синтетический стенд. Права проверяет сервер, а не этот экран. Реальных сотрудников не добавляйте.</p>
-    <label>UUID организации <input value={organization} onChange={e => { setOrganization(e.target.value); setMessage(''); }}
+    <label>UUID организации <input value={organization} onChange={e => { if(e.target.value===organization)return;resetAccess();setState('idle');setOrganization(e.target.value); }}
       placeholder="UUID организации" aria-label="UUID организации" /></label>
     {state === 'idle' && <p>Укажите корректный UUID организации.</p>}
     {state === 'loading' && <p role="status">Загрузка назначений…</p>}
-    {state === 'denied' && <p role="alert">Доступ запрещён или dev API отключён.</p>}
+    {state === 'denied' && <><p role="alert">{denialReason||'Доступ запрещён или dev API отключён.'}</p>
+      <button type="button" onClick={()=>{setGrantCursor(null);setRefresh(n=>n+1);}}>Проверить доступ заново</button></>}
     {state === 'error' && <p role="alert">Не удалось получить назначения.
-      <button type="button" onClick={() => setRefresh(n => n + 1)}>Повторить</button></p>}
+      <button type="button" onClick={() => {setGrantCursor(null);setRefresh(n => n + 1);}}>Повторить</button></p>}
     {state === 'ready' && <><h2>Активные назначения</h2>
       {items.length ? <ul>{items.map(g => <li key={g.grantId}>
         <strong>{g.role}</strong> · {g.userId} · {g.locationId ?? 'Все филиалы'}

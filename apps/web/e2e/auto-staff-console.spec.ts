@@ -198,7 +198,9 @@ test('ADMIN audit rejects remote 403 and malformed rows without showing identifi
   await page.getByRole('textbox', {name:'UUID организации'}).fill(org);
   await page.getByRole('button', {name:'Показать журнал',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Доступ к журналу запрещён');
+  await expect(page.getByRole('button',{name:'Назначить',exact:true})).toHaveCount(0);
   malformed = true;
+  await page.getByRole('button',{name:'Проверить доступ заново'}).click();
   await page.getByRole('button', {name:'Показать журнал',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить журнал');
   await expect(page.getByText('private')).toHaveCount(0);
@@ -248,4 +250,62 @@ test('staff admin pages grants invitations and both audit logs, denying revoked 
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(page.getByText('synthetic-900',{exact:false})).toHaveCount(0);
   await expect(page.getByText(id(1900),{exact:false})).toHaveCount(0);
+});
+
+
+test('ADMIN denial on any scoped journal clears all identities, forms and late replies',async({page})=>{
+  let denied=false;
+  let release!:()=>void;
+  let entered!:()=>void;
+  const waiting=new Promise<void>(resolve=>{release=resolve;});
+  const started=new Promise<void>(resolve=>{entered=resolve;});
+  let delayed=false;
+  const stamp='2026-11-24T00:00:00Z';
+  await page.route(endpoint,async route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path.endsWith('/staff-invitations/audit')){
+      if(delayed){entered();await waiting;}
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:[{
+        eventId:grant,invitationId:grant,actorId:user,action:'CREATED',targetLogin:'synthetic-late',
+        role:'INTAKE',locationId:null,createdAt:stamp}]} )}).catch(()=>{});
+    }
+    if(path.endsWith('/staff-invitations'))return route.fulfill({
+      status:denied?403:200,contentType:'application/json',body:denied?'{}':JSON.stringify({items:[{
+        invitationId:grant,targetLogin:'synthetic-existing',role:'INTAKE',locationId:null,
+        status:'PENDING',createdAt:stamp,expiresAt:'2026-12-01T00:00:00Z',grantId:null}]} )});
+    if(path.endsWith('/staff/audit'))return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:[{eventId:grant,grantId:grant,actorId:user,userId:user,
+        role:'INTAKE',locationId:null,action:'GRANTED',createdAt:stamp}]})});
+    if(path.endsWith('/access-policies'))return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[{eventId:grant,role:'INTAKE',userId:user,
+        locationId:null,documentKind:'INTAKE_ACT',capability:'READ',allowed:false,
+        notBefore:null,actorId:user,createdAt:stamp}]})});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:[{grantId:grant,userId:user,role:'INTAKE',locationId:null}]})});
+  });
+  await page.goto('/staff/auto-admin');
+  await page.getByLabel('UUID организации').fill(org);
+  await page.getByRole('button',{name:'Обновить приглашения'}).click();
+  await expect(page.getByText('synthetic-existing',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Показать журнал',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Журнал действий сотрудников'}).getByText(user,{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Показать ограничения документов'}).click();
+  await expect(page.getByText('DENY',{exact:true})).toBeVisible();
+  delayed=true;
+  try{
+    await page.getByRole('button',{name:'Показать события приглашений'}).click();
+    await started;
+    denied=true;
+    await page.getByRole('button',{name:'Обновить приглашения'}).click();
+    await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+    await expect(page.getByText('synthetic-existing',{exact:true})).toHaveCount(0);
+    await expect(page.getByText(user,{exact:false})).toHaveCount(0);
+    await expect(page.getByText('DENY',{exact:true})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Назначить',exact:true})).toHaveCount(0);
+    denied=false;
+    await page.getByRole('button',{name:'Проверить доступ заново'}).click();
+    await expect(page.getByRole('heading',{name:'Активные назначения'})).toBeVisible();
+  }finally{release();}
+  await expect(page.getByText('synthetic-late',{exact:false})).toHaveCount(0);
+  await expect(page.getByText('synthetic-existing',{exact:true})).toHaveCount(0);
 });
