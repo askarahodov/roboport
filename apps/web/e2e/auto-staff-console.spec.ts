@@ -203,3 +203,49 @@ test('ADMIN audit rejects remote 403 and malformed rows without showing identifi
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить журнал');
   await expect(page.getByText('private')).toHaveCount(0);
 });
+
+
+
+test('staff admin pages grants invitations and both audit logs, denying revoked access', async ({page})=>{
+  const id=(n:number)=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
+  const stamp='2026-11-24T00:00:00Z';
+  let denied=false;
+  const seen:string[]=[];
+  await page.route(endpoint,route=>{
+    const url=new URL(route.request().url()),path=url.pathname;
+    const cursor=url.searchParams.get('cursor');
+    if(denied)return route.fulfill({status:403,contentType:'application/json',body:'{}'});
+    const kind=path.endsWith('/staff-invitations/audit')?'inviteAudit':
+      path.endsWith('/staff-invitations')?'invite':path.endsWith('/staff/audit')?'audit':'grant';
+    const count=cursor?1:(kind==='audit'?30:100);
+    if(cursor)seen.push(kind);
+    const rows=Array.from({length:count},(_,i)=>{
+      const n=cursor?900:i+1;
+      if(kind==='grant')return {grantId:id(n),userId:id(n+1000),role:'INTAKE',locationId:null};
+      if(kind==='audit')return {eventId:id(n),grantId:id(n),actorId:user,userId:id(n+1000),action:'GRANTED',role:'INTAKE',locationId:null,createdAt:stamp};
+      if(kind==='invite')return {invitationId:id(n),targetLogin:'synthetic-'+n,role:'MECHANIC',locationId:null,status:'PENDING',createdAt:stamp,expiresAt:'2026-12-01T00:00:00Z',grantId:null};
+      return {eventId:id(n),invitationId:id(n),actorId:user,action:'CREATED',targetLogin:'synthetic-'+n,role:'MECHANIC',locationId:null,createdAt:stamp};
+    });
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({items:rows,...(cursor?{}:{nextCursor:'signed_'+kind})})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-admin');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('button',{name:'Следующие назначения'}).click();
+  await expect(page.getByText(id(1900),{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Обновить приглашения'}).click();
+  await page.getByRole('button',{name:'Следующие приглашения'}).click();
+  await expect(page.getByText('synthetic-900',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Показать события приглашений'}).click();
+  await page.getByRole('button',{name:'Следующие события приглашений'}).click();
+  await expect(page.getByText('synthetic-900',{exact:false})).toHaveCount(2);
+  await page.getByRole('button',{name:'Показать журнал',exact:true}).click();
+  await page.getByRole('button',{name:'Следующие события назначений'}).click();
+  await expect(page.getByRole('region',{name:'Журнал действий сотрудников'}).getByText(id(1900),{exact:false})).toBeVisible();
+  expect(seen).toEqual(['grant','invite','inviteAudit','audit']);
+  denied=true;
+  await page.getByRole('button',{name:'Обновить назначения'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('synthetic-900',{exact:false})).toHaveCount(0);
+  await expect(page.getByText(id(1900),{exact:false})).toHaveCount(0);
+});

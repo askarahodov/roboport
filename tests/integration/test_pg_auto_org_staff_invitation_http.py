@@ -347,3 +347,57 @@ def test_invitation_cannot_be_accepted_after_issuer_admin_is_revoked(monkeypatch
                  AND revoked_at IS NULL""",
             (org_a, data["intake"]),
         ).fetchone() == (0,)
+
+
+
+def test_staff_admin_lists_complete_pages_with_scoped_cursors(monkeypatch):
+    from roboport_api.auto_org_staff import grant_staff, create_staff_invitation
+
+    data, org_a, org_b, location, logins = _setup(monkeypatch)
+    actor = data["manager"]
+    admin = _client(data, actor)
+    # Настоящие назначения и приглашения в 102 филиалах, с равными
+    # transaction timestamps для событий назначений. UUID разбивает tie.
+    with psycopg.connect(DSN) as db:
+        db.execute("""INSERT INTO auto_organization_role_grant
+                   (id,organization_id,user_id,role_code) VALUES(%s,%s,%s,'ADMIN')""",
+                   (uuid4(), org_b, actor))
+        for index in range(102):
+            loc = uuid4()
+            db.execute("INSERT INTO auto_service_location(id,code,organization_id) VALUES(%s,%s,%s)",
+                       (loc, "LOC_" + loc.hex[:10].upper(), org_a))
+            grant_staff(db, data["tokens"][actor], org_a, data["intake"], "INTAKE", loc)
+            create_staff_invitation(db, data["tokens"][actor], org_a,
+                                    logins[data["other"]], "MECHANIC", loc)
+    base = f"/api/v1/dev/auto/organizations/{org_a}"
+    other = f"/api/v1/dev/auto/organizations/{org_b}"
+    cursors = {}
+    for suffix, key in (("/staff","grantId"),("/staff/audit","eventId"),
+                        ("/staff-invitations","invitationId"),
+                        ("/staff-invitations/audit","eventId")):
+        url = base + suffix
+        first = admin.get(url)
+        assert first.status_code == 200, first.text
+        assert first.headers["cache-control"] == "no-store"
+        page = first.json()
+        assert len(page["items"]) == 100
+        cursor = page["nextCursor"]
+        cursors[suffix] = cursor
+        tail = admin.get(url, params={"cursor": cursor, "limit": 10})
+        assert tail.status_code == 200, tail.text
+        assert len(tail.json()["items"]) == 2
+        assert "nextCursor" not in tail.json()
+        assert len({row[key] for row in page["items"] + tail.json()["items"]}) == 102
+        assert all("token" not in row and "tokenHash" not in row for row in page["items"])
+        assert admin.get(other + suffix, params={"cursor": cursor}).status_code == 422
+        assert admin.get(url, params={"cursor": cursor+"x"}).status_code == 422
+        assert admin.get(url+"?cursor="+cursor+"&cursor="+cursor).status_code == 422
+        assert admin.get(url+"?limit=2&limit=3").status_code == 422
+        assert _client(data, data["intake"]).get(url, params={"cursor": cursor}).status_code == 403
+    assert admin.get(base+"/staff/audit", params={"cursor":cursors["/staff"]}).status_code == 422
+    # Отзыв сессии/права должен остановить любую следующую страницу.
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+                   WHERE organization_id=%s AND user_id=%s AND role_code='ADMIN'""", (org_a, actor))
+    for suffix, cursor in cursors.items():
+        assert admin.get(base+suffix, params={"cursor":cursor}).status_code == 403

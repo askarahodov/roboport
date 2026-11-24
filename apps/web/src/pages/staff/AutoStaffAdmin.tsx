@@ -19,6 +19,17 @@ type EffectivePolicy = {syntheticOnly:true;subjectToObjectACL:true;
   documentKind:DocumentKind;userId:string;locationId:string;roles:string[];
   capabilities:Record<Capability,{allowed:boolean;notBefore:string|null}>};
 
+function readNextCursor(value:object, count:number, limit:number):string|null {
+  if (!('nextCursor' in value)) return null;
+  if (typeof value.nextCursor!=='string'||! /^[A-Za-z0-9_-]{1,256}$/.test(value.nextCursor)
+      ||count!==limit) throw Error('INVALID_CURSOR');
+  return value.nextCursor;
+}
+
+function cursorSuffix(cursor:string|null):string {
+  return cursor ? '&cursor='+encodeURIComponent(cursor) : '';
+}
+
 async function mutate(url: string, payload: unknown) {
   const csrf = await fetch('/api/v1/auth/csrf', { method: 'POST', credentials: 'include', cache: 'no-store' });
   if (!csrf.ok) throw new Error('Сессия недоступна или истекла');
@@ -39,6 +50,14 @@ export function AutoStaffAdmin() {
   const [audit, setAudit] = React.useState<AuditEvent[]>([]);
   const [auditState, setAuditState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [auditLimit, setAuditLimit] = React.useState(30);
+  const [grantCursor,setGrantCursor] = React.useState<{org:string;cursor:string}|null>(null);
+  const [grantNext,setGrantNext] = React.useState<string|null>(null);
+  const [auditNext,setAuditNext] = React.useState<string|null>(null);
+  const [inviteNext,setInviteNext] = React.useState<string|null>(null);
+  const [inviteAuditNext,setInviteAuditNext] = React.useState<string|null>(null);
+  const auditRequest = React.useRef(0);
+  const inviteRequest = React.useRef(0);
+  const inviteAuditRequest = React.useRef(0);
   const [state, setState] = React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [busy, setBusy] = React.useState(false);
   const [confirmId, setConfirmId] = React.useState<string | null>(null);
@@ -78,6 +97,8 @@ export function AutoStaffAdmin() {
   const organizationRef = React.useRef(organization.trim());
   organizationRef.current = organization.trim();
   React.useEffect(() => {
+    auditRequest.current++;inviteRequest.current++;inviteAuditRequest.current++;
+    setGrantCursor(null);setGrantNext(null);setAuditNext(null);setInviteNext(null);setInviteAuditNext(null);
     setConfirmId(null);setAudit([]);setAuditState('idle');setMessage('');
     setInvitations([]);setInviteState('idle');setInviteToken('');setInviteMessage('');
     setInviteConfirmId(null);setInviteAudit([]);setInviteAuditState('idle');
@@ -93,37 +114,46 @@ export function AutoStaffAdmin() {
   React.useEffect(() => {
     if (!validOrg) { setItems([]); setState('idle'); return; }
     const controller = new AbortController();
-    setItems([]); setState('loading');
+    setItems([]);setGrantNext(null);setConfirmId(null); setState('loading');
     void (async () => {
       try {
-        const response = await fetch('/api/v1/dev/auto/organizations/' + encodeURIComponent(organization.trim()) + '/staff',
+        const response = await fetch('/api/v1/dev/auto/organizations/' + encodeURIComponent(organization.trim()) + '/staff' +
+          (grantCursor?.org===organization.trim()?'?cursor='+encodeURIComponent(grantCursor.cursor):''),
           { credentials: 'include', cache: 'no-store', signal: controller.signal });
         if (controller.signal.aborted) return;
-        if ([401, 403, 404].includes(response.status)) { setState('denied'); return; }
+        if ([401, 403, 404].includes(response.status)) {
+          auditRequest.current++;inviteRequest.current++;inviteAuditRequest.current++;policyRequest.current++;
+          setAudit([]);setAuditNext(null);setAuditState('idle');setInvitations([]);setInviteNext(null);setInviteState('idle');
+          setInviteAudit([]);setInviteAuditNext(null);setInviteAuditState('idle');setInviteToken('');
+          setPolicyEvents([]);setPolicyNextBefore(null);setPolicyTrail([]);setPolicyCursor(null);setPolicyState('idle');
+          setEffective(null);setEffectiveState('idle');setState('denied');return;
+        }
         if (!response.ok) throw new Error();
         const data: unknown = await response.json();
         if (!data || typeof data !== 'object' || !('items' in data) || !Array.isArray(data.items)
-          || !data.items.every((item: unknown) => item && typeof item === 'object'
+          || data.items.length>100 || !data.items.every((item: unknown) => item && typeof item === 'object'
             && 'grantId' in item && typeof item.grantId === 'string' && uuid.test(item.grantId)
             && 'userId' in item && typeof item.userId === 'string' && uuid.test(item.userId)
             && 'role' in item && typeof item.role === 'string' && staffRoles.some(r => r === item.role)
             && 'locationId' in item && (item.locationId === null || typeof item.locationId === 'string' && uuid.test(item.locationId)))) throw new Error();
-        if (!controller.signal.aborted) { setItems(data.items as Grant[]); setState('ready'); }
+        const next=readNextCursor(data,data.items.length,100);
+        if (!controller.signal.aborted) { setItems(data.items as Grant[]);setGrantNext(next); setState('ready'); }
       } catch { if (!controller.signal.aborted) setState('error'); }
     })();
     return () => controller.abort();
-  }, [organization, refresh, validOrg]);
+  }, [organization, refresh, validOrg,grantCursor]);
 
-  const loadInvitations = React.useCallback(async () => {
+  const loadInvitations = React.useCallback(async (cursor:string|null=null) => {
     if (!validOrg) return;
     const currentOrg=organization.trim();
-    setInvitations([]);setInviteState('loading');
+    const sequence=++inviteRequest.current;
+    setInviteNext(null);setInvitations([]);setInviteState('loading');
     try {
       const response=await fetch('/api/v1/dev/auto/organizations/'+
-        encodeURIComponent(currentOrg)+'/staff-invitations?limit=100',
+        encodeURIComponent(currentOrg)+'/staff-invitations?limit=100'+cursorSuffix(cursor),
         {credentials:'include',cache:'no-store'});
-      if(organizationRef.current!==currentOrg)return;
-      if([401,403,404].includes(response.status)){setInviteState('denied');return;}
+      if(organizationRef.current!==currentOrg||sequence!==inviteRequest.current)return;
+      if([401,403,404].includes(response.status)){setInviteToken('');setInviteState('denied');return;}
       if(!response.ok)throw new Error();
       const body:unknown=await response.json();
       if(!body||typeof body!=='object'||!('items' in body)||!Array.isArray(body.items)||
@@ -138,8 +168,10 @@ export function AutoStaffAdmin() {
             typeof v.expiresAt==='string'&&Number.isFinite(Date.parse(v.expiresAt))&&
             (v.grantId===null||typeof v.grantId==='string'&&uuid.test(v.grantId));
         }))throw new Error();
-      setInvitations(body.items as StaffInvitation[]);setInviteState('ready');
-    }catch{if(organizationRef.current===currentOrg)setInviteState('error');}
+      const next=readNextCursor(body,body.items.length,100);
+      if(organizationRef.current!==currentOrg||sequence!==inviteRequest.current)return;
+      setInviteNext(next);setInvitations(body.items as StaffInvitation[]);setInviteState('ready');
+    }catch{if(organizationRef.current===currentOrg&&sequence===inviteRequest.current)setInviteState('error');}
   },[organization,validOrg]);
 
   // Список приглашений загружается по явному действию администратора:
@@ -171,6 +203,7 @@ export function AutoStaffAdmin() {
         !Number.isFinite(Date.parse(value.expiresAt)))throw new Error();
       setInviteToken(value.token);
       setInviteMessage('Приглашение создано. Одноразовый код показан только сейчас.');
+      inviteAuditRequest.current++;setInviteAudit([]);setInviteAuditNext(null);setInviteAuditState('idle');
       await loadInvitations();
     }catch{
       if(org===organizationRef.current)
@@ -191,21 +224,23 @@ export function AutoStaffAdmin() {
       const value=await response.json() as {status?:string};
       setInviteConfirmId(null);
       setInviteMessage(value.status==='REVOKED'?'Приглашение отозвано.':'Приглашение уже закрыто: '+String(value.status));
+      inviteAuditRequest.current++;setInviteAudit([]);setInviteAuditNext(null);setInviteAuditState('idle');
       await loadInvitations();
     }catch{
       if(org===organizationRef.current)setInviteMessage('Не удалось подтвердить отзыв. Перечитайте список приглашений.');
     }finally{setInviteBusy(false);}
   }
 
-  async function loadInvitationAudit() {
+  async function loadInvitationAudit(cursor:string|null=null) {
     if(!validOrg)return;
     const org=organization.trim();
-    setInviteAudit([]);setInviteAuditState('loading');
+    const sequence=++inviteAuditRequest.current;
+    setInviteAuditNext(null);setInviteAudit([]);setInviteAuditState('loading');
     try{
       const response=await fetch('/api/v1/dev/auto/organizations/'+
-        encodeURIComponent(org)+'/staff-invitations/audit?limit=100',
+        encodeURIComponent(org)+'/staff-invitations/audit?limit=100'+cursorSuffix(cursor),
         {credentials:'include',cache:'no-store'});
-      if(org!==organizationRef.current)return;
+      if(organizationRef.current!==org||sequence!==inviteAuditRequest.current)return;
       if([401,403,404].includes(response.status)){setInviteAuditState('denied');return;}
       if(!response.ok)throw new Error();
       const body:unknown=await response.json();
@@ -219,19 +254,22 @@ export function AutoStaffAdmin() {
             (v.locationId===null||typeof v.locationId==='string'&&uuid.test(v.locationId))&&
             typeof v.createdAt==='string'&&Number.isFinite(Date.parse(v.createdAt));
         }))throw new Error();
-      setInviteAudit(body.items as InvitationEvent[]);setInviteAuditState('ready');
-    }catch{if(org===organizationRef.current)setInviteAuditState('error');}
+      const next=readNextCursor(body,body.items.length,100);
+      if(organizationRef.current!==org||sequence!==inviteAuditRequest.current)return;
+      setInviteAuditNext(next);setInviteAudit(body.items as InvitationEvent[]);setInviteAuditState('ready');
+    }catch{if(organizationRef.current===org&&sequence===inviteAuditRequest.current)setInviteAuditState('error');}
   }
 
-  async function loadAudit() {
+  async function loadAudit(cursor:string|null=null) {
     if (!validOrg) return;
     const currentOrg = organization.trim();
-    setAudit([]); setAuditState('loading');
+    const sequence=++auditRequest.current;
+    setAuditNext(null);setAudit([]); setAuditState('loading');
     try {
       const response = await fetch('/api/v1/dev/auto/organizations/' +
-        encodeURIComponent(currentOrg) + '/staff/audit?limit=' + auditLimit,
+        encodeURIComponent(currentOrg) + '/staff/audit?limit=' + auditLimit + cursorSuffix(cursor),
         { credentials: 'include', cache: 'no-store' });
-      if (organizationRef.current !== currentOrg) return;
+      if(organizationRef.current!==currentOrg||sequence!==auditRequest.current)return;
       if ([401,403,404].includes(response.status)) { setAuditState('denied'); return; }
       if (!response.ok) throw new Error();
       const body: unknown = await response.json();
@@ -247,8 +285,10 @@ export function AutoStaffAdmin() {
             'createdAt' in e && typeof e.createdAt === 'string' &&
             'locationId' in e && (e.locationId === null ||
               typeof e.locationId === 'string' && uuid.test(e.locationId)))) throw new Error();
-      setAudit(body.items as AuditEvent[]); setAuditState('ready');
-    } catch { if (organizationRef.current === currentOrg) setAuditState('error'); }
+      const next=readNextCursor(body,body.items.length,auditLimit);
+      if(organizationRef.current!==currentOrg||sequence!==auditRequest.current)return;
+      setAuditNext(next);setAudit(body.items as AuditEvent[]); setAuditState('ready');
+    } catch { if(organizationRef.current===currentOrg&&sequence===auditRequest.current) setAuditState('error'); }
   }
 
   async function execute(path: string, payload: unknown, action: 'grant'|'revoke') {
@@ -263,8 +303,8 @@ export function AutoStaffAdmin() {
         return;
       }
       setMessage(action === 'grant' ? 'Назначение создано.' : 'Доступ сотрудника отозван.');
-      setAudit([]); setAuditState('idle');
-      setRefresh(n => n + 1);
+      auditRequest.current++;setAuditNext(null);setAudit([]);setAuditState('idle');
+      setGrantCursor(null);setRefresh(n => n + 1);
     } catch { setMessage('Ошибка соединения. Проверьте локальный стенд и сессию.'); }
     finally { setBusy(false); }
   }
@@ -410,6 +450,8 @@ export function AutoStaffAdmin() {
         </span> : <button type="button" disabled={busy} onClick={() => setConfirmId(g.grantId)}>
           Отозвать
         </button>}</li>)}</ul> : <p>Активных назначений нет.</p>}
+      <button type="button" onClick={()=>{setGrantCursor(null);setRefresh(n=>n+1);}}>Обновить назначения</button>
+      {grantNext&&<button type="button" disabled={busy} onClick={()=>setGrantCursor({org:organization.trim(),cursor:grantNext})}>Следующие назначения</button>}
       <form onSubmit={e => {
         e.preventDefault();
         if (!uuid.test(user.trim()) || location.trim() && !uuid.test(location.trim())) return;
@@ -484,6 +526,7 @@ export function AutoStaffAdmin() {
             <button type="button" disabled={inviteBusy} onClick={()=>setInviteConfirmId(item.invitationId)}>
               Отозвать приглашение</button>)}
         </li>)}</ul>:<p>Приглашений пока нет.</p>)}
+        {inviteState==='ready'&&inviteNext&&<button type="button" disabled={inviteBusy} onClick={()=>void loadInvitations(inviteNext)}>Следующие приглашения</button>}
         <button type="button" disabled={inviteAuditState==='loading'}
           onClick={()=>void loadInvitationAudit()}>Показать события приглашений</button>
         {inviteAuditState==='loading'&&<p role="status">Загрузка журнала приглашений…</p>}
@@ -493,13 +536,14 @@ export function AutoStaffAdmin() {
           {({CREATED:'Создано',ACCEPTED:'Принято',REVOKED:'Отозвано',EXPIRED:'Истекло'} as const)[event.action]} ·
           {event.targetLogin} · {event.role} · {new Date(event.createdAt).toLocaleString('ru-RU')} · автор {event.actorId}
         </li>)}</ol>:<p>В журнале нет событий.</p>)}
+        {inviteAuditState==='ready'&&inviteAuditNext&&<button type="button" onClick={()=>void loadInvitationAudit(inviteAuditNext)}>Следующие события приглашений</button>}
       </section>
       {inviteMessage&&<p role="status">{inviteMessage}</p>}
     </>}
     {state === 'ready' && <section aria-label="Журнал действий сотрудников">
       <h2>Журнал назначений и отзывов</h2>
       <p>Только подтверждённые сервером события этой организации. Отозванные назначения остаются в истории.</p>
-      <label>Количество записей <select value={auditLimit} onChange={e => {setAuditLimit(Number(e.target.value)); setAudit([]); setAuditState('idle');}}>
+      <label>Количество записей <select value={auditLimit} onChange={e => {auditRequest.current++;setAuditLimit(Number(e.target.value));setAuditNext(null);setAudit([]);setAuditState('idle');}}>
         <option value={10}>10</option><option value={30}>30</option><option value={100}>100</option>
       </select></label>
       <button type="button" onClick={() => void loadAudit()} disabled={auditState === 'loading'}>Показать журнал</button>
@@ -511,6 +555,7 @@ export function AutoStaffAdmin() {
           {event.createdAt} · {event.role} · сотрудник {event.userId} ·
           исполнитель {event.actorId} · {event.locationId ?? 'Все филиалы'}
         </li>)}</ul> : <p>В журнале нет записей.</p>)}
+      {auditState==='ready'&&auditNext&&<button type="button" onClick={()=>void loadAudit(auditNext)}>Следующие события назначений</button>}
     </section>}
     {state==='ready'&&<section aria-label="Гранулярные ограничения на документы">
       <h2>Ограничения документов и цен (только ADMIN, dev)</h2>
