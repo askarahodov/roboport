@@ -38,6 +38,7 @@ import { AutoDemoClose } from './pages/shared/AutoDemoClose';
 import { WarehouseStocktake } from './pages/staff/WarehouseStocktake';
 import { WarehouseReconciliation } from './pages/staff/WarehouseReconciliation';
 import { WarehouseCatalog } from './pages/staff/WarehouseCatalog';
+import { SyntheticCutover } from './pages/staff/SyntheticCutover';
 import { WarehouseReceiving } from './pages/staff/WarehouseReceiving';
 import { WarehouseSupplierOrders } from './pages/staff/WarehouseSupplierOrders';
 import { WarehouseWorkOrders } from './pages/staff/WarehouseWorkOrders';
@@ -115,6 +116,7 @@ function App() {
         <NavLink to="/staff/warehouse-stocktake" end>Инвентаризация (dev)</NavLink>
         <NavLink to="/staff/warehouse-reconciliation" end>Сверка остатков (dev)</NavLink>
         <NavLink to="/staff/warehouse-catalog" end>Номенклатура (dev)</NavLink>
+        <NavLink to="/staff/auto-cutover" end>Импорт данных (dev)</NavLink>
         <NavLink to="/staff/warehouse-receiving" end>Приход (dev)</NavLink>
         <NavLink to="/staff/warehouse-supplier-orders" end>Закупки (dev)</NavLink>
         <NavLink to="/staff/warehouse-work-orders" end>Выдача (dev)</NavLink>
@@ -201,6 +203,7 @@ function App() {
       <Route path="/account/auto-estimates" element={<AutoEstimateConsole role="client" />} />
       <Route path="/account/auto-intake-act" element={<AutoIntakeAct role="client" />} />
       <Route path="/staff/warehouse-catalog" element={<WarehouseCatalog />} />
+      <Route path="/staff/auto-cutover" element={<SyntheticCutover />} />
       <Route path="/staff/warehouse-stocktake" element={<WarehouseStocktake />} />
       <Route path="/staff/warehouse-reconciliation" element={<WarehouseReconciliation />} />
       <Route path="/staff/warehouse-receiving" element={<WarehouseReceiving />} />
