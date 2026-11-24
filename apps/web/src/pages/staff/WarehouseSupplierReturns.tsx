@@ -56,6 +56,7 @@ export function WarehouseSupplierReturns(){
         scope.current.org!==requested.org||scope.current.loc!==requested.loc)return;
       if([401,403,404].includes(response.status)){
         setReview({...emptyReview(),status:'denied'});
+        setDocument('');setApproval('');setMessage('');
         return;
       }
       if(!response.ok)throw Error('unavailable');
@@ -113,6 +114,12 @@ export function WarehouseSupplierReturns(){
       if(result.status>=500)throw new Error('unknown');
       if(!result.ok){
         setPending(null);
+        if([401,403,404].includes(result.status)&&snap.org===scope.current.org&&
+            snap.loc===scope.current.loc){
+          reviewSequence.current+=1;
+          setReview({...emptyReview(),status:'denied'});
+          setDocument('');setApproval('');
+        }
         setMessage(result.status===409?
           'Конфликт: остаток, регистрация серии, оценка прихода или повтор запроса.':
           result.status===403?'Нет действующих полномочий на филиал.':

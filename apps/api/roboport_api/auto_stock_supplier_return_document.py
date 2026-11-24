@@ -7,6 +7,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockConflict, AutoStockDenied
+from .auto_purchase_document_policy import require_purchase_document,receipt_history_date
 
 SQL_FAILURES=(psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
               psycopg.errors.CheckViolation,psycopg.errors.ForeignKeyViolation)
@@ -17,10 +18,11 @@ def _validate(token,*ids):
         raise AutoStockDenied("INVALID_INPUT")
 
 
-def _run(conn,token,org,loc,role,sql,args):
+def _run(conn,token,org,loc,role,sql,args,*,cap,created_at):
     with conn.transaction():
         if not organization_role_allows(conn,token,org,role,loc,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
+        require_purchase_document(conn,token,org,loc,cap,created_at=created_at)
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None: raise AutoStockDenied("FORBIDDEN")
         try:
@@ -53,26 +55,35 @@ def draft_supplier_return(conn:psycopg.Connection,token:str,
       or supplier_reference!=supplier_reference.strip()):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        row=conn.execute("""SELECT id FROM auto_stock_receipt_document
+        if not organization_role_allows(conn,token,org,"WAREHOUSE",loc,for_mutation=True):
+            raise AutoStockDenied("FORBIDDEN")
+        row=conn.execute("""SELECT id,created_at FROM auto_stock_receipt_document
             WHERE id=%s AND organization_id=%s AND location_id=%s FOR SHARE""",
             (receipt_id,org,loc)).fetchone()
         if row is None: raise AutoStockDenied("FORBIDDEN")
         return _run(conn,token,org,loc,"WAREHOUSE",
             "SELECT record_auto_stock_supplier_return_document(%s,%s,%s,%s,%s)",
-            (receipt_id,request_id,quantity,reason,supplier_reference))
+            (receipt_id,request_id,quantity,reason,supplier_reference),
+            cap="CREATE",created_at=receipt_history_date(conn,org,loc,receipt_id))
 
 
 def approve_supplier_return(conn:psycopg.Connection,token:str,
     org:UUID,loc:UUID,document_id:UUID,request_id:UUID)->UUID:
     _validate(token,org,loc,document_id,request_id)
     with conn.transaction():
-        row=conn.execute("""SELECT id FROM auto_stock_supplier_return_document
-            WHERE id=%s AND organization_id=%s AND location_id=%s FOR SHARE""",
+        if not organization_role_allows(conn,token,org,"MANAGER",loc,for_mutation=True):
+            raise AutoStockDenied("FORBIDDEN")
+        row=conn.execute("""SELECT d.id,least(d.created_at,r.created_at),r.id
+            FROM auto_stock_supplier_return_document d
+            JOIN auto_stock_receipt_document r ON r.id=d.source_receipt_id
+              AND r.organization_id=d.organization_id AND r.location_id=d.location_id
+            WHERE d.id=%s AND d.organization_id=%s AND d.location_id=%s FOR SHARE OF d,r""",
             (document_id,org,loc)).fetchone()
         if row is None: raise AutoStockDenied("FORBIDDEN")
         return _run(conn,token,org,loc,"MANAGER",
             "SELECT accept_auto_stock_supplier_return_document(%s,%s)",
-            (document_id,request_id))
+            (document_id,request_id),cap="CLOSE",
+            created_at=min(row[1],receipt_history_date(conn,org,loc,row[2])))
 
 
 
@@ -92,6 +103,8 @@ def pending_supplier_returns(conn:psycopg.Connection,token:str,org:UUID,loc:UUID
     with conn.transaction():
         if not organization_role_allows(conn,token,org,"MANAGER",loc,
                                         for_mutation=True):
+            raise AutoStockDenied("FORBIDDEN")
+        if require_purchase_document(conn,token,org,loc) is not None:
             raise AutoStockDenied("FORBIDDEN")
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:

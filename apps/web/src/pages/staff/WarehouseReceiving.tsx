@@ -58,6 +58,14 @@ export function WarehouseReceiving(){
     priceRevision.trim().length>=3&&priceRevision.trim().length<=160&&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(quotedAt)&&
     !Number.isNaN(Date.parse(quotedAt));
+  function clearPurchaseView(stage?:Stage){
+    readSequence.current.accept+=1;readSequence.current.value+=1;
+    setReviews({accept:{...emptyReview(),status:stage==='accept'?'denied':'idle'},
+      value:{...emptyReview(),status:stage==='value'?'denied':'idle'}});
+    setDocumentId('');setAcceptanceId('');setValuationId('');
+    setBoundPurchase('');setPriceRevision('');setUnitCost('0');setVatTotal('0');
+    setCurrency('RUB');setQuotedAt(new Date().toISOString());setMessage('');
+  }
   async function getLots(){
     if(!validScope||listState==='loading')return;
     const scope={...context.current};
@@ -102,10 +110,7 @@ export function WarehouseReceiving(){
       if(seq!==readSequence.current[stage]||context.current.org!==scope.org||
          context.current.location!==scope.location)return;
       if([401,403,404].includes(response.status)){
-        setDocumentId('');
-        setBoundPurchase('');setPriceRevision('');setUnitCost('0');
-        setQuotedAt(new Date().toISOString());
-        setReviews(prev=>({...prev,[stage]:{...emptyReview(),status:'denied'}}));
+        clearPurchaseView(stage);
         return;
       }
       if(!response.ok)throw Error('unavailable');
@@ -203,6 +208,7 @@ export function WarehouseReceiving(){
       if(response.status>=500)throw new Error('uncertain');
       if(!response.ok){
         setPending(null);
+        if([401,403,404].includes(response.status))clearPurchaseView();
         setMessage(response.status===409?'Конфликт документа или повторная приёмка (409).':
           [401,403,404].includes(response.status)?'Нет прав WAREHOUSE/MANAGER или доступ отозван.':
           'Неверные данные ('+response.status+').');

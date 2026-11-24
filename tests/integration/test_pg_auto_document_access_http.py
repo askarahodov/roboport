@@ -244,3 +244,137 @@ def test_granular_admin_policy_write_serializes_against_doc_read(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT count(*) FROM auto_document_access_policy
              WHERE request_key=%s""",(key,)).fetchone()==(1,)
+
+
+def test_purchase_document_policy_full_receipt_return_lifecycle(monkeypatch):
+    """One real PG fixture for all policy transitions, including replay."""
+    from test_pg_auto_stock_receipt_valuation import setup_receipt
+    from test_pg_auto_stock_ledger import balance
+    from test_pg_auto_stock_lot_allocation import allocated
+    from test_pg_auto_stock_service import grant
+    from test_pg_auto_vehicle_claim_http import _scenario
+    from test_pg_auto_receipt_http import send
+
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,sku,lot,receipt=setup_receipt(db,d,3,accept=False)
+        admin(db,org,d["manager"])
+        grant(db,d["manager"],org,loc,"WAREHOUSE")
+    http=api(monkeypatch)
+    endpoint=url(org)
+    base=f"/api/v1/dev/auto/organizations/{org}/warehouse"
+    receipts=base+"/receipts"
+    returns=base+"/supplier-returns"
+    draft={"locationId":str(loc),"lotId":str(lot),"quantity":1,
+           "sourceReference":"POLICY-NEW-RECEIPT"}
+    accept={"locationId":str(loc),"documentId":str(receipt)}
+    valuation={**accept,"currency":"RUB","unitNetMinor":1250,"vatTotalMinor":301,
+               "supplierPriceRevision":"POLICY-QUOTE",
+               "supplierQuotedAt":"2026-10-28T12:00:00+00:00"}
+    return_body={"locationId":str(loc),"sourceReceiptId":str(receipt),"quantity":1,
+                 "reason":"Синтетический возврат","supplierReference":"POLICY-RMA"}
+    params={"locationId":str(loc)}
+    def rule(role,cap,allowed,not_before=None):
+        owner=token(http,d,d["manager"])
+        result=set_rule(http,endpoint,owner,role=role,loc=loc,
+                        document="SUPPLIER_ORDER",cap=cap,allowed=allowed,
+                        not_before=not_before)
+        assert result.status_code==201,result.text
+
+    def queue(path,**extra):
+        token(http,d,d["manager"])
+        return http.get(path,params={**params,**extra})
+
+    rule("WAREHOUSE","CREATE",False)
+    assert send(http,d,d["intake"],receipts,draft).status_code==403
+    rule("WAREHOUSE","CREATE",True)
+    # A DENY from either active role blocks the manager's direct POST.
+    rule("WAREHOUSE","CLOSE",False)
+    assert send(http,d,d["manager"],receipts+"/accept",accept).status_code==403
+    rule("WAREHOUSE","CLOSE",True)
+    rule("MANAGER","READ",True,"2099-01-01T00:00:00Z")
+    assert queue(receipts+"/pending",stage="accept").status_code==403
+    assert send(http,d,d["manager"],receipts+"/accept",accept).status_code==403
+    with psycopg.connect(DSN) as db:
+        assert balance(db,sku)==(1,0) and allocated(db,lot)==0
+    rule("MANAGER","READ",True)
+    accept_key=uuid4()
+    assert send(http,d,d["manager"],receipts+"/accept",accept,accept_key).status_code==201
+    rule("MANAGER","EDIT",False)
+    assert send(http,d,d["manager"],receipts+"/valuation",valuation).status_code==403
+    rule("MANAGER","EDIT",True)
+    rule("WAREHOUSE","PRICE_PURCHASE",False)
+    assert queue(receipts+"/pending",stage="value").status_code==403
+    assert send(http,d,d["manager"],receipts+"/valuation",valuation).status_code==403
+    rule("WAREHOUSE","PRICE_PURCHASE",True)
+    value_key=uuid4()
+    assert send(http,d,d["manager"],receipts+"/valuation",valuation,value_key).status_code==201
+    rule("MANAGER","READ",False)
+    assert send(http,d,d["manager"],receipts+"/accept",accept,accept_key).status_code==403
+    assert send(http,d,d["manager"],receipts+"/valuation",valuation,value_key).status_code==403
+    rule("MANAGER","READ",True)
+    rule("WAREHOUSE","READ",True,"2099-01-01T00:00:00Z")
+    assert send(http,d,d["intake"],returns,return_body).status_code==403
+    rule("WAREHOUSE","READ",True)
+    return_key=uuid4()
+    created=send(http,d,d["intake"],returns,return_body,return_key)
+    assert created.status_code==201,created.text
+    approval={**params,"documentId":created.json()["documentId"]}
+    rule("MANAGER","READ",False)
+    assert queue(returns+"/pending").status_code==403
+    assert send(http,d,d["manager"],returns+"/approvals",approval).status_code==403
+    rule("MANAGER","READ",True)
+    rule("MANAGER","WRITE",False)
+    assert send(http,d,d["manager"],returns+"/approvals",approval).status_code==403
+    with psycopg.connect(DSN) as db:
+        assert balance(db,sku)==(4,0) and allocated(db,lot)==3
+    rule("MANAGER","WRITE",True)
+    approval_key=uuid4()
+    approved=send(http,d,d["manager"],returns+"/approvals",approval,approval_key)
+    assert approved.status_code==201,approved.text
+    rule("MANAGER","READ",True,"2099-01-01T00:00:00Z")
+    assert send(http,d,d["manager"],returns+"/approvals",approval,approval_key).status_code==403
+    assert queue(returns+"/pending").status_code==403
+    with psycopg.connect(DSN) as db:
+        assert balance(db,sku)==(3,0) and allocated(db,lot)==2
+        assert db.execute("""SELECT purchase_net_attributed_minor,purchase_vat_attributed_minor
+          FROM auto_stock_supplier_return_acceptance WHERE id=%s""",
+          (approved.json()["approvalId"],)).fetchone()==(1250,100)
+
+
+def test_existing_purchase_order_direct_actions_and_replay_obey_read_history(monkeypatch):
+    d,org,loc,sku,lot,order,offers,grant_id,manager,base,body=supplier_fixture(monkeypatch)
+    http=api(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["manager"])
+    key=uuid4()
+    created=supplier_post(http,d,d["intake"],base,body,key)
+    assert created.status_code==201,created.text
+    endpoint=base+"/"+created.json()["orderId"]
+    payload={"locationId":str(loc),"quantity":1,"supplierReference":"POLICY-DELIVERY"}
+    delivery=supplier_post(http,d,d["intake"],endpoint+"/receipts",payload)
+    assert delivery.status_code==201,delivery.text
+    receipt=delivery.json()["documentId"]
+    with psycopg.connect(DSN) as db:
+        created_at=db.execute("SELECT created_at FROM auto_stock_receipt_document WHERE id=%s",
+                              (receipt,)).fetchone()[0]
+        order_at=db.execute("SELECT created_at FROM auto_supplier_purchase_order WHERE id=%s",
+                            (created.json()["orderId"],)).fetchone()[0]
+        assert order_at<created_at
+    from test_pg_auto_receipt_http import send
+    owner=token(http,d,d["manager"])
+    assert set_rule(http,url(org),owner,role="MANAGER",loc=loc,
+        document="SUPPLIER_ORDER",cap="READ",allowed=True,
+        not_before=created_at.isoformat()).status_code==201
+    # The receipt itself is on/after the cutoff, but its supplier order is not.
+    assert send(http,d,d["manager"],
+        f"/api/v1/dev/auto/organizations/{org}/warehouse/receipts/accept",
+        {"locationId":str(loc),"documentId":receipt}).status_code==403
+    owner=token(http,d,d["manager"])
+    assert set_rule(http,url(org),owner,role="WAREHOUSE",loc=loc,
+        document="SUPPLIER_ORDER",cap="READ",allowed=True,
+        not_before="2099-01-01T00:00:00Z").status_code==201
+    assert supplier_post(http,d,d["intake"],base,body,key).status_code==403
+    assert supplier_post(http,d,d["intake"],endpoint+"/receipts",payload).status_code==403
+    assert supplier_post(http,d,d["intake"],endpoint+"/cancel",
+                         {"locationId":str(loc)}).status_code==403

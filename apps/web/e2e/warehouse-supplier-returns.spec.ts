@@ -154,3 +154,23 @@ test('supplier return review refuses stale/foreign location or malformed queue b
   await queue.getByRole('button',{name:'Обновить акты к утверждению'}).click();
   await expect(queue.getByRole('alert')).toContainText('Нет доступа');
 });
+
+
+test('denied supplier approval clears selected act and cached queue',async({page})=>{
+  await page.route('**/warehouse/supplier-returns/pending?*',route=>route.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,nextDocumentId:null,items:[{
+      documentId:doc,sourceReceiptId:receipt,lotId:'66666666-6666-4666-8666-666666666666',
+      article:'PRIVATE-RETURN',batchCode:'LOT-A',binCode:'BIN-1',quantity:2,
+      reason:'Возврат брака',supplierReference:'PRIVATE-RMA'}]})}));
+  await page.route('**/warehouse/supplier-returns/approvals',route=>route.fulfill({
+    status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'}));
+  await setup(page);
+  const queue=page.getByLabel('Очередь актов поставщику');
+  await queue.getByRole('button',{name:'Обновить акты к утверждению'}).click();
+  await queue.getByRole('button',{name:'Выбрать акт '+doc}).click();
+  await page.getByRole('button',{name:'Утвердить возврат'}).click();
+  await expect(page.getByText('Нет действующих полномочий на филиал.')).toBeVisible();
+  await expect(queue).not.toContainText('PRIVATE-RETURN');
+  await expect(page.getByRole('textbox',{name:'UUID акта'})).toHaveValue('');
+});
