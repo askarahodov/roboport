@@ -142,15 +142,15 @@ test('customer service consent is distinct from contact preference and never ena
   await page.route('**/api/v1/dev/account/crm-contact-preferences',r=>r.fulfill({
     status:200,contentType:'application/json',
     body:JSON.stringify({syntheticOnly:true,sendAllowed:false,
-      channels:{CALL:false,EMAIL:false,SMS:false},revisions:{CALL:0,EMAIL:0,SMS:0}}),
+      channels:{CALL:false,EMAIL:false,SMS:false,MESSENGER:false},revisions:{CALL:0,EMAIL:0,SMS:0,MESSENGER:0}}),
   }));
-  await page.route('**/api/v1/dev/account/crm-contact-consent',route=>{
+  await page.route('**/api/v1/dev/account/crm-provider-consent',route=>{
     if(route.request().method()==='GET')return route.fulfill({
       status:200,contentType:'application/json',
       body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',
         legalConsentVerified:false,sendAllowed:false,
-        channels:{CALL:enabled,EMAIL:false,SMS:false},
-        revisions:{CALL:version,EMAIL:0,SMS:0}}),
+        channels:{CALL:enabled,EMAIL:false,SMS:false,MESSENGER:false},
+        revisions:{CALL:version,EMAIL:0,SMS:0,MESSENGER:0}}),
     });
     const body=route.request().postDataJSON();
     expect(route.request().headers()['x-csrf-token']).toBe('crm-csrf');
@@ -158,15 +158,15 @@ test('customer service consent is distinct from contact preference and never ena
     return route.fulfill({status:201,contentType:'application/json',
       body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',
         legalConsentVerified:false,sendAllowed:false,
-        channels:{CALL:enabled,EMAIL:false,SMS:false},
-        revisions:{CALL:version,EMAIL:0,SMS:0},replayed:false})});
+        channels:{CALL:enabled,EMAIL:false,SMS:false,MESSENGER:false},
+        revisions:{CALL:version,EMAIL:0,SMS:0,MESSENGER:0},replayed:false})});
   });
   await page.goto('/account/settings');
   const section=page.getByLabel('Тестовое согласие на сервисные уведомления CRM');
   await expect(section.getByText('Юридическое подтверждение: отсутствует. Отправка: запрещена.')).toBeVisible();
   await section.getByLabel('Звонок').check();
   const confirmed=page.waitForResponse(response=>
-    response.url().endsWith('/api/v1/dev/account/crm-contact-consent')&&response.request().method()==='POST');
+    response.url().endsWith('/api/v1/dev/account/crm-provider-consent')&&response.request().method()==='POST');
   await section.getByRole('button',{name:'Сохранить тестовый выбор: Звонок'}).click();
   expect((await confirmed).status()).toBe(201);
   await expect(section).toContainText('Тестовый выбор записан. Реальная отправка остаётся выключенной.');

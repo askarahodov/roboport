@@ -199,7 +199,7 @@ def list_mock_messages(conn,token,org,loc,lead_id,cursor=None,*,extended=False):
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
         lead=_lead(conn,org,loc,lead_id,actor,manager)
-        scope=hashlib.sha256(f"crm-mock:{org}:{loc}:{lead_id}:{extended}".encode()).hexdigest()[:32]
+        scope=hashlib.sha256((f"crm-mock:{org}:{loc}:{lead_id}"+(":extended" if extended else "")).encode()).hexdigest()[:32]
         try:
             after=decode_cursor(cursor,scope,token) if cursor is not None else None
         except ValueError:

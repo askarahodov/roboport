@@ -1,5 +1,6 @@
 import React from 'react';
 import { StaffCrmContactPreferences } from './StaffCrmContactPreferences';
+import {MockCallHistory} from './ProviderAttempts';
 import {ServiceSurvey} from '../shared/ServiceSurvey';
 import { StaffCrmMockMessages } from './StaffCrmMockMessages';
 
@@ -117,6 +118,7 @@ export function AutoCrmLeads(){
   const [loc,setLoc]=React.useState('');
   const [link,setLink]=React.useState('');
   const [source,setSource]=React.useState<'WEB'|'PHONE'|'WALK_IN'>('WALK_IN');
+  const [disposition,setDisposition]=React.useState<'ANSWERED'|'MISSED'>('MISSED');
   const [stage,setStage]=React.useState<'QUALIFIED'|'BOOKED'|'LOST'>('QUALIFIED');
   const [reason,setReason]=React.useState('TIMING');
   const [appointment,setAppointment]=React.useState('');
@@ -443,6 +445,15 @@ export function AutoCrmLeads(){
       <button type="button" disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null||!uuid.test(link)}
         onClick={()=>void mutate(base,{customerLinkId:link,sourceCode:source})}>
         Создать обращение</button>
+      <fieldset style={{minInlineSize:0}}><legend>Входящий тестовый звонок</legend>
+        <p>Без телефонного номера и звонка. Использует подтверждённую связь выше; повтор события не создаёт второй лид.</p>
+        <label>Результат звонка <select aria-label="Результат звонка" value={disposition}
+          disabled={busy||taskBusy||pendingLead!==null} onChange={e=>setDisposition(e.target.value as typeof disposition)}>
+          <option value="MISSED">Пропущен</option><option value="ANSWERED">Принят</option>
+        </select></label>
+        <button type="button" disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null||!uuid.test(link)}
+          onClick={()=>void mutate(base.replace(/\/leads$/,'/mock-calls'),{customerLinkId:link,disposition})}>Зарегистрировать тестовый звонок</button>
+      </fieldset>
       <h2>Журнал обращений</h2>
       {rows.length===0?<p>{leadCursor?'На этой странице обращений нет.':'Обращений пока нет.'}</p>:<label>Обращение
         <select aria-label="Обращение" value={selected} disabled={taskBusy||busy||pendingLead!==null}
@@ -466,6 +477,8 @@ export function AutoCrmLeads(){
       {chosen&&<div>
         <p>Ответственный: {chosen.ownerId}. Источник: {leadSourceLabels[chosen.sourceCode]}.
           Текущий этап: {leadStatusLabels[chosen.status]}.</p>
+        {chosen.sourceCode==='PHONE'&&<MockCallHistory key={'calls:'+scope+':'+selected} path={base+'/'+selected+'/mock-calls'}
+          onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);setStatus('denied');}}/>}
         <StaffCrmContactPreferences key={scope+':'+selected} base={base} leadId={selected}
           onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);
             setStatus('denied');}}/>

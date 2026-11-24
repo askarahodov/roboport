@@ -1,6 +1,7 @@
 import React from 'react';
+import {ProviderAttempts} from './ProviderAttempts';
 
-type Channel='CALL'|'EMAIL'|'SMS';
+type Channel='CALL'|'EMAIL'|'SMS'|'MESSENGER';
 type Template='BOOKING_REMINDER'|'SERVICE_UPDATE'|'POST_SERVICE_REVIEW';
 type Consent={syntheticOnly:true;purposeCode:'SERVICE_UPDATE';
   legalConsentVerified:false;sendAllowed:false;channels:Record<Channel,boolean>};
@@ -8,9 +9,9 @@ type Item={messageId:string;channelCode:Channel;templateCode:Template;
   status:'MOCK_ONLY'|'SUPPRESSED';createdAt:string};
 type Snapshot={syntheticOnly:true;sendAllowed:false;legalConsentVerified:false;items:Item[];nextCursor?:string|null};
 type Pending={channelCode:Channel;templateCode:Template;requestKey:string};
-const channels:Channel[]=['CALL','EMAIL','SMS'];
+const channels:Channel[]=['CALL','EMAIL','SMS','MESSENGER'];
 const templates:Template[]=['BOOKING_REMINDER','SERVICE_UPDATE','POST_SERVICE_REVIEW'];
-const channelNames:Record<Channel,string>={CALL:'Звонок',EMAIL:'Почта',SMS:'SMS'};
+const channelNames:Record<Channel,string>={CALL:'Звонок',EMAIL:'Почта',SMS:'SMS',MESSENGER:'Мессенджер'};
 const templateNames:Record<Template,string>={
   BOOKING_REMINDER:'Напоминание о записи',
   SERVICE_UPDATE:'Статус обслуживания',
@@ -47,6 +48,7 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
   const [consent,setConsent]=React.useState<Consent|null>(null);
   const [messages,setMessages]=React.useState<Item[]>([]);
   const [next,setNext]=React.useState<string|null>(null);
+  const [attemptMessage,setAttemptMessage]=React.useState<string|null>(null);
   const [channel,setChannel]=React.useState<Channel>('CALL');
   const [template,setTemplate]=React.useState<Template>('SERVICE_UPDATE');
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
@@ -63,12 +65,12 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
   async function load(cursor:string|null=null){
     controller.current?.abort();
     const current=new AbortController();controller.current=current;
-    setStatus('loading');setConsent(null);setMessages([]);setNext(null);
+    setStatus('loading');setConsent(null);setMessages([]);setNext(null);setAttemptMessage(null);
     try{
       const prefix=base+'/'+encodeURIComponent(leadId);
       const [c,m]=await Promise.all([
-        fetch(prefix+'/contact-consent',{credentials:'include',cache:'no-store',signal:current.signal}),
-        fetch(prefix+'/mock-messages'+(cursor?'?cursor='+encodeURIComponent(cursor):''),{credentials:'include',cache:'no-store',signal:current.signal}),
+        fetch(prefix+'/provider-consent',{credentials:'include',cache:'no-store',signal:current.signal}),
+        fetch(prefix+'/provider-messages'+(cursor?'?cursor='+encodeURIComponent(cursor):''),{credentials:'include',cache:'no-store',signal:current.signal}),
       ]);
       if(current.signal.aborted)return;
       if([401,403,404].includes(c.status)||[401,403,404].includes(m.status)){
@@ -96,7 +98,7 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
       if(current.signal.aborted)return;
       if(!value||typeof value!=='object'||!('csrfToken' in value)||
         typeof value.csrfToken!=='string')throw Error('csrf');
-      const response=await fetch(base+'/'+encodeURIComponent(leadId)+'/mock-messages',{
+      const response=await fetch(base+'/'+encodeURIComponent(leadId)+'/provider-messages',{
         method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':value.csrfToken},
         body:JSON.stringify(item),signal:current.signal,
@@ -128,7 +130,7 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
   return <section aria-label="Инертная очередь тестовых CRM уведомлений">
     <h3>Тестовые уведомления — без отправки</h3>
     <p>Макет outbox сохраняет только шаблон и канал. Нет текста, адресата,
-      телефона, email, сетевого отправителя или фонового worker. sendAllowed=false всегда.</p>
+      телефона, email, сетевого отправителя или фонового worker. Локальный адаптер моделирует ответ, timeout, лимит и отказ. sendAllowed=false всегда.</p>
     <button type="button" disabled={status==='loading'||busy||pending!==null} onClick={()=>void load()}>
       Проверить согласие и очередь</button>
     {status==='loading'&&<p role="status">Проверка…</p>}
@@ -159,6 +161,9 @@ export function StaffCrmMockMessages({base,leadId,onDenied}:{
         {channelNames[item.channelCode]} · {templateNames[item.templateCode]} · {
           item.status==='MOCK_ONLY'?'Только тест':'Подавлено после отзыва'
         } · {new Date(item.createdAt).toLocaleString('ru-RU')}
+        <button type="button" disabled={busy||pending!==null} onClick={()=>setAttemptMessage(old=>old===item.messageId?null:item.messageId)}>Попытки тестового адаптера</button>
+        {attemptMessage===item.messageId&&<ProviderAttempts key={item.messageId} message={item.messageId} channel={item.channelCode}
+          path={base+'/'+encodeURIComponent(leadId)+'/provider-messages/'+item.messageId+'/attempts'} onDenied={onDenied}/>}
       </li>)}</ul>}
     </>}
     {message&&<p role="status">{message}</p>}

@@ -43,7 +43,7 @@ class Attempt(BaseModel):
 class Call(BaseModel):
     model_config=ConfigDict(extra="forbid")
     customerLinkId:UUID
-    providerEventId:UUID
+    requestKey:UUID
     disposition:Literal["ANSWERED","MISSED"]
 
 
@@ -119,7 +119,7 @@ async def attempt(org_id:str,loc_id:str,lead_id:str,message_id:str,request:Reque
 @router.post(ROOT+"/mock-calls")
 async def call(org_id:str,loc_id:str,request:Request):
     return await _post(request,(org_id,loc_id),Call,lambda db,t,o,l,b:
-        ingest_call(db,t,o,l,b.customerLinkId,b.providerEventId,b.disposition))
+        ingest_call(db,t,o,l,b.customerLinkId,b.requestKey,b.disposition))
 
 
 @router.get(LEAD+"/mock-calls")

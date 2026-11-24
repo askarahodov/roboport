@@ -1,14 +1,14 @@
 import React from 'react';
 
-type Channel='CALL'|'EMAIL'|'SMS';
+type Channel='CALL'|'EMAIL'|'SMS'|'MESSENGER';
 type Flags=Record<Channel,boolean>;
 type Revisions=Record<Channel,number>;
 type Snapshot={syntheticOnly:true;purposeCode:'SERVICE_UPDATE';
   legalConsentVerified:false;sendAllowed:false;channels:Flags;revisions:Revisions};
 type Pending={channelCode:Channel;enabled:boolean;expectedRevision:number;requestKey:string};
-const channels:Channel[]=['CALL','EMAIL','SMS'];
-const names:Record<Channel,string>={CALL:'Звонок',EMAIL:'Электронная почта',SMS:'SMS'};
-const endpoint='/api/v1/dev/account/crm-contact-consent';
+const channels:Channel[]=['CALL','EMAIL','SMS','MESSENGER'];
+const names:Record<Channel,string>={CALL:'Звонок',EMAIL:'Электронная почта',SMS:'SMS',MESSENGER:'Мессенджер'};
+const endpoint='/api/v1/dev/account/crm-provider-consent';
 
 function parse(raw:unknown):Snapshot{
   if(!raw||typeof raw!=='object')throw Error('shape');
@@ -24,7 +24,7 @@ function parse(raw:unknown):Snapshot{
 
 export function CustomerCrmServiceConsent(){
   const [data,setData]=React.useState<Snapshot|null>(null);
-  const [draft,setDraft]=React.useState<Flags>({CALL:false,EMAIL:false,SMS:false});
+  const [draft,setDraft]=React.useState<Flags>({CALL:false,EMAIL:false,SMS:false,MESSENGER:false});
   const [status,setStatus]=React.useState<'loading'|'ready'|'denied'|'error'|'conflict'>('loading');
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [busy,setBusy]=React.useState(false);
@@ -34,7 +34,7 @@ export function CustomerCrmServiceConsent(){
   React.useEffect(()=>()=>mutation.current?.abort(),[]);
   React.useEffect(()=>{
     const controller=new AbortController();
-    setData(null);setDraft({CALL:false,EMAIL:false,SMS:false});
+    setData(null);setDraft({CALL:false,EMAIL:false,SMS:false,MESSENGER:false});
     setPending(null);setMessage('');setStatus('loading');
     void (async()=>{
       try{
@@ -71,7 +71,7 @@ export function CustomerCrmServiceConsent(){
       if([401,403,404].includes(response.status)){setData(null);setStatus('denied');setPending(null);return;}
       if(response.status===409){
         // Устаревшая версия не является подтверждённым состоянием.
-        setData(null);setDraft({CALL:false,EMAIL:false,SMS:false});
+        setData(null);setDraft({CALL:false,EMAIL:false,SMS:false,MESSENGER:false});
         setPending(null);setStatus('conflict');return;
       }
       if(!response.ok)throw Error('http');
@@ -107,7 +107,7 @@ export function CustomerCrmServiceConsent(){
     <h3>Согласие на тестовые сервисные уведомления</h3>
     <p>Отдельный синтетический журнал SERVICE_UPDATE. Это не юридически
       подтверждённое согласие и не согласие на маркетинг. Внешняя отправка,
-      звонки и подключение провайдеров не реализованы и запрещены.</p>
+      звонки и подключение реальных провайдеров запрещены. Только локальные тестовые адаптеры.</p>
     {status==='loading'&&<p role="status">Чтение тестового согласия…</p>}
     {status==='denied'&&<p role="status">Нет доступа к тестовому согласию.</p>}
     {status==='error'&&<p role="alert">Согласие недоступно.

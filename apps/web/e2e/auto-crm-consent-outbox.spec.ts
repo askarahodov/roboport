@@ -5,10 +5,10 @@ const loc='22222222-2222-4222-8222-222222222222';
 const lead='33333333-3333-4333-8333-333333333333';
 const link='44444444-4444-4444-8444-444444444444';
 const owner='55555555-5555-4555-8555-555555555555';
-const consentUrl='**/api/v1/dev/account/crm-contact-consent';
+const consentUrl='**/api/v1/dev/account/crm-provider-consent';
 const leadsUrl='**/api/v1/dev/auto/organizations/**/crm/leads**';
-const mockUrl='**/api/v1/dev/auto/organizations/**/crm/leads/*/mock-messages';
-const consentLeadUrl='**/api/v1/dev/auto/organizations/**/crm/leads/*/contact-consent';
+const mockUrl='**/api/v1/dev/auto/organizations/**/crm/leads/*/provider-messages';
+const consentLeadUrl='**/api/v1/dev/auto/organizations/**/crm/leads/*/provider-consent';
 
 test.beforeEach(async({page})=>{
   await page.route('**/api/v1/auth/me',r=>r.fulfill({status:200,contentType:'application/json',
@@ -26,15 +26,15 @@ test('service consent is separate, revisioned and never permits external sending
   await page.route('**/api/v1/dev/account/crm-contact-preferences',r=>r.fulfill({
     status:200,contentType:'application/json',
     body:JSON.stringify({syntheticOnly:true,sendAllowed:false,
-      channels:{CALL:false,EMAIL:false,SMS:false},revisions:{CALL:0,EMAIL:0,SMS:0}}),
+      channels:{CALL:false,EMAIL:false,SMS:false,MESSENGER:false},revisions:{CALL:0,EMAIL:0,SMS:0,MESSENGER:0}}),
   }));
   await page.route(consentUrl,route=>{
     if(route.request().method()==='GET')return route.fulfill({
       status:200,contentType:'application/json',
       body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',
         legalConsentVerified:false,sendAllowed:false,
-        channels:{CALL:enabled,EMAIL:false,SMS:false},
-        revisions:{CALL:version,EMAIL:0,SMS:0}}),
+        channels:{CALL:enabled,EMAIL:false,SMS:false,MESSENGER:false},
+        revisions:{CALL:version,EMAIL:0,SMS:0,MESSENGER:0}}),
     });
     const body=route.request().postDataJSON();
     expect(route.request().headers()['x-csrf-token']).toBe('crm-csrf');
@@ -44,8 +44,8 @@ test('service consent is separate, revisioned and never permits external sending
     return route.fulfill({status:201,contentType:'application/json',
       body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',
         legalConsentVerified:false,sendAllowed:false,
-        channels:{CALL:enabled,EMAIL:false,SMS:false},
-        revisions:{CALL:version,EMAIL:0,SMS:0},replayed:false})});
+        channels:{CALL:enabled,EMAIL:false,SMS:false,MESSENGER:false},
+        revisions:{CALL:version,EMAIL:0,SMS:0,MESSENGER:0},replayed:false})});
   });
   await page.goto('/account/settings');
   const section=page.getByLabel('Тестовое согласие на сервисные уведомления CRM');
@@ -53,7 +53,7 @@ test('service consent is separate, revisioned and never permits external sending
   await expect(section.getByLabel('Звонок')).not.toBeChecked();
   await section.getByLabel('Звонок').check();
   const firstSave=page.waitForResponse(response=>
-    response.url().endsWith('/api/v1/dev/account/crm-contact-consent')&&
+    response.url().endsWith('/api/v1/dev/account/crm-provider-consent')&&
     response.request().method()==='POST');
   await section.getByRole('button',{name:'Сохранить тестовый выбор: Звонок'}).click();
   const firstSaveResponse=await firstSave;
@@ -64,7 +64,7 @@ test('service consent is separate, revisioned and never permits external sending
   expect(enabled).toBe(true);
   await section.getByLabel('Звонок').uncheck();
   const revokeSave=page.waitForResponse(response=>
-    response.url().endsWith('/api/v1/dev/account/crm-contact-consent')&&
+    response.url().endsWith('/api/v1/dev/account/crm-provider-consent')&&
     response.request().method()==='POST');
   await section.getByRole('button',{name:'Сохранить тестовый выбор: Звонок'}).click();
   const revokeSaveResponse=await revokeSave;
@@ -100,13 +100,13 @@ test('staff creates an inert mock once with same-key retry and suppresses it aft
   await page.route('**/api/v1/dev/auto/organizations/**/crm/leads/*/contact-preferences',r=>r.fulfill({
     status:200,contentType:'application/json',
     body:JSON.stringify({syntheticOnly:true,sendAllowed:false,
-      channels:{CALL:false,EMAIL:false,SMS:false}}),
+      channels:{CALL:false,EMAIL:false,SMS:false,MESSENGER:false}}),
   }));
   await page.route(consentLeadUrl,route=>route.fulfill({
     status:200,contentType:'application/json',
     body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',
       legalConsentVerified:false,sendAllowed:false,
-      channels:{CALL:consent,EMAIL:false,SMS:false}}),
+      channels:{CALL:consent,EMAIL:false,SMS:false,MESSENGER:false}}),
   }));
   await page.route(mockUrl,route=>{
     if(route.request().method()==='GET')return route.fulfill({
@@ -170,7 +170,7 @@ for(const kind of ['consent','preferences'] as const){
     const posts:any[]=[];
     const snapshot=()=>({syntheticOnly:true,sendAllowed:false,
       ...(isConsent?{purposeCode:'SERVICE_UPDATE',legalConsentVerified:false}:{}),
-      channels:{CALL:enabled,EMAIL:false,SMS:false},revisions:{CALL:version,EMAIL:0,SMS:0}});
+      channels:{CALL:enabled,EMAIL:false,SMS:false,MESSENGER:false},revisions:{CALL:version,EMAIL:0,SMS:0,MESSENGER:0}});
     await page.route(endpoint,route=>{
       if(route.request().method()==='GET')return route.fulfill({status:200,contentType:'application/json',
         body:JSON.stringify(snapshot())});
@@ -240,8 +240,8 @@ test('mock history reaches later records and rechecks consent on every page',asy
     status:200,contentType:'application/json',body:'{"syntheticOnly":true,"items":[]}'}));
   await page.route(consentLeadUrl,route=>route.fulfill({status:200,contentType:'application/json',
     body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',legalConsentVerified:false,
-      sendAllowed:false,channels:{CALL:enabled,EMAIL:false,SMS:false}})}));
-  await page.route('**/crm/leads/*/mock-messages**',route=>{
+      sendAllowed:false,channels:{CALL:enabled,EMAIL:false,SMS:false,MESSENGER:false}})}));
+  await page.route('**/crm/leads/*/provider-messages**',route=>{
     const cursor=new URL(route.request().url()).searchParams.get('cursor');
     const rows=Array.from({length:cursor?2:100},(_,i)=>({
       messageId:'aaaaaaaa-aaaa-4aaa-8aaa-'+String((cursor?100:0)+i+1).padStart(12,'0'),
