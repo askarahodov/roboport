@@ -36,6 +36,10 @@ def check_auto_dev_spec(spec=SPEC):
     params = {param["name"]: param["schema"] for param in paged}
     assert params["limit"]["minimum"] == 1 and params["limit"]["maximum"] == 50
     assert params["offset"]["minimum"] == 0 and params["offset"]["maximum"] == 10000
+    assert params["paging"]["enum"] == ["offset","keyset"]
+    assert params["cursor"]["maxLength"] == 256
+    assert spec["components"]["schemas"]["AutoVehicleCursorPage"]["required"] == ["items","nextCursor"]
+    assert spec["components"]["schemas"]["AutoVehicleCursorPage"]["additionalProperties"] is False
     vehicle = spec["components"]["schemas"]["AutoVehicle"]
     assert set(vehicle["required"]) == {"id", "make", "model", "variant", "modelYear", "vinLast4"}
     assert vehicle["additionalProperties"] is False
@@ -76,3 +80,13 @@ def test_vehicle_detail_is_explicitly_private_and_nonpublic():
     assert "не содержит историю" in SPEC["info"]["description"]
     assert "Full VIN" in operation["description"]
     assert DETAIL_PATH not in app.openapi()["paths"]
+
+
+def test_cursor_contract_exact_fields_and_bounds():
+    check=Draft202012Validator({**SPEC,"$ref":"#/components/schemas/AutoVehicleCursorPage"})
+    assert check.is_valid({"items":[],"nextCursor":None})
+    assert check.is_valid({"items":[],"nextCursor":"opaque_test"})
+    assert not check.is_valid({"items":[]})
+    assert not check.is_valid({"items":[],"nextCursor":"a"*257})
+    assert not check.is_valid({"items":[],"nextCursor":"bad+cursor"})
+    assert not check.is_valid({"items":[],"nextCursor":None,"vin":"FULL"})

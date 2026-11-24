@@ -3,18 +3,18 @@ import { Link } from 'react-router-dom';
 import { Alert, EmptyState, Skeleton } from '../../ui';
 import { CustomerAutoClaim } from './CustomerAutoClaim';
 
-import { getAutoDevVehicles, getAutoDevVehicleDetails, AutoDevHttpError } from '../../shared/api/autoDevClient';
+import { getAutoDevVehicleCursorPage, getAutoDevVehicleDetails, AutoDevHttpError } from '../../shared/api/autoDevClient';
 import type { AutoDevVehicle } from '../../shared/api/autoDevClient';
 
 type LoadState = 'loading' | 'ready' | 'denied' | 'error';
 const PAGE_SIZE = 20;
-const MAX_OFFSET = 10000;
+const MAX_PAGES = 501;
 
 export function CustomerVehicles() {
   const [items, setItems] = React.useState<AutoDevVehicle[]>([]);
   const [status, setStatus] = React.useState<LoadState>('loading');
-  const [offset, setOffset] = React.useState(0);
-  const [nextOffset, setNextOffset] = React.useState<number | null>(null);
+  const [pageIndex, setPageIndex] = React.useState(0);
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [pageLoading, setPageLoading] = React.useState(false);
   const [pageError, setPageError] = React.useState(false);
   const [reload, setReload] = React.useState(0);
@@ -56,7 +56,7 @@ export function CustomerVehicles() {
           listAbort.current?.abort();
           setPageLoading(false);
           setItems([]);
-          setNextOffset(null);
+          setNextCursor(null);
           setStatus('denied');
         } else if (error.status === 404) {
           // Подтверждённая связь может быть отозвана в любой момент:
@@ -72,26 +72,27 @@ export function CustomerVehicles() {
     const controller = new AbortController();
     listAbort.current?.abort();
     listAbort.current = controller;
-    if (offset === 0) {
+    if (pageIndex === 0) {
       clearDetails();
       setStatus('loading');
       setItems([]);
-      setNextOffset(null);
+      setNextCursor(null);
     } else {
       setPageLoading(true);
     }
     setPageError(false);
     void (async () => {
+      const fresh:AutoDevVehicle[]=[];
+      let following:string|null=null;
       try {
         // Backend возвращает 200 + пустой список, когда customer link отозвана.
         // Перед расширением списка повторно запрашиваем ВСЕ видимые страницы:
         // иначе карточки с уже отозванным доступом остались бы на экране.
-        const fresh: AutoDevVehicle[] = [];
-        let following: number | null = null;
-        for (let pageOffset = 0; pageOffset <= offset; pageOffset += PAGE_SIZE) {
+        const seenCursors=new Set<string>();
+        for(let index=0;index<=pageIndex;index++){
           let data;
           try {
-            data = await getAutoDevVehicles(PAGE_SIZE, pageOffset, controller.signal);
+            data = await getAutoDevVehicleCursorPage(PAGE_SIZE, following, controller.signal);
           } catch (error) {
             if (error instanceof AutoDevHttpError
                 && [401, 403, 404].includes(error.status)) {
@@ -99,7 +100,7 @@ export function CustomerVehicles() {
               if (!controller.signal.aborted) {
                 clearDetails();
                 setItems([]);
-                setNextOffset(null);
+                setNextCursor(null);
                 setStatus('denied');
               }
               return;
@@ -108,22 +109,27 @@ export function CustomerVehicles() {
           }
           if (controller.signal.aborted) return;
           // Server-side фильтр по актуальной связи действует для каждой страницы.
-          // Offset может пересекать элементы после конкурентных изменений.
+          // Cursor does not shift when newer rows are inserted or revoked.
           for (const item of data.items) {
             if (!fresh.some(existing => existing.id === item.id)) fresh.push(item);
           }
-          following = data.items.length === PAGE_SIZE && pageOffset + PAGE_SIZE <= MAX_OFFSET
-            ? pageOffset + PAGE_SIZE : null;
-          if (data.items.length < PAGE_SIZE) break;
+          following=data.nextCursor;
+          if(following===null)break;
+          if(seenCursors.has(following))throw Error('Repeated vehicle cursor');
+          seenCursors.add(following);
         }
         if (controller.signal.aborted) return;
         if (selected && !fresh.some(vehicle => vehicle.id === selected.id)) clearDetails();
         setItems(fresh);
-        setNextOffset(following);
+        setNextCursor(pageIndex+1<MAX_PAGES?following:null);
         setStatus('ready');
       } catch {
         if (!controller.signal.aborted) {
-          if (offset === 0) setStatus('error');
+          // Keep only pages freshly re-authorized during this attempt.
+          clearDetails();
+          setItems(fresh);
+          setNextCursor(null);
+          if(pageIndex===0||fresh.length===0)setStatus('error');
           else setPageError(true);
         }
       } finally {
@@ -131,12 +137,12 @@ export function CustomerVehicles() {
       }
     })();
     return () => controller.abort();
-  }, [offset, reload]);
+  }, [pageIndex, reload]);
 
   function refresh() {
     clearDetails();
     // Запрос с нуля пересчитывает права и не оставляет устаревший кэш.
-    setOffset(0);
+    setPageIndex(0);
     setReload(value => value + 1);
   }
 
@@ -212,11 +218,11 @@ export function CustomerVehicles() {
         </section>}
         {pageLoading && <p role="status">Загружается следующая страница…</p>}
         {pageError && <p role="alert">Не удалось загрузить следующую страницу.
-          Уже полученные автомобили сохранены до обновления списка.</p>}
+          Показаны только повторно проверенные автомобили.</p>}
         {pageError && <button type="button" disabled={pageLoading}
           onClick={() => setReload(value => value + 1)}>Повторить загрузку страницы</button>}
-        {nextOffset !== null && !pageError && <button type="button"
-          disabled={pageLoading} onClick={() => setOffset(nextOffset)}>
+        {nextCursor !== null && !pageError && <button type="button"
+          disabled={pageLoading} onClick={() => setPageIndex(index=>index+1)}>
           {pageLoading ? 'Загрузка…' : 'Показать ещё автомобили'}
         </button>}
       </>)}

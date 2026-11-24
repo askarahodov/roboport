@@ -43,7 +43,7 @@ test('ошибки 403/503 не открывают автомобильные к
 test('после авторизации навигация содержит только автомобильные разделы', async ({ page }) => {
   await authorize(page);
   await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: '{"items":[]}',
+    status: 200, contentType: 'application/json', body: '{"items":[],"nextCursor":null}',
   }));
   await page.route('**/api/v1/dev/auto/customer/orders?*', route => route.fulfill({
     status: 200, contentType: 'application/json',

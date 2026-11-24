@@ -117,7 +117,7 @@ test('CLIENT предъявляет proof только POST/CSRF, не полу�
     status: 200, contentType: 'application/json', body: '{"csrfToken":"local-test-csrf"}',
   }));
   await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: '{"items":[]}',
+    status: 200, contentType: 'application/json', body: '{"items":[],"nextCursor":null}',
   }));
   let count = 0;
   await page.route('**/api/v1/dev/auto/claims/*/redeem', route => {
@@ -168,7 +168,7 @@ test('CLIENT ошибочный proof не подтверждает машину
     status: 200, contentType: 'application/json', body: '{"csrfToken":"local-test-csrf"}',
   }));
   await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: '{"items":[]}',
+    status: 200, contentType: 'application/json', body: '{"items":[],"nextCursor":null}',
   }));
   await page.route('**/api/v1/dev/auto/claims/*/redeem', route => route.fulfill({
     status: 200, contentType: 'application/json', body: '{"status":"REJECTED"}',
@@ -346,7 +346,7 @@ test('CLIENT предъявляет тот же proof с тем же ключо�
     status: 200, contentType: 'application/json', body: '{"csrfToken":"local-test-csrf"}',
   }));
   await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: '{"items":[]}',
+    status: 200, contentType: 'application/json', body: '{"items":[],"nextCursor":null}',
   }));
   const keys: string[] = [];
   await page.route('**/api/v1/dev/auto/claims/*/redeem', route => {
@@ -420,7 +420,7 @@ test('CLIENT при 429 получает понятное сообщение и 
     status: 200, contentType: 'application/json', body: '{"csrfToken":"local-test-csrf"}',
   }));
   await page.route('**/api/v1/dev/auto/vehicles?*', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: '{"items":[]}',
+    status: 200, contentType: 'application/json', body: '{"items":[],"nextCursor":null}',
   }));
   await page.route('**/api/v1/dev/auto/claims/*/redeem', route => route.fulfill({
     status: 429, contentType: 'application/json',

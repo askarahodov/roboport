@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from .auth_http import _dsn, _error
-from .auto_vehicle_read import owned_vehicle, owned_vehicles
+from .auto_vehicle_read import owned_vehicle, owned_vehicles, owned_vehicle_page
 
 router = APIRouter(include_in_schema=False)
 
@@ -41,7 +41,8 @@ def _page_int(value: str, *, minimum: int, maximum: int) -> int | None:
 
 
 @router.get("/api/v1/dev/auto/vehicles")
-def list_vehicles(request: Request, limit: str = "20", offset: str = "0"):
+def list_vehicles(request: Request, limit: str = "20", offset: str = "0",
+                  paging: str = "offset", cursor: str | None = None):
     if os.getenv("ROBOport_SYNTHETIC_AUTO_API") != "1":
         return _not_found(request)
     dsn = _enabled_dsn(request)
@@ -49,25 +50,34 @@ def list_vehicles(request: Request, limit: str = "20", offset: str = "0"):
         return _error(request, 403)
     page_limit = _page_int(limit, minimum=1, maximum=50)
     page_offset = _page_int(offset, minimum=0, maximum=10000)
-    if (page_limit is None or page_offset is None
-            or len(request.query_params.getlist("limit")) > 1
-            or len(request.query_params.getlist("offset")) > 1):
+    def invalid():
         return JSONResponse(
             status_code=422,
-            content={
-                "code": "INVALID_INPUT", "message": "Неверная пагинация",
-                "requestId": request.state.request_id,
-            }, headers={"Cache-Control": "no-store"},
+            content={"code":"INVALID_INPUT","message":"Неверная пагинация",
+                     "requestId":request.state.request_id},
+            headers={"Cache-Control":"no-store"},
         )
-    limit, offset = page_limit, page_offset
+    if (page_limit is None or page_offset is None
+            or paging not in ("offset","keyset")
+            or any(len(request.query_params.getlist(key))>1
+                   for key in ("limit","offset","paging","cursor"))
+            or (paging=="keyset" and "offset" in request.query_params)
+            or (paging=="offset" and cursor is not None)
+            or (cursor is not None and not 1<=len(cursor)<=256)):
+        return invalid()
+    token=request.cookies.get("rp_session","")
     with psycopg.connect(dsn) as conn:
-        items = owned_vehicles(
-            conn, request.cookies.get("rp_session", ""),
-            limit=limit, offset=offset,
-        )
-    if items is None:
-        return _error(request, 401)
-    return JSONResponse(content={"items": items}, headers={"Cache-Control": "no-store"})
+        if paging=="keyset":
+            try:
+                result=owned_vehicle_page(conn,token,limit=page_limit,cursor=cursor)
+            except ValueError:
+                return invalid()
+        else:
+            items=owned_vehicles(conn,token,limit=page_limit,offset=page_offset)
+            result=None if items is None else {"items":items}
+    if result is None:
+        return _error(request,401)
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
 
 
 @router.get("/api/v1/dev/auto/vehicles/{vehicle_id}")

@@ -3,6 +3,7 @@ import type { components } from './autoDevSchema';
 
 export type AutoDevVehicle = components['schemas']['AutoVehicle'];
 export type AutoDevVehiclePage = components['schemas']['AutoVehiclePage'];
+export type AutoDevVehicleCursorPage = components['schemas']['AutoVehicleCursorPage'];
 
 export class AutoDevHttpError extends Error {
   constructor(readonly status: number) {
@@ -75,4 +76,30 @@ export async function getAutoDevVehicleDetails(
     throw new Error('Invalid dev vehicle detail payload');
   }
   return payload;
+}
+
+
+const cursorPattern=/^[A-Za-z0-9_-]{1,256}$/;
+
+/** Keyset read remains private; never treat a cursor as an authorization grant. */
+export async function getAutoDevVehicleCursorPage(
+  limit:number,cursor:string|null=null,signal?:AbortSignal,
+):Promise<AutoDevVehicleCursorPage>{
+  if(!Number.isInteger(limit)||limit<1||limit>50||
+     (cursor!==null&&!cursorPattern.test(cursor)))throw new RangeError('Invalid vehicle cursor');
+  const params=new URLSearchParams({limit:String(limit),paging:'keyset'});
+  if(cursor!==null)params.set('cursor',cursor);
+  const response=await fetch('/api/v1/dev/auto/vehicles?'+params,{
+    credentials:'include',cache:'no-store',signal,headers:{Accept:'application/json'},
+  });
+  if(!response.ok)throw new AutoDevHttpError(response.status);
+  const raw:unknown=await response.json();
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('Invalid cursor page');
+  const page=raw as Record<string,unknown>;
+  if(Object.keys(page).length!==2||!Array.isArray(page.items)||page.items.length>limit||
+     !page.items.every(isAutoVehicle)||
+     !(page.nextCursor===null||(typeof page.nextCursor==='string'&&
+       cursorPattern.test(page.nextCursor)&&page.nextCursor!==cursor&&page.items.length===limit)))
+    throw Error('Invalid cursor page');
+  return {items:page.items,nextCursor:page.nextCursor} as AutoDevVehicleCursorPage;
 }

@@ -176,7 +176,7 @@ for(const size of sizes){
       await page.route('**/api/v1/dev/auto/**',route=>{
         if(current.emptyVehicles &&
           new URL(route.request().url()).pathname==='/api/v1/dev/auto/vehicles')
-          return route.fulfill(json({items:[]}));
+          return route.fulfill(json({items:[],nextCursor:null}));
         return route.fulfill(json({code:'FORBIDDEN'},403));
       });
       const {report,failures,pageErrorCount}=await collectVisualEvidence(
