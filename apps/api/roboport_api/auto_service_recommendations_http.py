@@ -11,6 +11,7 @@ from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_service_recommendations import (
     RecommendationDenied, RecommendationConflict, read_recommendations,
     create_recommendation, withdraw_recommendation, repeat_visit_options, book_repeat_visit,
+    search_recommendation_services,
 )
 
 router=APIRouter(include_in_schema=False)
@@ -175,3 +176,21 @@ async def visit_create(org_id:str,loc_id:str,order_id:str,recommendation_id:str,
             return _error(request,exc)
     return JSONResponse(content=result,status_code=200 if result["replayed"] else 201,
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get(prefix+"/services")
+def search_services(org_id:str,loc_id:str,order_id:str,request:Request):
+    scope=_scope(request,org_id,loc_id,order_id)
+    if isinstance(scope,JSONResponse):
+        return scope
+    dsn,org,loc,order=scope
+    queries=request.query_params.getlist("q")
+    if len(queries)>1:
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            result=search_recommendation_services(db,request.cookies.get("rp_session",""),
+                                                 org,loc,order,queries[0] if queries else "")
+        except (RecommendationDenied,RecommendationConflict) as exc:
+            return _error(request,exc)
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})

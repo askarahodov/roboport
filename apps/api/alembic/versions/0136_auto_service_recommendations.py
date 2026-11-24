@@ -146,6 +146,7 @@ def upgrade():
           JOIN auto_bay_booking b ON b.id=a.booking_id
           JOIN auto_work_order_service s ON s.work_order_id=w.id
           WHERE a.id=NEW.appointment_id AND w.id<>origin.id
+            AND w.organization_id=origin.organization_id AND w.location_id=origin.location_id
             AND a.organization_id=origin.organization_id AND a.location_id=origin.location_id
             AND a.customer_link_id=origin.customer_link_id
             AND b.id=NEW.booking_id AND b.canceled_at IS NULL

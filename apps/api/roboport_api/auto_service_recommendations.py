@@ -88,20 +88,31 @@ def _state(conn,org,loc,order,*,can_manage=False,customer=False):
         items.append(item)
     inspection=conn.execute("SELECT odometer_km FROM auto_work_order_inspection WHERE work_order_id=%s",
                             (order,)).fetchone()
-    catalog=[]
-    if can_manage:
-        catalog=conn.execute("""
-          SELECT id,code,title FROM auto_service_catalog
-          WHERE organization_id=%s AND location_id=%s ORDER BY code,id LIMIT 101
-        """,(org,loc)).fetchall()
-        if len(catalog)>100:
-            # Список выбора не должен молча скрывать услуги.
-            raise RecommendationConflict("CATALOG_LIMIT")
+    catalog=_catalog(conn,org,loc,"") if can_manage else {"items":[],"truncated":False}
     return {"syntheticOnly":True,"releaseAllowed":False,"sendAllowed":False,
             "workOrderId":str(order),"canManage":can_manage,
             "baselineKm":inspection[0] if inspection else None,
-            "services":[{"id":str(i),"code":c,"title":t} for i,c,t in catalog],
+            "services":catalog["items"],"servicesTruncated":catalog["truncated"],
             "items":items}
+
+
+def _catalog(conn,org,loc,query):
+    rows=conn.execute("""
+      SELECT id,code,title FROM auto_service_catalog
+      WHERE organization_id=%s AND location_id=%s
+        AND (strpos(lower(code),lower(%s))>0 OR strpos(lower(title),lower(%s))>0 OR %s='')
+      ORDER BY code,id LIMIT 101
+    """,(org,loc,query,query,query)).fetchall()
+    return {"items":[{"id":str(i),"code":c,"title":t} for i,c,t in rows[:100]],
+            "truncated":len(rows)>100}
+
+
+def search_recommendation_services(conn,token,org,loc,order,query):
+    if type(query) is not str or len(query)>80 or any(ord(ch)<32 for ch in query):
+        raise RecommendationDenied("INVALID_INPUT")
+    with conn.transaction():
+        _scope(conn,token,org,loc,order,write=True)
+        return {"syntheticOnly":True,"workOrderId":str(order),**_catalog(conn,org,loc,query.strip())}
 
 
 def read_recommendations(conn,token,org,loc,order,customer=False):
@@ -257,10 +268,11 @@ def repeat_visit_options(conn,token,org,loc,order,ident,*,bay=None,day=None):
 def book_repeat_visit(conn,token,org,loc,order,ident,*,key,bay,starts,ends):
     if (type(key) is not UUID or type(bay) is not UUID
         or any(type(x) is not datetime or x.tzinfo is None or x.utcoffset() is None
-               for x in (starts,ends)) or ends<=starts or ends-starts>timedelta(days=1)):
+               for x in (starts,ends)) or ends.astimezone(timezone.utc)<=starts.astimezone(timezone.utc)
+        or ends.astimezone(timezone.utc)-starts.astimezone(timezone.utc)>timedelta(days=1)):
         raise RecommendationDenied("INVALID_INPUT")
     with conn.transaction():
-        actor,service,link,_=_booking_context(conn,token,org,loc,order,ident)
+        actor,service,link,zone=_booking_context(conn,token,org,loc,order,ident)
         prior=conn.execute("""
           SELECT v.recommendation_id,v.actor_id,v.appointment_id,v.booking_id,
                  b.bay_id,b.starts_at,b.ends_at
@@ -277,6 +289,16 @@ def book_repeat_visit(conn,token,org,loc,order,ident,*,key,bay,starts,ends):
         if visit and visit["status"]=="SCHEDULED":
             raise RecommendationConflict("VISIT_ALREADY_BOOKED")
         try:
+            local=starts.astimezone(ZoneInfo(zone)).date()
+        except (ZoneInfoNotFoundError,OverflowError):
+            raise RecommendationDenied("INVALID_INPUT") from None
+        # Запись разрешена только на окно, выданное действующим планировщиком,
+        # с длительностью рекомендованной услуги, а не произвольным интервалом.
+        candidates=repeat_visit_options(conn,token,org,loc,order,ident,bay=bay,day=local)["items"]
+        if not any(datetime.fromisoformat(x["startsAt"])==starts and
+                   datetime.fromisoformat(x["endsAt"])==ends for x in candidates):
+            raise RecommendationConflict("VISIT_CONFLICT")
+        try:
             with conn.transaction():
                 appointment,booking,_=create_appointment(
                     conn,token,org,loc,bay,link,starts,ends,customer_mode=True,
@@ -291,6 +313,6 @@ def book_repeat_visit(conn,token,org,loc,order,ident,*,key,bay,starts,ends):
         except AppointmentDenied:
             raise RecommendationDenied("FORBIDDEN") from None
         except (AppointmentConflict,AppointmentKeyConflict,psycopg.errors.UniqueViolation,
-                psycopg.errors.RaiseException):
+                psycopg.errors.RaiseException,psycopg.errors.DeadlockDetected):
             raise RecommendationConflict("VISIT_CONFLICT") from None
         return {"replayed":False,"syntheticOnly":True,"visit":_latest_visit(conn,ident)}
