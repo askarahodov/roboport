@@ -143,10 +143,13 @@ def test_legacy_attachment_physical_backup_restore_and_corruption_detection(tmp_
     assert os.getenv("ROBOport_LEGACY_RESTORE_CI") == "1"
     source_dsn, clone_dsn = _dsn("roboport"), _dsn(RESTORE_DB)
     storage = MinioFileStorage.from_environment()
-    source = storage._client
-    target = Minio("127.0.0.1:9000",
-                   access_key=os.environ["MINIO_APP_ACCESS_KEY"],
-                   secret_key=os.environ["MINIO_APP_SECRET_KEY"], secure=False)
+    restore_key = os.environ["MINIO_RESTORE_ACCESS_KEY"]
+    restore_secret = os.environ["MINIO_RESTORE_SECRET_KEY"]
+    assert restore_key and restore_secret
+    assert restore_key not in {os.environ["MINIO_APP_ACCESS_KEY"],
+                               os.environ["MINIO_ROOT_USER"]}
+    source = target = Minio("127.0.0.1:9000", access_key=restore_key,
+                            secret_key=restore_secret, secure=False)
     buckets = {DOCUMENTS: "roboport-documents-restore-dev",
                QUARANTINE: "roboport-quarantine-restore-dev"}
     original_buckets = {DOCUMENTS: DOCUMENTS, QUARANTINE: QUARANTINE}
@@ -160,9 +163,29 @@ def test_legacy_attachment_physical_backup_restore_and_corruption_detection(tmp_
         # Only new synthetic keys, never existing objects.
         for bucket in original_buckets.values():
             assert_absent(source, bucket, item["key"])
-        put_object(source, item["bucket"], item["key"], PAYLOADS[role], item["mime"])
+        put_object(storage._client, item["bucket"], item["key"], PAYLOADS[role], item["mime"])
     verified_source_bytes = reconcile(source, expected, original_buckets)
     assert verified_source_bytes == PAYLOADS
+    # Restore identity can reconcile sources but cannot modify them.
+    for bucket in original_buckets.values():
+        key = expected["ready" if bucket == DOCUMENTS else "failed"]["key"]
+        for action in (
+            lambda: put_object(source, bucket, key, b"FORBIDDEN"),
+            lambda: source.remove_object(bucket, key),
+        ):
+            with pytest.raises(S3Error) as denied:
+                action()
+            assert denied.value.code == "AccessDenied"
+    assert reconcile(source, expected, original_buckets) == PAYLOADS
+    # The app never receives access to restore destinations.
+    for bucket in buckets.values():
+        for action in (
+            lambda: list(storage._client.list_objects(bucket, recursive=True)),
+            lambda: put_object(storage._client, bucket, expected["ready"]["key"], b"FORBIDDEN"),
+        ):
+            with pytest.raises(S3Error) as denied:
+                action()
+            assert denied.value.code == "AccessDenied"
     # FileStorage's ordinary document lookup must not reach quarantine.
     assert storage.get(expected["ready"]["key"]) == PAYLOADS["ready"]
     with pytest.raises(S3Error):
@@ -187,6 +210,10 @@ def test_legacy_attachment_physical_backup_restore_and_corruption_detection(tmp_
                for bucket in buckets.values())
     restore(archive, restored_expected, graph_sha, target, buckets)
     assert reconcile(target, restored_expected, buckets) == PAYLOADS
+    for item in restored_expected.values():
+        with pytest.raises(S3Error) as denied:
+            storage._client.get_object(buckets[item["bucket"]], item["key"])
+        assert denied.value.code == "AccessDenied"
     with pytest.raises(ValueError, match="not empty"):
         restore(archive, restored_expected, graph_sha, target, buckets)
 

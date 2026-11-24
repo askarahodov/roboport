@@ -27,7 +27,7 @@ mc alias set rp-app http://127.0.0.1:9000 "$MINIO_APP_ACCESS_KEY" "$MINIO_APP_SE
 mc ls rp-app/roboport-documents-dev
 ```
 
-Права приложения ограничены двумя dev-bucket и объектными операциями, без прав администратора.
+Права приложения: GET/PUT/DELETE/LIST в documents, только PUT в quarantine (плюс GetBucketLocation для обоих). Прямые GET/HEAD/DELETE/LIST карантина явно запрещены на уровне S3 IAM. Обычный FileStorage может переместить объект в карантин, но не читать или удалять его оттуда. PUT сам по себе не гарантирует WORM: защита от перезаписи известного ключа и production retention требуют отдельного решения #119.
 Эта S3 policy **не заменяет** доменный ACL: backend обязан повторно проверить сессию,
 роль, связь с заявкой и состояние quarantine перед любым чтением/скачиванием.
 
@@ -66,22 +66,21 @@ docker compose -f infra/dev/compose.minio.yml down -v
 
 ## Резервная копия и восстановление dev-bucket (только синтетика)
 
-С помощью `mc alias set rp-app` из раздела запуска, на локальной машине,
-экспортируйте приватные документы **в директорию вне Git**:
+Архивирование карантина **не выполняется от имени приложения**. На одноразовом доверенном dev-стенде отдельный временный субъект с `infra/dev/minio-restore-policy.json` имеет только GET/LIST на двух исходных bucket и GET/PUT/DELETE/LIST на двух **отдельных** restore-bucket. Не добавлять эту policy пользователю приложения. Создание субъектов и бакетов выполняет оператор; ключи хранятся вне Git, root не передаётся backend.
+
+При наличии выданных оператором временных restore credentials и пустых приватных `roboport-documents-restore-dev` / `roboport-quarantine-restore-dev`:
 
 ```bash
+mc alias set rp-restore http://127.0.0.1:9000 "$MINIO_RESTORE_ACCESS_KEY" "$MINIO_RESTORE_SECRET_KEY"
 mkdir -p /tmp/roboport-minio-dev-backup
-mc mirror rp-app/roboport-documents-dev /tmp/roboport-minio-dev-backup/documents
-mc mirror rp-app/roboport-quarantine-dev /tmp/roboport-minio-dev-backup/quarantine
-# Восстанавливать только после проверки PostgreSQL attachment metadata:
-mc mirror /tmp/roboport-minio-dev-backup/documents rp-app/roboport-documents-dev
-mc mirror /tmp/roboport-minio-dev-backup/quarantine rp-app/roboport-quarantine-dev
+mc mirror rp-restore/roboport-documents-dev /tmp/roboport-minio-dev-backup/documents
+mc mirror rp-restore/roboport-quarantine-dev /tmp/roboport-minio-dev-backup/quarantine
+# Только в пустые изолированные restore-bucket после сверки PostgreSQL metadata:
+mc mirror /tmp/roboport-minio-dev-backup/documents rp-restore/roboport-documents-restore-dev
+mc mirror /tmp/roboport-minio-dev-backup/quarantine rp-restore/roboport-quarantine-restore-dev
 ```
 
-Это локальное копирование синтетики, **не** production backup: консистентную пару
-PostgreSQL + S3 необходимо обеспечивать отдельно. В CI тестируется резервная
-копия, удаление и восстановление одного synthetic object в Docker MinIO.
-После завершения удалить директорию резервной копии вручную.
+Это локальная копия синтетики, не production backup. Полный CI drill сверяет граф PG17, bytes/MIME/SHA-256 и пустое назначение; проверяет запрет чтения/удаления карантина app-пользователем, запрет доступа приложения к restore-bucket и запрет мутаций source restore-пользователем. После теста удалить локальный архив и отозвать временный субъект. Для действующих dev-стендов заменить старую policy через доверенного оператора и повторить отрицательные проверки; не выдавать приложению старые широкие права ради восстановления.
 
 Отдельная служебная функция `storage_reconcile.purge_old_orphans` удаляет
 объекты без записи `attachment` старше часа из bucket документов. Quarantine

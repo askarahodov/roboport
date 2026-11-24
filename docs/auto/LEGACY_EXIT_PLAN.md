@@ -1,6 +1,6 @@
-# Полный вывод робототехнического домена из Airmatik (#165)
+# Полный вывод робототехнического домена из «БоксРитм» (#165)
 
-**Статус:** HTTP runtime cutover выполнен в отдельной ветке. Legacy SQL, исторический draft-контракт, хранение вложений и production cutover ещё требуют approval #119. Airmatik — только автомобильный продукт.
+**Статус:** HTTP runtime cutover выполнен в `main`; legacy SQL, исторический draft-контракт, хранение вложений и production cutover ещё требуют approval #119. «БоксРитм» — автомобильный продукт.
 
 ## Фактическая граница
 
@@ -49,7 +49,7 @@ Workflow `.github/workflows/minio-dev.yml` запускает `tests/integration
 
 1. Перед backup прочитать граф и сверить оба объекта с SQL; собрать временный ZIP (manifest и два файла), привязать его к SHA-256 графа.
 2. Выполнить реальный `pg_dump -Fc` с последующим `pg_restore --exit-on-error` в отдельную БД `roboport_restored`; проверить восстановленный SQL-граф в read-only транзакции.
-3. Проверить manifest, допустимый набор файлов, размеры и SHA-256 **до записи**; восстановить только в два пустых приватных restore-бакета, отличных от source. Используются отдельные CI-only разрешения, не меняющие штатный app policy. Проверить запрет анонимного доступа.
+3. Проверить manifest, допустимый набор файлов, размеры и SHA-256 **до записи**; восстановить только в два пустых приватных restore-бакета, отличных от source. Используется отдельный временный CI-only restore-пользователь: source GET/LIST, restore GET/PUT/DELETE/LIST. App-пользователь не получает restore policy; прямое чтение, удаление и перечисление карантина для него запрещены. Проверить запрет анонимного доступа.
 4. Повторно сверить bytes, MIME, SHA-256 и размещение с восстановленной SQL-метаинформацией. Некорректный архив не должен записать ни одного объекта, повторный restore в непустое назначение отвергается. Негативные сценарии (missing / corrupted / wrong bucket) выполняются только в disposable restore-бакетах; в конце проверяется неизменность исходного графа и source-объектов.
 
 Команда теста, **только внутри подготовленного MinIO workflow**:
@@ -171,3 +171,8 @@ PYTHONPATH=apps/api python -m pytest -q tests/bootstrap/test_legacy_route_invent
 Эта таблица фиксирует только статические DDL declarations в ревизиях 0001–0020. Она **не** доказывает, что live PostgreSQL содержит ровно тот же набор объектов, не описывает все последующие \`ALTER\` к legacy-таблицам, внешние схемы, grants, реальные row counts, object keys, владельцев, retention или legal basis. Для runtime-снимка остаётся обязательным одноразовый synthetic PG17 \`inspect_legacy_db_surface.py\`; для каждого реального объекта перед финальным decommission потребуется независимое решение \`retain / migrate / archive / remove\` с owner, evidence, backup/restore и rollback.
 
 До такого решения запрещены \`DROP\`/\`DELETE\` и production cutover. \`dropAllowed=false\`, \`releaseAllowed=false\`.
+
+
+### Изоляция доступа к карантину и восстановлению (#165/#119)
+
+`infra/dev/minio-app-policy.json` ограничивает quarantine до PUT и GetBucketLocation и явно запрещает GET/DELETE/LIST. `infra/dev/minio-restore-policy.json` выдаётся только отдельному временно созданному пользователю на одноразовом стенде: read-only source, read/write только изолированных restore bucket. Корневые credentials не передаются Python; seed использует обычное приложение, сверка — отдельный restore principal. Тесты реального S3 проверяют AccessDenied для app GET/HEAD/LIST/DELETE карантина, app-доступа к restore bucket и restore PUT/DELETE source, а также сохранение исходных bytes/hash. `minio-dev` запускается на PR и main при изменениях политики/адаптера/интеграции. См. [локальный runbook](../../infra/dev/README.md). PUT карантина не является неизменяемым WORM, не доказаны production retention, AV и роль реального оператора; #119/#165 остаются открытыми. Откат только через согласованное восстановление dev policy и повторную отрицательную проверку, не через расширение production-доступа.

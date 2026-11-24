@@ -38,3 +38,19 @@
 ## Дальнейший gate
 
 Финальное закрытие #165 возможно **только** после полного route/DDL/attachment inventory, подтверждённой миграции и сверки архивов, восстановления, отрицательных BOLA тестов, юридического/privacy/security одобрения #119, отдельного cutover PR и post-merge CI. Этот PR закрывает лишь bounded работу по disposition закрытых legacy PR, **не** #165.
+
+
+## Повторная сверка шести PR на 24.11.2026
+
+База: `02e0c3e4d411e1075b63f711ba850d37bdcbb0cb`. Все 100 changed-file records (пути, повторяющиеся в нескольких PR, считаются отдельно) сверены по Git blob SHA с деревом этой версии main. Это проверка идентичности содержимого, не доказательство семантической эквивалентности изменённых файлов.
+
+| PR / полный исходный HEAD | Совпадает / изменён / отсутствует | Решение |
+|---|---:|---|
+| #1 `59686f8c4c498b627a285411fb053cd34ab9ce27` | 1 / 58 / 0 | ARCHIVE: старый прототип совпадает, остальные пути изменены; robot SQL/UI не возвращать |
+| #45 `303a090b99672c3dc7ed779e33d25c919d62d598` | 3 / 9 / 0 | KEEP: 0008, ticket_read и старый cursor test совпадают; актуальный keyset_cursor имеет HMAC/session/state/canonical guard и triplet для авто; runtime robot HTTP отключён |
+| #46 `18cee0212ddc9a7bb8ec387d0e14e391501c5e13` | 2 / 4 / 0 | KEEP DEV: pinned compose и env example совпадают, provenance внешнего образа остаётся gate |
+| #47 `4abfa1c81e4adab6507c888fb7314344ac12f0a0` | 4 / 1 / 0 | KEEP + HARDEN: storage adapter, requirements, IAM и smoke test совпадали; найдено избыточное прямое право GET/DELETE/LIST quarantine |
+| #59 `b98b4ccc620df5cf1b09961af34713efe0f7084a` | 0 / 2 / 3 | DO NOT PORT: robot owner FK не эквивалент auto_vehicle_customer_link; 0021/0022 и 0133 обеспечивают pending/verified/revoked immutable history, не вводят единственного владельца из robot-модели |
+| #60 `98ae7a5ffc66bb6e74a033a8c81206c1648f4d86` | 0 / 8 / 5 | DO NOT PORT: конфликт revision 0015, robot model/dock не automotive; 0124 auto_catalog отдельно хранит SKU/provenance/price/analog, лицензированную применяемость решает #111 |
+
+Итого: 10 совпадают, 82 изменены, 8 отсутствуют. Старые ветки не merge/cherry-pick и не удалять. Повторная сверка обнаружила не недостающий robot-код, а реальный дефект разделения IAM: FileStorage отказывал через adapter, но app credentials могли напрямую читать/удалять карантин, а restore workflow расширял эту же app identity. В текущем пакете #165/#119 разделены политики и добавлены отрицательные S3/restore проверки в существующие тесты. Успех новых тестов подтверждается только по фактическому MinIO CI текущего HEAD; исторические прогоны не заменяют его. Никаких production permissions/данных или удаления веток.
