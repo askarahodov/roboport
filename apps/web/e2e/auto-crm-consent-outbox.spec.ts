@@ -226,3 +226,46 @@ for(const kind of ['consent','preferences'] as const){
     expect(posts[3].requestKey).not.toBe(posts[2].requestKey);
   });
 }
+
+
+test('mock history reaches later records and rechecks consent on every page',async({page})=>{
+  let enabled=true,denied=false;
+  await page.route(leadsUrl,route=>route.fulfill({status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,items:[{syntheticOnly:true,leadId:lead,
+      customerLinkId:link,ownerId:owner,sourceCode:'WEB',status:'NEW',
+      createdAt:'2030-01-01T10:00:00Z',events:[]}]})}));
+  await page.route('**/api/v1/dev/auto/organizations/**/crm/inbox**',r=>r.fulfill({
+    status:200,contentType:'application/json',body:'{"syntheticOnly":true,"items":[],"nextCursor":null}'}));
+  await page.route('**/api/v1/dev/auto/organizations/**/crm/leads/*/tasks**',r=>r.fulfill({
+    status:200,contentType:'application/json',body:'{"syntheticOnly":true,"items":[]}'}));
+  await page.route(consentLeadUrl,route=>route.fulfill({status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',legalConsentVerified:false,
+      sendAllowed:false,channels:{CALL:enabled,EMAIL:false,SMS:false}})}));
+  await page.route('**/crm/leads/*/mock-messages**',route=>{
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    const rows=Array.from({length:cursor?2:100},(_,i)=>({
+      messageId:'aaaaaaaa-aaaa-4aaa-8aaa-'+String((cursor?100:0)+i+1).padStart(12,'0'),
+      channelCode:'CALL',templateCode:'SERVICE_UPDATE',
+      status:enabled?'MOCK_ONLY':'SUPPRESSED',createdAt:'2030-01-01T10:00:00Z'}));
+    return route.fulfill({status:denied?403:200,contentType:'application/json',
+      body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({syntheticOnly:true,sendAllowed:false,
+        legalConsentVerified:false,items:rows,...(cursor?{}:{nextCursor:'mock_tail'})})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');
+  await page.getByLabel('UUID организации').fill(org);
+  await page.getByLabel('UUID филиала').fill(loc);
+  await page.getByLabel('Обращение').selectOption(lead);
+  const panel=page.getByLabel('Инертная очередь тестовых CRM уведомлений');
+  await panel.getByRole('button',{name:'Проверить согласие и очередь'}).click();
+  await expect(panel.getByText('Только тест',{exact:false})).toHaveCount(100);
+  enabled=false;
+  await panel.getByRole('button',{name:'Следующая страница макетов'}).click();
+  await expect(panel.getByText('Подавлено после отзыва',{exact:false})).toHaveCount(2);
+  await expect(panel.getByRole('button',{name:'Создать инертный макет'})).toBeDisabled();
+  await panel.getByRole('button',{name:'Обновить после отзыва'}).click();
+  await expect(panel.getByText('Подавлено после отзыва',{exact:false})).toHaveCount(100);
+  denied=true;
+  await panel.getByRole('button',{name:'Следующая страница макетов'}).click();
+  await expect(panel).toHaveCount(0);
+});
