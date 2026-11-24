@@ -52,6 +52,8 @@ def get_resources(request: Request, cursor: str | None = None):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
+    if len(request.query_params.getlist("cursor"))>1:
+        return _response(request,422,"INVALID_CURSOR")
     with psycopg.connect(dsn) as db:
         try:
             result = bookable_resources(db, request.cookies.get("rp_session", ""),
@@ -68,6 +70,8 @@ def get_appointments(request: Request, cursor: str | None = None):
     dsn = _request_dsn(request)
     if isinstance(dsn, JSONResponse):
         return dsn
+    if len(request.query_params.getlist("cursor"))>1:
+        return _response(request,422,"INVALID_CURSOR")
     with psycopg.connect(dsn) as db:
         try:
             result = my_appointments(db, request.cookies.get("rp_session", ""), cursor=cursor)
