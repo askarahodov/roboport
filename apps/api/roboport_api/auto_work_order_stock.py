@@ -3,6 +3,7 @@ from uuid import UUID
 import psycopg
 
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 
 
@@ -23,6 +24,7 @@ def mutate_work_order_stock(
             for_mutation=True,
         ):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,"EDIT")
         # Check both objects before invoking privileged DB operations; a
         # caller knowing a different organization's UUID must not consume it.
         objects = conn.execute(

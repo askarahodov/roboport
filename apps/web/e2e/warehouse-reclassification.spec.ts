@@ -77,3 +77,20 @@ test('uncertain approval holds key despite branch change',async({page})=>{
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
+
+test('policy denial on approval removes prior document and source choices',async({page})=>{
+  await page.route('**/warehouse/reclassifications**',route=>route.fulfill(
+    route.request().url().endsWith('/approvals')?
+      {status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'}:
+      {status:201,contentType:'application/json',body:JSON.stringify({documentId:doc})}));
+  await setup(page);
+  await page.getByRole('button',{name:'Создать акт пересортицы'}).click();
+  await expect(page.getByRole('textbox',{name:'UUID акта'})).toHaveValue(doc);
+  await page.getByRole('button',{name:'Утвердить пересортицу'}).click();
+  await expect(page.getByRole('status')).toContainText('Нет полномочий');
+  await expect(page.getByRole('textbox',{name:'UUID акта'})).toHaveValue('');
+  await expect(page.getByRole('textbox',{name:'UUID исходной партии'})).toHaveValue('');
+  await expect(page.getByRole('textbox',{name:'UUID целевой партии'})).toHaveValue('');
+  await expect(page.getByRole('button',{name:'Утвердить пересортицу'})).toBeDisabled();
+  await expect(page.getByText('UUID утверждения:')).toHaveCount(0);
+});

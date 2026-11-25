@@ -6,6 +6,7 @@ physical lot/work-order/interbranch ledger unit in the same PG transaction.
 from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 
@@ -22,6 +23,12 @@ def move_lot_serial(conn: psycopg.Connection, token: str,
             not isinstance(destination_lot_id,UUID) or work_order_id is not None))):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
+        # Check source scope before looking up a replay or serial identity.
+        # A denied actor must not distinguish an existing conflicting key.
+        if not organization_role_allows(conn,token,organization_id,
+                "WAREHOUSE",location_id,for_mutation=True):
+            raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,"EDIT")
         # A transfer changes the current branch. Replays must still verify original
         # branch and both live grants, without attempting a second physical transfer.
         prior=conn.execute("""SELECT m.id,m.serial_id,m.action,m.work_order_id,
@@ -34,15 +41,16 @@ def move_lot_serial(conn: psycopg.Connection, token: str,
         if prior is not None:
             if prior[6]!=organization_id or prior[7]!=location_id:
                 raise AutoStockDenied("FORBIDDEN")
-            if (prior[1]!=serial_id or prior[2]!=action
-                or prior[3]!=work_order_id or prior[4]!=destination_lot_id):
-                raise AutoStockConflict("CONFLICT")
-            for loc in (prior[7],) if prior[8] is None else (prior[7],prior[8]):
+            for loc in sorted({v for v in (prior[7],prior[8]) if v is not None},key=str):
                 if not organization_role_allows(conn,token,organization_id,
                      "WAREHOUSE",loc,for_mutation=True):
                     raise AutoStockDenied("FORBIDDEN")
+                require_full_stock_history(conn,token,organization_id,loc,"EDIT")
             if session_subject(conn,token,for_mutation=True)!=prior[5]:
                 raise AutoStockDenied("FORBIDDEN")
+            if (prior[1]!=serial_id or prior[2]!=action
+                or prior[3]!=work_order_id or prior[4]!=destination_lot_id):
+                raise AutoStockConflict("CONFLICT")
             return prior[0]
         source=conn.execute("""SELECT lot_id,sku_id,location_id,state
            FROM auto_stock_serial_current WHERE serial_id=%s AND organization_id=%s""",
@@ -56,10 +64,11 @@ def move_lot_serial(conn: psycopg.Connection, token: str,
                (destination_lot_id,organization_id)).fetchone()
             if dest is None or dest[1]==source[2]:
                 raise AutoStockDenied("FORBIDDEN")
-        for loc in (source[2],) if dest is None else (source[2],dest[1]):
+        for loc in sorted({source[2]} if dest is None else {source[2],dest[1]},key=str):
             if not organization_role_allows(conn,token,organization_id,
                     "WAREHOUSE",loc,for_mutation=True):
                 raise AutoStockDenied("FORBIDDEN")
+            require_full_stock_history(conn,token,organization_id,loc,"EDIT")
         ids=[source[1]] if dest is None else [source[1],dest[0]]
         conn.execute("""SELECT id FROM auto_stock_sku WHERE id=ANY(%s::uuid[])
             ORDER BY id FOR UPDATE""",(ids,)).fetchall()

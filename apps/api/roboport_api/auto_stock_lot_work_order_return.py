@@ -2,6 +2,7 @@
 from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 
 
@@ -17,6 +18,7 @@ def return_work_order_to_lot(conn: psycopg.Connection, token: str,
         if not organization_role_allows(conn,token,organization_id,
                 "WAREHOUSE",location_id,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,"EDIT")
         row=conn.execute("""
             SELECT w.id FROM auto_work_order w
             JOIN auto_stock_lot l ON l.organization_id=w.organization_id

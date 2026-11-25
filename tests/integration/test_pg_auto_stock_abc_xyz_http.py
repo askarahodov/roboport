@@ -232,10 +232,18 @@ def test_capacity_probe_rejects_before_event_aggregation(monkeypatch):
 
     monkeypatch.setattr(module,"organization_role_allows",lambda *a,**k:True)
     monkeypatch.setattr(module,"MAX_SKUS",2)
+    org,loc=uuid4(),uuid4()
     conn=ProbeConnection()
     months=last_months()
+    checked=[]
+    def policy(c,token,o,l):
+        assert (c,token,o,l)==(conn,"synthetic-test-token",org,loc)
+        assert not conn.queries  # policy must precede the capacity probe
+        checked.append(True)
+    monkeypatch.setattr(module,"require_full_stock_history",policy)
     with pytest.raises(module.StockReportCapacity):
-        module.stock_abc_xyz(conn,"",uuid4(),uuid4(),months[0],months[-1])
+        module.stock_abc_xyz(conn,"synthetic-test-token",org,loc,months[0],months[-1])
+    assert checked==[True]
     assert len(conn.queries)==2
     assert not any("auto_stock_event" in query for query in conn.queries)
 

@@ -18,12 +18,21 @@ export function WarehouseWorkOrders(){
   const [eventId,setEventId]=React.useState('');
   const context=React.useRef({org:'',location:''});
   context.current={org:org.trim(),location:location.trim()};
-  React.useEffect(()=>{setMessage('');setEventId('');},[org,location]);
+  React.useEffect(()=>{
+    setMessage('');setEventId('');setIssueId('');
+    if(!pending&&!serialPending&&!busy){setOrder('');setLot('');setQuantity('1');setSerialNumber('');}
+  },[org,location]);
+  function deny(retry?:Pending,serialRetry?:{org:string;location:string;body:string;key:string}){
+    setEventId('');setIssueId('');setOrder('');setLot('');setSerialNumber('');setQuantity('1');
+    // Не теряем ключ, если предыдущий результат уже был неизвестен.
+    setPending(retry??null);setSerialPending(serialRetry??null);
+    setMessage('Нет доступа к операции или синтетический API отключён.');
+  }
   const valid=[org,location,order,lot].every(x=>uuid.test(x.trim()))&&
     /^[1-9][0-9]*$/.test(quantity)&&Number.isSafeInteger(Number(quantity))&&
     Number(quantity)<=1_000_000_000;
   async function submit(action:Action,retry?:Pending){
-    if(busy||(!retry&&(!(action==='acknowledge'?uuid.test(org.trim())&&uuid.test(location.trim())&&uuid.test(issueId.trim()):valid)||pending)))return;
+    if(busy||serialPending||(!retry&&(!(action==='acknowledge'?uuid.test(org.trim())&&uuid.test(location.trim())&&uuid.test(issueId.trim()):valid)||pending)))return;
     const snap=retry??{
       action,org:org.trim(),location:location.trim(),
       url:'/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
@@ -35,23 +44,25 @@ export function WarehouseWorkOrders(){
         lotId:lot.trim(),quantity:Number(quantity)}),
     };
     if(snap.org!==context.current.org||snap.location!==context.current.location)return;
-    setBusy(true);setMessage('');setEventId('');
+    setPending(snap);setBusy(true);setMessage('');setEventId('');
     try{
       const csrfResponse=await fetch('/api/v1/auth/csrf',{
         method:'POST',credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(csrfResponse.status)){deny(retry);return;}
       if(!csrfResponse.ok)throw new Error('csrf unavailable');
       const token:unknown=await csrfResponse.json();
       if(!token||typeof token!=='object'||!('csrfToken' in token)||
         typeof token.csrfToken!=='string')throw new Error('invalid csrf');
+      if(snap.org!==context.current.org||snap.location!==context.current.location)throw new Error('scope changed');
       const response=await fetch(snap.url,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':token.csrfToken,
           'Idempotency-Key':snap.key},body:snap.body});
-      if(snap.org!==context.current.org||snap.location!==context.current.location)return;
+      if([401,403,404].includes(response.status)){deny(retry);return;}
+      if(snap.org!==context.current.org||snap.location!==context.current.location)throw new Error('scope changed');
       if(response.status>=500)throw new Error('uncertain server response');
       if(!response.ok){
         setPending(null);
         setMessage(response.status===409?'Конфликт резерва, партии или ранее выполненной операции (409).':
-          [401,403,404].includes(response.status)?'Нет доступа к операции или синтетический API отключён.':
           'Некорректный запрос ('+response.status+').');
         return;
       }
@@ -60,6 +71,7 @@ export function WarehouseWorkOrders(){
       if(!result||typeof result!=='object'||!(field in result)||
         typeof (result as Record<string,unknown>)[field]!=='string'||
         !uuid.test((result as Record<string,string>)[field]))throw new Error('invalid response');
+      if(snap.org!==context.current.org||snap.location!==context.current.location)throw new Error('scope changed');
       setEventId((result as Record<string,string>)[field]);
       if(snap.action==='issue')setIssueId((result as Record<string,string>)[field]);
       setPending(null);
@@ -67,14 +79,12 @@ export function WarehouseWorkOrders(){
         snap.action==='return'?'Возврат в исходную партию проведён в складском журнале.':
         'Механик подтвердил получение ранее выданной партии.');
     }catch{
-      if(snap.org===context.current.org&&snap.location===context.current.location){
-        setPending(snap);
-        setMessage('Неизвестный результат. Повторите с прежним ключом; не создавайте новую операцию.');
-      }
+      setPending(snap);
+      setMessage('Неизвестный результат. Повторите с прежним ключом; не создавайте новую операцию.');
     }finally{setBusy(false);}
   }
   async function registerSerial(retry?:{org:string;location:string;body:string;key:string}){
-    if(busy||(!retry&&serialPending))return;
+    if(busy||pending||(!retry&&serialPending))return;
     const snap=retry??{org:org.trim(),location:location.trim(),
       body:JSON.stringify({locationId:location.trim(),lotId:lot.trim(),serialNumber}),
       key:crypto.randomUUID()};
@@ -82,14 +92,18 @@ export function WarehouseWorkOrders(){
     setSerialPending(snap);setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(csrf.status)){deny(undefined,retry);return;}
       if(!csrf.ok)throw new Error('csrf');
       const token:unknown=await csrf.json();
       if(!token||typeof token!=='object'||!('csrfToken' in token)||
         typeof token.csrfToken!=='string')throw new Error('csrf');
+      if(snap.org!==context.current.org||snap.location!==context.current.location)throw new Error('scope changed');
       const result=await fetch('/api/v1/dev/auto/organizations/'+encodeURIComponent(snap.org)+
         '/warehouse/serials',{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':token.csrfToken,
           'Idempotency-Key':snap.key},body:snap.body});
+      if([401,403,404].includes(result.status)){deny(undefined,retry);return;}
+      if(snap.org!==context.current.org||snap.location!==context.current.location)throw new Error('scope changed');
       if(result.status>=500)throw new Error('unknown');
       if(!result.ok){
         setSerialPending(null);setMessage(result.status===409?
@@ -99,6 +113,7 @@ export function WarehouseWorkOrders(){
       const body:unknown=await result.json();
       if(!body||typeof body!=='object'||!('serialId' in body)||
         typeof body.serialId!=='string'||!uuid.test(body.serialId))throw new Error('response');
+      if(snap.org!==context.current.org||snap.location!==context.current.location)throw new Error('scope changed');
       setSerialPending(null);setEventId(body.serialId);
       setMessage('Серийный номер зарегистрирован за партией.');
     }catch{
@@ -117,21 +132,21 @@ export function WarehouseWorkOrders(){
     <label>Количество <input aria-label="Количество" disabled={!!pending||busy} type="number" min="1" max="1000000000"
       step="1" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label>
     <div>
-      <button type="button" disabled={!valid||busy||!!pending} onClick={()=>void submit('issue')}>Выдать из партии</button>
-      <button type="button" disabled={!valid||busy||!!pending} onClick={()=>void submit('return')}>Вернуть в партию</button>
+      <button type="button" disabled={!valid||busy||!!pending||!!serialPending} onClick={()=>void submit('issue')}>Выдать из партии</button>
+      <button type="button" disabled={!valid||busy||!!pending||!!serialPending} onClick={()=>void submit('return')}>Вернуть в партию</button>
     </div>
     <section aria-label="Подтверждение механиком">
       <h2>Подтверждение получения (MECHANIC)</h2>
       <p>Механик входит под собственной сессией и подтверждает уже проведённую выдачу по её UUID.</p>
       <label>UUID выдачи <input aria-label="UUID выдачи" disabled={!!pending||busy}
         value={issueId} onChange={e=>setIssueId(e.target.value)}/></label>
-      <button type="button" disabled={busy||!!pending||!uuid.test(org.trim())||
+      <button type="button" disabled={busy||!!pending||!!serialPending||!uuid.test(org.trim())||
         !uuid.test(location.trim())||!uuid.test(issueId.trim())}
         onClick={()=>void submit('acknowledge')}>Подтвердить получение</button>
     </section>
     <section aria-label="Регистрация серийного номера">
       <h2>Серийный номер партии (dev)</h2>
-      <p>Регистрация уникального номера за партией; движения отдельных экземпляров пока не реализованы.</p>
+      <p>Регистрация уникального номера за партией; выдача, возврат и перенос отдельных экземпляров — на экране «Движения серийных деталей».</p>
       <label>Серийный номер <input aria-label="Серийный номер" value={serialNumber}
         disabled={busy||!!serialPending} onChange={e=>setSerialNumber(e.target.value)}/></label>
       <button type="button" disabled={busy||!!serialPending||!!pending||

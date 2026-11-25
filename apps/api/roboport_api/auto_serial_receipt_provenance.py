@@ -34,11 +34,11 @@ class ApproveBody(BaseModel):
     requestKey:UUID
 
 
-def _authority(db,token,org,loc,role):
+def _authority(db,token,org,loc,role,*capabilities):
     if not organization_role_allows(db,token,org,role,loc,for_mutation=True):
         raise Denied()
     try:
-        for cap in ("READ","PRICE_PURCHASE"):
+        for cap in ("READ","PRICE_PURCHASE",*capabilities):
             if require_document_access(db,token,org,loc,("MANAGER","WAREHOUSE"),
                                        "SUPPLIER_ORDER",cap) is not None:
                 raise Denied()
@@ -76,16 +76,7 @@ def list_links(db,token,org,loc):
 
 def propose(db,token,org,loc,serial,receipt,key):
     with db.transaction():
-        actor=_authority(db,token,org,loc,"WAREHOUSE")
-        # All checks execute again on retry; no pre-revocation replay leak.
-        prior=db.execute("""
-          SELECT p.id,p.serial_id,p.receipt_id,p.proposed_by
-          FROM auto_stock_serial_receipt_assertion p WHERE p.request_key=%s
-        """,(key,)).fetchone()
-        if prior:
-            if prior[1:]!=(serial,receipt,actor):
-                raise Conflict()
-            return {"assertionId":str(prior[0]),"replayed":True}
+        actor=_authority(db,token,org,loc,"WAREHOUSE","CREATE")
         scope=db.execute("""
           SELECT s.id FROM auto_stock_serial s
           JOIN auto_stock_lot l ON l.id=s.lot_id
@@ -99,6 +90,21 @@ def propose(db,token,org,loc,serial,receipt,key):
         """,(receipt,serial,org,loc)).fetchone()
         if not scope:
             raise Denied()
+        # Verify original lot/receipt scope before looking up any replay.
+        # A key never permits disclosure in a different authorized branch.
+        prior=db.execute("""
+          SELECT p.id,p.serial_id,p.receipt_id,p.proposed_by,
+                 d.organization_id,d.location_id
+          FROM auto_stock_serial_receipt_assertion p
+          JOIN auto_stock_receipt_document d ON d.id=p.receipt_id
+          WHERE p.request_key=%s
+        """,(key,)).fetchone()
+        if prior:
+            if prior[4:]!=(org,loc):
+                raise Denied()
+            if prior[1:4]!=(serial,receipt,actor):
+                raise Conflict()
+            return {"assertionId":str(prior[0]),"replayed":True}
         try:
             with db.transaction():
                 db.execute("SELECT set_config('roboport.serial_receipt_actor',%s,true)",(str(actor),))
@@ -118,7 +124,7 @@ def propose(db,token,org,loc,serial,receipt,key):
 
 def approve(db,token,org,loc,assertion,key):
     with db.transaction():
-        actor=_authority(db,token,org,loc,"MANAGER")
+        actor=_authority(db,token,org,loc,"MANAGER","CLOSE")
         row=db.execute("""
           SELECT p.id,p.proposed_by,a.id,a.approved_by,a.request_key
           FROM auto_stock_serial_receipt_assertion p

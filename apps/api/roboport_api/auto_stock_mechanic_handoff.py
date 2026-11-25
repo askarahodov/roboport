@@ -2,8 +2,23 @@
 from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
+
+
+def require_mechanic_handoff_policy(conn,token,organization_id,location_id,order):
+    """Shared live policy for a handoff, including execution API replay.
+
+    Caller holds a transaction and has checked the mechanic role and scope.
+    """
+    try:
+        require_document_access(conn,token,organization_id,location_id,
+            ("INTAKE","MECHANIC","MANAGER"),"INTAKE_ACT","READ",order=order)
+        require_document_access(conn,token,organization_id,location_id,
+            ("MECHANIC",),"INTAKE_ACT","WRITE",order=order)
+    except DocumentPolicyDenied:
+        raise AutoStockDenied("FORBIDDEN") from None
 
 
 def acknowledge_mechanic_handoff(conn: psycopg.Connection,token: str,
@@ -16,7 +31,7 @@ def acknowledge_mechanic_handoff(conn: psycopg.Connection,token: str,
         if not organization_role_allows(conn,token,organization_id,"MECHANIC",
                 location_id,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
-        row=conn.execute("""SELECT i.id FROM auto_stock_lot_work_order_issue i
+        row=conn.execute("""SELECT i.id,w.id FROM auto_stock_lot_work_order_issue i
           JOIN auto_work_order w ON w.id=i.work_order_id
           JOIN auto_stock_lot l ON l.id=i.lot_id
           WHERE i.id=%s AND w.organization_id=%s AND w.location_id=%s
@@ -24,6 +39,10 @@ def acknowledge_mechanic_handoff(conn: psycopg.Connection,token: str,
           FOR SHARE OF i,w,l""",(issue_id,organization_id,location_id)).fetchone()
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
+        # Подтверждение механика относится к наряду, не к закупочной цене.
+        # Базовая роль MECHANIC обязательна; READ всех применимых ролей и
+        # WRITE механика проверяются также перед повтором.
+        require_mechanic_handoff_policy(conn,token,organization_id,location_id,row[1])
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:
             raise AutoStockDenied("FORBIDDEN")

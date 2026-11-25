@@ -162,3 +162,22 @@ test('in-flight serial scope edit retains original request key for retry',async(
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBe(keys[1]);
 });
+
+test('warehouse policy denial after issue clears receipt, form and prevents new action',async({page})=>{
+  let denied=false;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:denied?403:200,contentType:'application/json',
+    body:JSON.stringify(denied?{code:'FORBIDDEN'}:{csrfToken:'csrf'})}));
+  await page.route('**/warehouse/work-orders/issue',route=>route.fulfill({
+    status:201,contentType:'application/json',body:JSON.stringify({issueId:issued})}));
+  await fill(page);
+  await page.getByRole('button',{name:'Выдать из партии'}).click();
+  await expect(page.getByRole('textbox',{name:'UUID выдачи'})).toHaveValue(issued);
+  denied=true;
+  await page.getByRole('button',{name:'Вернуть в партию'}).click();
+  await expect(page.getByRole('status')).toContainText('Нет доступа');
+  await expect(page.getByRole('textbox',{name:'UUID выдачи'})).toHaveValue('');
+  await expect(page.getByRole('textbox',{name:'UUID партии'})).toHaveValue('');
+  await expect(page.getByRole('button',{name:'Выдать из партии'})).toBeDisabled();
+  await expect(page.getByText('Идентификатор события:')).toHaveCount(0);
+});

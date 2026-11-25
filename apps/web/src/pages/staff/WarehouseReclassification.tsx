@@ -18,6 +18,17 @@ export function WarehouseReclassification(){
   const [message,setMessage]=React.useState('');
   const current=React.useRef({organization:'',location:''});
   current.current={organization:organization.trim(),location:location.trim()};
+  function deny(retry?:Pending){
+    setSource('');setDestination('');setQuantity('1');setReason('');
+    setDocument('');setApproval('');setPending(retry??null);
+    setMessage('Нет полномочий или синтетический API отключён.');
+  }
+  const sameScope=(snap:Pending)=>snap.organization===current.current.organization&&
+    snap.location===current.current.location;
+  React.useEffect(()=>{
+    setApproval('');setMessage('');
+    if(!pending&&!busy){setSource('');setDestination('');setDocument('');setReason('');setQuantity('1');}
+  },[organization,location]);
   const validScope=uuid.test(organization.trim())&&uuid.test(location.trim());
   const validDraft=validScope&&uuid.test(source.trim())&&uuid.test(destination.trim())&&
     source.trim()!==destination.trim()&&/^[1-9][0-9]*$/.test(quantity)&&
@@ -44,20 +55,23 @@ export function WarehouseReclassification(){
     try{
       const csrfResponse=await fetch('/api/v1/auth/csrf',{
         method:'POST',credentials:'include',cache:'no-store'});
+      if([401,403,404].includes(csrfResponse.status)){deny(retry);return;}
       if(!csrfResponse.ok)throw new Error('csrf');
       const token:unknown=await csrfResponse.json();
       if(!token||typeof token!=='object'||!('csrfToken' in token)||
          typeof token.csrfToken!=='string')throw new Error('csrf');
+      if(!sameScope(snap))throw new Error('scope changed');
       const response=await fetch(snap.url,{
         method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','Idempotency-Key':snap.key,
           'X-CSRF-Token':token.csrfToken},body:snap.body,
       });
+      if([401,403,404].includes(response.status)){deny(retry);return;}
+      if(!sameScope(snap))throw new Error('scope changed');
       if(response.status>=500)throw new Error('unknown');
       if(!response.ok){
         setPending(null);
         setMessage(response.status===409?'Конфликт документа, партии или остатков (409).':
-          [401,403,404].includes(response.status)?'Нет полномочий или синтетический API отключён.':
           'Некорректные данные ('+response.status+').');
         return;
       }
@@ -66,6 +80,7 @@ export function WarehouseReclassification(){
       if(!data||typeof data!=='object'||!(field in data)||
          typeof (data as Record<string,unknown>)[field]!=='string'||
          !uuid.test((data as Record<string,string>)[field]))throw new Error('response');
+      if(!sameScope(snap))throw new Error('scope changed');
       if(snap.operation==='draft')setDocument((data as Record<string,string>)[field]);
       else setApproval((data as Record<string,string>)[field]);
       setPending(null);

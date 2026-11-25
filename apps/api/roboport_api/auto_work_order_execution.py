@@ -5,7 +5,8 @@ from .auto_workshop_qc import _actor_and_order, _snapshot, InspectionDenied
 from .auto_work_order_estimate import _estimate_state
 from .auto_work_order_additional import _state as _extra_state
 from .auto_stock_lot_work_order_issue import issue_work_order_from_lot
-from .auto_stock_mechanic_handoff import acknowledge_mechanic_handoff
+from .auto_stock_mechanic_handoff import acknowledge_mechanic_handoff, require_mechanic_handoff_policy
+from .auto_purchase_document_policy import require_full_stock_history
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 from .auto_org_authority import organization_role_allows
 from .auto_document_access import has_document_access
@@ -206,6 +207,11 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         _scope(conn,token,org,loc,order,("WAREHOUSE",))
+        # Replays must pass the same live policy before returning an ID or state.
+        try:
+            require_full_stock_history(conn,token,org,loc,"EDIT")
+        except AutoStockDenied:
+            raise ExecutionDenied("FORBIDDEN") from None
         prior=conn.execute("""
            SELECT id,work_order_id,lot_id,quantity
            FROM auto_stock_lot_work_order_issue WHERE request_id=%s
@@ -282,6 +288,10 @@ def receive_material(conn,token,org,loc,order,issue_id,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_scope(conn,token,org,loc,order,("MECHANIC",))
+        try:
+            require_mechanic_handoff_policy(conn,token,org,loc,order)
+        except AutoStockDenied:
+            raise ExecutionDenied("FORBIDDEN") from None
         match=conn.execute("""
            SELECT id FROM auto_stock_lot_work_order_issue
            WHERE id=%s AND work_order_id=%s

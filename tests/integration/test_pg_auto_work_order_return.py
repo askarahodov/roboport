@@ -146,3 +146,41 @@ def test_transaction_rollback_keeps_pairing_and_stock_unmodified():
             "SELECT count(*) FROM auto_work_order_stock_event WHERE work_order_id=%s AND action='RETURN'",
             (order,),
         ).fetchone()[0]==0
+
+
+def test_aggregate_return_policy_deny_cutoff_and_exact_replay(monkeypatch):
+    from test_pg_auto_document_access_http import admin
+    from test_pg_auto_stock_order_serial_policy_http import policy
+    from test_pg_auto_work_order_estimate_http import api
+    d=_scenario()
+    http=api(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        org,loc,bay=_org_and_bay(db)
+        order,_=work_order(db,d,org,loc,bay)
+        item=sku(db,org,loc)
+        grant(db,d["intake"],org,loc)
+        admin(db,org,d["other"])
+        record(db,item,"RECEIPT",2)
+        act(db,d,org,loc,order,item,"RESERVE",2)
+        act(db,d,org,loc,order,item,"ISSUE",2)
+    key=uuid4()
+    policy(http,d,org,loc,"WAREHOUSE","EDIT")
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(AutoStockDenied):
+            ret(db,d,org,loc,order,item,1,key)
+        assert balance(db,item)==(0,0)
+    policy(http,d,org,loc,"WAREHOUSE","EDIT",True)
+    with psycopg.connect(DSN) as db:
+        receipt=ret(db,d,org,loc,order,item,1,key)
+    policy(http,d,org,loc,"WAREHOUSE","READ",True,"2099-01-01T00:00:00Z")
+    with psycopg.connect(DSN) as db:
+        with pytest.raises(AutoStockDenied):
+            ret(db,d,org,loc,order,item,1,key)
+        with pytest.raises(AutoStockDenied):
+            ret(db,d,org,loc,order,item,1)
+        assert balance(db,item)==(1,0)
+    policy(http,d,org,loc,"WAREHOUSE","READ",True)
+    with psycopg.connect(DSN) as db:
+        assert ret(db,d,org,loc,order,item,1,key)==receipt
+        assert balance(db,item)==(1,0)
+        assert db.execute("SELECT count(*) FROM auto_work_order_stock_event WHERE work_order_id=%s AND action='RETURN'",(order,)).fetchone()==(1,)

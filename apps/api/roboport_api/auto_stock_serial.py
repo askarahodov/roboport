@@ -2,6 +2,7 @@
 from uuid import UUID
 import psycopg
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 
@@ -20,6 +21,7 @@ def register_lot_serial(conn: psycopg.Connection, token: str,
         if not organization_role_allows(conn,token,organization_id,
                 "WAREHOUSE",location_id,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,"CREATE")
         lot=conn.execute("""SELECT id FROM auto_stock_lot WHERE id=%s
           AND organization_id=%s AND location_id=%s FOR SHARE""",
           (lot_id,organization_id,location_id)).fetchone()

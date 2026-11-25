@@ -17,7 +17,9 @@ from fastapi import APIRouter,Request
 from fastapi.responses import JSONResponse,Response
 
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .auto_vehicle_claim_http import _request_dsn,_response
+from .auto_stock_service import AutoStockDenied
 
 router=APIRouter(include_in_schema=False)
 PAGE_SIZE=25
@@ -87,6 +89,12 @@ def stock_abc_xyz(conn:psycopg.Connection,token:str,org:UUID,loc:UUID,
             conn,token,org,"MANAGER",loc,for_mutation=True,
         ):
             raise StockReportDenied("FORBIDDEN")
+        # Even zero-use SKUs and monthly totals describe the whole requested
+        # population. Do not expose a partial historical report as complete.
+        try:
+            require_full_stock_history(conn,token,org,loc)
+        except AutoStockDenied:
+            raise StockReportDenied("FORBIDDEN") from None
         branch=conn.execute(
             """SELECT timezone_name FROM auto_service_location
                WHERE id=%s AND organization_id=%s AND disabled_at IS NULL
