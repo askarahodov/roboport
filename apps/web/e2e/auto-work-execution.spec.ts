@@ -232,3 +232,47 @@ test('execution denies CSRF and clears stale choices; uncertain retry survives r
   await expect(page.getByText('PRIVATE-SYN',{exact:false})).toHaveCount(0);
   expect(posts).toBe(3);
 });
+
+
+test('switching orders in one branch refreshes live assignments without manual reload',async({page})=>{
+  const orderB='77777777-7777-4777-8777-777777777777';
+  const workerA='88888888-8888-4888-8888-888888888888';
+  const workerB='99999999-9999-4999-8999-999999999999';
+  const assignmentA={assignmentId:issue,workOrderId:order,mechanicId:workerA,
+    startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:00:00Z',
+    status:'OFFERED',canRespond:true};
+  const assignmentB={assignmentId:lot,workOrderId:orderB,mechanicId:workerB,
+    startsAt:'2030-01-01T12:00:00Z',endsAt:'2030-01-01T13:00:00Z',
+    status:'OFFERED',canRespond:true};
+  let queueLoads=0;
+  await page.route(root,route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path.endsWith('/assignments')){
+      queueLoads++;
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({items:[assignmentA,assignmentB]})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({status:'IN_PROGRESS',approvedVersion:1,approvedTotalMinor:null,
+        requiredServices:[],labor:[],materials:[],qcStatus:'PENDING_QC',
+        executionId:path.includes(orderB)?orderB:order,syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.goto('/staff/auto-execution');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const input=page.getByRole('textbox',{name:'UUID заказ-наряда'});
+  await input.fill(order);
+  await expect(page.getByText(workerA,{exact:false})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Принять назначение'})).toHaveCount(1);
+  const firstLoads=queueLoads;
+  await input.fill(orderB);
+  await expect(page.getByText(workerB,{exact:false})).toBeVisible();
+  await expect(page.getByText(workerA,{exact:false})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Принять назначение'})).toHaveCount(1);
+  expect(queueLoads).toBeGreaterThan(firstLoads);
+  const secondLoads=queueLoads;
+  await input.fill(order);
+  await expect(page.getByText(workerA,{exact:false})).toBeVisible();
+  await expect(page.getByText(workerB,{exact:false})).toHaveCount(0);
+  expect(queueLoads).toBeGreaterThan(secondLoads);
+});

@@ -99,7 +99,7 @@ export function AutoWorkExecution({lockedScope}:{lockedScope?:{org:string;loc:st
         if(!controller.signal.aborted&&stamp===generation.current)setAssignments(safe);
       }).catch(()=>{});
     return ()=>controller.abort();
-  },[org,loc,valid,revision]);
+  },[scope,org,loc,valid,revision]);
 
   async function act(path:string,body:string){
     if(!ready||busy)return;
