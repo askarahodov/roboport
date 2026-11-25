@@ -162,3 +162,49 @@ def test_disputed_document_never_exports_as_closed_dossier(monkeypatch):
     assert event(http,base,client,act,preview,"CLIENT_DISPUTE").status_code==201
     assert http.get(base+"/technical-dossier.zip").status_code==409
     assert http.get(base+"/technical-dossier.zip").json()["code"]=="TECHNICAL_CLOSE_REQUIRED"
+
+
+def test_handover_projection_rechecks_all_source_families_and_owner_is_independent(monkeypatch):
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    d,org,loc,order,act,preview=ready(monkeypatch,with_photo=True)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    base=path(org,loc,order)
+    endpoint=base+"/technical-dossier.zip"
+    manager=session(http,d,d["intake"])
+    assert event(http,base,manager,act,preview,"POSTED").status_code==201
+    owner=session(http,d,d["client_a"])
+    assert event(http,base,owner,act,preview,"CLIENT_ACK").status_code==201
+    manager=session(http,d,d["intake"])
+    closing=uuid4()
+    assert event(http,base,manager,act,preview,"CLOSED_TECHNICAL",closing).status_code==201
+    original=http.get(endpoint)
+    assert original.status_code==200
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    def rule(document,cap,allowed,cutoff=None):
+        owner=session(http,d,d["other"])
+        response=set_rule(http,policy_url(org),owner,role="MANAGER",loc=loc,
+                          document=document,cap=cap,allowed=allowed,not_before=cutoff)
+        assert response.status_code==201,response.text
+        return session(http,d,d["intake"])
+    cases=[(kind,"READ",cutoff) for kind in
+           ("INTAKE_ACT","ESTIMATE","SUPPLIER_ORDER","FINANCE")
+           for cutoff in (None,"2099-01-01T00:00:00Z")]
+    cases.extend((kind,"PRICE_SALES",None) for kind in ("ESTIMATE","FINANCE"))
+    for document,cap,cutoff in cases:
+        manager=rule(document,cap,bool(cutoff),cutoff)
+        for result in (http.get(base),http.get(endpoint),
+                       event(http,base,manager,act,preview,"CLOSED_TECHNICAL",closing)):
+            assert result.status_code==403,result.text
+            assert set(result.json())=={"code","requestId"}
+            assert "x-technical-dossier-sha256" not in result.headers
+            assert "no-store" in result.headers["cache-control"]
+        session(http,d,d["client_a"])
+        assert http.get(base).status_code==200
+        assert http.get(endpoint).content==original.content
+        manager=rule(document,cap,True)
+        assert http.get(endpoint).content==original.content
+        assert event(http,base,manager,act,preview,"CLOSED_TECHNICAL",closing).status_code==200
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_order_demo_document_event WHERE work_order_id=%s",(order,)).fetchone()==(3,)
+        assert db.execute("SELECT count(*) FROM auto_order_demo_handover_preview WHERE work_order_id=%s",(order,)).fetchone()==(1,)

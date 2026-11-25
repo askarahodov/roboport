@@ -237,3 +237,35 @@ def test_concurrent_simulated_payments_cannot_overpay(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT COALESCE(SUM(amount_minor),0) FROM auto_order_demo_cash_event
                              WHERE work_order_id=%s""",(order,)).fetchone()[0]==2000
+
+
+def test_simulated_cash_requires_finance_edit_and_rechecks_replay(monkeypatch):
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    d,org,loc,order,*_=ready(monkeypatch,with_material=False)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    base=url(org,loc,order)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    def rule(allowed):
+        owner=session(http,d,d["other"])
+        response=set_rule(http,policy_url(org),owner,role="MANAGER",loc=loc,
+                          document="FINANCE",cap="EDIT",allowed=allowed)
+        assert response.status_code==201,response.text
+        return session(http,d,d["intake"])
+    key=uuid4()
+    body={"kind":"SIM_PAYMENT","amountMinor":2500}
+    manager=rule(False)
+    assert http.get(base).status_code==200
+    assert post(http,base+"/simulated-cash",manager,key,**body).status_code==403
+    manager=rule(True)
+    first=post(http,base+"/simulated-cash",manager,key,**body)
+    assert first.status_code==201,first.text
+    manager=rule(False)
+    denied=post(http,base+"/simulated-cash",manager,key,**body)
+    assert denied.status_code==403,denied.text
+    assert set(denied.json())=={"code","requestId"}
+    manager=rule(True)
+    replay=post(http,base+"/simulated-cash",manager,key,**body)
+    assert replay.status_code==200 and replay.json()["events"]==first.json()["events"]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*),sum(amount_minor) FROM auto_order_demo_cash_event WHERE work_order_id=%s",(order,)).fetchone()==(1,2500)

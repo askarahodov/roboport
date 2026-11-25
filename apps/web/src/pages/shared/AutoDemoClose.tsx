@@ -108,43 +108,64 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
   const [amount,setAmount]=React.useState('');
   const [sku,setSku]=React.useState(''),[qty,setQty]=React.useState('1');
   const scope=[org.trim(),loc.trim(),order.trim()].join(':');
-  const latestScope=React.useRef(scope);
-  latestScope.current=scope;
+  const identity=role+':'+scope;
+  const latestScope=React.useRef(identity);
+  const generation=React.useRef(0);
+  if(latestScope.current!==identity){latestScope.current=identity;generation.current++;}
   const activeDownload=React.useRef<AbortController|null>(null);
   const valid=[org,loc,order].every(x=>uuid.test(x.trim()));
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())
     +'/locations/'+encodeURIComponent(loc.trim())+'/orders/'+encodeURIComponent(order.trim())
     +'/demo-close';
   const ready=status==='ready'&&loaded===scope&&data!==null;
+  function clearSensitive(){
+    setLoaded('');setData(null);setVerifiedDigest('');
+    setAmount('');setSku('');setQty('1');setKind('SIM_PAYMENT');
+  }
+  function deny(){
+    generation.current++;activeDownload.current?.abort();
+    clearSensitive();setStatus('denied');setMessage('');
+  }
   React.useEffect(()=>{
-    setStatus(valid?'loading':'idle');setLoaded('');setData(null);setPending(null);
+    clearSensitive();setPending(null);setMessage('');
+  },[identity]);
+  React.useEffect(()=>{
+    setStatus(valid?'loading':'idle');setLoaded('');setData(null);
     setMessage('');setVerifiedDigest('');
     if(!valid)return;
     const controller=new AbortController();
+    const stamp=generation.current;
     void fetch(base,{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async res=>{
-        if(controller.signal.aborted)return;
-        if([401,403,404].includes(res.status)){setStatus('denied');return;}
+        if(controller.signal.aborted||stamp!==generation.current)return;
+        if([401,403,404].includes(res.status)){deny();return;}
         if(!res.ok)throw Error('unavailable');
         const state=parse(await res.json());
-        if(!controller.signal.aborted){setLoaded(scope);setData(state);setStatus('ready');}
-      }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
+        if(!controller.signal.aborted&&stamp===generation.current){setLoaded(scope);setData(state);setStatus('ready');}
+      }).catch(()=>{if(!controller.signal.aborted&&stamp===generation.current){clearSensitive();setStatus('error');}});
     return ()=>controller.abort();
   },[scope,valid,revision,role]);
 
   async function execute(path:string,body:string){
     if(!ready||busy)return;
+    const stamp=generation.current;
+    const retry=pending!==null;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
+      if(stamp!==generation.current)return;
+      if([401,403,404].includes(csrf.status)){if(!retry)setPending(null);deny();return;}
       if(!csrf.ok)throw Error('csrf');
       const csrfValue:unknown=await csrf.json();
       if(!csrfValue||typeof csrfValue!=='object'||!('csrfToken' in csrfValue)||
         typeof csrfValue.csrfToken!=='string')throw Error('csrf');
+      if(stamp!==generation.current)return;
       const res=await fetch(path,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':csrfValue.csrfToken},body});
+      if(stamp!==generation.current)return;
       if([401,403,404].includes(res.status)){
-        setData(null);setStatus('denied');setPending(null);return;
+        if(!retry)setPending(null);
+        deny();return;
       }
       if(res.status===409||res.status===422){
         setPending(null);setMessage(res.status===409?
@@ -155,8 +176,10 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
       if(!res.ok)throw Error('unknown');
       setPending(null);setRevision(n=>n+1);
     }catch{
-      setPending({path,body});
-      setMessage('Результат неизвестен. Повторите исходный запрос с прежним ключом или перечитайте журнал.');
+      if(stamp===generation.current){
+        setPending({path,body});
+        setMessage('Результат неизвестен. Повторите исходный запрос с прежним ключом или перечитайте журнал.');
+      }
     }finally{setBusy(false);}
   }
 
@@ -166,6 +189,7 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
   async function downloadTechnicalDossier(){
     if(!ready||busy||workflow?.status!=='CLOSED_TECHNICAL')return;
     const controller=new AbortController();
+    const stamp=generation.current;
     activeDownload.current=controller;
     setBusy(true);setMessage('');setVerifiedDigest('');
     let integrityFailed=false;
@@ -173,12 +197,12 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
       const response=await fetch(base+'/technical-dossier.zip',{
         credentials:'include',cache:'no-store',signal:controller.signal,
       });
-      if(controller.signal.aborted||latestScope.current!==scope)return;
+      if(controller.signal.aborted||stamp!==generation.current)return;
       if([401,403,404].includes(response.status)){
-        setData(null);setStatus('denied');setPending(null);return;
+        deny();return;
       }
       if(response.status===409){
-        setData(null);setStatus('error');
+        clearSensitive();setStatus('error');
         setMessage('Сервер отклонил целостность закрытого пакета. Обратитесь к администратору.');
         return;
       }
@@ -193,7 +217,7 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
       const payload=await response.blob();
       if(payload.size===0||payload.size>1024*1024)throw new Error('archive size');
       const hashBytes=await crypto.subtle.digest('SHA-256',await payload.arrayBuffer());
-      if(controller.signal.aborted||latestScope.current!==scope)return;
+      if(controller.signal.aborted||stamp!==generation.current)return;
       const actual=Array.from(new Uint8Array(hashBytes),b=>b.toString(16).padStart(2,'0')).join('');
       if(actual!==expected){integrityFailed=true;throw new Error('digest mismatch');}
       const url=URL.createObjectURL(payload);
@@ -205,7 +229,7 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
       }finally{URL.revokeObjectURL(url);}
       setVerifiedDigest(expected);
     }catch{
-      if(!controller.signal.aborted&&latestScope.current===scope){
+      if(!controller.signal.aborted&&stamp===generation.current){
         setMessage(integrityFailed?
           'Архив не сохранён: контрольная сумма SHA-256 отсутствует или не совпадает. Обратитесь к администратору.':
           'Не удалось скачать и проверить технический архив. Перечитайте статус и повторите.');
@@ -246,7 +270,8 @@ export function AutoDemoClose({role,lockedScope}:{role:'staff'|'client';lockedSc
       value={order} readOnly={lockedScope!==undefined} onChange={e=>setOrder(e.target.value)}/></label>
     {status==='idle'&&<p>Введите три UUID для проверки заказа.</p>}
     {status==='loading'&&<p role="status">Загрузка технической сверки…</p>}
-    {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
+    {status==='denied'&&<><p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>
+      <button type="button" disabled={busy} onClick={()=>setRevision(n=>n+1)}>Проверить доступ заново</button></>}
     {status==='error'&&<><p role="alert">Не удалось загрузить пакет.</p>
       <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить загрузку</button></>}
     {ready&&data&&<>
