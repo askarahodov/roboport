@@ -7,6 +7,20 @@ from .session_lookup import session_subject
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 
 
+def require_mechanic_handoff_policy(conn,token,organization_id,location_id,order):
+    """Shared live policy for a handoff, including execution API replay.
+
+    Caller holds a transaction and has checked the mechanic role and scope.
+    """
+    try:
+        require_document_access(conn,token,organization_id,location_id,
+            ("INTAKE","MECHANIC","MANAGER"),"INTAKE_ACT","READ",order=order)
+        require_document_access(conn,token,organization_id,location_id,
+            ("MECHANIC",),"INTAKE_ACT","WRITE",order=order)
+    except DocumentPolicyDenied:
+        raise AutoStockDenied("FORBIDDEN") from None
+
+
 def acknowledge_mechanic_handoff(conn: psycopg.Connection,token: str,
     organization_id: UUID, location_id: UUID, issue_id: UUID,
     request_id: UUID) -> UUID:
@@ -28,13 +42,7 @@ def acknowledge_mechanic_handoff(conn: psycopg.Connection,token: str,
         # Подтверждение механика относится к наряду, не к закупочной цене.
         # Базовая роль MECHANIC обязательна; READ всех применимых ролей и
         # WRITE механика проверяются также перед повтором.
-        try:
-            require_document_access(conn,token,organization_id,location_id,
-                ("INTAKE","MECHANIC","MANAGER"),"INTAKE_ACT","READ",order=row[1])
-            require_document_access(conn,token,organization_id,location_id,
-                ("MECHANIC",),"INTAKE_ACT","WRITE",order=row[1])
-        except DocumentPolicyDenied:
-            raise AutoStockDenied("FORBIDDEN") from None
+        require_mechanic_handoff_policy(conn,token,organization_id,location_id,row[1])
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:
             raise AutoStockDenied("FORBIDDEN")

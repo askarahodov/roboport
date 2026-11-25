@@ -376,3 +376,66 @@ def test_concurrent_start_serializes_and_only_one_execution(monkeypatch):
             return "CONFLICT"
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(attempt,range(2)))==["CONFLICT","STARTED"]
+
+
+def test_execution_material_replay_obeys_live_document_policy(monkeypatch):
+    """Direct and wrapped endpoints cannot return a receipt after policy revoke."""
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    d,org,loc,order,_,item,lot=fixture(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    http=TestClient(app,base_url="https://127.0.0.1")
+    base=url(org,loc,order)
+    warehouse=d["intake"]
+    mechanic=d["manager"]
+
+    def rule(role,document,cap,allowed=False,cutoff=None):
+        headers=session(http,d,d["other"])
+        response=set_rule(http,policy_url(org),headers,role=role,loc=loc,
+                          document=document,cap=cap,allowed=allowed,not_before=cutoff)
+        assert response.status_code==201,response.text
+
+    def attempt(actor,path,key,**body):
+        return post(http,base+path,session(http,d,actor),key,**body)
+
+    def denied(actor,path,key,**body):
+        result=attempt(actor,path,key,**body)
+        assert result.status_code==403,result.text
+        assert result.headers["cache-control"]=="no-store"
+        assert set(result.json())=={"code","requestId"}
+
+    assert attempt(warehouse,"/start",uuid4()).status_code==201
+    issue_key=uuid4()
+    issue_body={"lotId":str(lot),"quantity":1}
+    rule("WAREHOUSE","SUPPLIER_ORDER","EDIT")
+    denied(warehouse,"/materials/issue",issue_key,**issue_body)
+    rule("WAREHOUSE","SUPPLIER_ORDER","EDIT",True)
+    issued=attempt(warehouse,"/materials/issue",issue_key,**issue_body)
+    assert issued.status_code==201,issued.text
+    issue_id=issued.json()["issueId"]
+    for cap,cutoff in (("EDIT",None),("READ","2099-01-01T00:00:00Z")):
+        rule("WAREHOUSE","SUPPLIER_ORDER",cap,bool(cutoff),cutoff)
+        denied(warehouse,"/materials/issue",issue_key,**issue_body)
+        denied(warehouse,"/materials/issue",issue_key,lotId=str(lot),quantity=2)
+        rule("WAREHOUSE","SUPPLIER_ORDER",cap,True)
+    replay=attempt(warehouse,"/materials/issue",issue_key,**issue_body)
+    assert replay.status_code==200 and replay.json()["issueId"]==issue_id
+
+    receipt_key=uuid4()
+    receipt_body={"issueId":issue_id}
+    rule("MECHANIC","INTAKE_ACT","WRITE")
+    denied(mechanic,"/materials/receive",receipt_key,**receipt_body)
+    rule("MECHANIC","INTAKE_ACT","WRITE",True)
+    receipt=attempt(mechanic,"/materials/receive",receipt_key,**receipt_body)
+    assert receipt.status_code==201,receipt.text
+    for cap,cutoff in (("WRITE",None),("READ","2099-01-01T00:00:00Z")):
+        rule("MECHANIC","INTAKE_ACT",cap,bool(cutoff),cutoff)
+        denied(mechanic,"/materials/receive",receipt_key,**receipt_body)
+        denied(mechanic,"/materials/receive",uuid4(),**receipt_body)
+        rule("MECHANIC","INTAKE_ACT",cap,True)
+    replay=attempt(mechanic,"/materials/receive",receipt_key,**receipt_body)
+    assert replay.status_code==200 and replay.json()["handoffId"]==receipt.json()["handoffId"]
+    with psycopg.connect(DSN) as db:
+        assert balance(db,item)==(1,1)
+        assert db.execute("SELECT count(*) FROM auto_stock_lot_work_order_issue WHERE work_order_id=%s",(order,)).fetchone()==(1,)
+        assert db.execute("SELECT count(*) FROM auto_stock_mechanic_handoff WHERE issue_id=%s",(issue_id,)).fetchone()==(1,)
