@@ -383,11 +383,12 @@ export function AutoCrmLeads(){
     {status==='loading'&&<p role="status">Чтение обращений…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
     {status==='error'&&<p role="alert">Не удалось загрузить обращения. Обновите список с первой страницы.</p>}
-    {status==='ready'&&loadedScope===scope&&<>
+    {valid&&((status==='ready'&&loadedScope===scope)||status==='error')&&
       <button type="button" disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null}
         onClick={()=>{setLeadCursor(null);setLeadHistory([]);setLeadNext(null);
           setSelected('');setRevision(n=>n+1);}}>
-        Обновить список</button>
+        Обновить список</button>}
+    {status==='ready'&&loadedScope===scope&&<>
       <div aria-label="Очередь CRM">
         <h2>Очередь открытых задач филиала</h2>
         <p>Только внутренние задачи. Сначала просроченные, затем ближайшие по сроку.

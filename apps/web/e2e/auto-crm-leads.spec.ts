@@ -320,6 +320,32 @@ test('CRM journal refuses malformed cursor and clears previous lead after 403',a
   await expect(page.getByLabel('Обращение')).toHaveCount(0);
 });
  
+test('CRM journal resets expired signed cursor after server restart',async({page})=>{
+  const seen:string[]=[];
+  const signed='a'.repeat(190);
+  let restarted=false;
+  await page.route(path,route=>{
+    const cursor=new URL(route.request().url()).searchParams.get('cursor');
+    seen.push(cursor??'FIRST');
+    if(cursor&&restarted)return route.fulfill({status:422,contentType:'application/json',
+      body:'{"code":"INVALID_INPUT"}'});
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[item('NEW')],nextCursor:cursor?null:signed})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await expect(page.getByLabel('Обращение')).toBeVisible();
+  restarted=true;
+  await page.getByLabel('Страницы журнала CRM')
+    .getByRole('button',{name:'Следующая страница обращений'}).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить обращения');
+  await expect(page.getByLabel('Обращение')).toHaveCount(0);
+  await page.getByRole('button',{name:'Обновить список'}).click();
+  await expect(page.getByLabel('Обращение')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Предыдущая страница обращений'})).toHaveCount(0);
+  expect(seen).toEqual(['FIRST',signed,'FIRST']);
+});
+
 test('CRM journal reauthorizes page request after initial successful page',async({page})=>{
   await page.route(path,route=>{
     const cursor=new URL(route.request().url()).searchParams.get('cursor');
