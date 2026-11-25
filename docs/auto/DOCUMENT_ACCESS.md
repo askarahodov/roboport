@@ -283,3 +283,8 @@ POST основной сметы и допработ требует READ, PRICE_
 ### Общий WRITE для совмещённых ролей приёмки (#446)
 
 Для INTAKE_ACT действующий WRITE DENY любой из INTAKE/MANAGER/MECHANIC запрещает изменение документа, осмотра, диагностики, QC и связанного исполнения через другую активную роль, включая точный replay. CREATE/EDIT требуют прежнюю базовую INTAKE роль и соответствующее действие; WRITE второй роли не расширяет базовые полномочия. ADMIN preview CREATE/EDIT учитывает те же общие запреты. READ и клиентская ACL остаются независимыми. Сценарий PG17/HTTPS `test_combined_intake_roles_share_write_deny_and_preview` проверяет deny/restore/replay, effective preview, 403/no-store и неизменяемые строки. DDL/DTO без изменений. Откат revert на synthetic стенде; production gate #119 не пройден.
+
+
+### Прямой план ТО и очередь рекомендаций (#446/#169)
+
+Staff GET плана ТО, поиск услуг, создание, отзыв и replay проверяют тот же INTAKE_ACT READ/cutoff по действующим INTAKE/MANAGER/MECHANIC, что и очередь CRM maintenance. Это предотвращает получение пробега и истории через прямой URL при запрете очереди. Изменение требует MANAGER и общего WRITE; при WRITE DENY разрешённый GET становится read-only (canManage=false, services=[]), а прямой POST и replay возвращают 403/no-store. Клиентский план и повторная запись остаются под отдельной проверкой исходного владельца, без наследования staff ACL. PG17/HTTPS test `test_recommendation_direct_routes_follow_intake_read_cutoff_and_write`; UI уже скрывает мутации при canManage=false и очищает данные после 403. Без DDL/DTO/production; откат revert только synthetic.
