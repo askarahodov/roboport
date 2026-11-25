@@ -5,7 +5,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 
-from .auto_workshop_qc import _actor_and_order, InspectionDenied
+from .auto_workshop_qc import _actor_and_order, InspectionDenied, _inspection_policy
+from .auto_document_access import has_document_access
 from .auto_customer_orders import _actor as customer_actor, CustomerOrderDenied
 from .auto_org_authority import organization_role_allows
 from .auto_appointment_service import (create_appointment, AppointmentDenied,
@@ -28,6 +29,9 @@ def _scope(conn,token,org,loc,order,*,customer=False,write=False):
         actor=(customer_actor(conn,token) if customer else
                _actor_and_order(conn,token,org,loc,order,
                    ("MANAGER",) if write else ("MANAGER","INTAKE","MECHANIC")))
+        if not customer:
+            _inspection_policy(conn,token,org,loc,order,
+                               write_roles=("MANAGER",) if write else ())
     except (InspectionDenied,CustomerOrderDenied):
         raise RecommendationDenied("FORBIDDEN") from None
     # Проверяем именно исходную связь заказчика, а не текущего владельца VIN.
@@ -120,6 +124,9 @@ def read_recommendations(conn,token,org,loc,order,customer=False):
         _scope(conn,token,org,loc,order,customer=customer)
         manager=not customer and organization_role_allows(
             conn,token,org,"MANAGER",loc,for_mutation=True)
+        if manager:
+            manager=has_document_access(conn,token,org,loc,("MANAGER",),
+                                        "INTAKE_ACT","WRITE",order=order)
         return _state(conn,org,loc,order,can_manage=manager,customer=customer)
 
 

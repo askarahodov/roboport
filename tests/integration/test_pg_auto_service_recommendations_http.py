@@ -274,3 +274,74 @@ def test_branch_maintenance_queue_pagination_local_date_and_live_document_policy
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
     assert http.get(path).json()["items"]==[]
+
+
+def test_recommendation_direct_routes_follow_intake_read_cutoff_and_write(monkeypatch):
+    from test_pg_auto_document_access_http import admin, set_rule, url
+    d,org,loc,order,service,_,_=scenario()
+    http=api(monkeypatch)
+    root=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+    path=root+f"/orders/{order}/recommendations"
+    queue=root+"/crm/maintenance-queue"
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        submit_work_order_inspection(db,d["tokens"][d["intake"]],org,loc,order,
+            odometer_km=41700,fuel_percent=65,tyres_ok=True,lights_ok=True,
+            fluid_leak=False,exterior_code="CLEAR")
+    def policy(cap,allowed=False,cutoff=None):
+        owner=token(http,d,d["other"])
+        result=set_rule(http,url(org),owner,loc=loc,user=d["intake"],
+            document="INTAKE_ACT",cap=cap,allowed=allowed,not_before=cutoff)
+        assert result.status_code==201,result.text
+    body={"requestKey":str(uuid4()),"serviceId":str(service),
+          "reasonCode":"PERIODIC","dueDate":(datetime.now(timezone.utc).date()+
+          timedelta(days=14)).isoformat(),"dueKm":50000}
+    manager=token(http,d,d["intake"])
+    created=http.post(path,headers=manager,json=body)
+    assert created.status_code==201,created.text
+    item=created.json()["items"][0]
+    assert item["baselineKm"]==41700
+    withdraw=path+"/"+item["id"]+"/withdraw"
+    cancel={"requestKey":str(uuid4())}
+    policy("READ")
+    manager=token(http,d,d["intake"])
+    for response in (http.get(path),http.get(path+"/services"),http.get(queue),
+                     http.post(path,headers=manager,json=body),
+                     http.post(withdraw,headers=manager,json=cancel)):
+        assert response.status_code==403,response.text
+        assert response.headers["cache-control"]=="no-store"
+        assert "41700" not in response.text
+    policy("READ",True,"2099-01-01T00:00:00Z")
+    manager=token(http,d,d["intake"])
+    assert http.get(path).status_code==403
+    assert http.get(queue).json()["items"]==[]
+    assert http.post(path,headers=manager,json=body).status_code==403
+    policy("READ",True)
+    policy("WRITE")
+    manager=token(http,d,d["intake"])
+    snapshot=http.get(path)
+    assert snapshot.status_code==200,snapshot.text
+    assert snapshot.json()["canManage"] is False
+    assert snapshot.json()["services"]==[]
+    assert snapshot.json()["items"]==created.json()["items"]
+    assert http.get(path+"/services").status_code==403
+    assert http.post(path,headers=manager,json=body).status_code==403
+    assert http.post(withdraw,headers=manager,json=cancel).status_code==403
+    token(http,d,d["client_a"])
+    assert http.get(path+"/customer").json()["items"][0]["id"]==item["id"]
+    token(http,d,d["client_b"])
+    assert http.get(path+"/customer").status_code==403
+    policy("WRITE",True)
+    manager=token(http,d,d["intake"])
+    assert http.get(path).json()["canManage"] is True
+    assert http.post(path,headers=manager,json=body).json()["replayed"] is True
+    withdrawn=http.post(withdraw,headers=manager,json=cancel)
+    assert withdrawn.status_code==201,withdrawn.text
+    policy("WRITE")
+    manager=token(http,d,d["intake"])
+    assert http.post(withdraw,headers=manager,json=cancel).status_code==403
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_service_recommendation WHERE work_order_id=%s",
+                          (order,)).fetchone()==(1,)
+        assert db.execute("SELECT count(*) FROM auto_service_recommendation_withdrawal WHERE recommendation_id=%s",
+                          (item["id"],)).fetchone()==(1,)
