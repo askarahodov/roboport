@@ -96,8 +96,14 @@ def _client_and_scope(conn, token, org, loc, order):
 
 def _staff_and_scope(conn,token,org,loc,order):
     try:
-        return _actor_and_order(conn,token,org,loc,order,("MANAGER",))
-    except InspectionDenied:
+        actor=_actor_and_order(conn,token,org,loc,order,("MANAGER",))
+        # Смета и ответы на её изменение содержат immutable снимок
+        # диагностики; отдельный READ DENY/cutoff нельзя обойти через ESTIMATE.
+        require_document_access(conn,token,org,loc,
+                                ("INTAKE","MANAGER","MECHANIC"),
+                                "INTAKE_ACT","READ",order=order)
+        return actor
+    except (InspectionDenied,DocumentPolicyDenied):
         raise AutoEstimateDenied("FORBIDDEN") from None
 
 

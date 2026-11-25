@@ -476,3 +476,102 @@ def test_cashier_finance_cutoff_concurrent_read_and_payment_no_lock_upgrade(monk
         assert db.execute("""SELECT COUNT(*),SUM(amount_minor)
             FROM auto_treasury_event WHERE work_order_id=%s
               AND kind='ADVANCE'""",(order,)).fetchone()==(2,300)
+
+
+def test_finance_create_and_close_follow_combined_role_preview_and_replay(monkeypatch):
+    """ADMIN policy -> dual-role staff -> direct URL -> immutable financial receipts."""
+    from test_pg_auto_treasury_http import local_day
+
+    d,org,loc,order,service,http,base,_=treasury_prepare(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        grant(db,d["intake"],org,loc,"CASHIER")
+        day=local_day(db,loc)
+    actor=d["intake"]
+    policy=policy_url(org)
+    preview_params={"locationId":str(loc),"userId":str(actor),
+                    "documentKind":"FINANCE"}
+
+    def set_cap(role,cap,allowed=False):
+        owner=token(http,d,d["other"])
+        result=set_rule(http,policy,owner,role=role,loc=loc,user=actor,
+                        document="FINANCE",cap=cap,allowed=allowed)
+        assert result.status_code==201,result.text
+
+    def preview(cap,allowed):
+        token(http,d,d["other"])
+        result=http.get(policy+"/effective",params=preview_params)
+        assert result.status_code==200,result.text
+        assert result.json()["subjectToObjectACL"] is True
+        assert result.json()["capabilities"][cap]["allowed"] is allowed
+
+    def forbidden(response):
+        assert response.status_code==403,response.text
+        assert response.headers["cache-control"]=="no-store"
+        assert "closingMinor" not in response.text
+        assert "accountId" not in response.text
+
+    create_key=uuid4()
+    set_cap("CASHIER","CREATE")
+    preview("CREATE",False)
+    staff=token(http,d,actor)
+    forbidden(treasury_create(http,base,staff,key=create_key))
+    set_cap("CASHIER","CREATE",True)
+    preview("CREATE",True)
+    staff=token(http,d,actor)
+    opened=treasury_create(http,base,staff,key=create_key)
+    assert opened.status_code==201,opened.text
+    account=UUID(opened.json()["accountId"])
+    set_cap("CASHIER","CREATE")
+    staff=token(http,d,actor)
+    forbidden(treasury_create(http,base,staff,key=create_key))
+    forbidden(treasury_create(http,base,staff,code="CASH-02"))
+    set_cap("CASHIER","CREATE",True)
+    staff=token(http,d,actor)
+    replay=treasury_create(http,base,staff,key=create_key)
+    assert replay.status_code==200,replay.text
+    assert replay.json()["accountId"]==str(account)
+    assert treasury_event(http,base,staff,order,account,"ADVANCE",100).status_code==201
+
+    close_path=base+f"/accounts/{account}/close-day"
+    close_body={"requestKey":str(uuid4()),"businessDay":day}
+    set_cap("MANAGER","CLOSE")
+    preview("CLOSE",False)
+    staff=token(http,d,actor)
+    forbidden(http.post(close_path,headers=staff,json=close_body))
+    set_cap("MANAGER","CLOSE",True)
+    set_cap("MANAGER","WRITE")
+    for cap in ("CREATE","EDIT","CLOSE","WRITE"):
+        preview(cap,False)
+    staff=token(http,d,actor)
+    forbidden(http.post(close_path,headers=staff,json=close_body))
+    forbidden(treasury_create(http,base,staff,key=create_key))
+    assert http.get(base+"/accounts").status_code==200
+    set_cap("MANAGER","WRITE",True)
+    preview("CLOSE",True)
+    staff=token(http,d,actor)
+    closed=http.post(close_path,headers=staff,json=close_body)
+    assert closed.status_code==201,closed.text
+    assert closed.json()["closingMinor"]==100
+    assert closed.json()["realMoney"] is False
+    set_cap("MANAGER","CLOSE")
+    staff=token(http,d,actor)
+    forbidden(http.post(close_path,headers=staff,json=close_body))
+    set_cap("MANAGER","CLOSE",True)
+    staff=token(http,d,actor)
+    repeated=http.post(close_path,headers=staff,json=close_body)
+    assert repeated.status_code==200,repeated.text
+    assert repeated.json()["closeId"]==closed.json()["closeId"]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT count(*) FROM auto_treasury_account
+          WHERE organization_id=%s AND location_id=%s""",(org,loc)).fetchone()==(1,)
+        assert db.execute("""SELECT count(*),SUM(amount_minor) FROM auto_treasury_event
+          WHERE account_id=%s""",(account,)).fetchone()==(1,100)
+        assert db.execute("""SELECT count(*),SUM(closing_minor) FROM auto_treasury_day_close
+          WHERE account_id=%s""",(account,)).fetchone()==(1,100)
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+          WHERE organization_id=%s AND location_id=%s AND user_id=%s
+            AND role_code='CASHIER' AND revoked_at IS NULL""",(org,loc,actor))
+    staff=token(http,d,actor)
+    forbidden(http.post(close_path,headers=staff,json=close_body))
+    assert http.get(base+"/accounts").status_code==200
