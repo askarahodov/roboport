@@ -1,12 +1,14 @@
 """Restrictive handover policy shared by read, settlement and lifecycle writes."""
-from .auto_document_access import require_document_access
+from .auto_document_access import require_document_access, DocumentPolicyDenied
 
 
 def require_handover_access(conn,token,org,loc,order,*,cap="READ"):
     """Caller separately establishes the exact operational role and object ACL."""
     for capability in dict.fromkeys(("READ","PRICE_SALES",cap)):
-        require_document_access(conn,token,org,loc,("MANAGER","WAREHOUSE"),
+        cutoff=require_document_access(conn,token,org,loc,("MANAGER","WAREHOUSE"),
                                 "HANDOVER",capability,order=order)
+        if order is None and cutoff is not None:
+            raise DocumentPolicyDenied("HISTORY_DENIED")
 
 
 def require_handover_projection(conn,token,org,loc,order,*,cap="READ"):
@@ -24,5 +26,9 @@ def require_handover_projection(conn,token,org,loc,order,*,cap="READ"):
         ("FINANCE",("READ","PRICE_SALES")),
     ):
         for capability in capabilities:
-            require_document_access(conn,token,org,loc,roles,document,
+            cutoff=require_document_access(conn,token,org,loc,roles,document,
                                     capability,order=order)
+            # A branch aggregate is not an individual document. Its entire
+            # history must be visible, or the total would be misleading.
+            if order is None and cutoff is not None:
+                raise DocumentPolicyDenied("HISTORY_DENIED")

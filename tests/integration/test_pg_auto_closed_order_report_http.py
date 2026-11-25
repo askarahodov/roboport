@@ -135,3 +135,85 @@ def test_refund_repayment_and_policy_cutoff_are_reconciled_against_real_pg(monke
     token(http,d,d["intake"])
     assert http.get(path,params=query).status_code==403
     assert http.get(path+"/export",params=query).status_code==403
+
+
+def test_composite_branch_reports_do_not_bypass_source_document_denials(monkeypatch):
+    """One actual closed order, one ADMIN session, all reporting views/exports."""
+    from test_pg_auto_demo_finance_report_http import url as finance_path
+    from test_pg_auto_mechanic_productivity_http import report_path
+    d,org,loc,order=_close(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        stamp,zone=db.execute("""
+          SELECT e.created_at,l.timezone_name FROM auto_order_demo_document_event e
+          JOIN auto_work_order w ON w.id=e.work_order_id
+          JOIN auto_service_location l ON l.id=w.location_id
+          WHERE e.work_order_id=%s AND e.action='CLOSED_TECHNICAL'
+        """,(order,)).fetchone()
+    day=stamp.astimezone(ZoneInfo(zone)).date().isoformat()
+    query={"fromDay":day,"toDay":day}
+    base=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/closed-orders"
+    priced=(base,base+"/export",finance_path(org,loc))
+    labor=report_path(org,loc)
+    unpriced=(labor,labor+"/export",labor+"/shift-comparison",labor+"/shift-comparison/export")
+    token(http,d,d["intake"])
+    originals={}
+    for path in priced+unpriced:
+        response=http.get(path,params=query)
+        assert response.status_code==200,response.text
+        originals[path]=response.content
+    assert http.get(base,params=query).json()["summary"]["approvedTotalMinor"]==2500
+    assert http.get(labor,params=query).json()["summary"]["actualMinutes"]==45
+    def policy(document,cap,allowed,cutoff=None):
+        owner=token(http,d,d["other"])
+        result=set_rule(http,policy_url(org),owner,role="MANAGER",loc=loc,
+                        user=d["intake"],document=document,cap=cap,
+                        allowed=allowed,not_before=cutoff)
+        assert result.status_code==201,result.text
+        token(http,d,d["intake"])
+    def deny(paths):
+        for path in paths:
+            response=http.get(path,params=query)
+            assert response.status_code==403,(path,response.text)
+            assert set(response.json())=={"code","requestId"}
+            assert "no-store" in response.headers["cache-control"]
+            assert "content-disposition" not in response.headers
+    def restore(paths):
+        for path in paths:
+            response=http.get(path,params=query)
+            assert response.status_code==200,(path,response.text)
+            assert response.content==originals[path],path
+    for document in ("INTAKE_ACT","ESTIMATE","SUPPLIER_ORDER","HANDOVER","FINANCE"):
+        policy(document,"READ",False)
+        deny(priced)
+        if document in ("INTAKE_ACT","ESTIMATE","HANDOVER"):
+            deny(unpriced)
+        else:
+            restore(unpriced)
+        policy(document,"READ",True)
+        restore(priced+unpriced)
+        policy(document,"READ",True,"2099-01-01T00:00:00Z")
+        deny(priced)
+        if document in ("INTAKE_ACT","ESTIMATE","HANDOVER"):
+            empty=http.get(labor,params=query)
+            assert empty.status_code==200,empty.text
+            assert empty.json()["items"]==[]
+            assert empty.json()["summary"]["actualMinutes"]==0
+            deny(unpriced[2:])
+        else:
+            restore(unpriced)
+        policy(document,"READ",True)
+        restore(priced+unpriced)
+    for document in ("ESTIMATE","HANDOVER","FINANCE"):
+        policy(document,"PRICE_SALES",False)
+        deny(priced)
+        restore(unpriced)
+        policy(document,"PRICE_SALES",True)
+        restore(priced+unpriced)
+    # No purchase price is returned by these reports.
+    policy("SUPPLIER_ORDER","PRICE_PURCHASE",False)
+    restore(priced+unpriced)
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_order_demo_document_event WHERE work_order_id=%s",(order,)).fetchone()==(3,)
+        assert db.execute("SELECT count(*) FROM auto_order_demo_cash_event WHERE work_order_id=%s",(order,)).fetchone()==(1,)
