@@ -126,11 +126,14 @@ def test_every_archived_robot_operation_is_unreachable_in_current_runtime():
     archived = [
         *scan_python(ROOT / "tests/legacy_app.py", ROOT),
         *scan_python(ROOT / "apps/api/roboport_api/guest_claim_http.py", ROOT),
+        *scan_python(ROOT / "apps/api/roboport_api/auth_http.py", ROOT),
     ]
     assert archived and not any(row["unresolved"] for row in archived)
     # These exact paths are intentionally shared, not robot business operations.
     shared = {"/health/live", "/health/ready", "/api/v1/meta",
-              "/api/v1/dev/account/preferences"}
+              "/api/v1/dev/account/preferences", "/api/v1/dev/staff/access",
+              "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/me",
+              "/api/v1/auth/change-password", "/api/v1/auth/csrf"}
     retired = {(row["method"], row["path"]) for row in archived
                if row["path"] not in shared}
     assert retired and all(_retired(path) for _, path in retired), retired
@@ -144,6 +147,8 @@ def test_every_archived_robot_operation_is_unreachable_in_current_runtime():
     assert len(retired) >= 40
     assert ("POST", "/api/v1/dev/guest-claims/{claim_id}/assign-review") in retired
     assert ("GET", "/api/v1/dev/tickets/{ticket_id}/state") in retired
+    assert ("GET", "/api/v1/dev/staff/queue") in retired
+    assert ("GET", "/api/v1/dev/staff/audit") in retired
     # Exercise the actual method and concretize path variables with dummy UUIDs.
     # In a fresh process no historical test application is imported/mounted.
     operations = sorted({(method, re.sub(r"\{[^{}]+\}",
@@ -155,10 +160,30 @@ def test_every_archived_robot_operation_is_unreachable_in_current_runtime():
 import json, os, sys
 from fastapi.testclient import TestClient
 from roboport_api.main import app
+from fastapi import FastAPI, APIRouter
+from starlette.routing import Match
+from roboport_api.guest_claim_http import router as archived_router
 for flag in ("ACCESS","AUTH","AUTO"):
     os.environ["ROBOport_SYNTHETIC_"+flag+"_API"]="1"
 os.environ.pop("ROBOport_DATABASE_URL",None)
 operations=json.load(sys.stdin)
+
+def registered(application, method, path):
+    # Use the actual ASGI dispatcher matching protocol, including lazy routers.
+    scope={"type":"http","method":method,"path":path,"root_path":"",
+           "headers":[],"scheme":"https","query_string":b""}
+    return any(route.matches(scope)[0] != Match.NONE for route in application.routes)
+
+# Mutation control: a hidden nested archived router must be detected even
+# when its handlers return 404 without a DSN and OpenAPI omits it.
+mutant=FastAPI()
+nested=APIRouter(include_in_schema=False)
+nested.include_router(archived_router)
+mutant.include_router(nested)
+assert registered(mutant,"POST","/api/v1/dev/guest-intake")
+assert registered(app,"GET","/api/v1/dev/auto/vehicles")
+registered_legacy=[[method,path] for method,path in operations
+                   if registered(app,method,path)]
 with TestClient(app,base_url="https://127.0.0.1") as client:
     failures=[]
     for method,path in operations:
@@ -168,13 +193,14 @@ with TestClient(app,base_url="https://127.0.0.1") as client:
     # No spoofed proxy header in the principal probe: a transport guard
     # must not be mistaken for proof that the business route is retired.
     schema=client.get("/openapi.json").json()["paths"]
-    print(json.dumps({"failures":failures,"schema":list(schema),
+    print(json.dumps({"failures":failures,"registered":registered_legacy,"schema":list(schema),
         "health":client.get("/health/live").status_code,
         "auto":client.get("/api/v1/dev/auto/vehicles").status_code}))
 """
     check=subprocess.run([sys.executable,"-c",runner],
         input=json.dumps(operations),capture_output=True,text=True,check=True,timeout=60)
     result=json.loads(check.stdout)
+    assert result["registered"]==[],result["registered"]
     assert result["failures"]==[],result["failures"]
     assert result["health"]==200 and result["auto"]==403,result
     historical_paths={path for _,path in retired}
