@@ -462,3 +462,43 @@ test('interbranch serial cost shows source branch and rejects tampered provenanc
   await expect(section.getByRole('alert')).toContainText('Доступ');
   await expect(table).toHaveCount(0);
 });
+
+
+test('closed-order CSV denial clears previously loaded source evidence and restores only on fresh read',async({page})=>{
+  const id=(n:string)=>n.repeat(8)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(4)+'-'+n.repeat(12);
+  const row={workOrderId:id('a'),closedDay:'2030-10-27',previewId:id('b'),
+    previewDigest:'f'.repeat(64),estimateRevisionId:id('c'),postedEventId:id('d'),
+    ackEventId:id('e'),closedEventId:id('f'),approvedBaseMinor:2500,approvedExtraMinor:0,
+    approvedTotalMinor:2500,simulatedPaidMinor:2500,simulatedRefundedMinor:0,
+    cashEvents:[{id:id('1'),kind:'SIM_PAYMENT',amountMinor:2500,revisionId:id('c')}]};
+  const data={syntheticOnly:true,realMoney:false,releaseAllowed:false,marginAvailable:false,
+    payrollAvailable:false,currency:'RUB',basis:'CLOSED_TECHNICAL_RECONCILED_PREVIEW_AND_CASH',
+    timeZone:'Europe/Berlin',fromDay:'2030-10-27',toDay:'2030-10-27',
+    summary:{orderCount:1,cashEventCount:1,approvedBaseMinor:2500,approvedExtraMinor:0,
+      approvedTotalMinor:2500,simulatedPaidMinor:2500,simulatedRefundedMinor:0},items:[row]};
+  let denied=false,downloads=0;
+  page.on('download',()=>downloads++);
+  await page.route('**/reports/closed-orders**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    const reject=denied||path.endsWith('/export');
+    return route.fulfill({status:reject?403:200,contentType:'application/json',
+      body:reject?'{"code":"FORBIDDEN"}':JSON.stringify(data)});
+  });
+  await page.goto('/staff/auto-demo-finance-report');
+  await fill(page);
+  const load=page.getByRole('button',{name:'Сверить закрытые заказ-наряды'});
+  const table=page.getByRole('table',{name:'Сверка закрытых заказ-нарядов с первичными событиями'});
+  await load.click();
+  await expect(table).toBeVisible();
+  await page.getByRole('button',{name:'Скачать реестр CSV'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ к реестру запрещён');
+  await expect(table).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Скачать реестр CSV'})).toHaveCount(0);
+  denied=true;
+  await load.click();
+  await expect(page.getByRole('alert')).toContainText('Доступ к реестру запрещён');
+  denied=false;
+  await load.click();
+  await expect(table).toBeVisible();
+  expect(downloads).toBe(0);
+});

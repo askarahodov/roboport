@@ -151,8 +151,18 @@ def mechanic_productivity(conn: psycopg.Connection, token: str, org: UUID,
                                         for_mutation=True):
             raise ProductivityDenied("FORBIDDEN")
         try:
-            cutoff = require_document_access(
-                conn, token, org, loc, ("MANAGER", "WAREHOUSE"), "HANDOVER", "READ")
+            # Labor evidence includes the agreed service and QC/closure
+            # identifiers, but no amounts. Check source READ, not prices.
+            cutoffs=[]
+            for document,roles in (
+                ("HANDOVER",("MANAGER","WAREHOUSE")),
+                ("INTAKE_ACT",("MANAGER","INTAKE","MECHANIC")),
+                ("ESTIMATE",("MANAGER","MECHANIC","WAREHOUSE","INTAKE")),
+            ):
+                stamp=require_document_access(conn,token,org,loc,roles,document,"READ")
+                if stamp is not None:
+                    cutoffs.append(stamp)
+            cutoff=max(cutoffs) if cutoffs else None
         except DocumentPolicyDenied:
             raise ProductivityDenied("FORBIDDEN") from None
         # A historical cutoff cannot safely produce a branch-wide shift

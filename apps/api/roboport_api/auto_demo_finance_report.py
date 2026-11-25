@@ -13,7 +13,8 @@ from fastapi.responses import JSONResponse
 
 from .auto_bay_occupancy import _day, OccupancyInvalid
 from .auto_org_authority import organization_role_allows
-from .auto_document_access import require_document_access, DocumentPolicyDenied
+from .auto_document_access import DocumentPolicyDenied
+from .auto_handover_policy import require_handover_projection
 from .auto_vehicle_claim_http import _request_dsn, _response
 
 
@@ -46,15 +47,9 @@ def daily_demo_finance(conn: psycopg.Connection, token: str, *,
         ):
             raise FinanceReportDenied("FORBIDDEN")
         try:
-            for cap in ("READ", "PRICE_SALES"):
-                cutoff=require_document_access(
-                    conn,token,organization_id,location_id,
-                    ("MANAGER","CASHIER"),"FINANCE",cap)
-                # This branch-wide report combines ledger entries without
-                # individual WorkOrder cutoff filtering. Deny the entire
-                # report when an active historical restriction is present.
-                if cutoff is not None:
-                    raise FinanceReportDenied("HISTORY_DENIED")
+            # The response includes both finance journals and sealed handover
+            # counts. Do not return a partial total after a source restriction.
+            require_handover_projection(conn,token,organization_id,location_id,None)
         except DocumentPolicyDenied:
             raise FinanceReportDenied("FORBIDDEN") from None
         location=conn.execute(

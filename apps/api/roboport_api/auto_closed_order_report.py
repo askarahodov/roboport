@@ -10,7 +10,8 @@ import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
-from .auto_document_access import DocumentPolicyDenied, require_document_access
+from .auto_document_access import DocumentPolicyDenied
+from .auto_handover_policy import require_handover_projection
 from .auto_org_authority import organization_role_allows
 from .auto_material_cost_evidence import _period, MaterialAuditInvalid
 from .auto_vehicle_claim_http import _request_dsn, _response
@@ -37,19 +38,9 @@ def report(conn, token, org, loc, from_day, to_day):
                                         for_mutation=True):
             raise Denied()
         try:
-            for document, roles, cap in (
-                ("FINANCE", ("MANAGER", "CASHIER"), "READ"),
-                ("FINANCE", ("MANAGER", "CASHIER"), "PRICE_SALES"),
-                ("ESTIMATE", ("MANAGER",), "READ"),
-                ("ESTIMATE", ("MANAGER",), "PRICE_SALES"),
-                ("HANDOVER", ("MANAGER", "WAREHOUSE"), "READ"),
-                ("HANDOVER", ("MANAGER", "WAREHOUSE"), "PRICE_SALES"),
-            ):
-                # Любое ограничение истории запрещает весь филиальный отчёт:
-                # частичный итог нельзя выдавать за полный.
-                if require_document_access(conn, token, org, loc, roles,
-                                           document, cap) is not None:
-                    raise Denied()
+            # The closed report is derived from the same sealed projection
+            # as the direct handover JSON/ZIP, not a way around source ACLs.
+            require_handover_projection(conn,token,org,loc,None)
         except DocumentPolicyDenied:
             raise Denied() from None
         branch = conn.execute("""
