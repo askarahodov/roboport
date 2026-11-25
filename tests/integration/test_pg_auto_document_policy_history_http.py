@@ -231,3 +231,50 @@ def test_finance_prices_are_enforced_after_520_policy_versions(monkeypatch):
         assert db.execute("""SELECT count(*) FROM auto_document_access_policy
           WHERE organization_id=%s AND document_kind='FINANCE'""",
           (org,)).fetchone()[0]==522
+
+
+def test_preview_write_roles_and_mixed_purchase_denial_match_live_command(monkeypatch):
+    from test_pg_auto_supplier_purchase_http import fixture,post
+    from test_pg_auto_stock_service import grant
+    from test_pg_auto_stock_ledger import balance
+    from fastapi.testclient import TestClient
+    from roboport_api.main import app
+    d,org,loc,item,lot,order,offers,warehouse_grant,manager,base,body=fixture(monkeypatch)
+    actor=d["intake"]
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        grant(db,actor,org,loc,"MANAGER")
+        # A mechanic with no finance/estimate/purchase role must not see
+        # WRITE as granted merely because some branch role exists.
+        grant(db,d["other"],org,loc,"MECHANIC")
+        before=balance(db,item)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    def preview(user,document):
+        token(http,d,d["other"])
+        response=http.get(url(org)+"/effective",params={
+            "locationId":str(loc),"userId":str(user),"documentKind":document})
+        assert response.status_code==200,response.text
+        return response.json()["capabilities"]
+    for document in ("ESTIMATE","HANDOVER","SUPPLIER_ORDER","FINANCE"):
+        assert preview(d["other"],document)["WRITE"]["allowed"] is False
+    assert preview(d["other"],"INTAKE_ACT")["WRITE"]["allowed"] is True
+    assert preview(actor,"SUPPLIER_ORDER")["CREATE"]["allowed"] is True
+    owner=token(http,d,d["other"])
+    assert set_rule(http,url(org),owner,role="MANAGER",loc=loc,
+                    document="SUPPLIER_ORDER",cap="CREATE",allowed=False).status_code==201
+    assert preview(actor,"SUPPLIER_ORDER")["CREATE"]["allowed"] is False
+    key=uuid4()
+    assert post(http,d,actor,base,body,key).status_code==403
+    with psycopg.connect(DSN) as db:
+        assert balance(db,item)==before
+    owner=token(http,d,d["other"])
+    assert set_rule(http,url(org),owner,role="MANAGER",loc=loc,
+                    document="SUPPLIER_ORDER",cap="CREATE",allowed=True).status_code==201
+    assert preview(actor,"SUPPLIER_ORDER")["CREATE"]["allowed"] is True
+    created=post(http,d,actor,base,body,key)
+    assert created.status_code==201,created.text
+    owner=token(http,d,d["other"])
+    assert set_rule(http,url(org),owner,role="MANAGER",loc=loc,
+                    document="SUPPLIER_ORDER",cap="WRITE",allowed=False).status_code==201
+    assert preview(actor,"SUPPLIER_ORDER")["CREATE"]["allowed"] is False
+    assert post(http,d,actor,base,body,key).status_code==403
