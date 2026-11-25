@@ -65,8 +65,8 @@ def _audit(
     actor: UUID, action: str,
 ) -> None:
     conn.execute(
-        """INSERT INTO auto_vehicle_claim_audit(id,link_id,claim_id,actor_id,action)
-           VALUES(%s,%s,%s,%s,%s)""",
+        """INSERT INTO auto_vehicle_claim_audit(id,link_id,claim_id,actor_id,action,created_at)
+           VALUES(%s,%s,%s,%s,%s,clock_timestamp())""",
         (uuid4(), link, claim, actor, action),
     )
 
@@ -274,13 +274,13 @@ def review_auto_claim(
         raise VehicleClaimRejected("unavailable")
     conn.execute(
         """UPDATE auto_vehicle_claim
-           SET reviewed_by=%s,reviewed_at=now(),status=%s WHERE id=%s""",
+           SET reviewed_by=%s,reviewed_at=clock_timestamp(),status=%s WHERE id=%s""",
         (reviewer, outcome, claim_id),
     )
     if approve:
         conn.execute(
             """UPDATE auto_vehicle_customer_link
-               SET verified_at=now(),verified_by=%s
+               SET verified_at=clock_timestamp(),verified_by=%s
                WHERE id=%s AND verified_at IS NULL AND revoked_at IS NULL""",
             (reviewer, row[0]),
         )
@@ -304,7 +304,7 @@ def revoke_auto_link(
     reviewer = _role_scoped(conn, manager_token, "MANAGER", row[0])
     if row[1] is None:
         conn.execute(
-            "UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
+            "UPDATE auto_vehicle_customer_link SET revoked_at=clock_timestamp() WHERE id=%s",
             (link_id,),
         )
         linked_claim = conn.execute(
