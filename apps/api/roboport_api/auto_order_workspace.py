@@ -8,7 +8,7 @@ from uuid import UUID
 import psycopg
 
 from .auto_order_customer_read import get_order_customer_summary
-from .auto_document_access import require_document_access, has_document_access, DocumentPolicyDenied
+from .auto_document_access import has_document_access
 from .auto_stock_service import AutoStockDenied
 
 
@@ -21,13 +21,9 @@ def read_order_workspace(conn: psycopg.Connection, token: str,
         # A workspace contains several document states. Require intake
         # visibility for the workspace itself, but redact estimate/handover
         # states independently when their document policies deny READ.
-        try:
-            require_document_access(
-                conn, token, org, loc, ("INTAKE", "MANAGER"),
-                "INTAKE_ACT", "READ", order=order,
-            )
-        except DocumentPolicyDenied:
-            raise AutoStockDenied("FORBIDDEN") from None
+        # Общая customer projection проверяет базовую роль и READ всех
+        # применимых ролей акта до чтения остальных состояний.
+        get_order_customer_summary(conn, token, org, loc, order)
         estimate_visible = has_document_access(
             conn, token, org, loc, ("MANAGER",),
             "ESTIMATE", "READ", order=order,
@@ -36,7 +32,6 @@ def read_order_workspace(conn: psycopg.Connection, token: str,
             conn, token, org, loc, ("MANAGER", "WAREHOUSE"),
             "HANDOVER", "READ", order=order,
         )
-        get_order_customer_summary(conn, token, org, loc, order)
         row = conn.execute("""
             SELECT
               (SELECT count(*) FROM auto_work_order_service s

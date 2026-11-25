@@ -112,3 +112,64 @@ def test_http_customer_read_denies_disabled_organization(monkeypatch):
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_organization SET disabled_at=now() WHERE id=%s", (org,))
     assert client.get(path).status_code == 403
+
+
+def test_dual_role_intake_projections_respect_mechanic_read_deny_and_cutoff(monkeypatch):
+    from test_pg_auto_document_access_http import admin, set_rule, url
+    from test_pg_auto_work_order_estimate_http import token
+
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d, org, loc, order, _, _ = prepare()
+    subject = d["intake"]
+    with psycopg.connect(DSN) as db:
+        admin(db, org, d["other"])
+        db.execute("""INSERT INTO auto_organization_role_grant
+          (id,organization_id,location_id,user_id,role_code)
+          VALUES(%s,%s,%s,%s,'MECHANIC')""", (uuid4(),org,loc,subject))
+    client = TestClient(app, base_url="https://127.0.0.1")
+    base = f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}"
+    paths = [base + suffix for suffix in ("/customer", "/workspace", "/inspection-qc")]
+
+    def preview_and_rule(allowed, cutoff=None):
+        owner = token(client,d,d["other"])
+        response = set_rule(client,url(org),owner,role="MECHANIC",loc=loc,
+                            document="INTAKE_ACT",cap="READ",allowed=allowed,not_before=cutoff)
+        assert response.status_code == 201,response.text
+        preview = client.get(url(org)+"/effective",params={
+            "locationId":str(loc),"userId":str(subject),"documentKind":"INTAKE_ACT",
+        })
+        assert preview.status_code == 200,preview.text
+        assert preview.json()["capabilities"]["READ"]["allowed"] is allowed
+        assert (preview.json()["capabilities"]["READ"]["notBefore"] is not None) == (cutoff is not None)
+
+    def assert_paths(status, targets=paths):
+        token(client,d,subject)
+        for path in targets:
+            response = client.get(path)
+            assert response.status_code == status,(path,response.text)
+            assert response.headers["cache-control"] == "no-store"
+            if status == 403:
+                for field in ("customerId","customerLinkId","steps","inspection"):
+                    assert field not in response.json()
+
+    assert_paths(200)
+    preview_and_rule(False)
+    assert_paths(403)
+    # Личная ALLOW другой роли не отменяет запрет совмещённой роли.
+    owner = token(client,d,d["other"])
+    assert set_rule(client,url(org),owner,role="INTAKE",loc=loc,user=subject,
+                    document="INTAKE_ACT",cap="READ",allowed=True).status_code == 201
+    assert_paths(403)
+    preview_and_rule(True,"2099-01-01T00:00:00Z")
+    assert_paths(403)
+    preview_and_rule(True)
+    assert_paths(200)
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+          WHERE organization_id=%s AND location_id=%s AND user_id=%s
+            AND role_code='INTAKE' AND revoked_at IS NULL""",(org,loc,subject))
+    # MECHANIC alone may inspect, but cannot gain customer/workspace access.
+    assert_paths(403,paths[:2])
+    assert_paths(200,paths[2:])
