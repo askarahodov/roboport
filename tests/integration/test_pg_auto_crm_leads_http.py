@@ -253,8 +253,15 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
     assert http.get(url(foreign,foreign_loc),params={
         "cursor":page1["nextCursor"],
     }).status_code==403
-    for bad in ("!", "a"*181, "====", "invalid"):
+    for bad in ("!", "a"*257, "====", "invalid", "", page1["nextCursor"]+"="):
         assert http.get(base,params={"cursor":bad}).status_code==422
+    assert http.get(base,params=[("cursor",page1["nextCursor"]),("cursor",page1["nextCursor"])]).status_code==422
+    assert http.get(base,params={"cursor":fp["nextCursor"]}).status_code==422
+    assert http.get(search,params={"cursor":page1["nextCursor"]}).status_code==422
+    # The manager is authorized in this branch, but not to replay another session's cursor.
+    session(http,d,d["manager"])
+    assert http.get(base).status_code==200
+    assert http.get(base,params={"cursor":page1["nextCursor"]}).status_code==422
     http.cookies.set("rp_session",d["tokens"][d["client_a"]])
     assert http.get(base,params={"cursor":"invalid"}).status_code==403
     session(http,d,d["intake"])
@@ -272,19 +279,31 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
 
 
 def test_lead_cursor_roundtrip_order_and_noncanonical_rejected():
-    from datetime import datetime,timezone
     from uuid import UUID
-    from roboport_api.auto_crm_leads import (
-        _decode_lead_cursor,_encode_lead_cursor,LeadDenied,
-    )
+    from roboport_api.auto_crm_leads import _decode_lead_cursor,_journal_scope,LeadDenied
+    from roboport_api.keyset_cursor import encode_cursor
     date=datetime(2030,10,27,2,30,tzinfo=timezone.utc)
     key=UUID("11111111-1111-4111-8111-111111111111")
-    cursor=_encode_lead_cursor(date,key)
-    assert _decode_lead_cursor(cursor)==(date,key)
-    for changed in (cursor+"=",cursor.lower(),cursor+"_", "eA"):
+    org,loc=uuid4(),uuid4()
+    scope=_journal_scope(org,loc)
+    token="synthetic-session"
+    cursor=encode_cursor(date,key,scope,token)
+    assert _decode_lead_cursor(cursor,scope,token)==(date,key)
+    for changed in (cursor+"=",cursor.lower(),cursor+"_", "eA", ("A" if cursor[0]!="A" else "B")+cursor[1:]):
         if changed!=cursor:
             with pytest.raises(LeadDenied):
-                _decode_lead_cursor(changed)
+                _decode_lead_cursor(changed,scope,token)
+    for changed_scope,changed_token in (
+        (_journal_scope(org,uuid4()),token),(_journal_scope(uuid4(),loc),token),
+        (scope,"another-session"),
+    ):
+        with pytest.raises(LeadDenied):
+            _decode_lead_cursor(cursor,changed_scope,changed_token)
+    # Previously issued unsigned cursors cannot be used after upgrade.
+    import base64
+    old=base64.urlsafe_b64encode((date.isoformat()+"|"+str(key)).encode()).decode().rstrip("=")
+    with pytest.raises(LeadDenied):
+        _decode_lead_cursor(old,scope,token)
 
 
 def test_repeat_lead_cycle_after_terminal_keeps_history_and_rejects_concurrent_duplicate(monkeypatch):

@@ -277,7 +277,7 @@ test('CRM journal paginates 28 leads, opens later page and resets on refresh',as
     const part=cursor?leads.slice(25):leads.slice(0,25);
     return route.fulfill({status:200,contentType:'application/json',
       body:JSON.stringify({syntheticOnly:true,items:part,
-        nextCursor:cursor?null:'page-after-25'})});
+        nextCursor:cursor?null:'a'.repeat(190)})});
   });
   await page.setViewportSize({width:390,height:844});
   await page.goto('/staff/auto-crm-leads');
@@ -293,7 +293,7 @@ test('CRM journal paginates 28 leads, opens later page and resets on refresh',as
   await page.getByRole('button',{name:'Обновить список'}).click();
   await expect(journal.getByRole('button',{name:'Предыдущая страница обращений'}))
     .toHaveCount(0);
-  expect(seen).toContain('page-after-25');
+  expect(seen).toContain('a'.repeat(190));
   expect(seen.at(-1)).toBe('FIRST');
   await page.setViewportSize({width:1280,height:800});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);

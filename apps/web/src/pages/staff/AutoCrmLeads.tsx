@@ -103,7 +103,7 @@ function parseList(v:unknown):LeadPage{
     !Array.isArray(v.items)||v.items.length>25)throw Error('shape');
   const next='nextCursor' in v?v.nextCursor:null;
   if(!(next===null||(typeof next==='string'&&next.length>0&&
-       next.length<=180&&/^[A-Za-z0-9_-]+$/.test(next))))throw Error('shape');
+       next.length<=256&&/^[A-Za-z0-9_-]+$/.test(next))))throw Error('shape');
   return {items:v.items.map(parseLead),nextCursor:next};
 }
 async function token(){
@@ -181,6 +181,7 @@ export function AutoCrmLeads(){
         if(!res.ok)throw Error('request');
         const parsed=parseList(await res.json());
         if(controller.signal.aborted)return;
+        if(leadCursor&&parsed.nextCursor===leadCursor)throw Error('cursor');
         setRows(parsed.items);setLeadNext(parsed.nextCursor);
         setLoadedScope(scope);setStatus('ready');
       }catch{if(!controller.signal.aborted)setStatus('error');}
@@ -381,7 +382,7 @@ export function AutoCrmLeads(){
     {status==='idle'&&<p>Укажите организацию и филиал.</p>}
     {status==='loading'&&<p role="status">Чтение обращений…</p>}
     {status==='denied'&&<p role="alert">Доступ запрещён или связь с автомобилем отозвана.</p>}
-    {status==='error'&&<p role="alert">Не удалось загрузить обращения.</p>}
+    {status==='error'&&<p role="alert">Не удалось загрузить обращения. Обновите список с первой страницы.</p>}
     {status==='ready'&&loadedScope===scope&&<>
       <button type="button" disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null}
         onClick={()=>{setLeadCursor(null);setLeadHistory([]);setLeadNext(null);

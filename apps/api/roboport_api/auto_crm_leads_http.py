@@ -62,6 +62,9 @@ def crm_leads(org_id:str,loc_id:str,request:Request,cursor:str|None=None):
     dsn,(org,loc)=scoped
     with psycopg.connect(dsn) as db:
         try:
+            # Duplicate values are invalid, but live authority still precedes decoding.
+            if len(request.query_params.getlist("cursor"))>1:
+                cursor=""
             result=list_leads(db,request.cookies.get("rp_session",""),org,loc,cursor)
         except (LeadDenied,LeadConflict) as exc:
             return _error(request,exc)
