@@ -4,6 +4,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator,FormatChecker
 from openapi_spec_validator import validate_spec
 from roboport_api.main import app
+from roboport_api.auto_service_recommendations_http import router
 
 SPEC=json.loads((Path(__file__).resolve().parents[2]/"contracts/auto-maintenance-queue-dev-openapi.json").read_text(encoding="utf-8"))
 PATH="/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/maintenance-queue"
@@ -17,7 +18,8 @@ def test_queue_contract_is_private_and_bounded():
     assert set(op["responses"])=={"200","403","404","422"}
     assert op["responses"]["200"]["headers"]["Cache-Control"]["schema"]["const"]=="no-store"
     assert PATH not in app.openapi()["paths"]
-    assert any(getattr(r,"path",None)==PATH for r in app.routes)
+    assert [(route.path,method) for route in router.routes for method in route.methods
+            if route.path==PATH]==[(PATH,"GET")]
 
 def test_queue_dto_no_customer_data_or_unbounded_page():
     check=Draft202012Validator({**SPEC,"$ref":"#/components/schemas/MaintenanceQueue"},format_checker=FormatChecker())
