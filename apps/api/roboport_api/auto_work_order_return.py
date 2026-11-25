@@ -3,6 +3,7 @@ from uuid import UUID
 import psycopg
 
 from .auto_org_authority import organization_role_allows
+from .auto_purchase_document_policy import require_full_stock_history
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 
 
@@ -22,6 +23,7 @@ def return_work_order_stock(
             for_mutation=True,
         ):
             raise AutoStockDenied("FORBIDDEN")
+        require_full_stock_history(conn,token,organization_id,location_id,"EDIT")
         row = conn.execute(
             """SELECT w.id FROM auto_work_order w JOIN auto_stock_sku s
                ON s.organization_id=w.organization_id

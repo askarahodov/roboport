@@ -126,3 +126,48 @@ def test_sealed_order_uses_serial_cost_but_missing_internal_rate_remains_unknown
     rows=list(csv.reader(StringIO(out.text.lstrip("\ufeff")),delimiter=";"))
     assert len(rows)==10 and all(len(r)==30 for r in rows)
     assert len([r for r in rows if r[2]=="FIFO_SLICE"])==3
+
+
+def test_serial_provenance_replay_requires_create_close_and_original_branch(monkeypatch):
+    from test_pg_auto_stock_service import grant
+    from test_pg_auto_bay_booking import _org_and_bay
+    d,org,loc,order,proof,_,_=fixture(monkeypatch,"serial")
+    http=TestClient(app,base_url="https://127.0.0.1")
+    prefix=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/serial-receipt-provenance"
+    with psycopg.connect(DSN) as db:
+        pkey=db.execute("SELECT request_key FROM auto_stock_serial_receipt_assertion WHERE id=%s",
+                        (proof["p1"]["assertionId"],)).fetchone()[0]
+        akey=db.execute("SELECT request_key FROM auto_stock_serial_receipt_approval WHERE id=%s",
+                        (proof["a1"]["approvalId"],)).fetchone()[0]
+        # Another organization/branch in which the same actor has WAREHOUSE.
+        foreign,foreign_loc,_=_org_and_bay(db)
+        grant(db,d["manager"],foreign,foreign_loc,"WAREHOUSE")
+    body={"requestKey":str(pkey),"serialId":str(proof["serial1"]),"receiptId":str(proof["receipt"])}
+    approval=prefix+"/"+proof["p1"]["assertionId"]+"/approve"
+    def rule(role,cap,allowed):
+        owner=token(http,d,d["other"])
+        result=set_rule(http,policy_url(org),owner,role=role,loc=loc,
+                        document="SUPPLIER_ORDER",cap=cap,allowed=allowed)
+        assert result.status_code==201,result.text
+    warehouse=token(http,d,d["manager"])
+    assert http.post(prefix,headers=warehouse,json=body).status_code==200
+    assert http.post(prefix.replace(str(org),str(foreign)).replace(str(loc),str(foreign_loc)),
+                     headers=warehouse,json=body).status_code==403
+    rule("WAREHOUSE","CREATE",False)
+    warehouse=token(http,d,d["manager"])
+    assert http.post(prefix,headers=warehouse,json=body).status_code==403
+    rule("WAREHOUSE","CREATE",True)
+    warehouse=token(http,d,d["manager"])
+    restored=http.post(prefix,headers=warehouse,json=body)
+    assert restored.status_code==200 and restored.json()["assertionId"]==proof["p1"]["assertionId"]
+    rule("MANAGER","CLOSE",False)
+    manager=token(http,d,d["intake"])
+    assert http.get(prefix).status_code==200
+    assert http.post(approval,headers=manager,json={"requestKey":str(akey)}).status_code==403
+    rule("MANAGER","CLOSE",True)
+    manager=token(http,d,d["intake"])
+    restored=http.post(approval,headers=manager,json={"requestKey":str(akey)})
+    assert restored.status_code==200 and restored.json()["approvalId"]==proof["a1"]["approvalId"]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_stock_serial_receipt_approval WHERE assertion_id=%s",
+                          (proof["p1"]["assertionId"],)).fetchone()==(1,)
