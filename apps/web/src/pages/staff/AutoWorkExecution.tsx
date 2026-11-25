@@ -46,19 +46,34 @@ export function AutoWorkExecution({lockedScope}:{lockedScope?:{org:string;loc:st
   const root='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
     '/locations/'+encodeURIComponent(loc.trim())+'/orders/'+encodeURIComponent(order.trim());
   const ready=status==='ready'&&loaded===scope&&snapshot!==null;
+  const generation=React.useRef(0);
+  const lastScope=React.useRef(scope);
+  if(lastScope.current!==scope){lastScope.current=scope;generation.current++;}
+  function clearSensitive(){
+    setSnapshot(null);setLoaded('');setMinutes({});setLot('');setQty('1');setIssue('');
+    setAssignments([]);setMechanicId('');setShiftStart('');setShiftEnd('');
+  }
+  function deny(){
+    generation.current++;
+    clearSensitive();setStatus('denied');setMessage('');
+  }
   React.useEffect(()=>{
-    setSnapshot(null);setLoaded('');setPending(null);setMessage('');
+    clearSensitive();setPending(null);setMessage('');
+  },[scope]);
+  React.useEffect(()=>{
+    setSnapshot(null);setLoaded('');setMessage('');
     setStatus(valid?'loading':'idle');
     if(!valid)return;
     const controller=new AbortController();
+    const stamp=generation.current;
     void fetch(root+'/execution',{credentials:'include',cache:'no-store',signal:controller.signal})
       .then(async res=>{
-        if(controller.signal.aborted)return;
-        if([401,403,404].includes(res.status)){setStatus('denied');return;}
+        if(controller.signal.aborted||stamp!==generation.current)return;
+        if([401,403,404].includes(res.status)){deny();return;}
         if(!res.ok)throw Error('failed');
         const data=parse(await res.json());
-        if(!controller.signal.aborted){setSnapshot(data);setLoaded(scope);setStatus('ready');}
-      }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
+        if(!controller.signal.aborted&&stamp===generation.current){setSnapshot(data);setLoaded(scope);setStatus('ready');}
+      }).catch(()=>{if(!controller.signal.aborted&&stamp===generation.current){clearSensitive();setStatus('error');}});
     return ()=>controller.abort();
   },[scope,valid,revision]);
 
@@ -66,6 +81,7 @@ export function AutoWorkExecution({lockedScope}:{lockedScope?:{org:string;loc:st
     setAssignments([]);
     if(!valid)return;
     const controller=new AbortController();
+    const stamp=generation.current;
     const queue='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
       '/locations/'+encodeURIComponent(loc.trim())+'/assignments';
     void fetch(queue,{credentials:'include',cache:'no-store',signal:controller.signal})
@@ -80,24 +96,31 @@ export function AutoWorkExecution({lockedScope}:{lockedScope?:{org:string;loc:st
           &&'startsAt' in v&&typeof v.startsAt==='string'
           &&'endsAt' in v&&typeof v.endsAt==='string'
           &&'status' in v&&(v.status==='OFFERED'||v.status==='ACCEPTED'));
-        if(!controller.signal.aborted)setAssignments(safe);
+        if(!controller.signal.aborted&&stamp===generation.current)setAssignments(safe);
       }).catch(()=>{});
     return ()=>controller.abort();
-  },[org,loc,valid,revision]);
+  },[scope,org,loc,valid,revision]);
 
   async function act(path:string,body:string){
     if(!ready||busy)return;
+    const stamp=generation.current;
+    const retry=pending!==null;
     setBusy(true);setMessage('');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{method:'POST',credentials:'include',cache:'no-store'});
+      if(stamp!==generation.current)return;
+      if([401,403,404].includes(csrf.status)){if(!retry)setPending(null);deny();return;}
       if(!csrf.ok)throw Error('csrf');
       const value:unknown=await csrf.json();
       if(!value||typeof value!=='object'||!('csrfToken' in value)
         ||typeof value.csrfToken!=='string')throw Error('csrf');
+      if(stamp!==generation.current)return;
       const res=await fetch(path,{method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':value.csrfToken},body});
+      if(stamp!==generation.current)return;
       if([401,403,404].includes(res.status)){
-        setSnapshot(null);setStatus('denied');setPending(null);return;
+        if(!retry)setPending(null);
+        deny();return;
       }
       if(res.status===409||res.status===422){
         setPending(null);
@@ -108,7 +131,7 @@ export function AutoWorkExecution({lockedScope}:{lockedScope?:{org:string;loc:st
       if(!res.ok)throw Error('unknown');
       setPending(null);setRevision(n=>n+1);
     }catch{
-      setPending({path,body});setMessage('Результат неизвестен. Повторите тот же запрос или перечитайте журнал.');
+      if(stamp===generation.current){setPending({path,body});setMessage('Результат неизвестен. Повторите тот же запрос или перечитайте журнал.');}
     }finally{setBusy(false);}
   }
   function send(kind:string,body:Record<string,unknown>){
@@ -130,7 +153,8 @@ export function AutoWorkExecution({lockedScope}:{lockedScope?:{org:string;loc:st
       value={order} readOnly={lockedScope!==undefined} onChange={e=>setOrder(e.target.value)}/></label>
     {status==='idle'&&<p>Укажите UUID для чтения актуального заказ-наряда.</p>}
     {status==='loading'&&<p role="status">Загрузка статуса исполнения…</p>}
-    {status==='denied'&&<p role="alert">Доступ запрещён, связь отозвана или запись отменена.</p>}
+    {status==='denied'&&<><p role="alert">Доступ запрещён, связь отозвана или запись отменена.</p>
+      <button type="button" disabled={busy} onClick={()=>setRevision(n=>n+1)}>Проверить доступ заново</button></>}
     {status==='error'&&<><p role="alert">Не удалось загрузить данные.</p>
       <button type="button" onClick={()=>setRevision(n=>n+1)}>Повторить загрузку</button></>}
     {ready&&snapshot&&<>

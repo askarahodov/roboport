@@ -9,7 +9,7 @@ from .auto_stock_mechanic_handoff import acknowledge_mechanic_handoff, require_m
 from .auto_purchase_document_policy import require_full_stock_history
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 from .auto_org_authority import organization_role_allows
-from .auto_document_access import has_document_access
+from .auto_document_access import has_document_access, require_document_access, DocumentPolicyDenied
 
 
 class ExecutionDenied(ValueError):
@@ -24,6 +24,27 @@ def _scope(conn,token,org,loc,order,roles):
     try:
         return _actor_and_order(conn,token,org,loc,order,roles)
     except InspectionDenied:
+        raise ExecutionDenied("FORBIDDEN") from None
+
+
+# The execution screen is an operational projection, not a full estimate,
+# intake act or purchase document. Existing execution roles may see only
+# the necessary non-price projection, subject to restrictions on every
+# represented family. A policy ALLOW never grants access to the full doc.
+EXECUTION_ROLES=("MANAGER","MECHANIC","WAREHOUSE")
+PROJECTION_ROLES=(*EXECUTION_ROLES,"INTAKE")
+
+
+def _execution_policy(conn,token,org,loc,order,*,write_role=None):
+    """All response families are checked before reads, writes and replays."""
+    try:
+        for document in ("INTAKE_ACT","ESTIMATE","SUPPLIER_ORDER"):
+            require_document_access(conn,token,org,loc,PROJECTION_ROLES,
+                                    document,"READ",order=order)
+        if write_role:
+            require_document_access(conn,token,org,loc,(write_role,),
+                                    "INTAKE_ACT","WRITE",order=order)
+    except DocumentPolicyDenied:
         raise ExecutionDenied("FORBIDDEN") from None
 
 
@@ -108,7 +129,8 @@ def _present_state(conn,token,org,loc,order):
 
 def read_execution(conn,token,org,loc,order):
     with conn.transaction():
-        _scope(conn,token,org,loc,order,("MANAGER","MECHANIC","WAREHOUSE"))
+        _scope(conn,token,org,loc,order,EXECUTION_ROLES)
+        _execution_policy(conn,token,org,loc,order)
         return _present_state(conn,token,org,loc,order)
 
 
@@ -117,6 +139,7 @@ def start_execution(conn,token,org,loc,order,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_scope(conn,token,org,loc,order,("MANAGER",))
+        _execution_policy(conn,token,org,loc,order,write_role="MANAGER")
         state=_state(conn,order)
         prior=conn.execute("""
           SELECT id,request_key,actor_id FROM auto_work_order_execution
@@ -166,6 +189,7 @@ def labor_execution(conn,token,org,loc,order,service_id,minutes,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_scope(conn,token,org,loc,order,("MECHANIC",))
+        _execution_policy(conn,token,org,loc,order,write_role="MECHANIC")
         execution_row=conn.execute("""
            SELECT id FROM auto_work_order_execution WHERE work_order_id=%s
         """,(order,)).fetchone()
@@ -207,6 +231,7 @@ def issue_material(conn,token,org,loc,order,lot_id,quantity,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         _scope(conn,token,org,loc,order,("WAREHOUSE",))
+        _execution_policy(conn,token,org,loc,order)
         # Replays must pass the same live policy before returning an ID or state.
         try:
             require_full_stock_history(conn,token,org,loc,"EDIT")
@@ -288,6 +313,7 @@ def receive_material(conn,token,org,loc,order,issue_id,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_scope(conn,token,org,loc,order,("MECHANIC",))
+        _execution_policy(conn,token,org,loc,order,write_role="MECHANIC")
         try:
             require_mechanic_handoff_policy(conn,token,org,loc,order)
         except AutoStockDenied:
@@ -325,6 +351,7 @@ def finish_execution(conn,token,org,loc,order,request_key):
         raise ExecutionDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_scope(conn,token,org,loc,order,("MECHANIC",))
+        _execution_policy(conn,token,org,loc,order,write_role="MECHANIC")
         state=_state(conn,order)
         execution=conn.execute("""
           SELECT id FROM auto_work_order_execution WHERE work_order_id=%s

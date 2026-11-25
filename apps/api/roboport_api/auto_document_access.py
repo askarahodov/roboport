@@ -244,25 +244,30 @@ ROLE_BASE={
   "INTAKE_ACT":{
     "READ":{"INTAKE","MANAGER","MECHANIC"},
     "CREATE":{"INTAKE"},"EDIT":{"INTAKE"},
+    "WRITE":{"INTAKE","MANAGER","MECHANIC"},
   },
   "ESTIMATE":{
     "READ":{"MANAGER"},"CREATE":{"MANAGER"},"EDIT":{"MANAGER"},
     "PRICE_SALES":{"MANAGER"},"DISCOUNT":{"MANAGER"},
+    "WRITE":{"MANAGER"},
   },
   "HANDOVER":{
     "READ":{"MANAGER","WAREHOUSE"},"CREATE":{"MANAGER"},
     "EDIT":{"WAREHOUSE"},"CLOSE":{"MANAGER"},
     "PRICE_SALES":{"MANAGER","WAREHOUSE"},
+    "WRITE":{"MANAGER","WAREHOUSE"},
   },
   "SUPPLIER_ORDER":{
     "READ":{"MANAGER","WAREHOUSE"},"CREATE":{"WAREHOUSE"},
     "EDIT":{"WAREHOUSE","MANAGER"},"CLOSE":{"WAREHOUSE","MANAGER"},
     "PRICE_PURCHASE":{"WAREHOUSE","MANAGER"},
+    "WRITE":{"MANAGER","WAREHOUSE"},
   },
   "FINANCE":{
     "READ":{"MANAGER","CASHIER"},"CREATE":{"MANAGER"},
     "EDIT":{"CASHIER","MANAGER"},"CLOSE":{"CASHIER"},
     "PRICE_SALES":{"MANAGER","CASHIER"},
+    "WRITE":{"MANAGER","CASHIER"},
     # Внутренние затраты филиала — только MANAGER; CASHIER не получает ставки.
     "PRICE_PURCHASE":{"MANAGER"},
   },
@@ -314,15 +319,19 @@ def preview_employee_document_access(conn,token,org,loc,user,document):
                 for role,location,target,cap,allowed,not_before in rules}
         rights={}
         for cap in CAPABILITIES:
-            applicable=active & ROLE_BASE[document].get(cap,active if cap=="WRITE" else set())
+            applicable=active & ROLE_BASE[document].get(cap,set())
             # Стоимость труда имеет только MANAGER; при совмещении с CASHIER
             # его запрет тоже сужает действительное право, как в cost API.
             if document=="FINANCE" and cap=="PRICE_PURCHASE" and "MANAGER" in active:
                 applicable=active & {"MANAGER","CASHIER"}
             # The handover operational role remains mandatory, but a
             # second live MANAGER/WAREHOUSE role cannot bypass its DENY.
-            if document=="HANDOVER" and applicable and cap in ("CREATE","EDIT","CLOSE"):
+            if document in ("HANDOVER","SUPPLIER_ORDER") and applicable and cap in ("CREATE","EDIT","CLOSE"):
                 applicable=active & {"MANAGER","WAREHOUSE"}
+            # Treasury checks both active financial roles after the exact
+            # operational role, so CREATE/CLOSE preview must do the same.
+            if document=="FINANCE" and applicable and cap in ("CREATE","EDIT","CLOSE"):
+                applicable=active & {"MANAGER","CASHIER"}
             controls=(cap,"WRITE") if cap in ("CREATE","EDIT","CLOSE") else (cap,)
             matching=[(allowed,stamp) for (role,location,target,rule_cap),(allowed,stamp)
                       in latest.items() if role in applicable and rule_cap in controls]

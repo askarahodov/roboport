@@ -306,3 +306,48 @@ test('390/1280: ZIP закрытого документа доступен MANAG
     expect(downloads).toBe(5);
     expect(savedDownloads).toBe(2);
   });
+
+
+test('cash retry survives document revoke and CSRF denial clears old amounts',async({page})=>{
+  let csrfDenied=false,posts=0;
+  const keys:string[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:csrfDenied?403:200,contentType:'application/json',
+    body:csrfDenied?'{"code":"FORBIDDEN"}':'{"csrfToken":"synthetic"}'}));
+  await page.route(root,route=>{
+    const req=route.request();
+    if(req.method()==='POST'){
+      posts++;keys.push(req.postDataJSON().requestKey);
+      if(posts===1)return route.abort('failed');
+      return route.fulfill({status:posts===2?403:200,contentType:'application/json',
+        body:posts===2?'{"code":"FORBIDDEN"}':'{"ok":true,"replayed":true}'});
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,releaseAllowed:false,legalGatePassed:false,currency:'RUB',
+      approvedVersion:1,approvedBaseMinor:2500,approvedExtraMinor:0,
+      approvedExtraVersion:null,approvedExtraRevisionId:null,approvedTotalMinor:2500,
+      simulatedPaidMinor:0,simulatedRefundedMinor:0,simulatedDueMinor:2500,events:[],
+      outstandingReserves:[],unreceivedMaterialCount:0,executionStatus:'QC_ACCEPTED',
+      blockers:['SIMULATED_BALANCE_OPEN'],canSealPreview:false,preview:null})});
+  });
+  await page.goto('/staff/auto-demo-close');
+  await fillScope(page);
+  await page.getByRole('spinbutton',{name:'Сумма, коп.'}).fill('2500');
+  await page.getByRole('button',{name:'Записать условное движение'}).click();
+  const retry=page.getByRole('button',{name:/Повторить.*запрос/});
+  await retry.click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('Основные работы: 2500',{exact:false})).toHaveCount(0);
+  await page.getByRole('button',{name:'Проверить доступ заново'}).click();
+  await expect(page.getByRole('spinbutton',{name:'Сумма, коп.'})).toHaveValue('');
+  await retry.click();
+  await expect(retry).toHaveCount(0);
+  expect(keys).toHaveLength(3);
+  expect(new Set(keys).size).toBe(1);
+  await page.getByRole('spinbutton',{name:'Сумма, коп.'}).fill('100');
+  csrfDenied=true;
+  await page.getByRole('button',{name:'Записать условное движение'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('Основные работы: 2500',{exact:false})).toHaveCount(0);
+  expect(posts).toBe(3);
+});

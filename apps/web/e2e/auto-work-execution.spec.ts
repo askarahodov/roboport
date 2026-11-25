@@ -183,3 +183,96 @@ test('execution renders all 70 approved base plus additional labor entries at 39
     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }
 });
+
+
+test('execution denies CSRF and clears stale choices; uncertain retry survives revoke',async({page})=>{
+  let csrfDenied=false,denied=false,posts=0;
+  const keys:string[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:csrfDenied?403:200,contentType:'application/json',
+    body:csrfDenied?'{"code":"FORBIDDEN"}':'{"csrfToken":"synthetic"}'}));
+  await page.route(root,route=>{
+    const req=route.request();
+    if(req.method()==='POST'){
+      posts++;keys.push(req.postDataJSON().requestKey);
+      if(posts===1)return route.abort('failed');
+      return route.fulfill({status:posts===2?403:200,contentType:'application/json',
+        body:posts===2?'{"code":"FORBIDDEN"}':'{"ok":true,"replayed":true}'});
+    }
+    return route.fulfill({status:denied?403:200,contentType:'application/json',
+      body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({
+        status:'IN_PROGRESS',approvedVersion:1,approvedTotalMinor:7500,
+        requiredServices:[{serviceId:service,code:'PRIVATE-SYN',title:'Synthetic',durationMinutes:30}],
+        labor:[],materials:[],qcStatus:'PENDING_QC',executionId:order,syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.goto('/staff/auto-execution');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByRole('textbox',{name:'UUID заказ-наряда'}).fill(order);
+  await expect(page.getByText('PRIVATE-SYN',{exact:false})).toBeVisible();
+  await page.getByRole('spinbutton',{name:'Фактические минуты PRIVATE-SYN'}).fill('20');
+  await page.getByRole('button',{name:'Зафиксировать работу'}).click();
+  await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('PRIVATE-SYN',{exact:false})).toHaveCount(0);
+  denied=true;
+  await page.getByRole('button',{name:'Проверить доступ заново'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  denied=false;
+  await page.getByRole('button',{name:'Проверить доступ заново'}).click();
+  await expect(page.getByRole('spinbutton',{name:'Фактические минуты PRIVATE-SYN'})).toHaveValue('');
+  await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
+  await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toHaveCount(0);
+  expect(keys).toHaveLength(3);
+  expect(new Set(keys).size).toBe(1);
+  await page.getByRole('spinbutton',{name:'Фактические минуты PRIVATE-SYN'}).fill('25');
+  csrfDenied=true;
+  await page.getByRole('button',{name:'Зафиксировать работу'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('PRIVATE-SYN',{exact:false})).toHaveCount(0);
+  expect(posts).toBe(3);
+});
+
+
+test('switching orders in one branch refreshes live assignments without manual reload',async({page})=>{
+  const orderB='77777777-7777-4777-8777-777777777777';
+  const workerA='88888888-8888-4888-8888-888888888888';
+  const workerB='99999999-9999-4999-8999-999999999999';
+  const assignmentA={assignmentId:issue,workOrderId:order,mechanicId:workerA,
+    startsAt:'2030-01-01T10:00:00Z',endsAt:'2030-01-01T11:00:00Z',
+    status:'OFFERED',canRespond:true};
+  const assignmentB={assignmentId:lot,workOrderId:orderB,mechanicId:workerB,
+    startsAt:'2030-01-01T12:00:00Z',endsAt:'2030-01-01T13:00:00Z',
+    status:'OFFERED',canRespond:true};
+  let queueLoads=0;
+  await page.route(root,route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path.endsWith('/assignments')){
+      queueLoads++;
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({items:[assignmentA,assignmentB]})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({status:'IN_PROGRESS',approvedVersion:1,approvedTotalMinor:null,
+        requiredServices:[],labor:[],materials:[],qcStatus:'PENDING_QC',
+        executionId:path.includes(orderB)?orderB:order,syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.goto('/staff/auto-execution');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  const input=page.getByRole('textbox',{name:'UUID заказ-наряда'});
+  await input.fill(order);
+  await expect(page.getByText(workerA,{exact:false})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Принять назначение'})).toHaveCount(1);
+  const firstLoads=queueLoads;
+  await input.fill(orderB);
+  await expect(page.getByText(workerB,{exact:false})).toBeVisible();
+  await expect(page.getByText(workerA,{exact:false})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Принять назначение'})).toHaveCount(1);
+  expect(queueLoads).toBeGreaterThan(firstLoads);
+  const secondLoads=queueLoads;
+  await input.fill(order);
+  await expect(page.getByText(workerA,{exact:false})).toBeVisible();
+  await expect(page.getByText(workerB,{exact:false})).toHaveCount(0);
+  expect(queueLoads).toBeGreaterThan(secondLoads);
+});

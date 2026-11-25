@@ -12,8 +12,8 @@ from .auto_work_order_additional import _state as _extra_state
 from .auto_org_authority import organization_role_allows
 from .auto_work_order_stock import mutate_work_order_stock
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
-from .auto_document_access import DocumentPolicyDenied
-from .auto_handover_policy import require_handover_access
+from .auto_document_access import DocumentPolicyDenied, require_document_access
+from .auto_handover_policy import require_handover_projection
 
 
 class DemoCloseDenied(ValueError):
@@ -32,7 +32,7 @@ def _authority(conn, token, org, loc, order):
             or organization_role_allows(conn,token,org,"WAREHOUSE",loc,for_mutation=True)):
         try:
             _scope(conn,token,org,loc,order,("MANAGER","WAREHOUSE"))
-            require_handover_access(conn,token,org,loc,order)
+            require_handover_projection(conn,token,org,loc,order)
         except (ExecutionDenied,DocumentPolicyDenied):
             raise DemoCloseDenied("FORBIDDEN") from None
         return
@@ -45,7 +45,7 @@ def _authority(conn, token, org, loc, order):
 def _manager(conn,token,org,loc,order,*,cap="CREATE"):
     try:
         actor=_scope(conn,token,org,loc,order,("MANAGER",))
-        require_handover_access(conn,token,org,loc,order,cap=cap)
+        require_handover_projection(conn,token,org,loc,order,cap=cap)
         return actor
     except (ExecutionDenied,DocumentPolicyDenied):
         raise DemoCloseDenied("FORBIDDEN") from None
@@ -54,7 +54,7 @@ def _manager(conn,token,org,loc,order,*,cap="CREATE"):
 def _warehouse(conn,token,org,loc,order):
     try:
         actor=_scope(conn,token,org,loc,order,("WAREHOUSE",))
-        require_handover_access(conn,token,org,loc,order,cap="EDIT")
+        require_handover_projection(conn,token,org,loc,order,cap="EDIT")
         return actor
     except (ExecutionDenied,DocumentPolicyDenied):
         raise DemoCloseDenied("FORBIDDEN") from None
@@ -157,6 +157,11 @@ def simulate_cash(conn,token,org,loc,order,*,request_key,kind,amount_minor):
         raise DemoCloseDenied("INVALID_INPUT")
     with conn.transaction():
         actor=_manager(conn,token,org,loc,order)
+        try:
+            require_document_access(conn,token,org,loc,("MANAGER","CASHIER"),
+                                    "FINANCE","EDIT",order=order)
+        except DocumentPolicyDenied:
+            raise DemoCloseDenied("FORBIDDEN") from None
         state=_state_snapshot(conn,order)
         existing=conn.execute("""
            SELECT id,actor_id,kind,amount_minor,revision_id

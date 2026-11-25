@@ -439,3 +439,81 @@ def test_execution_material_replay_obeys_live_document_policy(monkeypatch):
         assert balance(db,item)==(1,1)
         assert db.execute("SELECT count(*) FROM auto_stock_lot_work_order_issue WHERE work_order_id=%s",(order,)).fetchone()==(1,)
         assert db.execute("SELECT count(*) FROM auto_stock_mechanic_handoff WHERE issue_id=%s",(issue_id,)).fetchone()==(1,)
+
+
+def test_execution_composite_read_and_write_restrictions(monkeypatch):
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    d,org,loc,order,service,item,lot=fixture(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+    http=TestClient(app,base_url="https://127.0.0.1")
+    base=url(org,loc,order)
+    manager=d["intake"]
+    mechanic=d["manager"]
+    def rule(role,document,cap,allowed=False,cutoff=None):
+        owner=session(http,d,d["other"])
+        res=set_rule(http,policy_url(org),owner,loc=loc,role=role,document=document,
+                     cap=cap,allowed=allowed,not_before=cutoff)
+        assert res.status_code==201,res.text
+    def mutate(actor,kind,key,**body):
+        return post(http,base+"/"+kind,session(http,d,actor),key,**body)
+    def denied(res):
+        assert res.status_code==403,res.text
+        assert res.headers["cache-control"]=="no-store"
+        assert set(res.json())=={"code","requestId"}
+    start_key=uuid4()
+    rule("MANAGER","INTAKE_ACT","WRITE")
+    denied(mutate(manager,"start",start_key))
+    rule("MANAGER","INTAKE_ACT","WRITE",True)
+    assert mutate(manager,"start",start_key).status_code==201
+    labor_key=uuid4()
+    labor={"serviceId":str(service),"actualMinutes":20}
+    rule("MECHANIC","INTAKE_ACT","WRITE")
+    denied(mutate(mechanic,"labor",labor_key,**labor))
+    rule("MECHANIC","INTAKE_ACT","WRITE",True)
+    assert mutate(mechanic,"labor",labor_key,**labor).status_code==201
+    issue_key=uuid4()
+    issued=mutate(manager,"materials/issue",issue_key,lotId=str(lot),quantity=1)
+    assert issued.status_code==201,issued.text
+    receive_key=uuid4()
+    assert mutate(mechanic,"materials/receive",receive_key,issueId=issued.json()["issueId"]).status_code==201
+    # Each family is separately checked even for a mechanic who can see
+    # operational data without the full estimate/warehouse document.
+    for document in ("INTAKE_ACT","ESTIMATE","SUPPLIER_ORDER"):
+        for cutoff in (None,"2099-01-01T00:00:00Z"):
+            rule("MECHANIC",document,"READ",bool(cutoff),cutoff)
+            session(http,d,mechanic)
+            denied(http.get(base))
+            denied(mutate(mechanic,"labor",labor_key,**labor))
+            denied(mutate(mechanic,"finish",uuid4()))
+            rule("MECHANIC",document,"READ",True)
+            session(http,d,mechanic)
+            restored=http.get(base)
+            assert restored.status_code==200,restored.text
+            assert restored.json()["approvedTotalMinor"] is None
+            assert restored.json()["materials"][0]["issueId"]==issued.json()["issueId"]
+    # DENY on a second live role cannot be ignored when reading the projection.
+    rule("WAREHOUSE","ESTIMATE","READ")
+    session(http,d,manager)
+    denied(http.get(base))
+    denied(mutate(manager,"start",start_key))
+    denied(mutate(manager,"materials/issue",issue_key,lotId=str(lot),quantity=1))
+    rule("WAREHOUSE","ESTIMATE","READ",True)
+    assert mutate(manager,"start",start_key).status_code==200
+    rule("MANAGER","ESTIMATE","PRICE_SALES")
+    session(http,d,manager)
+    assert http.get(base).json()["approvedTotalMinor"] is None
+    rule("MANAGER","ESTIMATE","PRICE_SALES",True)
+    session(http,d,manager)
+    assert http.get(base).json()["approvedTotalMinor"]==2500
+    finish_key=uuid4()
+    rule("MECHANIC","INTAKE_ACT","WRITE")
+    denied(mutate(mechanic,"finish",finish_key))
+    denied(mutate(mechanic,"labor",labor_key,**labor))
+    rule("MECHANIC","INTAKE_ACT","WRITE",True)
+    assert mutate(mechanic,"finish",finish_key).status_code==201
+    assert mutate(mechanic,"finish",finish_key).status_code==200
+    with psycopg.connect(DSN) as db:
+        assert balance(db,item)==(1,1)
+        assert db.execute("SELECT count(*) FROM auto_work_order_labor_entry l JOIN auto_work_order_execution e ON e.id=l.execution_id WHERE e.work_order_id=%s",(order,)).fetchone()==(1,)
+        assert db.execute("SELECT count(*) FROM auto_work_order_execution_finish f JOIN auto_work_order_execution e ON e.id=f.execution_id WHERE e.work_order_id=%s",(order,)).fetchone()==(1,)
