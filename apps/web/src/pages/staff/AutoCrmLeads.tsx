@@ -8,14 +8,14 @@ type Event={id:string;actorId:string;stageCode:'QUALIFIED'|'BOOKED'|'LOST';
   reasonCode:string|null;appointmentId:string|null;createdAt:string};
 type Lead={leadId:string;customerLinkId:string;ownerId:string;
   sourceCode:'WEB'|'PHONE'|'WALK_IN';status:'NEW'|'QUALIFIED'|'BOOKED'|'LOST';
-  createdAt:string;syntheticOnly:true;events:Event[]};
+  createdAt:string;syntheticOnly:true;events:Event[];visitNumber?:number};
 function parseLead(v:unknown):Lead{
   if(!v||typeof v!=='object')throw Error('shape');
   const x=v as Lead;
   if(![x.leadId,x.customerLinkId,x.ownerId].every(y=>typeof y==='string'&&uuid.test(y))||
     !['WEB','PHONE','WALK_IN'].includes(x.sourceCode)||
     !['NEW','QUALIFIED','BOOKED','LOST'].includes(x.status)||
-    x.syntheticOnly!==true||!Array.isArray(x.events)||x.events.length>99||
+    x.syntheticOnly!==true||(x.visitNumber!==undefined&&(!Number.isSafeInteger(x.visitNumber)||x.visitNumber<1))||!Array.isArray(x.events)||x.events.length>99||
     !x.events.every(e=>e&&uuid.test(e.id)&&uuid.test(e.actorId)&&
       ['QUALIFIED','BOOKED','LOST'].includes(e.stageCode)&&
       (e.reasonCode===null||['PRICE','TIMING','NO_RESPONSE','OTHER'].includes(e.reasonCode))&&
@@ -367,7 +367,7 @@ export function AutoCrmLeads(){
   const chosen=rows.find(x=>x.leadId===selected);
   return <section aria-label="Синтетический реестр CRM (dev)">
     <h1>Обращения и этапы CRM</h1>
-    <p>Только тестовый HTTPS-стенд. Один лид на подтверждённую связь,
+    <p>Только тестовый HTTPS-стенд. Один открытый лид на подтверждённую связь,
       источник и филиал; никакой отправки сообщений, звонков или обработки
       реальных номеров. Этап «Записан» связывается с существующей записью,
       но не означает посещение или оплату.</p>
@@ -443,13 +443,14 @@ export function AutoCrmLeads(){
       <button type="button" disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null||!uuid.test(link)}
         onClick={()=>void mutate(base,{customerLinkId:link,sourceCode:source})}>
         Создать обращение</button>
+      <p>После записи или отказа можно начать новое обращение того же клиента. Пока предыдущее открыто, дубль запрещён.</p>
       <h2>Журнал обращений</h2>
       {rows.length===0?<p>{leadCursor?'На этой странице обращений нет.':'Обращений пока нет.'}</p>:<label>Обращение
         <select aria-label="Обращение" value={selected} disabled={taskBusy||busy||pendingLead!==null}
           onChange={e=>{setPendingTask(null);setSelected(e.target.value);}}>
           <option value="">Выберите обращение</option>
           {rows.map(x=><option value={x.leadId} key={x.leadId}>
-            {leadSourceLabels[x.sourceCode]} · {leadStatusLabels[x.status]} · {x.leadId}</option>)}
+            {leadSourceLabels[x.sourceCode]} · {leadStatusLabels[x.status]} · {x.visitNumber!==undefined?'Обращение №'+x.visitNumber+' · ':''}{x.leadId}</option>)}
         </select></label>}
       <div aria-label="Страницы журнала CRM">
         {leadHistory.length>0&&<button type="button"
@@ -465,7 +466,11 @@ export function AutoCrmLeads(){
       </div>
       {chosen&&<div>
         <p>Ответственный: {chosen.ownerId}. Источник: {leadSourceLabels[chosen.sourceCode]}.
-          Текущий этап: {leadStatusLabels[chosen.status]}.</p>
+          Текущий этап: {leadStatusLabels[chosen.status]}.{chosen.visitNumber!==undefined&&<> Цикл обращения №{chosen.visitNumber}.</>}</p>
+        {['BOOKED','LOST'].includes(chosen.status)&&<button type="button"
+          disabled={busy||taskBusy||pendingLead!==null||pendingTask!==null}
+          onClick={()=>void mutate(base,{customerLinkId:chosen.customerLinkId,sourceCode:chosen.sourceCode})}>
+          Создать повторное обращение</button>}
         <StaffCrmContactPreferences key={scope+':'+selected} base={base} leadId={selected}
           onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);
             setStatus('denied');}}/>

@@ -17,6 +17,9 @@ from .auto_appointment_service import (
     AppointmentHoursClosed,
 )
 from .session_lookup import session_subject
+from .auto_crm_leads import (
+    latest_lead_cycle, create_lead, transition_lead, lead_detail, LeadDenied, LeadConflict,
+)
 
 
 class PublicBookingDenied(ValueError): pass
@@ -610,11 +613,11 @@ def fulfill_request(conn,token,org,loc,ident,key):
         if not live:
             raise PublicBookingDenied("FORBIDDEN")
         prior=conn.execute("""
-          SELECT f.appointment_id,f.work_order_id,f.actor_id,f.request_key
+          SELECT f.appointment_id,f.work_order_id,f.actor_id,f.request_key,f.crm_lead_id
           FROM auto_public_booking_fulfillment f WHERE f.request_id=%s
         """,(ident,)).fetchone()
         if prior:
-            if prior[2:]!=(actor,key):
+            if prior[2:4]!=(actor,key):
                 raise PublicBookingConflict("ALREADY_FULFILLED")
             # Повтор исторического ключа не означает, что исходное время
             # ещё зарезервировано после переноса или отмены.
@@ -622,7 +625,7 @@ def fulfill_request(conn,token,org,loc,ident,key):
                 raise PublicBookingConflict("BOOKING_SUPERSEDED")
             return {"replayed":True,"syntheticOnly":True,
                     "appointmentId":str(prior[0]),"workOrderId":str(prior[1]),
-                    "releaseAllowed":False}
+                    "crmLeadId":str(prior[4]),"releaseAllowed":False}
         if row[2]<=datetime.now(timezone.utc):
             raise PublicBookingConflict("SLOT_EXPIRED")
         try:
@@ -630,40 +633,33 @@ def fulfill_request(conn,token,org,loc,ident,key):
                 conn,token,org,loc,p[3],claimed[1],row[2],row[3],
                 request_key=uuid5(NAMESPACE_URL,"public-booking:"+str(ident)),
                 service_ids=(p[4],),material_items=materials)
-            lead=conn.execute("""
-               SELECT id FROM auto_crm_lead
-               WHERE organization_id=%s AND location_id=%s
-                 AND customer_link_id=%s AND source_code='WEB'
-               FOR SHARE
-            """,(org,loc,claimed[1])).fetchone()
-            if lead is None:
-                lead_id=uuid4()
-                conn.execute("""
-                  INSERT INTO auto_crm_lead
-                   (id,organization_id,location_id,customer_link_id,owner_id,
-                    source_code,request_key)
-                  VALUES (%s,%s,%s,%s,%s,'WEB',%s)
-                """,(lead_id,org,loc,claimed[1],actor,
-                     uuid5(NAMESPACE_URL,"public-crm:"+str(ident))))
-                conn.execute("""INSERT INTO auto_crm_lead_stage
-                  (id,lead_id,actor_id,stage_code,request_key)
-                  VALUES (%s,%s,%s,'QUALIFIED',%s)
-                """,(uuid4(),lead_id,actor,
-                     uuid5(NAMESPACE_URL,"public-crm-qualified:"+str(ident))))
-                conn.execute("""INSERT INTO auto_crm_lead_stage
-                  (id,lead_id,actor_id,stage_code,appointment_id,request_key)
-                  VALUES (%s,%s,%s,'BOOKED',%s,%s)
-                """,(uuid4(),lead_id,actor,appointment,
-                     uuid5(NAMESPACE_URL,"public-crm-booked:"+str(ident))))
+            # A new request has its own appointment lineage. Consume an
+            # accessible active WEB lead, or open the next immutable cycle.
+            latest=latest_lead_cycle(conn,org,loc,claimed[1],"WEB")
+            if latest and latest[2] in ("NEW","QUALIFIED"):
+                lead_id=latest[0]
+                conn.execute("""SELECT id FROM auto_crm_lead
+                  WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
+                  (lead_id,org,loc))
+                lead=lead_detail(conn,token,org,loc,lead_id)
             else:
-                lead_id=lead[0]
+                lead=create_lead(conn,token,org,loc,claimed[1],"WEB",
+                                 uuid5(NAMESPACE_URL,"public-crm:"+str(ident)))
+                lead_id=UUID(lead["leadId"])
+            if lead["status"]=="NEW":
+                transition_lead(conn,token,org,loc,lead_id,
+                    uuid5(NAMESPACE_URL,"public-crm-qualified:"+str(ident)),
+                    "QUALIFIED",None,None)
+            transition_lead(conn,token,org,loc,lead_id,
+                uuid5(NAMESPACE_URL,"public-crm-booked:"+str(ident)),
+                "BOOKED",None,appointment)
             conn.execute("""INSERT INTO auto_public_booking_fulfillment
               (request_id,appointment_id,work_order_id,crm_lead_id,actor_id,request_key)
               VALUES (%s,%s,%s,%s,%s,%s)
             """,(ident,appointment,order,lead_id,actor,key))
-        except (AppointmentDenied,):
+        except (AppointmentDenied,LeadDenied):
             raise PublicBookingDenied("FORBIDDEN") from None
-        except (AppointmentConflict,AppointmentStockUnavailable,
+        except (AppointmentConflict,LeadConflict,AppointmentStockUnavailable,
                 AppointmentKeyConflict,AppointmentDurationInvalid,
                 AppointmentHoursClosed,psycopg.errors.RaiseException,
                 psycopg.errors.UniqueViolation,psycopg.errors.ExclusionViolation,

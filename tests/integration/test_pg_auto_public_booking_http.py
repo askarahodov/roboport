@@ -503,3 +503,49 @@ def test_unusual_branch_timezone_slot_candidates_are_accepted(monkeypatch):
     assert created.status_code==201,created.text
     # Without local-zone matching the generated candidate would return 422.
     assert created.json()["noSlotHold"] is True
+
+
+def test_public_booking_consumes_active_crm_lead_then_creates_repeat_cycle(monkeypatch):
+    d,org,loc,bay,http,part,consumable,service,staff,offer=setup(monkeypatch)
+    from roboport_api.auto_crm_leads import create_lead,lead_detail
+    with psycopg.connect(DSN) as db:
+        first=create_lead(db,d["tokens"][d["intake"]],org,loc,d["link"],"WEB",uuid4())
+    slot=published_slot(http,org,loc,offer)
+    created,_=submit(http,offer,slot)
+    assert created.status_code==201,created.text
+    req=created.json()
+    assert claim(http,d,req["requestId"],req["receiptKey"])[0].status_code==201
+    finished,key=fulfill(http,d,staff,req["requestId"])
+    assert finished.status_code==201,finished.text
+    assert finished.json()["crmLeadId"]==first["leadId"]
+    assert fulfill(http,d,staff,req["requestId"],key=key)[0].json()["crmLeadId"]==first["leadId"]
+    # Publish a second offer without materials; the first reservation remains
+    # untouched and the next visit has an independent appointment and deal.
+    h=_auth(http,d,d["intake"])
+    new_offer=http.post(staff+"/offers",headers=h,json={
+      "requestKey":str(uuid4()),"bayId":str(bay),"serviceId":str(service),
+      "policyVersion":"DEV-CONSENT-2026","materials":[]})
+    assert new_offer.status_code==201,new_offer.text
+    offer2=new_offer.json()["id"]
+    day=(datetime.now(timezone.utc)+timedelta(days=23)).date().isoformat()
+    slots=http.get(PUB+"/slots",params={"offerId":offer2,"localDay":day})
+    assert slots.status_code==200,slots.text
+    slot2=slots.json()["items"][0]
+    created2,_=submit(http,offer2,slot2)
+    assert created2.status_code==201,created2.text
+    req2=created2.json()
+    assert claim(http,d,req2["requestId"],req2["receiptKey"])[0].status_code==201
+    finished2,key2=fulfill(http,d,staff,req2["requestId"])
+    assert finished2.status_code==201,finished2.text
+    second=finished2.json()
+    assert second["crmLeadId"]!=first["leadId"]
+    assert second["appointmentId"]!=finished.json()["appointmentId"]
+    assert fulfill(http,d,staff,req2["requestId"],key=key2)[0].json()["crmLeadId"]==second["crmLeadId"]
+    with psycopg.connect(DSN) as db:
+        rows=db.execute("""SELECT l.visit_number,l.id,s.appointment_id,f.appointment_id
+          FROM auto_public_booking_fulfillment f JOIN auto_crm_lead l ON l.id=f.crm_lead_id
+          JOIN auto_crm_lead_stage s ON s.lead_id=l.id AND s.stage_code='BOOKED'
+          WHERE l.organization_id=%s AND l.location_id=%s ORDER BY l.visit_number""",(org,loc)).fetchall()
+        assert len(rows)==2 and [x[0] for x in rows]==[1,2]
+        assert all(x[2]==x[3] for x in rows)
+        assert balance(db,part)==(2,2)

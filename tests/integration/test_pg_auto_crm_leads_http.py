@@ -263,3 +263,53 @@ def test_lead_cursor_roundtrip_order_and_noncanonical_rejected():
         if changed!=cursor:
             with pytest.raises(LeadDenied):
                 _decode_lead_cursor(changed)
+
+
+def test_repeat_lead_cycle_after_terminal_keeps_history_and_rejects_concurrent_duplicate(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    base=url(org,loc)
+    h=session(http,d,d["intake"])
+    first={"customerLinkId":str(d["link"]),"sourceCode":"WEB","requestKey":str(uuid4())}
+    created=http.post(base,headers=h,json=first)
+    assert created.status_code==201,created.text
+    original=created.json()
+    assert original["visitNumber"]==1
+    detail=base+"/"+original["leadId"]
+    assert http.post(base,headers=h,json={**first,"requestKey":str(uuid4())}).status_code==409
+    lost=http.post(detail+"/stages",headers=h,json={"stageCode":"LOST","reasonCode":"TIMING","requestKey":str(uuid4())})
+    assert lost.status_code==201,lost.text
+    barrier=Barrier(2)
+    def write(_):
+        key=uuid4()
+        barrier.wait(timeout=10)
+        try:
+            with psycopg.connect(DSN) as db:
+                result=create_lead(db,d["tokens"][d["intake"]],org,loc,d["link"],"WEB",key)
+            return key,result
+        except LeadConflict:
+            return key,None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=list(pool.map(write,range(2)))
+    assert sum(result is not None for _,result in results)==1
+    key,second=next((key,result) for key,result in results if result is not None)
+    assert second["visitNumber"]==2 and second["status"]=="NEW"
+    assert second["leadId"]!=original["leadId"] and second["events"]==[]
+    replay=http.post(base,headers=h,json={**first,"requestKey":str(key)})
+    assert replay.status_code==200 and replay.json()["leadId"]==second["leadId"]
+    old=http.post(base,headers=h,json=first)
+    assert old.status_code==200 and old.json()["status"]=="LOST"
+    assert old.json()["visitNumber"]==1
+    assert len(http.get(base).json()["items"])==2
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT previous_lead_id FROM auto_crm_lead WHERE id=%s",(second["leadId"],)).fetchone()[0].hex==original["leadId"].replace("-","")
+        with pytest.raises((psycopg.errors.RaiseException,psycopg.errors.UniqueViolation)):
+            with db.transaction():
+                db.execute("""INSERT INTO auto_crm_lead
+                  (id,organization_id,location_id,customer_link_id,owner_id,source_code,request_key,visit_number,previous_lead_id)
+                  VALUES(%s,%s,%s,%s,%s,'WEB',%s,3,%s)""",
+                  (uuid4(),org,loc,d["link"],d["intake"],uuid4(),second["leadId"]))
+    assert http.get(base.replace(str(loc),str(foreign_loc))).status_code==403
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+    assert http.post(base,headers=h,json={**first,"requestKey":str(key)}).status_code==403
+    assert http.get(base).json()["items"]==[]

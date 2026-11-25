@@ -218,3 +218,37 @@ test('CRM Kanban selects the only enabled transition and does not request an app
   await expect(page.getByText('Нет доступных переходов.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Изменить этап'})).toBeDisabled();
 });
+
+
+test('Kanban creates repeat deal in NEW without modifying terminal card',async({page})=>{
+  const next='88888888-8888-4888-8888-888888888888';
+  const config=defaultConfig();
+  let created=false;
+  const posts:any[]=[];
+  await csrf(page);
+  await page.route(workflowUrl,route=>route.fulfill({status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,version:0,canConfigure:true,config})}));
+  await page.route(boardUrl,route=>route.fulfill({status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,version:0,canConfigure:true,limit:200,
+      columns:columns(config),items:[{...item('LOST'),visitNumber:1},
+        ...(created?[{...item('NEW'),leadId:next,visitNumber:2}]:[])]})}));
+  await page.route(leadUrl,route=>{
+    posts.push(route.request().postDataJSON());
+    expect(posts.at(-1)).toEqual(posts[0]);
+    created=true;
+    if(posts.length===1)return route.abort('failed');
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,replayed:true,leadId:next,visitNumber:2,status:'NEW'})});
+  });
+  await page.goto('/staff/auto-crm-kanban');
+  await page.getByLabel('UUID организации').fill(org);
+  await page.getByLabel('UUID филиала').fill(loc);
+  await page.getByRole('button',{name:'Загрузить канбан'}).click();
+  await expect(page.getByRole('region',{name:'Этап LOST'})).toContainText('Цикл обращения №1');
+  await page.getByRole('button',{name:'Создать повторное обращение'}).click();
+  await page.getByRole('button',{name:'Повторить операцию с тем же ключом'}).click();
+  await expect(page.getByRole('region',{name:'Этап NEW'})).toContainText('Цикл обращения №2');
+  await expect(page.getByRole('region',{name:'Этап LOST'})).toContainText('Цикл обращения №1');
+  expect(posts).toHaveLength(2);
+  expect(posts[0]).toMatchObject({customerLinkId:link,sourceCode:'WEB'});
+});

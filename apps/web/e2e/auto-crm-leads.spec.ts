@@ -377,3 +377,36 @@ test('CRM staff creates and cancels a closed-order survey with exact retry',asyn
   await expect(section.getByText('Отменён',{exact:true})).toBeVisible();
   await expect(section.getByRole('button',{name:'Отменить опрос'})).toHaveCount(0);
 });
+
+
+test('terminal CRM deal starts a new cycle with old evidence unchanged',async({page})=>{
+  const second='88888888-8888-4888-8888-888888888888';
+  const old={...item('LOST',[event('LOST','TIMING',null)]),visitNumber:1};
+  const fresh={...item('NEW'),leadId:second,visitNumber:2};
+  let created=false;
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(path,route=>{
+    const req=route.request(),pathname=new URL(req.url()).pathname;
+    if(!pathname.endsWith('/crm/leads'))return route.fulfill({
+      status:200,contentType:'application/json',body:JSON.stringify({syntheticOnly:true,items:[],nextCursor:null})});
+    if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:created?[fresh,old]:[old],nextCursor:null})});
+    expect(req.postDataJSON()).toMatchObject({customerLinkId:link,sourceCode:'WEB'});
+    created=true;
+    return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({...fresh,replayed:false})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const select=page.getByLabel('Обращение',{exact:true});
+  await select.selectOption(lead);
+  await expect(page.getByText('Цикл обращения №1.',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Создать повторное обращение'}).click();
+  await expect(select.locator('option',{hasText:'Обращение №2'})).toHaveCount(1);
+  await select.selectOption(second);
+  await expect(page.getByText('Цикл обращения №2.',{exact:false})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Создать повторное обращение'})).toHaveCount(0);
+  await select.selectOption(lead);
+  await expect(page.getByText('Цикл обращения №1.',{exact:false})).toBeVisible();
+  await expect(page.getByText('Отказ · Время',{exact:false})).toBeVisible();
+});
