@@ -194,7 +194,16 @@ def require_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
         raise DocumentPolicyDenied("FORBIDDEN")
     cutoffs=[]
     checked_caps=(cap,"WRITE") if cap in ("CREATE","EDIT","CLOSE") else (cap,)
-    for role in active:
+    # WRITE — общий запрет изменения семейства INTAKE_ACT. Базовая
+    # операционная роль уже проверена выше; дополнительные роли не выдают
+    # CREATE/EDIT, но их действующий WRITE DENY нельзя обойти.
+    role_caps={role:checked_caps for role in active}
+    if document=="INTAKE_ACT" and cap in ("CREATE","EDIT","CLOSE","WRITE"):
+        for role in ("INTAKE","MANAGER","MECHANIC"):
+            if role not in role_caps and organization_role_allows(
+                    conn,token,org,role,loc,for_mutation=True):
+                role_caps[role]=("WRITE",)
+    for role,role_controls in role_caps.items():
         # У org уже FOR SHARE: ADMIN начинает публикацию с FOR UPDATE
         # той же строки. Исторические события immutable, поэтому
         # DISTINCT ON безопасен без FOR SHARE, запрещённого в DISTINCT.
@@ -209,7 +218,7 @@ def require_document_access(conn,token,org,loc,roles,document,cap,*,order=None):
             AND (location_id IS NULL OR location_id=%s)
             AND (user_id IS NULL OR user_id=%s)
           ORDER BY capability,location_id,user_id,created_at DESC,id DESC
-        """,(org,role,document,list(checked_caps),loc,actor)).fetchall()
+        """,(org,role,document,list(role_controls),loc,actor)).fetchall()
         latest={(capability,location,user):(allowed,not_before)
                 for capability,location,user,allowed,not_before in rules}
         if any(not allowed for allowed,_ in latest.values()):
@@ -335,6 +344,13 @@ def preview_employee_document_access(conn,token,org,loc,user,document):
             controls=(cap,"WRITE") if cap in ("CREATE","EDIT","CLOSE") else (cap,)
             matching=[(allowed,stamp) for (role,location,target,rule_cap),(allowed,stamp)
                       in latest.items() if role in applicable and rule_cap in controls]
+            if document=="INTAKE_ACT" and cap in ("CREATE","EDIT","CLOSE"):
+                # Точно как runtime: дополнительная роль ограничивает WRITE,
+                # а не предоставляет базовое право CREATE/EDIT.
+                matching.extend((allowed,stamp)
+                    for (role,location,target,rule_cap),(allowed,stamp) in latest.items()
+                    if role in (active & {"INTAKE","MANAGER","MECHANIC"})-applicable
+                    and rule_cap=="WRITE")
             permitted=bool(applicable) and all(allowed for allowed,_ in matching)
             cutoffs=[stamp for allowed,stamp in matching
                      if allowed and stamp is not None] if cap=="READ" else []

@@ -111,3 +111,61 @@ def test_qc_queue_cutoff_write_deny_and_replay(monkeypatch):
                           (order,)).fetchone()==(1,)
         assert db.execute("SELECT count(*) FROM auto_work_order_qc_rework WHERE work_order_id=%s",
                           (order,)).fetchone()==(0,)
+
+
+def test_combined_intake_roles_share_write_deny_and_preview(monkeypatch):
+    from test_pg_auto_stock_service import grant
+    from test_pg_auto_intake_act_http import custody, synthetic_png, publish, url as act_url
+
+    d,org,loc,order,service,_,http=setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        grant(db,d["manager"],org,loc,"INTAKE")
+    read,inspect,_=target(org,loc,order)
+    diagnostic=diagnostic_url(org,loc,order)
+    act=act_url(org,loc,order)
+    key=uuid4()
+    payload=custody(synthetic_png())
+    rule(http,d,org,loc,"MANAGER","WRITE",user=d["intake"])
+    owner=token(http,d,d["other"])
+    params={"locationId":str(loc),"userId":str(d["intake"]),"documentKind":"INTAKE_ACT"}
+    preview=http.get(url(org)+"/effective",params=params)
+    assert preview.status_code==200,preview.text
+    caps=preview.json()["capabilities"]
+    assert caps["READ"]["allowed"] is True
+    assert all(caps[c]["allowed"] is False for c in ("WRITE","CREATE","EDIT"))
+    staff=token(http,d,d["intake"])
+    assert http.get(read).status_code==200
+    for response in (http.post(inspect,headers=staff,json=inspection()),
+                     publish(http,staff,act,payload,key)):
+        assert response.status_code==403,response.text
+        assert response.headers["cache-control"]=="no-store"
+    rule(http,d,org,loc,"MANAGER","WRITE",True,user=d["intake"])
+    staff=token(http,d,d["intake"])
+    assert http.post(inspect,headers=staff,json=inspection()).status_code==201
+    created=publish(http,staff,act,payload,key)
+    assert created.status_code==201,created.text
+    rule(http,d,org,loc,"MANAGER","WRITE",user=d["intake"])
+    staff=token(http,d,d["intake"])
+    assert publish(http,staff,act,payload,key).status_code==403
+    assert publish(http,staff,act,custody(synthetic_png(),condition="MISSING"),
+                   version=1).status_code==403
+    rule(http,d,org,loc,"INTAKE","WRITE",user=d["manager"])
+    mechanic=token(http,d,d["manager"])
+    finding_payload=finding(service)
+    assert http.get(diagnostic).status_code==200
+    assert http.post(diagnostic,headers=mechanic,json=finding_payload).status_code==403
+    rule(http,d,org,loc,"INTAKE","WRITE",True,user=d["manager"])
+    mechanic=token(http,d,d["manager"])
+    assert http.post(diagnostic,headers=mechanic,json=finding_payload).status_code==201
+    rule(http,d,org,loc,"INTAKE","WRITE",user=d["manager"])
+    mechanic=token(http,d,d["manager"])
+    assert http.post(diagnostic,headers=mechanic,json=finding_payload).status_code==403
+    with psycopg.connect(DSN) as db:
+        for table in ("auto_work_order_inspection","auto_work_order_intake_act",
+                      "auto_work_order_diagnostic"):
+            assert db.execute("SELECT count(*) FROM "+table+" WHERE work_order_id=%s",
+                              (order,)).fetchone()==(1,)
+    # READ и исходное право клиента не расширяются и не отзываются staff WRITE.
+    token(http,d,d["client_a"])
+    assert http.get(act).status_code==200
