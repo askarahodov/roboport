@@ -9,7 +9,7 @@ from uuid import UUID,uuid4
 import psycopg
 
 from .auto_work_order_estimate import (
-    _staff_and_scope,_client_and_scope,_estimate_state,_fingerprint,
+    _staff_and_scope,_client_and_scope,_estimate_state,_fingerprint,_matches_published_input,
     AutoEstimateDenied,
 )
 from .auto_work_tariffs import quote_tariff_snapshot,TariffConflict
@@ -111,6 +111,18 @@ def publish_extra(conn,token,org,loc,order,*,base_revision_id,
           WHERE e.work_order_id=%s
         """,(order,)).fetchone():
             raise ExtraConflict("EXECUTION_FINISHED")
+        # As for base quotes, use the committed snapshot for an exact retry.
+        # Current execution/base checks remain mandatory.
+        prior=conn.execute("""
+          SELECT version,actor_id,base_revision_id,service_lines
+          FROM auto_work_order_extra_revision
+          WHERE work_order_id=%s AND request_key=%s
+        """,(order,request_key)).fetchone()
+        if prior:
+            if (prior[:3]!=(expected_version+1,actor,base_revision_id)
+                    or not _matches_published_input(prior[3],supplied,"NORM_HOUR_FACTORED")):
+                raise ExtraConflict("KEY_REUSED")
+            return {"ok":True,"replayed":True,**_state(conn,order)}
         existing_services={UUID(line["serviceId"]) for line in base[-1]["lines"]}
         if existing_services.intersection(supplied):
             raise ExtraConflict("SERVICE_ALREADY_APPROVED")
@@ -143,15 +155,6 @@ def publish_extra(conn,token,org,loc,order,*,base_revision_id,
             raise ExtraConflict("TARIFF_MISMATCH") from None
         digest=_fingerprint({"order":str(order),"baseRevisionId":str(base_revision_id),
                              "lines":lines,"tariffs":tariffs,"totalMinor":total,"currency":"RUB"})
-        prior=conn.execute("""
-          SELECT fingerprint,version,actor_id FROM auto_work_order_extra_revision
-          WHERE work_order_id=%s AND request_key=%s
-        """,(order,request_key)).fetchone()
-        if prior:
-            if (prior[0].strip()!=digest or prior[1]!=expected_version+1
-                    or prior[2]!=actor):
-                raise ExtraConflict("KEY_REUSED")
-            return {"ok":True,"replayed":True,**_state(conn,order)}
         state=_state(conn,order)
         if state["latestVersion"]!=expected_version or any(
             row["decision"]=="APPROVED" for row in state["items"]):

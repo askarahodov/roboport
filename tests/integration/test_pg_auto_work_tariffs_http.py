@@ -112,7 +112,8 @@ def test_new_approved_tariff_supersedes_old_rate_without_editing_old_quote(monke
     assert http.post(policies+"/"+first["id"]+"/approve",
         headers=checker,json={"requestKey":str(uuid4())}).status_code==201
     proposer=token(http,d,d["intake"])
-    original=http.post(quote,headers=proposer,json=factored(service))
+    original_request=factored(service)
+    original=http.post(quote,headers=proposer,json=original_request)
     assert original.status_code==201,original.text
     old=original.json()["items"][0]
     second=http.post(policies,headers=proposer,
@@ -123,6 +124,17 @@ def test_new_approved_tariff_supersedes_old_rate_without_editing_old_quote(monke
     assert http.post(policies+"/"+next_policy["id"]+"/approve",
         headers=checker,json={"requestKey":str(uuid4())}).status_code==201
     proposer=token(http,d,d["intake"])
+    replay=http.post(quote,headers=proposer,json=original_request)
+    assert replay.status_code==200,replay.text
+    assert replay.json()["replayed"] is True and replay.json()["items"]==[old]
+    for changed in (
+        {**original_request,"expectedVersion":1},
+        {**original_request,"workRates":[{**original_request["workRates"][0],"rateMinorPerHour":20001}]},
+        {**original_request,"workRates":[{**original_request["workRates"][0],"discountBps":500}]},
+        {"requestKey":original_request["requestKey"],"expectedVersion":0,
+         "prices":[{"serviceId":str(service),"amountMinor":old["totalMinor"]}]},
+    ):
+        assert http.post(quote,headers=proposer,json=changed).status_code==409
     assert http.post(quote,headers=proposer,json=factored(
         service,rate=10001,version=1)).status_code==409
     updated=http.post(quote,headers=proposer,json=factored(
@@ -132,6 +144,18 @@ def test_new_approved_tariff_supersedes_old_rate_without_editing_old_quote(monke
     assert updated.json()["items"][0]["totalMinor"]==16877
     assert updated.json()["items"][1]["tariffs"][0]["policyId"]==next_policy["id"]
     assert updated.json()["items"][1]["tariffs"][0]["maxDiscountBps"]==500
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_work_order_estimate_revision WHERE work_order_id=%s",
+                          (order,)).fetchone()==(2,)
+        from test_pg_auto_document_access_http import admin
+        admin(db,org,d["other"])
+    from test_pg_auto_document_access_http import set_rule,url
+    owner=token(http,d,d["other"])
+    assert set_rule(http,url(org),owner,loc=loc,user=d["intake"],
+                    cap="DISCOUNT",allowed=False).status_code==201
+    proposer=token(http,d,d["intake"])
+    denied=http.post(quote,headers=proposer,json=original_request)
+    assert denied.status_code==403 and "items" not in denied.json()
 
 
 def test_sql_cannot_forge_tariff_snapshot_or_excess_discount(monkeypatch):
