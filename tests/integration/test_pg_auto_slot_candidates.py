@@ -203,9 +203,9 @@ def test_disabled_employee_is_not_offered_or_reserved_and_history_survives(monke
     assert original.status_code==200 and original.json()["workOrderId"]==order
     assert original.json()["items"][0]["state"]=="CURRENT"
     # Явно снять недоступного специалиста можно: запись и история сохраняются.
-    cleared=http.post(move,headers=moving,json={**moved_body,"employeeMode":"clear"})
+    cleared=http.post(move,headers=moving,json={**moved_body,"employeeId":None})
     assert cleared.status_code==200,cleared.text
-    assert http.post(move,headers=moving,json={**moved_body,"employeeMode":"clear"}).json()==cleared.json()
+    assert http.post(move,headers=moving,json={**moved_body,"employeeId":None}).json()==cleared.json()
     canceled=http.post(create+"/"+appointment+"/cancel",headers={**headers,"Idempotency-Key":str(uuid4())})
     assert canceled.status_code==200,canceled.text
     with psycopg.connect(DSN) as db:
