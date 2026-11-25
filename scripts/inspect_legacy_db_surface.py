@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Read-only PostgreSQL schema dependency inventory for automotive cutover (#165).
 
-Prints catalog metadata only: relation names, foreign-key edges and user triggers.
+Prints catalog metadata only: relations, foreign-key and view dependencies,
+user triggers and their function identities.
 Never scans business rows, extracts object keys, or authorizes decommission.
 Requires an explicitly configured synthetic loopback PostgreSQL instance.
 """
@@ -74,26 +75,49 @@ def inspect_schema(conn: psycopg.Connection) -> dict[str, object]:
     ]
     foreign_keys = [
         {"name": name, "from": src, "to": dst,
-         "crossBoundary": classify(src) != classify(dst)}
-        for name, src, dst in conn.execute("""
-            SELECT co.conname, src.relname, dst.relname
+         "fromSchema": src_schema, "toSchema": dst_schema,
+         "crossBoundary": src_schema != dst_schema or classify(src) != classify(dst)}
+        for name, src_schema, src, dst_schema, dst in conn.execute("""
+            SELECT co.conname, ns.nspname, src.relname, nd.nspname, dst.relname
             FROM pg_constraint co
             JOIN pg_class src ON src.oid=co.conrelid
             JOIN pg_class dst ON dst.oid=co.confrelid
             JOIN pg_namespace ns ON ns.oid=src.relnamespace
             JOIN pg_namespace nd ON nd.oid=dst.relnamespace
-            WHERE co.contype='f' AND ns.nspname='public' AND nd.nspname='public'
-            ORDER BY src.relname, dst.relname, co.conname
+            WHERE co.contype='f' AND (ns.nspname='public' OR nd.nspname='public')
+            ORDER BY ns.nspname, src.relname, nd.nspname, dst.relname, co.conname
         """).fetchall()
     ]
     triggers = [
-        {"table": table, "name": name}
-        for table, name in conn.execute("""
-            SELECT c.relname, t.tgname
+        {"table": table, "name": name, "functionSchema": fn_schema,
+         "function": fn_name}
+        for table, name, fn_schema, fn_name in conn.execute("""
+            SELECT c.relname, t.tgname, pn.nspname, p.proname
             FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
             JOIN pg_namespace n ON n.oid=c.relnamespace
+            JOIN pg_proc p ON p.oid=t.tgfoid
+            JOIN pg_namespace pn ON pn.oid=p.pronamespace
             WHERE n.nspname='public' AND NOT t.tgisinternal
             ORDER BY c.relname, t.tgname
+        """).fetchall()
+    ]
+    # Deduplicate column dependencies; never deparse SQL definitions.
+    view_dependencies = [
+        {"viewSchema": vs, "view": view, "relationSchema": rs,
+         "relation": relation,
+         "crossBoundary": vs != rs or classify(view) != classify(relation)}
+        for vs, view, rs, relation in conn.execute("""
+            SELECT DISTINCT vn.nspname, v.relname, rn.nspname, r.relname
+            FROM pg_rewrite rw
+            JOIN pg_class v ON v.oid=rw.ev_class AND v.relkind IN ('v','m')
+            JOIN pg_namespace vn ON vn.oid=v.relnamespace
+            JOIN pg_depend dep ON dep.classid='pg_rewrite'::regclass
+                AND dep.objid=rw.oid AND dep.refclassid='pg_class'::regclass
+            JOIN pg_class r ON r.oid=dep.refobjid
+            JOIN pg_namespace rn ON rn.oid=r.relnamespace
+            WHERE v.oid<>r.oid
+              AND (vn.nspname='public' OR rn.nspname='public')
+            ORDER BY vn.nspname, v.relname, rn.nspname, r.relname
         """).fetchall()
     ]
     return {
@@ -101,10 +125,14 @@ def inspect_schema(conn: psycopg.Connection) -> dict[str, object]:
         "status": "INVENTORY_ONLY_NOT_DECOMMISSION_APPROVAL",
         "releaseAllowed": False, "dropAllowed": False,
         "relations": relations, "foreignKeys": foreign_keys, "triggers": triggers,
+        "viewDependencies": view_dependencies,
         "summary": {
             "relations": len(relations), "foreignKeys": len(foreign_keys),
             "crossBoundaryForeignKeys": sum(item["crossBoundary"] for item in foreign_keys),
             "triggers": len(triggers),
+            "viewDependencies": len(view_dependencies),
+            "crossBoundaryViewDependencies": sum(
+                item["crossBoundary"] for item in view_dependencies),
         },
     }
 
