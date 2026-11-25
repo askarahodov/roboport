@@ -410,3 +410,180 @@ test('terminal CRM deal starts a new cycle with old evidence unchanged',async({p
   await expect(page.getByText('Цикл обращения №1.',{exact:false})).toBeVisible();
   await expect(page.getByText('Отказ · Время',{exact:false})).toBeVisible();
 });
+
+
+test('deal card shows linked primary evidence and separate journals, clears on revoke',async({page})=>{
+  const order='99999999-9999-4999-8999-999999999999';
+  const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const date='2030-01-01T10:00:00Z';
+  const deal={syntheticOnly:true,realMoney:false,releaseAllowed:false,leadId:lead,
+    visitNumber:1,stage:'BOOKED',lineage:'LINKED',financeStatus:'VISIBLE',
+    booking:{appointmentId:appointment,startsAt:date,endsAt:'2030-01-01T11:00:00Z',status:'RESCHEDULED'},
+    workOrder:{workOrderId:order,steps:{services:'SELECTED',inspection:'RECORDED',
+      intakeAct:'ACKNOWLEDGED',estimate:'APPROVED',execution:'FINISHED',quality:'PASS',technicalDocuments:'CLOSED_TECHNICAL'},
+      documentEvents:[{id,action:'CLOSED_TECHNICAL',createdAt:date}]},
+    finance:{currency:'RUB',approvedTotalMinor:'2500',
+      demoClose:{paidMinor:'2500',refundedMinor:'0',dueMinor:'0',
+        events:[{id,kind:'SIM_PAYMENT',amountMinor:'2500',createdAt:date}]},
+      treasury:{advancedMinor:'0',paymentMinor:'1700',appliedMinor:'0',refundedAdvanceMinor:'0',
+        refundedPaymentMinor:'0',settledMinor:'1700',dueMinor:'800',
+        events:[{id,kind:'PAYMENT',amountMinor:'1700',createdAt:date}]}}};
+  let mode='visible';
+  await page.route(path,route=>{
+    const pathname=new URL(route.request().url()).pathname;
+    if(pathname.endsWith('/deal')){
+      const payload=mode==='restricted'?{...deal,financeStatus:'RESTRICTED',finance:null,
+        workOrder:{...deal.workOrder,steps:{...deal.workOrder.steps,technicalDocuments:'RESTRICTED'},documentEvents:null}}:
+        mode==='malformed'?{...deal,finance:{...deal.finance,treasury:{...deal.finance.treasury,settledMinor:'2500'}}}:deal;
+      return route.fulfill({status:mode==='denied'?403:200,contentType:'application/json',
+        body:JSON.stringify(mode==='denied'?{code:'FORBIDDEN'}:payload)});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:pathname.endsWith('/crm/leads')?
+        [{...item('BOOKED',[event('BOOKED',null,appointment)]),visitNumber:1}]:[],nextCursor:null})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  const card=page.getByRole('region',{name:'Карточка сделки CRM'});
+  await card.getByRole('button',{name:'Загрузить карточку сделки'}).click();
+  await expect(card).toContainText('Перенесена');
+  await expect(card).toContainText(order);
+  await expect(card).toContainText('Технически закрыто');
+  await expect(card.getByRole('table',{name:'Имитация закрытия'})).toContainText('25,00');
+  await expect(card.getByRole('table',{name:'Тестовое казначейство'})).toContainText('17,00');
+  await expect(card).toContainText('8,00 ₽');
+  const refresh=card.getByRole('button',{name:'Обновить карточку сделки'});
+  mode='restricted';await refresh.click();
+  await expect(card).toContainText('Финансовая история недоступна');
+  await expect(card.getByRole('table')).toHaveCount(0);
+  await expect(card.getByRole('heading',{name:'История документов'})).toHaveCount(0);
+  mode='malformed';await refresh.click();
+  await expect(card.getByRole('alert')).toContainText('Не удалось получить полную карточку');
+  await expect(card.getByRole('table')).toHaveCount(0);
+  mode='visible';await refresh.click();
+  await expect(card.getByRole('table')).toHaveCount(2);
+  mode='denied';await refresh.click();
+  await expect(card.getByRole('alert')).toContainText('Доступ к сделке запрещён');
+  await expect(card).not.toContainText(order);
+  await expect(card.getByRole('table')).toHaveCount(0);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});
+
+
+test('inbound contact keeps exact request after lost response and access denial',async({page})=>{
+  const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const record={interactionId:id,actorId:owner,ownerId:owner,sourceCode:'WEB',
+    channelCode:'CALL',outcomeCode:'CALLBACK_REQUIRED',direction:'INBOUND_SIM',
+    createdAt:'2030-01-01T10:00:00Z',callbackTaskId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',callbackDueAt:''};
+  const envelope={syntheticOnly:true,sendAllowed:false,leadId:lead,viewerId:owner};
+  const posts:any[]=[];
+  let denied=false;
+  await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',
+    body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(path,route=>{
+    const req=route.request(),pathname=new URL(req.url()).pathname;
+    if(pathname.endsWith('/interactions')){
+      if(req.method()==='POST'){
+        posts.push(req.postDataJSON());
+        expect(posts.at(-1)).toEqual(posts[0]);
+        record.callbackDueAt=posts[0].callbackDueAt;
+        expect(posts[0].expectedActorId).toBe(owner);
+        if(posts.length===1)return route.abort('failed');
+        if(posts.length===2){denied=true;return route.fulfill({status:403,body:'{}'});}
+        return route.fulfill({status:200,contentType:'application/json',
+          body:JSON.stringify({...envelope,replayed:true,requestKey:posts[0].requestKey,item:record})});
+      }
+      return route.fulfill({status:denied?403:200,contentType:'application/json',
+        body:JSON.stringify(denied?{}:{...envelope,items:posts.length?[record]:[],nextCursor:null})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:pathname.endsWith('/crm/leads')?[item('NEW')]:[],nextCursor:null})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  const panel=page.getByRole('region',{name:'Журнал тестовых контактов'});
+  await panel.getByRole('button',{name:'Загрузить журнал контактов'}).click();
+  await panel.getByLabel('Результат входящего контакта').selectOption('CALLBACK_REQUIRED');
+  const tomorrow=new Date(Date.now()+86400000);
+  const local=new Date(tomorrow.getTime()-tomorrow.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  await panel.getByLabel('Срок обратного контакта').fill(local);
+  await panel.getByRole('button',{name:'Записать входящий контакт'}).click();
+  const retry=panel.getByRole('button',{name:'Повторить контакт с тем же ключом'});
+  await expect(panel).toContainText('Ответ неизвестен');
+  // Destroy the component and reload the page, then recover only after a new scoped GET.
+  await page.reload();
+  await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  await panel.getByRole('button',{name:'Загрузить журнал контактов'}).click();
+  await expect(retry).toBeEnabled();
+  await expect(panel.getByRole('button',{name:'Записать входящий контакт'})).toBeDisabled();
+  await retry.click();
+  await expect(panel.getByRole('alert')).toContainText('Доступ к журналу контактов запрещён');
+  await expect(panel.getByRole('listitem')).toHaveCount(0);
+  denied=false;
+  await panel.getByRole('button',{name:'Обновить журнал контактов'}).click();
+  await expect(retry).toBeEnabled();
+  await expect(panel.getByRole('button',{name:'Записать входящий контакт'})).toBeDisabled();
+  await retry.click();
+  await expect(panel).toContainText('Входящий тестовый контакт записан');
+  await expect(panel.getByRole('listitem')).toHaveCount(1);
+  await expect(retry).toHaveCount(0);
+  expect(posts).toHaveLength(3);
+  await expect(panel).toContainText('Задача обратного контакта:');
+  await panel.getByText('Аудит контакта').click();
+  await expect(panel).toContainText(id);
+  denied=true;
+  await panel.getByRole('button',{name:'Обновить журнал контактов'}).click();
+  await expect(panel.getByRole('alert')).toBeVisible();
+  await expect(panel).not.toContainText(id);
+});
+
+
+test('expired callback pending clears only for exact terminal rejection',async({page})=>{
+  const envelope={syntheticOnly:true,sendAllowed:false,leadId:lead,viewerId:owner};
+  const posts:any[]=[];
+  await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',
+    body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(path,route=>{
+    const req=route.request(),pathname=new URL(req.url()).pathname;
+    if(pathname.endsWith('/interactions')){
+      if(req.method()==='POST'){
+        const body=req.postDataJSON();posts.push(body);
+        if(posts.length===1)return route.abort('failed');
+        expect(body).toEqual(posts[0]);
+        return route.fulfill({status:422,contentType:'application/json',body:JSON.stringify({
+          ...envelope,code:'CALLBACK_DEADLINE_EXPIRED',callbackDueAt:body.callbackDueAt,
+          requestKey:posts.length===2?'00000000-0000-4000-8000-000000000000':body.requestKey})});
+      }
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({...envelope,items:[],nextCursor:null})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:pathname.endsWith('/crm/leads')?[item('NEW')]:[],nextCursor:null})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  const panel=page.getByRole('region',{name:'Журнал тестовых контактов'});
+  await panel.getByRole('button',{name:'Загрузить журнал контактов'}).click();
+  await panel.getByLabel('Результат входящего контакта').selectOption('CALLBACK_REQUIRED');
+  const tomorrow=new Date(Date.now()+86400000);
+  await panel.getByLabel('Срок обратного контакта').fill(
+    new Date(tomorrow.getTime()-tomorrow.getTimezoneOffset()*60000).toISOString().slice(0,16));
+  const create=panel.getByRole('button',{name:'Записать входящий контакт'});
+  const retry=panel.getByRole('button',{name:'Повторить контакт с тем же ключом'});
+  await create.click();
+  await expect(panel).toContainText('Ответ неизвестен');
+  await retry.click();
+  await expect(retry).toBeEnabled();
+  await expect(create).toBeDisabled();
+  await retry.click();
+  await expect(panel).toContainText('Сервер подтвердил отсутствие записи');
+  await expect(retry).toHaveCount(0);
+  await expect(create).toBeEnabled();
+  expect(posts).toHaveLength(3);
+});
