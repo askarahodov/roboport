@@ -4,9 +4,6 @@ No phones, message payloads or outbound integrations. Stages are append-only;
 DB trigger independently enforces ordering and WorkOrder booking lineage.
 """
 from uuid import UUID, uuid4
-from datetime import datetime
-import base64
-import binascii
 from hashlib import sha256
 from .keyset_cursor import encode_cursor,decode_cursor
 import psycopg
@@ -217,36 +214,24 @@ def lead_detail(conn,token,org,loc,ident):
 LEAD_PAGE_SIZE=25
 
 
-def _decode_lead_cursor(cursor):
+def _journal_scope(org,loc):
+    return sha256(f"crm-lead-journal:{org}:{loc}".encode()).hexdigest()[:32]
+
+
+def _decode_lead_cursor(cursor,scope,token):
     if cursor is None:
         return None
-    if type(cursor) is not str or not (1<=len(cursor)<=180):
-        raise LeadDenied("INVALID_INPUT")
     try:
-        raw=base64.urlsafe_b64decode(cursor+"="*(-len(cursor)%4))
-        if len(raw)>130 or base64.urlsafe_b64encode(raw).decode().rstrip("=")!=cursor:
-            raise ValueError("non-canonical")
-        stamp,ident=raw.decode("ascii").split("|")
-        created=datetime.fromisoformat(stamp)
-        key=UUID(ident)
-        if (created.tzinfo is None or created.utcoffset() is None
-                or str(key)!=ident):
-            raise ValueError("invalid")
-        return created,key
-    except (ValueError,UnicodeDecodeError,binascii.Error,TypeError) as exc:
-        raise LeadDenied("INVALID_INPUT") from exc
-
-
-def _encode_lead_cursor(stamp,ident):
-    return base64.urlsafe_b64encode(
-        (stamp.isoformat()+"|"+str(ident)).encode("ascii")
-    ).decode().rstrip("=")
+        return decode_cursor(cursor,scope,token)
+    except ValueError:
+        raise LeadDenied("INVALID_INPUT") from None
 
 
 def list_leads(conn,token,org,loc,cursor=None):
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
-        after=_decode_lead_cursor(cursor)
+        scope=_journal_scope(org,loc)
+        after=_decode_lead_cursor(cursor,scope,token)
         # Proof and tenant checks must precede LIMIT, not merely filter
         # an already truncated page in Python.
         rows=conn.execute(
@@ -285,7 +270,7 @@ def list_leads(conn,token,org,loc,cursor=None):
         items=[_state(conn,_lead(conn,org,loc,row[0],actor,manager))
                for row in page]
         next_cursor=(
-            _encode_lead_cursor(page[-1][5],page[-1][0])
+            encode_cursor(page[-1][5],page[-1][0],scope,token)
             if len(rows)>LEAD_PAGE_SIZE else None
         )
         return {"syntheticOnly":True,"items":items,"nextCursor":next_cursor}
