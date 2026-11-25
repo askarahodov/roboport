@@ -2,6 +2,9 @@
 additional consent, authorized labor, material handoff and independent QC.
 """
 from datetime import datetime,timedelta,timezone
+from io import BytesIO
+from zipfile import ZipFile
+import json
 from uuid import uuid4
 import psycopg
 import pytest
@@ -65,24 +68,24 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     first=publish_act(http,manager,acts,custody(raw))
     assert first.status_code==201,first.text
     old_act=first.json()["items"][0]
-    customer=token(http,d["client_a"])
+    customer=token(http,d,d["client_a"])
     assert review_act(http,acts,old_act,customer,decision="DISPUTED",
                       reason="INVENTORY_MISMATCH").status_code==201
-    manager=token(http,d["intake"])
+    manager=token(http,d,d["intake"])
     second=publish_act(http,manager,acts,custody(raw,condition="MISSING"),version=1)
     assert second.status_code==201,second.text
     act=second.json()["items"][-1]
     assert act["version"]==2 and act["sha256"]!=old_act["sha256"]
-    customer=token(http,d["client_a"])
+    customer=token(http,d,d["client_a"])
     assert review_act(http,acts,old_act,customer).status_code==409
     acknowledged=review_act(http,acts,act,customer)
     assert acknowledged.status_code==201,acknowledged.text
     assert acknowledged.json()["locked"] is True
     assert acknowledged.json()["legalSignatureStatus"]=="NOT_IMPLEMENTED"
     assert http.get(act["photos"][0]["path"]).status_code==200
-    token(http,d["client_b"])
+    token(http,d,d["client_b"])
     assert http.get(act["photos"][0]["path"]).status_code==403
-    manager=token(http,d["intake"])
+    manager=token(http,d,d["intake"])
     assert publish_act(http,manager,acts,custody(raw),version=2).status_code==409
 
     # Governance is real PG17: proposal author cannot independently approve.
@@ -114,10 +117,10 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
                 "coefficientBps":12500,"discountBps":1000}
 
     diagnostics=root+f"/orders/{order}/diagnostics"
-    mechanic=token(http,d["manager"])
+    mechanic=token(http,d,d["manager"])
     diagnosed=http.post(diagnostics,headers=mechanic,json=finding(base_service))
     assert diagnosed.status_code==201,diagnosed.text
-    manager=token(http,d["intake"])
+    manager=token(http,d,d["intake"])
     recommendations=root+f"/orders/{order}/recommendations"
     suggested=http.post(recommendations,headers=manager,json={
         "requestKey":str(uuid4()),"serviceId":str(base_service),
@@ -125,9 +128,9 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
         "dueKm":2000})
     assert suggested.status_code==201,suggested.text
     recommendation=suggested.json()["items"][0]
-    customer=token(http,d["client_a"])
+    customer=token(http,d,d["client_a"])
     assert http.get(recommendations+"/customer").json()["items"][0]["id"]==recommendation["id"]
-    manager=token(http,d["intake"])
+    manager=token(http,d,d["intake"])
     estimate=estimate_path(org,loc,order)
     revision=http.post(estimate,headers=manager,json={
         "requestKey":str(uuid4()),"expectedVersion":0,
@@ -148,7 +151,7 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
         "requestKey":str(uuid4()),"revisionId":snapshot["id"],
         "decision":"APPROVED"}).status_code==201
 
-    manager=token(http,d["intake"])
+    manager=token(http,d,d["intake"])
     assert http.post(estimate,headers=manager,json={
         "requestKey":str(uuid4()),"expectedVersion":1,
         "workRates":[priced(base_service),priced(complex_service)]}).status_code==409
@@ -299,6 +302,21 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     assert archive.status_code==200,archive.text[:200] if archive.status_code!=200 else ""
     verified=verify_dossier_bytes(archive.content,expected_sha256=archive.headers["x-technical-dossier-sha256"])
     assert verified["verified"] is True and verified["photos"]==1
+    with ZipFile(BytesIO(archive.content)) as package:
+        manifest=json.loads(package.read("manifest.json"))
+        assert manifest["organizationId"]==str(org)
+        assert manifest["locationId"]==str(loc)
+        assert manifest["workOrderId"]==str(order)
+        assert manifest["intakeActId"]==act["id"]
+        assert manifest["intakeDigest"]==act["sha256"]
+        assert manifest["previewId"]==preview["id"]
+        assert manifest["previewDigest"]==preview["digest"]
+        assert json.loads(package.read("preview.json"))==preview["snapshot"]
+        settlement=json.loads(package.read("settlement.json"))
+        assert settlement["simulatedPaidMinor"]==total
+        assert settlement["simulatedDueMinor"]==0
+        assert settlement["outstandingReserves"]==[]
+        assert settlement["unreceivedMaterialCount"]==0
     customer=token(http,d,d["client_a"])
     assert http.get(dossier).content==archive.content
     token(http,d,d["client_b"])
