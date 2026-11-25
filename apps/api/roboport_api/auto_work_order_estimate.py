@@ -28,6 +28,29 @@ def _fingerprint(data):
                                      ensure_ascii=True).encode()).hexdigest()
 
 
+def _matches_published_input(lines,supplied,method):
+    """Compare caller-controlled fields to the original immutable snapshot.
+
+    Current catalogue prices, approved tariffs and calculated amounts are
+    not part of a retry's input. A different pricing mode is never equivalent.
+    """
+    if type(lines) is not list or len(lines)!=len(supplied):
+        return False
+    expected={str(ident):{k:v for k,v in item.items() if k!="serviceId"}
+              for ident,item in supplied.items()}
+    for line in lines:
+        if type(line) is not dict or line.get("pricingMethod")!=method:
+            return False
+        ident=line.get("serviceId")
+        if type(ident) is not str or ident not in expected:
+            return False
+        values=expected.pop(ident)
+        if any(k not in line or type(line[k]) is not type(v) or line[k]!=v
+               for k,v in values.items()):
+            return False
+    return not expected
+
+
 def _client_and_scope(conn, token, org, loc, order):
     if (type(token) is not str or not token.strip() or
         any(type(i) is not UUID for i in (org,loc,order))):
@@ -209,6 +232,17 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
                                         "ESTIMATE","DISCOUNT",order=order)
         except DocumentPolicyDenied:
             raise AutoEstimateDenied("FORBIDDEN") from None
+        # Replay only after current ACL, before recalculating a new quote.
+        existing=conn.execute("""
+          SELECT version,actor_id,service_lines FROM auto_work_order_estimate_revision
+          WHERE work_order_id=%s AND request_key=%s
+        """,(order,request_key)).fetchone()
+        if existing is not None:
+            method="NORM_HOUR_FACTORED" if advanced else "NORM_HOUR" if rated else None
+            if (existing[0]!=expected_version+1 or existing[1]!=actor
+                    or not _matches_published_input(existing[2],supplied,method)):
+                raise AutoEstimateConflict("KEY_REUSED")
+            return {"ok":True,"replayed":True,**_estimate_state(conn,order)}
         services=conn.execute("""
            SELECT s.id,s.code,s.title,s.duration_minutes FROM auto_work_order_service link
            JOIN auto_service_catalog s ON s.id=link.service_id
@@ -261,15 +295,6 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
                              "diagnostics":diagnostics,"tariffs":tariffs,
                              "materials":materials,"totalMinor":total,
                              "currency":"RUB"})
-        existing=conn.execute("""
-          SELECT fingerprint,version,actor_id FROM auto_work_order_estimate_revision
-          WHERE work_order_id=%s AND request_key=%s
-        """,(order,request_key)).fetchone()
-        if existing is not None:
-            if (existing[0].strip()!=digest or existing[1]!=expected_version+1
-                    or existing[2]!=actor):
-                raise AutoEstimateConflict("KEY_REUSED")
-            return {"ok":True,"replayed":True,**_estimate_state(conn,order)}
         state=_estimate_state(conn,order)
         if state["items"] and state["items"][-1]["clarificationId"] and (
             state["items"][-1]["clarificationResolution"] is None):

@@ -385,3 +385,51 @@ def test_extra_version_edit_permission_and_exact_replay(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT version FROM auto_work_order_extra_revision "
                           "WHERE work_order_id=%s ORDER BY version",(order,)).fetchall()==[(1,),(2,)]
+
+
+def test_extra_exact_replay_after_tariff_change_preserves_original_snapshot(monkeypatch):
+    from test_pg_auto_work_tariffs_http import policy_url,proposal
+    from test_pg_auto_stock_service import grant
+    d,org,loc,order,_,additional,base=setup(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    endpoint=extra_path(org,loc,order)
+    tariffs=policy_url(org,loc)
+    with psycopg.connect(DSN) as db:
+        grant(db,d["other"],org,loc,"MANAGER")
+
+    def publish_policy(rate,version):
+        manager=session(http,d,d["intake"])
+        proposed=http.post(tariffs,headers=manager,json=proposal(rate=rate,version=version))
+        assert proposed.status_code==201,proposed.text
+        policy=proposed.json()["items"][-1]
+        approver=session(http,d,d["other"])
+        approved=http.post(tariffs+"/"+policy["id"]+"/approve",
+                           headers=approver,json={"requestKey":str(uuid4())})
+        assert approved.status_code==201,approved.text
+        return policy
+
+    first_policy=publish_policy(10001,0)
+    manager=session(http,d,d["intake"])
+    body=quote(additional,base)
+    created=http.post(endpoint,headers=manager,json=body)
+    assert created.status_code==201,created.text
+    old=created.json()["items"][0]
+    assert old["tariffs"][0]["policyId"]==first_policy["id"]
+    second_policy=publish_policy(12000,1)
+    manager=session(http,d,d["intake"])
+    replay=http.post(endpoint,headers=manager,json=body)
+    assert replay.status_code==200,replay.text
+    assert replay.json()["replayed"] is True and replay.json()["items"]==[old]
+    assert http.post(endpoint,headers=manager,json={
+        **body,"workRates":[{**body["workRates"][0],"rateMinorPerHour":12000}]
+    }).status_code==409
+    assert http.post(endpoint,headers=manager,json=quote(
+        additional,base,version=1)).status_code==409
+    updated=http.post(endpoint,headers=manager,json=quote(
+        additional,base,version=1,rate=12000))
+    assert updated.status_code==201,updated.text
+    assert updated.json()["items"][0]==old
+    assert updated.json()["items"][1]["tariffs"][0]["policyId"]==second_policy["id"]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_work_order_extra_revision WHERE work_order_id=%s",
+                          (order,)).fetchone()==(2,)
