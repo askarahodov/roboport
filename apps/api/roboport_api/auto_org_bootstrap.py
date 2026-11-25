@@ -70,6 +70,12 @@ def bootstrap_first_admin(
         ).fetchone()
         if user is None:
             raise BootstrapDenied("target unavailable")
+        # Проверка срока повторяется после всех блокировок. Срок
+        # может истечь, пока конкурирующая транзакция держит org/user.
+        if not conn.execute(
+            "SELECT clock_timestamp()<to_timestamp(%s)", (expires,)
+        ).fetchone()[0]:
+            raise BootstrapDenied("approval expired while waiting")
         proof_hash = sha256(msg).hexdigest()
         grant_id = uuid4()
         conn.execute(

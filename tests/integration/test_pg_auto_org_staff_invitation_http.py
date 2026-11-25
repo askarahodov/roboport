@@ -423,3 +423,52 @@ def test_staff_admin_lists_complete_pages_with_scoped_cursors(monkeypatch):
             assert reader.get(base+suffix,params={"cursor":cursor}).status_code==403
         for suffix in ("/access-policies","/workshop","/workshop/audit"):
             assert reader.get(base+suffix).status_code==403
+
+
+def test_invitation_expires_while_waiting_for_branch_lock(monkeypatch):
+    from queue import Queue
+    from roboport_api.auto_org_staff import accept_staff_invitation
+    from test_pg_auto_org_bootstrap import wait_for_blocked_backend
+
+    data,org,_,loc,logins=_setup(monkeypatch)
+    actor=data["intake"]
+    invite=uuid4()
+    secret=uuid4().hex+uuid4().hex[:11]
+    ready=Queue()
+    def accept():
+        with psycopg.connect(DSN) as db:
+            db.execute("SET lock_timeout='15s'")
+            ready.put(db.info.backend_pid)
+            return accept_staff_invitation(db,data["tokens"][actor],secret)
+
+    with psycopg.connect(DSN) as db:
+        expiry=db.execute("SELECT clock_timestamp()+interval '5 seconds'").fetchone()[0]
+        db.execute("""INSERT INTO auto_org_staff_invitation
+           (id,organization_id,location_id,target_user_id,target_login,role_code,
+            token_hash,created_by,created_at,expires_at)
+           VALUES(%s,%s,%s,%s,%s,'INTAKE',%s,%s,%s,%s)""",
+            (invite,org,loc,actor,logins[actor],hashlib.sha256(secret.encode()).hexdigest(),
+             data["manager"],expiry-timedelta(days=1),expiry))
+        db.execute("""INSERT INTO auto_org_staff_invitation_event
+           (id,invitation_id,organization_id,actor_id,action)
+           VALUES(%s,%s,%s,%s,'CREATED')""",(uuid4(),invite,org,data["manager"]))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with psycopg.connect(DSN) as lock:
+            lock.execute("SELECT id FROM auto_service_location WHERE id=%s FOR UPDATE",(loc,))
+            future=pool.submit(accept)
+            wait_for_blocked_backend(lock,ready.get(timeout=5))
+            lock.execute("SELECT pg_sleep(GREATEST(0,extract(epoch FROM %s::timestamptz-clock_timestamp())+0.15))",
+                         (expiry,))
+        assert future.result(timeout=15)=={"status":"EXPIRED"}
+    target=_client(data,actor)
+    response=target.post("/api/v1/dev/auto/staff-invitations/accept",
+        json={"token":secret},headers=_headers(data,actor))
+    assert response.status_code==410,response.text
+    assert response.headers["cache-control"]=="no-store"
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT status,accepted_grant_id,expired_at>=expires_at
+            FROM auto_org_staff_invitation WHERE id=%s""",(invite,)).fetchone()==("EXPIRED",None,True)
+        assert db.execute("""SELECT count(*) FROM auto_organization_role_grant
+            WHERE organization_id=%s AND user_id=%s""",(org,actor)).fetchone()==(0,)
+        assert db.execute("""SELECT action FROM auto_org_staff_invitation_event
+            WHERE invitation_id=%s ORDER BY action""",(invite,)).fetchall()==[("CREATED",),("EXPIRED",)]
