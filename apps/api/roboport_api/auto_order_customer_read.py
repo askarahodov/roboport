@@ -22,6 +22,12 @@ def get_order_customer_summary(conn: psycopg.Connection, token: str,
             require_document_access(conn, token, organization_id, location_id,
                                     ("INTAKE", "MANAGER"), "INTAKE_ACT", "READ",
                                     order=order_id)
+            # Базовое право INTAKE/MANAGER остаётся обязательным, но при
+            # совмещении ролей нельзя обходить READ DENY или cutoff MECHANIC
+            # через альтернативную проекцию того же акта.
+            require_document_access(conn, token, organization_id, location_id,
+                                    ("INTAKE", "MANAGER", "MECHANIC"),
+                                    "INTAKE_ACT", "READ", order=order_id)
         except DocumentPolicyDenied:
             raise AutoStockDenied("FORBIDDEN") from None
         row = _scoped_order(conn, organization_id, location_id, order_id, identity=True)
