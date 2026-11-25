@@ -113,3 +113,69 @@ def test_runtime_source_does_not_import_archival_test_application():
         alias.name.startswith("tests") for alias in node.names
     ) for node in ast.walk(tree))
     assert (ROOT / "tests/legacy_app.py").exists()
+
+
+def test_every_archived_robot_operation_is_unreachable_in_current_runtime():
+    """Inventory frozen HTTP source + historical draft, not a hand-picked sample."""
+    import json
+    import re
+    import subprocess
+    import sys
+    from scripts.inventory_legacy_routes import scan_python, scan_openapi_contract
+
+    archived = [
+        *scan_python(ROOT / "tests/legacy_app.py", ROOT),
+        *scan_python(ROOT / "apps/api/roboport_api/guest_claim_http.py", ROOT),
+    ]
+    assert archived and not any(row["unresolved"] for row in archived)
+    # These exact paths are intentionally shared, not robot business operations.
+    shared = {"/health/live", "/health/ready", "/api/v1/meta",
+              "/api/v1/dev/account/preferences"}
+    retired = {(row["method"], row["path"]) for row in archived
+               if row["path"] not in shared}
+    assert retired and all(_retired(path) for _, path in retired), retired
+    draft = scan_openapi_contract(ROOT / "contracts/openapi.yaml", ROOT)
+    assert draft and not any(row.get("unresolved") for row in draft)
+    # Historical non-auth draft is not a published API. Do not treat the
+    # versioned current auth namespace as robot business functionality.
+    retired.update((row["method"], row["path"]) for row in draft
+                   if row["kind"] == "historical-openapi-draft"
+                   and not row["path"].startswith("/api/v1/auth/"))
+    assert len(retired) >= 40
+    assert ("POST", "/api/v1/dev/guest-claims/{claim_id}/assign-review") in retired
+    assert ("GET", "/api/v1/dev/tickets/{ticket_id}/state") in retired
+    # Exercise the actual method and concretize path variables with dummy UUIDs.
+    # In a fresh process no historical test application is imported/mounted.
+    operations = sorted({(method, re.sub(r"\{[^{}]+\}",
+                         "11111111-1111-4111-8111-111111111111", path))
+                         for method, path in retired})
+    assert all(method in {"GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"}
+               for method,_ in operations)
+    runner = """
+import json, os, sys
+from fastapi.testclient import TestClient
+from roboport_api.main import app
+for flag in ("ACCESS","AUTH","AUTO"):
+    os.environ["ROBOport_SYNTHETIC_"+flag+"_API"]="1"
+os.environ.pop("ROBOport_DATABASE_URL",None)
+operations=json.load(sys.stdin)
+with TestClient(app,base_url="https://127.0.0.1") as client:
+    failures=[]
+    for method,path in operations:
+        response=client.request(method,path,follow_redirects=False)
+        if response.status_code!=404:
+            failures.append([method,path,response.status_code])
+    # No spoofed proxy header in the principal probe: a transport guard
+    # must not be mistaken for proof that the business route is retired.
+    schema=client.get("/openapi.json").json()["paths"]
+    print(json.dumps({"failures":failures,"schema":list(schema),
+        "health":client.get("/health/live").status_code,
+        "auto":client.get("/api/v1/dev/auto/vehicles").status_code}))
+"""
+    check=subprocess.run([sys.executable,"-c",runner],
+        input=json.dumps(operations),capture_output=True,text=True,check=True,timeout=60)
+    result=json.loads(check.stdout)
+    assert result["failures"]==[],result["failures"]
+    assert result["health"]==200 and result["auto"]==403,result
+    historical_paths={path for _,path in retired}
+    assert not historical_paths.intersection(result["schema"])
