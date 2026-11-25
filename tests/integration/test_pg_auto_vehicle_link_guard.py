@@ -178,3 +178,26 @@ def test_vehicle_customer_link_identity_and_verification_are_immutable():
                WHERE vehicle_id=%s AND customer_id=%s""",
             (data["vehicle"], data["customer_a"]),
         ).fetchone() == (2,)
+
+
+def test_verified_link_cannot_be_revoked_before_verification():
+    with psycopg.connect(DSN) as db:
+        data = _seed(db)
+        link = data["link_a"]
+        db.execute(
+            "UPDATE auto_vehicle_customer_link SET verified_at=linked_at + interval '2 seconds', "
+            "verified_by=%s WHERE id=%s", (data["reviewer"], link),
+        )
+        with pytest.raises(psycopg.errors.CheckViolation) as error:
+            with db.transaction():
+                db.execute(
+                    "UPDATE auto_vehicle_customer_link SET revoked_at=linked_at + interval '1 second' "
+                    "WHERE id=%s", (link,),
+                )
+        assert error.value.diag.constraint_name == "ck_auto_vehicle_link_chronology"
+        assert db.execute("SELECT revoked_at FROM auto_vehicle_customer_link WHERE id=%s",
+                          (link,)).fetchone()[0] is None
+        # Равенство допустимо; pending-связь по-прежнему можно отозвать.
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=verified_at WHERE id=%s", (link,))
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=linked_at WHERE id=%s",
+                   (data["link_b"],))

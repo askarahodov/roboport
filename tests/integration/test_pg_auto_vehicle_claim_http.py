@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from roboport_api.auto_vehicle_claim import (
-    VehicleClaimRejected, review_auto_claim,
+    VehicleClaimRejected, review_auto_claim, revoke_auto_link,
 )
 from roboport_api.main import app
 from roboport_api.session_tokens import new_token, token_digest
@@ -397,3 +397,39 @@ def test_organization_bound_vehicle_rejects_legacy_grants_from_another_tenant(mo
         f"/api/v1/dev/auto/links/{d['link']}/issue-proof",
     )
     assert response.status_code == 403
+
+
+def test_revoke_transaction_started_before_verification_uses_actual_transition_time(monkeypatch):
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API", "1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API", "1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL", DSN)
+    d = _scenario()
+    http = _http()
+    issued = _act(http, d, d["intake"], f"/api/v1/dev/auto/links/{d['link']}/issue-proof")
+    assert issued.status_code == 200, issued.text
+    claim, proof = issued.json()["claimId"], issued.json()["proof"]
+    redeemed = _act(http, d, d["client_a"], f"/api/v1/dev/auto/claims/{claim}/redeem",
+                    json={"proof": proof})
+    assert redeemed.status_code == 200, redeemed.text
+    # Другая транзакция подтверждает связь после начала первой, но до её отзыва.
+    with psycopg.connect(DSN) as earlier:
+        started = earlier.execute("SELECT now()").fetchone()[0]
+        reviewed = _act(http, d, d["manager"], f"/api/v1/dev/auto/claims/{claim}/review",
+                        json={"approve": True})
+        assert reviewed.status_code == 200, reviewed.text
+        verified = earlier.execute(
+            "SELECT verified_at FROM auto_vehicle_customer_link WHERE id=%s", (d["link"],),
+        ).fetchone()[0]
+        assert verified > started
+        assert revoke_auto_link(earlier, d["tokens"][d["manager"]], d["link"]) == "REVOKED"
+        linked, revoked = earlier.execute(
+            "SELECT verified_at,revoked_at FROM auto_vehicle_customer_link WHERE id=%s", (d["link"],),
+        ).fetchone()
+        assert linked == verified and revoked >= verified
+    with psycopg.connect(DSN) as db:
+        events = db.execute(
+            "SELECT action,created_at FROM auto_vehicle_claim_audit WHERE link_id=%s "
+            "AND action IN ('VERIFIED','REVOKED') ORDER BY created_at,id", (d["link"],),
+        ).fetchall()
+        assert [row[0] for row in events] == ["VERIFIED", "REVOKED"]
+        assert events[1][1] >= revoked
