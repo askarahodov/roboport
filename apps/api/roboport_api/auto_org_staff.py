@@ -415,6 +415,21 @@ def revoke_staff_invitation(
         return action
 
 
+def _expire_invitation(conn, invitation_id, organization_id, actor, now):
+    conn.execute(
+        """UPDATE auto_org_staff_invitation
+           SET status='EXPIRED',expired_at=%s WHERE id=%s""",
+        (now, invitation_id),
+    )
+    conn.execute(
+        """INSERT INTO auto_org_staff_invitation_event
+           (id,invitation_id,organization_id,actor_id,action)
+           VALUES(%s,%s,%s,%s,'EXPIRED')""",
+        (uuid4(), invitation_id, organization_id, actor),
+    )
+    return {"status":"EXPIRED"}
+
+
 def accept_staff_invitation(
     conn: psycopg.Connection, session_token: str, invitation_token: str,
 ) -> dict:
@@ -450,18 +465,7 @@ def accept_staff_invitation(
             raise OrgStaffDenied("invitation unavailable")
         now = conn.execute("SELECT clock_timestamp()").fetchone()[0]
         if expires_at <= now:
-            conn.execute(
-                """UPDATE auto_org_staff_invitation
-                   SET status='EXPIRED',expired_at=%s WHERE id=%s""",
-                (now, invitation_id),
-            )
-            conn.execute(
-                """INSERT INTO auto_org_staff_invitation_event
-                   (id,invitation_id,organization_id,actor_id,action)
-                   VALUES(%s,%s,%s,%s,'EXPIRED')""",
-                (uuid4(), invitation_id, organization_id, actor),
-            )
-            return {"status":"EXPIRED"}
+            return _expire_invitation(conn, invitation_id, organization_id, actor, now)
 
         org = conn.execute(
             """SELECT id FROM auto_organization
@@ -497,6 +501,11 @@ def accept_staff_invitation(
         ).fetchone() is not None:
             raise OrgStaffConflict("active staff grant already exists")
 
+        # Срок проверяем повторно после org/issuer/branch locks, а не
+        # по timestamp, полученному до ожидания конкурентного изменения.
+        now = conn.execute("SELECT clock_timestamp()").fetchone()[0]
+        if expires_at <= now:
+            return _expire_invitation(conn, invitation_id, organization_id, actor, now)
         grant_id = uuid4()
         try:
             with conn.transaction():
