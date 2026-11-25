@@ -66,7 +66,7 @@ test('CRM creates and qualifies synthetic lead with CSRF, 390/1280 dark',async({
   await scope(page);
   await expect(page.getByText('Обращений пока нет.')).toBeVisible();
   await page.getByRole('textbox',{name:'UUID подтверждённой связи'}).fill(link);
-  await page.getByLabel('Источник').selectOption('WEB');
+  await page.getByLabel('Источник',{exact:true}).selectOption('WEB');
   await page.getByRole('button',{name:'Создать обращение'}).click();
   await expect(page.getByLabel('Обращение')).toBeVisible();
   await page.getByLabel('Обращение').selectOption(lead);
@@ -121,7 +121,7 @@ test('CRM booked stage requires a scoped appointment UUID and qualified stage',a
   await page.goto('/staff/auto-crm-leads');
   await scope(page);
   await page.getByLabel('Обращение').selectOption(lead);
-  await page.getByLabel('Этап').selectOption('BOOKED');
+  await page.getByLabel('Этап',{exact:true}).selectOption('BOOKED');
   await expect(page.getByRole('button',{name:'Сохранить этап'})).toBeDisabled();
   await page.getByRole('textbox',{name:'UUID записи'}).fill(appointment);
   await expect(page.getByRole('button',{name:'Сохранить этап'})).toBeEnabled();
