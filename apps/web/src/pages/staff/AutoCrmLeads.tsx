@@ -3,6 +3,7 @@ import { StaffCrmContactPreferences } from './StaffCrmContactPreferences';
 import {ServiceSurvey} from '../shared/ServiceSurvey';
 import { StaffCrmMockMessages } from './StaffCrmMockMessages';
 import {CrmDealCard} from './CrmDealCard';
+import {CrmInteractions} from './CrmInteractions';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Event={id:string;actorId:string;stageCode:'QUALIFIED'|'BOOKED'|'LOST';
@@ -473,6 +474,7 @@ export function AutoCrmLeads(){
           onClick={()=>void mutate(base,{customerLinkId:chosen.customerLinkId,sourceCode:chosen.sourceCode})}>
           Создать повторное обращение</button>}
         <CrmDealCard key={'deal:'+scope+':'+selected} base={base} leadId={selected}/>
+        <CrmInteractions key={'interactions:'+scope+':'+selected} base={base} leadId={selected}/>
         <StaffCrmContactPreferences key={scope+':'+selected} base={base} leadId={selected}
           onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);
             setStatus('denied');}}/>

@@ -55,7 +55,10 @@ def _financial(conn,org,loc,order):
 
 def read_deal(conn,token,org,loc,ident):
     with conn.transaction():
-        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        # READ COMMITTED is required: assignment/policy evidence is append-only.
+        # A repeatable-read snapshot taken before waiting for the lead/tenant
+        # lock could authorize a former owner or see an outdated rule.
+        # _lead rereads assignment after locking; hold source rows through read.
         actor,manager=_authority(conn,token,org,loc)
         lead=_lead(conn,org,loc,ident,actor,manager)
         state=_state(conn,lead)
@@ -68,6 +71,14 @@ def read_deal(conn,token,org,loc,ident):
         appointment=UUID(state["events"][-1]["appointmentId"])
         # The original booking is immutable. Resolve its actual current
         # resource/time from the latest reschedule, not the old receipt.
+        # Resolve reschedule only AFTER locking the appointment. Reschedule
+        # holds this row FOR UPDATE and inserts an immutable replacement.
+        if not conn.execute("""
+          SELECT id FROM auto_appointment WHERE id=%s AND organization_id=%s
+            AND location_id=%s AND customer_link_id=%s FOR SHARE
+        """,(appointment,org,loc,lead[1])).fetchone():
+            result["lineage"]="UNAVAILABLE"
+            return result
         row=conn.execute("""
           SELECT b.starts_at,b.ends_at,b.canceled_at,b.id<>a.booking_id
           FROM auto_appointment a
@@ -102,6 +113,11 @@ def read_deal(conn,token,org,loc,ident):
             result["lineage"]="NO_ORDER"
             return result
         order=orders[0][0]
+        # All primary order mutations serialize on the WorkOrder. Acquire
+        # its shared lock before deriving document and monetary projections.
+        conn.execute("""SELECT id FROM auto_work_order WHERE id=%s
+                         AND organization_id=%s AND location_id=%s FOR SHARE""",
+                     (order,org,loc))
         try:
             # All source policies apply to operational projection, not just
             # the CRM role. No order identifier on denied access.
