@@ -11,13 +11,13 @@ def record(**fields):
     return base | fields
 
 
-def test_oem_and_cross_have_different_fitment_trust():
+def test_oem_and_cross_without_vehicle_evidence_are_unverified():
     calls = []
     def transport(kind, article):
         calls.append((kind, article))
         return 200, [record()]
     adapter = OemSandboxAdapter(transport)
-    assert adapter.search(" syn-001 ")[0].applicability == Applicability.VERIFIED
+    assert adapter.search(" syn-001 ")[0].applicability == Applicability.UNVERIFIED
     assert adapter.search("syn-001", alternatives=True)[0].applicability == Applicability.UNVERIFIED
     assert calls == [("oem", "SYN-001"), ("alternatives", "SYN-001")]
 
@@ -65,3 +65,13 @@ def test_transport_failures_map_to_unavailable(failure):
 
 def test_empty_results_are_not_invented():
     assert OemSandboxAdapter(lambda *_: (200, [])).search("SYN-001") == ()
+
+
+@pytest.mark.parametrize("alternatives", [False, True])
+def test_sandbox_preserves_unknown_and_rejects_invalid_status(alternatives):
+    adapter = OemSandboxAdapter(lambda *_: (200, [record(applicability="UNKNOWN")]))
+    assert adapter.search("SYN-001", alternatives=alternatives)[0].applicability == Applicability.UNKNOWN
+    invalid = OemSandboxAdapter(lambda *_: (200, [record(), record(applicability="FIT")]))
+    with pytest.raises(CatalogError) as error:
+        invalid.search("SYN-001", alternatives=alternatives)
+    assert error.value.code == CatalogErrorCode.UNAVAILABLE

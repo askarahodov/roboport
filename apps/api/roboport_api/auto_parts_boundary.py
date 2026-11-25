@@ -30,7 +30,8 @@ def provider_error(status: int | None = None, *, timed_out: bool = False) -> Cat
 def parse_provider_part(raw: Mapping[str, Any], *, is_cross: bool = False) -> CatalogPart:
     """Validate an untrusted provider record without inventing metadata.
 
-    Cross references are not independent applicability evidence.
+    Neither article lookup nor cross references prove vehicle-specific fitment.
+    is_cross is retained for existing callers; it cannot elevate trust.
     """
     if not isinstance(raw, dict):
         raise CatalogError(CatalogErrorCode.UNAVAILABLE)
@@ -49,7 +50,7 @@ def parse_provider_part(raw: Mapping[str, Any], *, is_cross: bool = False) -> Ca
         status = Applicability(raw["applicability"])
         if type(raw["applicability"]) is not str:
             raise ValueError("status type")
-        if is_cross and status == Applicability.VERIFIED:
+        if status == Applicability.VERIFIED:
             status = Applicability.UNVERIFIED
         return CatalogPart(
             provider=raw["provider"].strip(),
