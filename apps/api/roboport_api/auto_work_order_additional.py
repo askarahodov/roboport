@@ -44,7 +44,7 @@ def _state(conn,order):
             "syntheticOnly":True,"releaseAllowed":False}
 
 
-def _authorize(conn,token,org,loc,order,manager,*,cap=None,discount=False):
+def _authorize(conn,token,org,loc,order,manager,*,cap=None,discount=False,edit=False):
     try:
         actor=(_staff_and_scope(conn,token,org,loc,order) if manager
                else _client_and_scope(conn,token,org,loc,order))
@@ -57,6 +57,9 @@ def _authorize(conn,token,org,loc,order,manager,*,cap=None,discount=False):
             for capability in dict.fromkeys(("READ","PRICE_SALES",cap or "READ")):
                 require_document_access(conn,token,org,loc,("MANAGER",),
                                         "ESTIMATE",capability,order=order)
+            if edit:
+                require_document_access(conn,token,org,loc,("MANAGER",),
+                                        "ESTIMATE","EDIT",order=order)
             if discount:
                 require_document_access(conn,token,org,loc,("MANAGER",),
                                         "ESTIMATE","DISCOUNT",order=order)
@@ -97,7 +100,8 @@ def publish_extra(conn,token,org,loc,order,*,base_revision_id,
         supplied[item["serviceId"]]=item
     with conn.transaction():
         actor=_authorize(conn,token,org,loc,order,True,cap="CREATE",
-                         discount=any(x["discountBps"]>0 for x in supplied.values()))
+                         discount=any(x["discountBps"]>0 for x in supplied.values()),
+                         edit=expected_version>0)
         base=_estimate_state(conn,order)["items"]
         if not base or base[-1]["id"]!=str(base_revision_id) or base[-1]["decision"]!="APPROVED":
             raise ExtraConflict("BASE_APPROVAL_REQUIRED")
@@ -140,11 +144,12 @@ def publish_extra(conn,token,org,loc,order,*,base_revision_id,
         digest=_fingerprint({"order":str(order),"baseRevisionId":str(base_revision_id),
                              "lines":lines,"tariffs":tariffs,"totalMinor":total,"currency":"RUB"})
         prior=conn.execute("""
-          SELECT fingerprint FROM auto_work_order_extra_revision
+          SELECT fingerprint,version,actor_id FROM auto_work_order_extra_revision
           WHERE work_order_id=%s AND request_key=%s
         """,(order,request_key)).fetchone()
         if prior:
-            if prior[0].strip()!=digest:
+            if (prior[0].strip()!=digest or prior[1]!=expected_version+1
+                    or prior[2]!=actor):
                 raise ExtraConflict("KEY_REUSED")
             return {"ok":True,"replayed":True,**_state(conn,order)}
         state=_state(conn,order)

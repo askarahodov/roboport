@@ -188,3 +188,58 @@ def test_concurrent_publish_and_concurrent_customer_consent(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT count(*) FROM auto_work_order_estimate_decision
                              WHERE work_order_id=%s""",(order,)).fetchone()[0]==1
+
+
+def test_estimate_version_edit_permission_and_exact_replay(monkeypatch):
+    from test_pg_auto_document_access_http import admin, set_rule, url as policies_url
+    from test_pg_auto_stock_service import grant
+
+    d,org,loc,order,service,_,_=scenario()
+    client=api(monkeypatch)
+    endpoint=path(org,loc,order)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["manager"])
+        grant(db,d["manager"],org,loc,"MANAGER")
+
+    def policy(allowed):
+        owner=token(client,d,d["manager"])
+        changed=set_rule(client,policies_url(org),owner,loc=loc,user=d["intake"],
+                         cap="EDIT",allowed=allowed)
+        assert changed.status_code==201,changed.text
+        preview=client.get(policies_url(org)+"/effective",params={
+            "locationId":str(loc),"userId":str(d["intake"]),"documentKind":"ESTIMATE"})
+        assert preview.status_code==200,preview.text
+        assert preview.json()["capabilities"]["EDIT"]["allowed"] is allowed
+        assert preview.json()["capabilities"]["CREATE"]["allowed"] is True
+
+    first=publish_payload(service,amount=1500)
+    second=publish_payload(service,version=1,amount=2700)
+    policy(False)
+    manager=token(client,d,d["intake"])
+    created=client.post(endpoint,headers=manager,json=first)
+    assert created.status_code==201,created.text
+    assert client.post(endpoint,headers=manager,json=first).status_code==200
+    assert client.post(endpoint,headers=manager,json=second).status_code==403
+    policy(True)
+    manager=token(client,d,d["intake"])
+    revised=client.post(endpoint,headers=manager,json=second)
+    assert revised.status_code==201,revised.text
+    assert revised.json()["latestVersion"]==2
+    assert client.post(endpoint,headers=manager,json=second).status_code==200
+    policy(False)
+    manager=token(client,d,d["intake"])
+    denied=client.post(endpoint,headers=manager,json=second)
+    assert denied.status_code==403,denied.text
+    assert denied.headers["cache-control"]=="no-store"
+    assert "items" not in denied.json()
+    assert client.post(endpoint,headers=manager,json={**second,"expectedVersion":0}).status_code==409
+    assert client.post(endpoint,headers=manager,json=first).status_code==200
+    # Даже другой действующий MANAGER не может выдать чужой ключ за свой retry.
+    other=token(client,d,d["manager"])
+    assert client.post(endpoint,headers=other,json=second).status_code==409
+    policy(True)
+    manager=token(client,d,d["intake"])
+    assert client.post(endpoint,headers=manager,json=second).status_code==200
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT version,total_minor FROM auto_work_order_estimate_revision "
+                          "WHERE work_order_id=%s ORDER BY version",(order,)).fetchall()==[(1,1500),(2,2700)]
