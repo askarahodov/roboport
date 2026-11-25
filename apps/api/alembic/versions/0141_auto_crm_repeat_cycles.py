@@ -48,13 +48,13 @@ def upgrade():
       LANGUAGE plpgsql AS $f$
       BEGIN
         IF NEW.stage_code='BOOKED' AND EXISTS (
-          SELECT 1 FROM auto_crm_lead current
-          JOIN auto_crm_lead prior ON prior.organization_id=current.organization_id
-            AND prior.location_id=current.location_id AND prior.customer_link_id=current.customer_link_id
-            AND prior.source_code=current.source_code AND prior.visit_number<current.visit_number
+          SELECT 1 FROM auto_crm_lead cur
+          JOIN auto_crm_lead prior ON prior.organization_id=cur.organization_id
+            AND prior.location_id=cur.location_id AND prior.customer_link_id=cur.customer_link_id
+            AND prior.source_code=cur.source_code AND prior.visit_number<cur.visit_number
           JOIN auto_crm_lead_stage stage ON stage.lead_id=prior.id
             AND stage.stage_code='BOOKED' AND stage.appointment_id=NEW.appointment_id
-          WHERE current.id=NEW.lead_id
+          WHERE cur.id=NEW.lead_id
         ) THEN RAISE EXCEPTION 'CRM repeat must use a new appointment'; END IF;
         RETURN NEW;
       END $f$;

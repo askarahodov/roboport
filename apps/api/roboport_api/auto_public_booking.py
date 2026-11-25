@@ -638,6 +638,9 @@ def fulfill_request(conn,token,org,loc,ident,key):
             latest=latest_lead_cycle(conn,org,loc,claimed[1],"WEB")
             if latest and latest[2] in ("NEW","QUALIFIED"):
                 lead_id=latest[0]
+                conn.execute("""SELECT id FROM auto_crm_lead
+                  WHERE id=%s AND organization_id=%s AND location_id=%s FOR UPDATE""",
+                  (lead_id,org,loc))
                 lead=lead_detail(conn,token,org,loc,lead_id)
             else:
                 lead=create_lead(conn,token,org,loc,claimed[1],"WEB",

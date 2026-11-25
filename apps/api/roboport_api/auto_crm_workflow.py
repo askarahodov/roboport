@@ -227,7 +227,7 @@ def list_kanban(conn,token,org,loc):
             items.append({
                 "leadId":str(lead_id),"customerLinkId":str(link),
                 "ownerId":str(lead[2]),"sourceCode":source,
-                "stageCode":stage,"createdAt":created.isoformat(),
+                "stageCode":stage,"createdAt":created.isoformat(),"visitNumber":lead[6],
             })
         return {"syntheticOnly":True,"version":version,
                 "columns":columns,"items":items,"limit":200,"canConfigure":manager}

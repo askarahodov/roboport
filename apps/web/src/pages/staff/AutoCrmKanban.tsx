@@ -7,7 +7,7 @@ type Stage={code:'QUALIFIED'|'BOOKED'|'LOST';label:string;position:number;
 type Column={code:StageCode;label:string;position:number;enabled:boolean;
   allowedFrom:StageCode[];lossReasons:LossReason[]};
 type Item={leadId:string;customerLinkId:string;ownerId:string;sourceCode:'WEB'|'PHONE'|'WALK_IN';
-  stageCode:StageCode;createdAt:string};
+  stageCode:StageCode;createdAt:string;visitNumber?:number};
 type Board={syntheticOnly:true;version:number;columns:Column[];items:Item[];limit:200;canConfigure:boolean};
 type Workflow={syntheticOnly:true;version:number;canConfigure:boolean;config:{stages:Stage[]}};
 type PendingMutation={url:string;body:Record<string,unknown>;success:string};
@@ -52,7 +52,7 @@ function parseBoard(raw:unknown):Board{
     new Set(x.columns.map(c=>c.code)).size!==4||
     !x.items.every(i=>i&&uuid.test(i.leadId)&&uuid.test(i.customerLinkId)&&
       uuid.test(i.ownerId)&&['WEB','PHONE','WALK_IN'].includes(i.sourceCode)&&
-      codes.includes(i.stageCode)&&typeof i.createdAt==='string'&&
+      codes.includes(i.stageCode)&&(i.visitNumber===undefined||(Number.isSafeInteger(i.visitNumber)&&i.visitNumber>=1))&&typeof i.createdAt==='string'&&
       !Number.isNaN(Date.parse(i.createdAt))))throw Error('board');
   return x as Board;
 }
@@ -137,6 +137,14 @@ export function AutoCrmKanban(){
     setPending(mutation);void submitMutation(mutation);
   }
 
+  function repeat(item:Item){
+    if(!base||busy||pending||!['BOOKED','LOST'].includes(item.stageCode))return;
+    const mutation:PendingMutation={url:base+'/leads',
+      body:{customerLinkId:item.customerLinkId,sourceCode:item.sourceCode,requestKey:crypto.randomUUID()},
+      success:'Новое обращение создано. История предыдущего сохранена.'};
+    setPending(mutation);void submitMutation(mutation);
+  }
+
   function transition(item:Item){
     if(!base||busy||pending||!editLead)return;
     const body:{stageCode:StageCode;reasonCode:LossReason|null;appointmentId:string|null;requestKey:string}={
@@ -204,6 +212,9 @@ export function AutoCrmKanban(){
             <p>Обращение: {item.leadId}</p>
             <p>Ответственный: {item.ownerId}</p>
             <p>Источник: {sourceNames[item.sourceCode]}</p>
+            {item.visitNumber!==undefined&&<p>Цикл обращения №{item.visitNumber}</p>}
+            {['BOOKED','LOST'].includes(item.stageCode)&&<button type="button"
+              disabled={busy||pending!==null} onClick={()=>void repeat(item)}>Создать повторное обращение</button>}
             <label>Новый ответственный UUID <input aria-label={'Ответственный '+item.leadId}
               value={assignees[item.leadId]||''} disabled={busy}
               onChange={e=>setAssignees(x=>({...x,[item.leadId]:e.target.value}))}/></label>
