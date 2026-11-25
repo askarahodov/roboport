@@ -468,7 +468,15 @@ def test_inbound_interaction_journal_concurrent_retry_owner_audit_pagination_and
     assert http.post(endpoint,headers=intake,json={**payload,"channelCode":"UNKNOWN"}).status_code==422
     assert http.get(endpoint).json()["items"]==[]
     assert http.post(endpoint,headers=intake,json={**payload,"expectedActorId":str(d["manager"])}).status_code==403
-    assert http.post(endpoint,headers=intake,json={**payload,"callbackDueAt":(due-timedelta(days=3)).isoformat()}).status_code==422
+    expired_due=(due-timedelta(days=3)).isoformat()
+    rejected=http.post(endpoint,headers=intake,json={**payload,"callbackDueAt":expired_due})
+    assert rejected.status_code==422,rejected.text
+    receipt=rejected.json()
+    assert receipt["code"]=="CALLBACK_DEADLINE_EXPIRED" and receipt["requestKey"]==str(key)
+    assert receipt["viewerId"]==str(d["intake"]) and receipt["leadId"]==str(lead_id)
+    assert datetime.fromisoformat(receipt["callbackDueAt"])==datetime.fromisoformat(expired_due)
+    assert receipt["sendAllowed"] is False
+    assert http.get(detail+"/tasks").json()["items"]==[]
     barrier=Barrier(2)
     def concurrent_write():
         with psycopg.connect(DSN) as db:

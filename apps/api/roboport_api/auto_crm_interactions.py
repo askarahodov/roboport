@@ -14,6 +14,10 @@ OUTCOMES=("REQUEST_RECEIVED","CALLBACK_REQUIRED","INFORMATION_REQUESTED","DECLIN
 PAGE=25
 
 
+class CallbackDeadlineExpired(LeadDenied):
+    """Terminal rejection only after scoped exact-key lookup under lead lock."""
+
+
 def _item(row):
     ident,actor,owner,source,channel,outcome,stamp,task_id,due=row
     return {"interactionId":str(ident),"actorId":str(actor),"ownerId":str(owner),
@@ -84,7 +88,9 @@ def record_interaction(conn,token,org,loc,lead_id,key,channel,outcome,callback_d
         task_id=None
         if callback_due is not None:
             now=datetime.now(timezone.utc)
-            if not now<callback_due<=now+timedelta(days=365):
+            if callback_due<=now:
+                raise CallbackDeadlineExpired("CALLBACK_DEADLINE_EXPIRED")
+            if callback_due>now+timedelta(days=365):
                 raise LeadDenied("INVALID_INPUT")
             task=create_followup(conn,token,org,loc,lead_id,
                                  uuid5(NAMESPACE_URL,"crm-interaction-callback:"+str(key)),

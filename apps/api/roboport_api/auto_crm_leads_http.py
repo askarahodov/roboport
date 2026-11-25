@@ -9,7 +9,7 @@ from pydantic import BaseModel,ConfigDict,ValidationError
 
 from .auth_http import _mutation_ok
 from .auto_crm_deal import read_deal
-from .auto_crm_interactions import list_interactions, record_interaction
+from .auto_crm_interactions import list_interactions, record_interaction, CallbackDeadlineExpired
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auto_crm_leads import (
     LeadDenied,LeadConflict,create_lead,transition_lead,lead_detail,list_leads,
@@ -187,6 +187,16 @@ async def crm_interaction(org_id:str,loc_id:str,lead_id:str,request:Request):
             result=record_interaction(db,request.cookies.get("rp_session",""),org,loc,lead,
                                       body.requestKey,body.channelCode,body.outcomeCode,
                                       body.callbackDueAt,body.expectedActorId)
+        except CallbackDeadlineExpired:
+            # Exact lookup already checked under the same lead lock. A stale
+            # retry cannot create a task for a deadline that has passed.
+            return JSONResponse(status_code=422,content={
+                "code":"CALLBACK_DEADLINE_EXPIRED","requestId":request.state.request_id,
+                "syntheticOnly":True,"sendAllowed":False,"leadId":str(lead),
+                "requestKey":str(body.requestKey),
+                "viewerId":str(body.expectedActorId) if body.expectedActorId else None,
+                "callbackDueAt":body.callbackDueAt.isoformat(),
+            },headers={"Cache-Control":"no-store"})
         except (LeadDenied,LeadConflict) as exc:
             return _error(request,exc)
         except (psycopg.errors.DeadlockDetected,psycopg.errors.SerializationFailure):

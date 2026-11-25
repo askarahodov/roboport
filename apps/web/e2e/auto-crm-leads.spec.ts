@@ -541,3 +541,49 @@ test('inbound contact keeps exact request after lost response and access denial'
   await expect(panel.getByRole('alert')).toBeVisible();
   await expect(panel).not.toContainText(id);
 });
+
+
+test('expired callback pending clears only for exact terminal rejection',async({page})=>{
+  const envelope={syntheticOnly:true,sendAllowed:false,leadId:lead,viewerId:owner};
+  const posts:any[]=[];
+  await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',
+    body:'{"csrfToken":"synthetic-csrf"}'}));
+  await page.route(path,route=>{
+    const req=route.request(),pathname=new URL(req.url()).pathname;
+    if(pathname.endsWith('/interactions')){
+      if(req.method()==='POST'){
+        const body=req.postDataJSON();posts.push(body);
+        if(posts.length===1)return route.abort('failed');
+        expect(body).toEqual(posts[0]);
+        return route.fulfill({status:422,contentType:'application/json',body:JSON.stringify({
+          ...envelope,code:'CALLBACK_DEADLINE_EXPIRED',callbackDueAt:body.callbackDueAt,
+          requestKey:posts.length===2?'00000000-0000-4000-8000-000000000000':body.requestKey})});
+      }
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({...envelope,items:[],nextCursor:null})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:pathname.endsWith('/crm/leads')?[item('NEW')]:[],nextCursor:null})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  const panel=page.getByRole('region',{name:'Журнал тестовых контактов'});
+  await panel.getByRole('button',{name:'Загрузить журнал контактов'}).click();
+  await panel.getByLabel('Результат входящего контакта').selectOption('CALLBACK_REQUIRED');
+  const tomorrow=new Date(Date.now()+86400000);
+  await panel.getByLabel('Срок обратного контакта').fill(
+    new Date(tomorrow.getTime()-tomorrow.getTimezoneOffset()*60000).toISOString().slice(0,16));
+  const create=panel.getByRole('button',{name:'Записать входящий контакт'});
+  const retry=panel.getByRole('button',{name:'Повторить контакт с тем же ключом'});
+  await create.click();
+  await expect(panel).toContainText('Ответ неизвестен');
+  await retry.click();
+  await expect(retry).toBeEnabled();
+  await expect(create).toBeDisabled();
+  await retry.click();
+  await expect(panel).toContainText('Сервер подтвердил отсутствие записи');
+  await expect(retry).toHaveCount(0);
+  await expect(create).toBeEnabled();
+  expect(posts).toHaveLength(3);
+});

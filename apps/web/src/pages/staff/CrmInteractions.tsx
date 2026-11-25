@@ -112,8 +112,18 @@ export function CrmInteractions({base,leadId}:{base:string;leadId:string}){
       if(control.signal.aborted)return;
       if([401,403,404].includes(r.status)){if(!retry)sessionStorage.removeItem(storageKey(endpoint,viewer));deny();return;}
       if(r.status===409||r.status===422){
-        if(!retry){sessionStorage.removeItem(storageKey(endpoint,viewer));setPending(null);}
-        setMessage(retry?'Повтор не подтверждён. Исходный ключ сохранён; сверяйте журнал.':'Запись отклонена. Сверьте журнал.');refresh=true;return;
+        let expired=false;
+        if(r.status===422&&request.callbackDueAt!==null){
+          const rejection=await r.json().catch(()=>null);
+          if(control.signal.aborted)return;
+          expired=rejection?.code==='CALLBACK_DEADLINE_EXPIRED'&&rejection.syntheticOnly===true&&
+            rejection.sendAllowed===false&&rejection.leadId===leadId&&rejection.viewerId===viewer&&
+            rejection.requestKey===request.requestKey&&typeof rejection.callbackDueAt==='string'&&
+            Date.parse(rejection.callbackDueAt)===Date.parse(request.callbackDueAt);
+        }
+        if(expired||!retry){sessionStorage.removeItem(storageKey(endpoint,viewer));setPending(null);}
+        setMessage(expired?'Срок истёк. Сервер подтвердил отсутствие записи. Укажите новый срок.':
+          retry?'Повтор не подтверждён. Исходный ключ сохранён; сверяйте журнал.':'Запись отклонена. Сверьте журнал.');refresh=true;return;
       }
       if(!r.ok)throw Error('http');
       const result=envelope(await r.json(),leadId);
