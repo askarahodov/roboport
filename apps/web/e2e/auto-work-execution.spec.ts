@@ -183,3 +183,52 @@ test('execution renders all 70 approved base plus additional labor entries at 39
     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }
 });
+
+
+test('execution denies CSRF and clears stale choices; uncertain retry survives revoke',async({page})=>{
+  let csrfDenied=false,denied=false,posts=0;
+  const keys:string[]=[];
+  await page.route('**/api/v1/auth/csrf',route=>route.fulfill({
+    status:csrfDenied?403:200,contentType:'application/json',
+    body:csrfDenied?'{"code":"FORBIDDEN"}':'{"csrfToken":"synthetic"}'}));
+  await page.route(root,route=>{
+    const req=route.request();
+    if(req.method()==='POST'){
+      posts++;keys.push(req.postDataJSON().requestKey);
+      if(posts===1)return route.abort('failed');
+      return route.fulfill({status:posts===2?403:200,contentType:'application/json',
+        body:posts===2?'{"code":"FORBIDDEN"}':'{"ok":true,"replayed":true}'});
+    }
+    return route.fulfill({status:denied?403:200,contentType:'application/json',
+      body:denied?'{"code":"FORBIDDEN"}':JSON.stringify({
+        status:'IN_PROGRESS',approvedVersion:1,approvedTotalMinor:7500,
+        requiredServices:[{serviceId:service,code:'PRIVATE-SYN',title:'Synthetic',durationMinutes:30}],
+        labor:[],materials:[],qcStatus:'PENDING_QC',executionId:order,syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.goto('/staff/auto-execution');
+  await page.getByRole('textbox',{name:'UUID организации'}).fill(org);
+  await page.getByRole('textbox',{name:'UUID филиала'}).fill(loc);
+  await page.getByRole('textbox',{name:'UUID заказ-наряда'}).fill(order);
+  await expect(page.getByText('PRIVATE-SYN',{exact:false})).toBeVisible();
+  await page.getByRole('spinbutton',{name:'Фактические минуты PRIVATE-SYN'}).fill('20');
+  await page.getByRole('button',{name:'Зафиксировать работу'}).click();
+  await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('PRIVATE-SYN',{exact:false})).toHaveCount(0);
+  denied=true;
+  await page.getByRole('button',{name:'Проверить доступ заново'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  denied=false;
+  await page.getByRole('button',{name:'Проверить доступ заново'}).click();
+  await expect(page.getByRole('spinbutton',{name:'Фактические минуты PRIVATE-SYN'})).toHaveValue('');
+  await page.getByRole('button',{name:'Повторить тот же запрос'}).click();
+  await expect(page.getByRole('button',{name:'Повторить тот же запрос'})).toHaveCount(0);
+  expect(keys).toHaveLength(3);
+  expect(new Set(keys).size).toBe(1);
+  await page.getByRole('spinbutton',{name:'Фактические минуты PRIVATE-SYN'}).fill('25');
+  csrfDenied=true;
+  await page.getByRole('button',{name:'Зафиксировать работу'}).click();
+  await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
+  await expect(page.getByText('PRIVATE-SYN',{exact:false})).toHaveCount(0);
+  expect(posts).toBe(3);
+});
