@@ -233,3 +233,89 @@ def test_crm_outcomes_uses_current_booking_after_real_reschedule(monkeypatch):
         "sourceCode": "ALL", "bookedLeads": 1, "closedTechnical": 1,
         "simSettledMinor": "2500", "simRefundMinor": "0",
     }
+
+
+def test_deal_card_links_real_visit_and_two_independent_ledgers_with_live_acl(monkeypatch):
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    from test_pg_auto_work_order_execution_http import session
+    from test_pg_auto_crm_leads_http import url as leads_url
+    d,org,loc,order,act,preview=ready(monkeypatch,with_refund=True)
+    http=_client()
+    with psycopg.connect(DSN) as db:
+        appointment=db.execute("SELECT appointment_id FROM auto_work_order WHERE id=%s",(order,)).fetchone()[0]
+        lead=create_lead(db,d["tokens"][d["intake"]],org,loc,d["link"],"WEB",uuid4())
+        ident=UUID(lead["leadId"])
+        admin(db,org,d["other"])
+        grant(db,d["intake"],org,loc,"CASHIER")
+        account=create_account(db,d["tokens"][d["intake"]],org,loc,request_key=uuid4(),
+                               code="DEAL_SIM",label="Тестовая касса сделки",kind="CASH_SIM")
+        paid=record_event(db,d["tokens"][d["intake"]],org,loc,order,account_id=UUID(account["accountId"]),
+                          request_key=uuid4(),kind="PAYMENT",amount_minor=1700,reason="Синтетический расчёт")
+        payment_id=paid["eventId"]
+    endpoint=leads_url(org,loc)+"/"+str(ident)+"/deal"
+    assert http.get(endpoint).status_code==403
+    session(http,d,d["intake"])
+    initial=http.get(endpoint)
+    assert initial.status_code==200,initial.text
+    assert initial.json()["lineage"]=="NOT_BOOKED" and initial.json()["finance"] is None
+    with psycopg.connect(DSN) as db:
+        transition_lead(db,d["tokens"][d["intake"]],org,loc,ident,uuid4(),"QUALIFIED",None,None)
+        transition_lead(db,d["tokens"][d["intake"]],org,loc,ident,uuid4(),"BOOKED",None,appointment)
+        _posted(db,d,org,loc,order,act,preview,"POSTED",d["intake"])
+        _posted(db,d,org,loc,order,act,preview,"CLIENT_ACK",d["client_a"])
+        _posted(db,d,org,loc,order,act,preview,"CLOSED_TECHNICAL",d["intake"])
+    response=http.get(endpoint)
+    assert response.status_code==200,response.text
+    original=response.json()
+    assert response.headers["cache-control"]=="no-store"
+    assert original["lineage"]=="LINKED" and original["booking"]["appointmentId"]==str(appointment)
+    assert original["workOrder"]["workOrderId"]==str(order)
+    assert original["workOrder"]["steps"]["technicalDocuments"]=="CLOSED_TECHNICAL"
+    assert [e["action"] for e in original["workOrder"]["documentEvents"]]==["POSTED","CLIENT_ACK","CLOSED_TECHNICAL"]
+    assert original["financeStatus"]=="VISIBLE"
+    f=original["finance"]
+    assert f["approvedTotalMinor"]=="2500"
+    assert f["demoClose"]["paidMinor"]=="3000" and f["demoClose"]["refundedMinor"]=="500"
+    assert f["demoClose"]["dueMinor"]=="0"
+    assert f["treasury"]["settledMinor"]=="1700" and f["treasury"]["dueMinor"]=="800"
+    assert f["treasury"]["events"][0]["id"]==payment_id
+    assert "Синтетический расчёт" not in response.text and "accountId" not in response.text
+    assert str(d["ca"]) not in response.text and str(d["client_a"]) not in response.text
+    def policy(document,cap,allowed,cutoff=None):
+        owner=session(http,d,d["other"])
+        changed=set_rule(http,policy_url(org),owner,role="MANAGER",loc=loc,
+                         user=d["intake"],document=document,cap=cap,allowed=allowed,not_before=cutoff)
+        assert changed.status_code==201,changed.text
+        session(http,d,d["intake"])
+    for doc,cap in (("FINANCE","PRICE_SALES"),("HANDOVER","READ"),("ESTIMATE","PRICE_SALES")):
+        policy(doc,cap,False)
+        denied=http.get(endpoint)
+        assert denied.status_code==200,denied.text
+        result=denied.json()
+        assert result["financeStatus"]=="RESTRICTED" and result["finance"] is None
+        assert result["workOrder"]["documentEvents"] is None
+        assert result["workOrder"]["steps"]["technicalDocuments"]=="RESTRICTED"
+        assert payment_id not in denied.text
+        policy(doc,cap,True)
+        assert http.get(endpoint).json()==original
+    policy("INTAKE_ACT","READ",True,"2099-01-01T00:00:00Z")
+    denied=http.get(endpoint).json()
+    assert denied["lineage"]=="RESTRICTED" and denied["workOrder"] is None and denied["finance"] is None
+    policy("INTAKE_ACT","READ",True)
+    assert http.get(endpoint).json()==original
+    session(http,d,d["client_a"])
+    assert http.get(endpoint).status_code==403
+    session(http,d,d["intake"])
+    assert http.get(endpoint.replace(str(loc),str(uuid4()))).status_code==403
+    # Another source may historically have attributed the same appointment.
+    # Never display a financial attribution to either ambiguous deal.
+    with psycopg.connect(DSN) as db:
+        other=create_lead(db,d["tokens"][d["intake"]],org,loc,d["link"],"PHONE",uuid4())
+        other_id=UUID(other["leadId"])
+        transition_lead(db,d["tokens"][d["intake"]],org,loc,other_id,uuid4(),"QUALIFIED",None,None)
+        transition_lead(db,d["tokens"][d["intake"]],org,loc,other_id,uuid4(),"BOOKED",None,appointment)
+    ambiguous=http.get(endpoint).json()
+    assert ambiguous["lineage"]=="AMBIGUOUS" and ambiguous["workOrder"] is None and ambiguous["finance"] is None
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+    assert http.get(endpoint).status_code==403

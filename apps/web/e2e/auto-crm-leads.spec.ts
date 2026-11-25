@@ -410,3 +410,64 @@ test('terminal CRM deal starts a new cycle with old evidence unchanged',async({p
   await expect(page.getByText('Цикл обращения №1.',{exact:false})).toBeVisible();
   await expect(page.getByText('Отказ · Время',{exact:false})).toBeVisible();
 });
+
+
+test('deal card shows linked primary evidence and separate journals, clears on revoke',async({page})=>{
+  const order='99999999-9999-4999-8999-999999999999';
+  const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const date='2030-01-01T10:00:00Z';
+  const deal={syntheticOnly:true,realMoney:false,releaseAllowed:false,leadId:lead,
+    visitNumber:1,stage:'BOOKED',lineage:'LINKED',financeStatus:'VISIBLE',
+    booking:{appointmentId:appointment,startsAt:date,endsAt:'2030-01-01T11:00:00Z',status:'RESCHEDULED'},
+    workOrder:{workOrderId:order,steps:{services:'SELECTED',inspection:'RECORDED',
+      intakeAct:'ACKNOWLEDGED',estimate:'APPROVED',execution:'FINISHED',quality:'PASS',technicalDocuments:'CLOSED_TECHNICAL'},
+      documentEvents:[{id,action:'CLOSED_TECHNICAL',createdAt:date}]},
+    finance:{currency:'RUB',approvedTotalMinor:'2500',
+      demoClose:{paidMinor:'2500',refundedMinor:'0',dueMinor:'0',
+        events:[{id,kind:'SIM_PAYMENT',amountMinor:'2500',createdAt:date}]},
+      treasury:{advancedMinor:'0',paymentMinor:'1700',appliedMinor:'0',refundedAdvanceMinor:'0',
+        refundedPaymentMinor:'0',settledMinor:'1700',dueMinor:'800',
+        events:[{id,kind:'PAYMENT',amountMinor:'1700',createdAt:date}]}}};
+  let mode='visible';
+  await page.route(path,route=>{
+    const pathname=new URL(route.request().url()).pathname;
+    if(pathname.endsWith('/deal')){
+      const payload=mode==='restricted'?{...deal,financeStatus:'RESTRICTED',finance:null,
+        workOrder:{...deal.workOrder,steps:{...deal.workOrder.steps,technicalDocuments:'RESTRICTED'},documentEvents:null}}:
+        mode==='malformed'?{...deal,finance:{...deal.finance,treasury:{...deal.finance.treasury,settledMinor:'2500'}}}:deal;
+      return route.fulfill({status:mode==='denied'?403:200,contentType:'application/json',
+        body:JSON.stringify(mode==='denied'?{code:'FORBIDDEN'}:payload)});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:pathname.endsWith('/crm/leads')?
+        [{...item('BOOKED',[event('BOOKED',null,appointment)]),visitNumber:1}]:[],nextCursor:null})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  const card=page.getByRole('region',{name:'Карточка сделки CRM'});
+  await card.getByRole('button',{name:'Загрузить карточку сделки'}).click();
+  await expect(card).toContainText('Перенесена');
+  await expect(card).toContainText(order);
+  await expect(card).toContainText('Технически закрыто');
+  await expect(card.getByRole('table',{name:'Имитация закрытия'})).toContainText('25,00');
+  await expect(card.getByRole('table',{name:'Тестовое казначейство'})).toContainText('17,00');
+  await expect(card).toContainText('8,00 ₽');
+  const refresh=card.getByRole('button',{name:'Обновить карточку сделки'});
+  mode='restricted';await refresh.click();
+  await expect(card).toContainText('Финансовая история недоступна');
+  await expect(card.getByRole('table')).toHaveCount(0);
+  await expect(card.getByRole('heading',{name:'История документов'})).toHaveCount(0);
+  mode='malformed';await refresh.click();
+  await expect(card.getByRole('alert')).toContainText('Не удалось получить полную карточку');
+  await expect(card.getByRole('table')).toHaveCount(0);
+  mode='visible';await refresh.click();
+  await expect(card.getByRole('table')).toHaveCount(2);
+  mode='denied';await refresh.click();
+  await expect(card.getByRole('alert')).toContainText('Доступ к сделке запрещён');
+  await expect(card).not.toContainText(order);
+  await expect(card.getByRole('table')).toHaveCount(0);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});

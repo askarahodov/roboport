@@ -12,7 +12,7 @@ const stepNames:Record<string,string>={services:'Услуги',inspection:'Ос�
   estimate:'Смета',execution:'Работы',quality:'Контроль качества',technicalDocuments:'Документы выдачи'};
 const stateNames:Record<string,string>={SELECTED:'Выбраны',EMPTY:'Не выбраны',RECORDED:'Записан',
   MISSING:'Нет',AWAITING_CLIENT:'Ожидает клиента',APPROVED:'Согласовано',REJECTED:'Отклонено',
-  ACCEPTED:'Принято',DISPUTED:'Оспорено',RESTRICTED:'Доступ ограничен',FINISHED:'Завершены',
+  ACCEPTED:'Принято',ACKNOWLEDGED:'Подтверждено',DISPUTED:'Оспорено',RESTRICTED:'Доступ ограничен',FINISHED:'Завершены',
   IN_PROGRESS:'В работе',NOT_STARTED:'Не начаты',PASS:'Пройден',FAIL:'Не пройден',
   NOT_CHECKED:'Не проверено',DRAFT:'Черновик',PREVIEW_SEALED:'Пакет зафиксирован',
   POSTED:'Проведено',CLIENT_ACKNOWLEDGED:'Подтверждено клиентом',
@@ -20,13 +20,16 @@ const stateNames:Record<string,string>={SELECTED:'Выбраны',EMPTY:'Не в
 const eventNames:Record<string,string>={SIM_PAYMENT:'Имитация оплаты',SIM_REFUND:'Имитация возврата',
   ADVANCE:'Аванс',PAYMENT:'Оплата',APPLY_ADVANCE:'Зачёт аванса',
   REFUND_ADVANCE:'Возврат аванса',REFUND_PAYMENT:'Возврат оплаты'};
+const documentNames:Record<string,string>={POSTED:'Проведено',CLIENT_ACK:'Подтверждение клиента',
+  CLIENT_DISPUTE:'Возражение клиента',CLOSED_TECHNICAL:'Технически закрыто'};
+type DocumentEvent={id:string;action:string;createdAt:string};
 type Event={id:string;kind:string;amountMinor:string;createdAt:string};
 type Demo={paidMinor:string;refundedMinor:string;dueMinor:string|null;events:Event[]};
 type Treasury={advancedMinor:string;paymentMinor:string;appliedMinor:string;refundedAdvanceMinor:string;
   refundedPaymentMinor:string;settledMinor:string;dueMinor:string|null;events:Event[]};
 type Deal={syntheticOnly:true;realMoney:false;releaseAllowed:false;leadId:string;visitNumber:number;stage:string;
   lineage:string;booking:null|{appointmentId:string;startsAt:string;endsAt:string;status:string};
-  workOrder:null|{workOrderId:string;steps:Record<string,string>};
+  workOrder:null|{workOrderId:string;steps:Record<string,string>;documentEvents:DocumentEvent[]|null};
   financeStatus:'VISIBLE'|'RESTRICTED'|'UNAVAILABLE';
   finance:null|{currency:'RUB';approvedTotalMinor:string|null;demoClose:Demo;treasury:Treasury}};
 const minor=(n:unknown):n is string=>typeof n==='string'&&/^-?(0|[1-9][0-9]{0,17})$/.test(n);
@@ -50,6 +53,11 @@ function parse(raw:unknown,leadId:string):Deal{
   if(x.lineage==='LINKED'){
     if(!x.booking||!x.workOrder||!uuid.test(x.workOrder.workOrderId)||!x.workOrder.steps||
       !Object.keys(stepNames).every(k=>typeof x.workOrder?.steps[k]==='string'))throw Error('order');
+    const docs=x.workOrder.documentEvents;
+    if(docs!==null&&(!Array.isArray(docs)||docs.length>4||
+      !docs.every(d=>d&&uuid.test(d.id)&&Object.hasOwn(documentNames,d.action)&&stamp(d.createdAt))||
+      new Set(docs.map(d=>d.id)).size!==docs.length))throw Error('document history');
+    if((x.workOrder.steps.technicalDocuments==='RESTRICTED')!==(docs===null))throw Error('document history');
   }else if(x.workOrder!==null)throw Error('order');
   if(x.financeStatus==='VISIBLE'){
     const f=x.finance;
@@ -118,7 +126,12 @@ export function CrmDealCard({base,leadId}:{base:string;leadId:string}){
       {data.workOrder&&<><h4>Заказ-наряд</h4><p style={{overflowWrap:'anywhere'}}>{data.workOrder.workOrderId}</p>
         <dl>{Object.entries(stepNames).map(([k,label])=><React.Fragment key={k}>
           <dt>{label}</dt><dd>{stateNames[data.workOrder!.steps[k]]??'Нет подтверждённого статуса'}</dd>
-        </React.Fragment>)}</dl></>}
+        </React.Fragment>)}</dl>
+        {data.workOrder.documentEvents!==null&&<><h4>История документов</h4>
+          {data.workOrder.documentEvents.length===0?<p>Событий проведения нет.</p>:<ol>
+            {data.workOrder.documentEvents.map(e=><li key={e.id}>{documentNames[e.action]} ·
+              {' '+new Date(e.createdAt).toLocaleString('ru-RU')} · <span style={{overflowWrap:'anywhere'}}>{e.id}</span></li>)}</ol>}</>}
+      </>}
       {data.financeStatus==='RESTRICTED'&&<p>Финансовая история недоступна по документным правам.</p>}
       {data.finance&&<><h4>Расчёты — только синтетические</h4>
         <p>Два независимых журнала. Не складывать суммы. Не выручка, не реальная оплата.</p>

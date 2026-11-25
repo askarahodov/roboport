@@ -123,7 +123,18 @@ def read_deal(conn,token,org,loc,ident):
         if not handover:
             steps["technicalDocuments"]="RESTRICTED"
         result["lineage"]="LINKED"
-        result["workOrder"]={"workOrderId":str(order),"steps":steps}
+        documents=None
+        if handover:
+            rows=conn.execute("""
+              SELECT id,action,created_at FROM auto_order_demo_document_event
+              WHERE work_order_id=%s ORDER BY created_at,id LIMIT 5
+            """,(order,)).fetchall()
+            if len(rows)>4:
+                raise LeadConflict("DOCUMENT_EVENT_LIMIT")
+            documents=[{"id":str(i),"action":action,"createdAt":at.isoformat()}
+                       for i,action,at in rows]
+        result["workOrder"]={"workOrderId":str(order),"steps":steps,
+                             "documentEvents":documents}
         if not manager or not handover:
             result["financeStatus"]="RESTRICTED"
             return result
