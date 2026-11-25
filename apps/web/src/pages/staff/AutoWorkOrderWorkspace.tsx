@@ -101,6 +101,7 @@ export function AutoWorkOrderWorkspace(){
   const [query,setQuery]=useSearchParams();
   const org=query.get('org')??'',loc=query.get('loc')??'',order=query.get('order')??'';
   const scope=[org,loc,order].join(':');
+  const initialTab=tabs.find(t=>t.id===query.get('tab'))?.id??'services';
   const valid=[org,loc,order].every(x=>uuid.test(x));
   const [draftOrg,setDraftOrg]=React.useState(org);
   const [draftLoc,setDraftLoc]=React.useState(loc);
@@ -113,8 +114,8 @@ export function AutoWorkOrderWorkspace(){
   const requestKey=scope+':'+revision;
   React.useEffect(()=>{
     setDraftOrg(org);setDraftLoc(loc);setDraftOrder(order);
-    setActive('services');
-  },[scope]);
+    setActive(initialTab);
+  },[scope,initialTab]);
   React.useEffect(()=>{
     setData(null);setLoaded('');
     if(!valid){setStatus('idle');return;}
