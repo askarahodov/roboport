@@ -445,3 +445,124 @@ def test_four_offline_adapters_require_separate_consent_and_replay_stable_receip
     assert http.get(path.replace(str(loc),str(foreign_loc)),headers=manager).status_code==403
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT count(*) FROM auto_crm_mock_outbox WHERE lead_id=%s",(lead,)).fetchone()==(4,)
+
+
+def test_inbound_interaction_journal_concurrent_retry_owner_audit_pagination_and_revoke(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from roboport_api.auto_crm_interactions import record_interaction
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    base=crm(org,loc)+"/leads"
+    intake=session(http,d,d["intake"])
+    created=http.post(base,headers=intake,json=lead_payload(d))
+    assert created.status_code==201,created.text
+    lead_id=UUID(created.json()["leadId"])
+    detail=base+"/"+str(lead_id)
+    endpoint=detail+"/interactions"
+    key=uuid4()
+    payload={"requestKey":str(key),"channelCode":"CALL","outcomeCode":"CALLBACK_REQUIRED"}
+    assert http.post(endpoint,json=payload).status_code==403
+    assert http.post(endpoint,headers=intake,json={**payload,"phone":"synthetic"}).status_code==422
+    assert http.post(endpoint,headers=intake,json={**payload,"channelCode":"UNKNOWN"}).status_code==422
+    assert http.get(endpoint).json()["items"]==[]
+    barrier=Barrier(2)
+    def concurrent_write():
+        with psycopg.connect(DSN) as db:
+            barrier.wait(timeout=10)
+            return record_interaction(db,d["tokens"][d["intake"]],org,loc,lead_id,key,
+                                      "CALL","CALLBACK_REQUIRED")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures=[pool.submit(concurrent_write) for _ in range(2)]
+        one,two=[future.result(timeout=20) for future in futures]
+    assert sorted([one["replayed"],two["replayed"]])==[False,True]
+    assert one["item"]==two["item"]
+    original=one["item"]
+    assert original["ownerId"]==original["actorId"]==str(d["intake"])
+    assert original["sourceCode"]=="WEB" and original["direction"]=="INBOUND_SIM"
+    replay=http.post(endpoint,headers=intake,json=payload)
+    assert replay.status_code==200 and replay.json()["item"]==original
+    assert replay.json()["sendAllowed"] is False
+    assert http.post(endpoint,headers=intake,json={**payload,"outcomeCode":"DECLINED"}).status_code==409
+    assert http.get(detail).json()["status"]=="NEW"
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_crm_mock_outbox WHERE lead_id=%s",(lead_id,)).fetchone()==(0,)
+        for n in range(26):
+            record_interaction(db,d["tokens"][d["intake"]],org,loc,lead_id,uuid4(),
+                               ("EMAIL","SMS","MESSENGER","WALK_IN")[n%4],"INFORMATION_REQUESTED")
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("UPDATE auto_crm_interaction SET outcome_code='DECLINED' WHERE lead_id=%s",(lead_id,))
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("DELETE FROM auto_crm_interaction WHERE lead_id=%s",(lead_id,))
+    first=http.get(endpoint)
+    assert first.status_code==200 and first.headers["cache-control"]=="no-store"
+    page=first.json()
+    assert len(page["items"])==25 and page["nextCursor"]
+    second=http.get(endpoint,params={"cursor":page["nextCursor"]}).json()
+    assert len(second["items"])==2 and second["nextCursor"] is None
+    all_items=page["items"]+second["items"]
+    assert len({x["interactionId"] for x in all_items})==27 and original in all_items
+    assert http.get(endpoint,params={"cursor":"bogus"}).status_code==422
+    assert http.get(endpoint.replace(str(loc),str(foreign_loc))).status_code==403
+    manager=session(http,d,d["manager"])
+    assigned=http.post(detail+"/assignment",headers=manager,json={
+        "assigneeId":str(d["manager"]),"requestKey":str(uuid4())})
+    assert assigned.status_code==201,assigned.text
+    assert http.get(endpoint,params={"cursor":page["nextCursor"]}).status_code==422
+    intake=session(http,d,d["intake"])
+    assert http.get(endpoint).status_code==403
+    assert http.post(endpoint,headers=intake,json=payload).status_code==403
+    manager=session(http,d,d["manager"])
+    assert http.post(endpoint,headers=manager,json=payload).status_code==409
+    next_record=http.post(endpoint,headers=manager,json={**payload,"requestKey":str(uuid4())})
+    assert next_record.status_code==201,next_record.text
+    assert next_record.json()["item"]["ownerId"]==str(d["manager"])
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT owner_id FROM auto_crm_interaction WHERE id=%s",(original["interactionId"],)).fetchone()==(d["intake"],)
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+    assert http.get(endpoint).status_code==403
+    assert http.post(endpoint,headers=manager,json={**payload,"requestKey":str(uuid4())}).status_code==403
+
+
+def test_deal_waits_for_reassignment_and_denies_former_intake(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from time import monotonic,sleep
+    from roboport_api.auto_crm_deal import read_deal
+    from roboport_api.auto_crm_leads import LeadDenied
+    from roboport_api.auto_crm_workflow import assign_lead
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    intake=session(http,d,d["intake"])
+    created=http.post(crm(org,loc)+"/leads",headers=intake,json=lead_payload(d))
+    assert created.status_code==201,created.text
+    lead_id=UUID(created.json()["leadId"])
+    started=Event()
+    backend=[]
+    def former_owner():
+        with psycopg.connect(DSN) as db:
+            backend.append(db.info.backend_pid)
+            started.set()
+            with pytest.raises(LeadDenied):
+                read_deal(db,d["tokens"][d["intake"]],org,loc,lead_id)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with psycopg.connect(DSN) as writer:
+            with writer.transaction():
+                assign_lead(writer,d["tokens"][d["manager"]],org,loc,lead_id,d["manager"],uuid4())
+                future=pool.submit(former_owner)
+                assert started.wait(timeout=5)
+                # Prove the reader is waiting on the writer, not just sleeping.
+                deadline=monotonic()+8
+                with psycopg.connect(DSN,autocommit=True) as monitor:
+                    while monotonic()<deadline:
+                        blockers=monitor.execute("SELECT pg_blocking_pids(%s)",(backend[0],)).fetchone()[0]
+                        if writer.info.backend_pid in blockers:
+                            break
+                        sleep(0.025)
+                    else:
+                        raise AssertionError("reader did not wait for assignment lock")
+            future.result(timeout=10)
+    manager=session(http,d,d["manager"])
+    result=http.get(crm(org,loc)+"/leads/"+str(lead_id)+"/deal")
+    assert result.status_code==200,result.text
+    assert result.json()["leadId"]==str(lead_id)

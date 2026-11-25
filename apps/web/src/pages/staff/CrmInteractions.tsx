@@ -1,6 +1,7 @@
 import React from 'react';
 
 const channels={CALL:'Звонок (имитация IP-телефонии)',EMAIL:'Почта',SMS:'SMS',MESSENGER:'Мессенджер',WALK_IN:'Личное обращение'};
+const sources={WEB:'Сайт',PHONE:'Звонок',WALK_IN:'Личное обращение'};
 const outcomes={REQUEST_RECEIVED:'Запрос получен',CALLBACK_REQUIRED:'Нужен обратный контакт',
   INFORMATION_REQUESTED:'Запрошена информация',DECLINED:'Клиент отказался'};
 type Channel=keyof typeof channels;
@@ -124,7 +125,7 @@ export function CrmInteractions({base,leadId}:{base:string;leadId:string}){
       {rows.length===0?<p>Контактов нет.</p>:<ol>{rows.map(row=><li key={row.interactionId} style={{overflowWrap:'anywhere'}}>
         {channels[row.channelCode]} · {outcomes[row.outcomeCode]} · {new Date(row.createdAt).toLocaleString('ru-RU')}
         <details><summary>Аудит контакта</summary><dl><dt>Ответственный на момент контакта</dt><dd>{row.ownerId}</dd>
-          <dt>Автор</dt><dd>{row.actorId}</dd><dt>Источник обращения</dt><dd>{row.sourceCode}</dd>
+          <dt>Автор</dt><dd>{row.actorId}</dd><dt>Источник обращения</dt><dd>{sources[row.sourceCode]}</dd>
           <dt>UUID события</dt><dd>{row.interactionId}</dd></dl></details></li>)}</ol>}
       {cursor&&<button type="button" disabled={busy||pending!==null} onClick={()=>void load()}>Первая страница контактов</button>}
       {next&&<button type="button" disabled={busy||pending!==null} onClick={()=>void load(next)}>Следующая страница контактов</button>}
