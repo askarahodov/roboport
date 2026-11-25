@@ -21,6 +21,8 @@ def upgrade():
         channel_code text NOT NULL CHECK(channel_code IN ('CALL','EMAIL','SMS','MESSENGER','WALK_IN')),
         outcome_code text NOT NULL CHECK(outcome_code IN
           ('REQUEST_RECEIVED','CALLBACK_REQUIRED','INFORMATION_REQUESTED','DECLINED')),
+        callback_task_id uuid UNIQUE REFERENCES auto_crm_followup_task(id),
+        CHECK(callback_task_id IS NULL OR outcome_code='CALLBACK_REQUIRED'),
         request_key uuid NOT NULL UNIQUE,
         created_at timestamptz NOT NULL DEFAULT clock_timestamp()
       );
@@ -62,6 +64,13 @@ def upgrade():
             AND p.verified_by IS NOT NULL AND p.revoked_at IS NULL
           FOR SHARE OF p,b,l,o
         ) THEN RAISE EXCEPTION 'CRM interaction requires verified proof'; END IF;
+        IF NEW.callback_task_id IS NOT NULL AND NOT EXISTS(
+          SELECT 1 FROM auto_crm_followup_task t
+          WHERE t.id=NEW.callback_task_id AND t.lead_id=NEW.lead_id
+            AND t.creator_id=NEW.actor_id AND t.owner_id=NEW.owner_id
+            AND t.task_code='CALL_BACK' AND t.origin_work_order_id IS NULL
+          FOR SHARE OF t
+        ) THEN RAISE EXCEPTION 'CRM callback task lineage mismatch'; END IF;
         RETURN NEW;
       END $f$;
       CREATE TRIGGER auto_crm_interaction_guard

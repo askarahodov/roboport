@@ -1,5 +1,6 @@
 """Synthetic-only CRM lead HTTP: tenant-scoped, CSRF-protected mutations."""
 from uuid import UUID
+from datetime import datetime
 
 import psycopg
 from fastapi import APIRouter,Request
@@ -147,6 +148,8 @@ class InteractionBody(BaseModel):
     channelCode:str
     outcomeCode:str
     requestKey:UUID
+    callbackDueAt:datetime|None=None
+    expectedActorId:UUID|None=None
 
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/leads/{lead_id}/interactions")
@@ -182,7 +185,8 @@ async def crm_interaction(org_id:str,loc_id:str,lead_id:str,request:Request):
             return _response(request,403,"FORBIDDEN")
         try:
             result=record_interaction(db,request.cookies.get("rp_session",""),org,loc,lead,
-                                      body.requestKey,body.channelCode,body.outcomeCode)
+                                      body.requestKey,body.channelCode,body.outcomeCode,
+                                      body.callbackDueAt,body.expectedActorId)
         except (LeadDenied,LeadConflict) as exc:
             return _error(request,exc)
         except (psycopg.errors.DeadlockDetected,psycopg.errors.SerializationFailure):
