@@ -336,6 +336,9 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
           JOIN auto_stock_lot_work_order_issue i ON i.id=h.issue_id
           WHERE i.work_order_id=%s""",(order,)).fetchone()==(3,)
 
+    if extra_decision=="APPROVED":
+        _verify_tenant_staff_lifecycle(monkeypatch,http,d,org,loc,order,archive.content)
+
     # Отзыв исходной связи закрывает даже уже технически закрытый архив.
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
@@ -343,3 +346,115 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     assert http.get(dossier).status_code==403
     token(http,d,d["intake"])
     assert http.get(dossier).status_code==403
+
+
+def _verify_tenant_staff_lifecycle(monkeypatch,http,d,org,loc,order,archive):
+    """Две реальные закрытые вертикали, чужой филиал и живой ADMIN revoke."""
+    from zoneinfo import ZoneInfo
+    from test_pg_auto_mechanic_productivity_http import _close
+    from test_pg_auto_document_access_http import admin
+
+    foreign,other_org,other_loc,other_order=_close(monkeypatch)
+    sibling=uuid4()
+    actor=foreign["intake"]
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        db.execute("""INSERT INTO auto_service_location(id,code,organization_id)
+                      VALUES(%s,%s,%s)""",(sibling,"LOC_"+sibling.hex[:10].upper(),org))
+        zone=db.execute("SELECT timezone_name FROM auto_service_location WHERE id=%s",
+                        (loc,)).fetchone()[0]
+        day=db.execute("""SELECT e.created_at FROM auto_order_demo_document_event e
+            WHERE e.work_order_id=%s AND e.action='CLOSED_TECHNICAL'""",
+            (order,)).fetchone()[0].astimezone(ZoneInfo(zone)).date().isoformat()
+
+    root=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
+    order_root=root+f"/orders/{order}"
+    other_root=f"/api/v1/dev/auto/organizations/{other_org}/locations/{other_loc}"
+    report=root+"/reports/closed-orders"
+    query={"fromDay":day,"toDay":day}
+    routes=[order_root+suffix for suffix in (
+        "/customer","/overview","/stock","/estimates","/intake-acts",
+        "/execution","/demo-close","/demo-close/technical-dossier.zip")]
+    routes.extend((report,report+"/export"))
+    def read(path):
+        return http.get(path,params=query if path.startswith(report) else None)
+    def assert_denied():
+        for path in routes:
+            response=read(path)
+            assert response.status_code==403,(path,response.text[:160])
+            assert "no-store" in response.headers["cache-control"]
+            assert "x-technical-dossier-sha256" not in response.headers
+            assert str(order) not in response.text
+        # Прямой POST с корректным CSRF чужого сотрудника не создаёт проводку.
+        headers=token(http,foreign,actor)
+        result=post(http,order_root+"/demo-close/simulated-cash",headers,
+                    kind="SIM_PAYMENT",amountMinor=1)
+        assert result.status_code==403,result.text
+
+    token(http,d,d["intake"])
+    original={}
+    for path in routes:
+        response=read(path)
+        assert response.status_code==200,(path,response.status_code)
+        original[path]=response.content
+    assert original[order_root+"/demo-close/technical-dossier.zip"]==archive
+    assert http.get(order_root+"/stock").json()["items"]
+    assert http.get(report,params=query).json()["summary"]["orderCount"]==1
+
+    token(http,foreign,actor)
+    own=other_root+f"/orders/{other_order}/demo-close/technical-dossier.zip"
+    own_archive=http.get(own)
+    assert own_archive.status_code==200
+    assert own_archive.content!=archive
+    assert_denied()
+    # MANAGER чужой компании не может назначить себя в организацию A.
+    staff=f"/api/v1/dev/auto/organizations/{org}/staff"
+    payload={"userId":str(actor),"role":"MANAGER","locationId":str(loc)}
+    headers=token(http,foreign,actor)
+    assert http.post(staff,headers=headers,json=payload).status_code==403
+    assert http.post(staff,headers=headers,json={**payload,"role":"ADMIN"}).status_code==403
+
+    # Выдача только в соседнем филиале той же организации не открывает заказ A.
+    owner=token(http,d,d["other"])
+    sibling_grant=http.post(staff,headers=owner,json={**payload,"locationId":str(sibling)})
+    assert sibling_grant.status_code==201,sibling_grant.text
+    token(http,foreign,actor)
+    assert_denied()
+    # Подмена tenant/branch в URL при наличии реального scoped grant также запрещена.
+    for scope in (other_root,root.replace(str(loc),str(sibling))):
+        for suffix in ("/customer","/stock","/estimates","/demo-close/technical-dossier.zip"):
+            assert http.get(scope+f"/orders/{order}"+suffix).status_code==403
+
+    owner=token(http,d,d["other"])
+    assigned=http.post(staff,headers=owner,json=payload)
+    assert assigned.status_code==201,assigned.text
+    grant_id=assigned.json()["grantId"]
+    token(http,foreign,actor)
+    for path in routes:
+        response=read(path)
+        assert response.status_code==200,(path,response.status_code)
+    assert http.get(order_root+"/demo-close/technical-dossier.zip").content==archive
+    # Отзыв именно филиального назначения; та же сессия остаётся живой в B.
+    owner=token(http,d,d["other"])
+    revoked=http.post(staff+"/"+grant_id+"/revoke",headers=owner)
+    assert revoked.status_code==200 and revoked.json()["status"]=="REVOKED"
+    audit=http.get(staff+"/audit")
+    assert audit.status_code==200
+    events=[x for x in audit.json()["items"] if x["grantId"]==grant_id]
+    assert {x["action"] for x in events}=={"GRANTED","REVOKED"}
+    assert {x["actorId"] for x in events}=={str(d["other"])}
+    token(http,foreign,actor)
+    assert_denied()
+    assert http.get(own).content==own_archive.content
+    token(http,d,d["client_a"])
+    assert http.get(order_root+"/demo-close/technical-dossier.zip").content==archive
+    token(http,d,d["intake"])
+    assert http.get(order_root+"/demo-close/technical-dossier.zip").content==archive
+    assert http.get(report,params=query).content==original[report]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("""SELECT count(*) FROM auto_order_demo_cash_event
+            WHERE work_order_id=%s""",(order,)).fetchone()==(1,)
+        assert db.execute("""SELECT count(*) FROM auto_order_demo_document_event
+            WHERE work_order_id=%s""",(order,)).fetchone()==(3,)
+        assert db.execute("""SELECT count(*) FROM auto_org_staff_action
+            WHERE grant_id=%s""",(grant_id,)).fetchone()==(2,)
