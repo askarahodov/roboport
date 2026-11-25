@@ -197,8 +197,9 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
         serviceId=str(extra_service),actualMinutes=20).status_code==(
             201 if extra_decision=="APPROVED" else 409)
     other=token(http,d,d["other"])
+    # Use an approved base service in both branches to isolate assignment ACL.
     assert post(http,execution+"/labor",other,
-        serviceId=str(extra_service),actualMinutes=20).status_code==403
+        serviceId=str(base_service),actualMinutes=20).status_code==403
 
     # Actual allocated lot issues and handoffs consume the package reservations.
     # Labor alone never fulfills the reserved stock of a selected complex.
