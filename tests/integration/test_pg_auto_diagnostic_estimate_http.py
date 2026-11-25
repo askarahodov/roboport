@@ -166,3 +166,58 @@ def test_concurrent_mechanics_cannot_duplicate_finding_or_change_quote(monkeypat
     published=http.post(quote,headers=manager,json=publish_payload(service))
     assert published.status_code==201,published.text
     assert published.json()["items"][0]["diagnostics"][0]["findingCode"]=="MAINTENANCE_DUE"
+
+
+def test_priced_diagnostic_snapshot_cannot_bypass_intake_read_policy(monkeypatch):
+    from test_pg_auto_document_access_http import admin,set_rule,url as policies_url
+    d,org,loc,order,service,_,http=setup(monkeypatch)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+        grant(db,d["intake"],org,loc,"MECHANIC")
+        inspect(db,d,org,loc,order)
+    diag=diagnostic_url(org,loc,order)
+    mechanic=token(http,d,d["manager"])
+    assert http.post(diag,headers=mechanic,json=finding(service)).status_code==201
+    quote=estimate_path(org,loc,order)
+    body=publish_payload(service)
+    manager=token(http,d,d["intake"])
+    created=http.post(quote,headers=manager,json=body)
+    assert created.status_code==201,created.text
+    row=created.json()["items"][0]
+    assert row["diagnostics"][0]["findingCode"]=="FAULT_CONFIRMED"
+    def policy(allowed,cutoff=None):
+        owner=token(http,d,d["other"])
+        result=set_rule(http,policies_url(org),owner,role="MECHANIC",loc=loc,
+            user=d["intake"],document="INTAKE_ACT",cap="READ",
+            allowed=allowed,not_before=cutoff)
+        assert result.status_code==201,result.text
+    for allowed,cutoff in ((False,None),(True,"2099-01-01T00:00:00Z")):
+        policy(allowed,cutoff)
+        manager=token(http,d,d["intake"])
+        for response in (http.get(diag),http.get(quote),
+                         http.post(quote,headers=manager,json=body),
+                         http.post(quote,headers=manager,json=publish_payload(service,version=1)),
+                         http.get(quote.removesuffix("/estimates")+"/extras")):
+            assert response.status_code==403,response.text
+            assert response.headers["cache-control"]=="no-store"
+            assert "FAULT_CONFIRMED" not in response.text
+        token(http,d,d["client_a"])
+        visible=http.get(quote)
+        assert visible.status_code==200,visible.text
+        assert visible.json()["items"]==created.json()["items"]
+        token(http,d,d["client_b"])
+        assert http.get(quote).status_code==403
+    policy(True)
+    manager=token(http,d,d["intake"])
+    restored=http.get(quote)
+    assert restored.status_code==200
+    assert restored.json()["items"]==created.json()["items"]
+    replay=http.post(quote,headers=manager,json=body)
+    assert replay.status_code==200,replay.text
+    assert replay.json()["items"]==created.json()["items"]
+    assert http.get(quote.removesuffix("/estimates")+"/extras").status_code==200
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_work_order_estimate_revision WHERE work_order_id=%s",
+                          (order,)).fetchone()==(1,)
+        assert db.execute("SELECT count(*) FROM auto_work_order_diagnostic WHERE work_order_id=%s",
+                          (order,)).fetchone()==(1,)
