@@ -228,6 +228,27 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
     assert ids==expected
     assert len(set(ids))==28
 
+    search=base.replace("/leads","/lead-search")
+    exact=http.get(search,params={"customerLinkId":str(d["link"]),"sourceCode":"WEB","stageCode":"NEW"})
+    assert exact.status_code==200,exact.text
+    assert [x["leadId"] for x in exact.json()["items"]]==[original.json()["leadId"]]
+    assert "events" not in exact.json()["items"][0]
+    filtered=http.get(search,params={"sourceCode":"WALK_IN","stageCode":"NEW"})
+    assert filtered.status_code==200,filtered.text
+    fp=filtered.json()
+    assert len(fp["items"])==25 and fp["nextCursor"]
+    rest=http.get(search,params={"sourceCode":"WALK_IN","stageCode":"NEW","cursor":fp["nextCursor"]})
+    assert rest.status_code==200,rest.text
+    assert len(rest.json()["items"])==2
+    assert len({x["leadId"] for x in fp["items"]+rest.json()["items"]})==27
+    assert http.get(search,params={"sourceCode":"WEB","stageCode":"NEW","cursor":fp["nextCursor"]}).status_code==422
+    assert http.get(search,params={"stageCode":"BOOKED"}).json()["items"]==[]
+    assert http.get(search+"?sourceCode=WEB&sourceCode=PHONE").status_code==422
+    assert http.get(search.replace(str(loc),str(foreign_loc))).status_code==403
+    session(http,d,d["client_a"])
+    assert http.get(search).status_code==403
+    session(http,d,d["intake"])
+
     # Cursor is a position, never an authorization or tenant grant.
     assert http.get(url(foreign,foreign_loc),params={
         "cursor":page1["nextCursor"],
@@ -247,6 +268,7 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
     assert after.status_code==200,after.text
     assert len(after.json()["items"])==2
     assert victim not in after.text
+    assert http.get(search,params={"customerLinkId":victim}).json()["items"]==[]
 
 
 def test_lead_cursor_roundtrip_order_and_noncanonical_rejected():

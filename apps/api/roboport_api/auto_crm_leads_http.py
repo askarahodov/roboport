@@ -9,6 +9,7 @@ from pydantic import BaseModel,ConfigDict,ValidationError
 
 from .auth_http import _mutation_ok
 from .auto_crm_deal import read_deal
+from .auto_crm_leads import search_leads
 from .auto_crm_interactions import list_interactions, record_interaction, CallbackDeadlineExpired
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auto_crm_leads import (
@@ -203,3 +204,26 @@ async def crm_interaction(org_id:str,loc_id:str,lead_id:str,request:Request):
             return _response(request,409,"CONFLICT")
     return JSONResponse(content=result,status_code=200 if result["replayed"] else 201,
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/lead-search")
+def crm_lead_search(org_id:str,loc_id:str,request:Request):
+    scoped=_context(request,org_id,loc_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,(org,loc)=scoped
+    query=request.query_params
+    try:
+        if any(len(query.getlist(k))>1 for k in ("customerLinkId","sourceCode","stageCode","cursor")):
+            raise ValueError("duplicate")
+        link=UUID(query["customerLinkId"]) if "customerLinkId" in query else None
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    try:
+        with psycopg.connect(dsn) as db:
+            result=search_leads(db,request.cookies.get("rp_session",""),org,loc,
+                link=link,source=query.get("sourceCode","ALL"),stage=query.get("stageCode","ALL"),
+                cursor=query.get("cursor"))
+    except (LeadDenied,LeadConflict) as exc:
+        return _error(request,exc)
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})

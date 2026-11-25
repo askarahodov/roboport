@@ -587,3 +587,46 @@ test('expired callback pending clears only for exact terminal rejection',async({
   await expect(create).toBeEnabled();
   expect(posts).toHaveLength(3);
 });
+
+
+test('search finds a lead outside the current journal page and rechecks detail',async({page})=>{
+  const older='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let denied=false,detailReads=0;
+  await page.route('**/crm/lead-search?*',r=>{
+    const u=new URL(r.request().url());
+    expect(u.searchParams.get('customerLinkId')).toBe(link);
+    expect(u.searchParams.get('sourceCode')).toBe('WEB');
+    expect(u.searchParams.get('stageCode')).toBe('LOST');
+    return r.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,organizationId:org,locationId:loc,customerLinkId:link,sourceCode:'WEB',stageCode:'LOST',
+      items:[{leadId:older,customerLinkId:link,ownerId:owner,sourceCode:'WEB',status:'LOST',
+        visitNumber:1,createdAt:'2030-01-01T10:00:00Z'}],nextCursor:null})});
+  });
+  await page.route(path,r=>{
+    const pathname=new URL(r.request().url()).pathname;
+    if(pathname.endsWith('/leads/'+older)){
+      detailReads++;
+      return r.fulfill({status:denied?403:200,contentType:'application/json',body:JSON.stringify(denied?{}:
+        {...item('LOST',[event('LOST','TIMING',null)]),leadId:older,visitNumber:1})});
+    }
+    return r.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,items:pathname.endsWith('/crm/leads')?[item('NEW')]:[],nextCursor:null})});
+  });
+  await page.goto('/staff/auto-crm-leads');
+  await scope(page);
+  const panel=page.getByRole('region',{name:'Поиск обращений CRM'});
+  await panel.getByLabel('UUID связи для поиска').fill(link);
+  await panel.getByLabel('Источник поиска').selectOption('WEB');
+  await panel.getByLabel('Этап поиска').selectOption('LOST');
+  await panel.getByRole('button',{name:'Найти обращения'}).click();
+  await expect(panel.getByRole('table')).toContainText('Отказ');
+  await panel.getByRole('button',{name:'Открыть найденную сделку'}).click();
+  await expect(page.getByLabel('Обращение',{exact:true})).toHaveValue(older);
+  expect(detailReads).toBe(1);
+  denied=true;
+  await panel.getByRole('button',{name:'Найти обращения'}).click();
+  await panel.getByRole('button',{name:'Открыть найденную сделку'}).click();
+  await expect(page.getByText('Доступ запрещён или связь с автомобилем отозвана.')).toBeVisible();
+  await expect(panel).toHaveCount(0);
+  expect(detailReads).toBe(2);
+});
