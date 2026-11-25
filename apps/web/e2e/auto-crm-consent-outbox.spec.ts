@@ -269,3 +269,37 @@ test('mock history reaches later records and rechecks consent on every page',asy
   await panel.getByRole('button',{name:'Следующая страница макетов'}).click();
   await expect(panel).toHaveCount(0);
 });
+
+
+test('messenger consent is independent of call and has no delivery permission',async({page})=>{
+  let enabled=false,version=0;
+  await page.route('**/api/v1/dev/account/crm-contact-preferences',r=>r.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,sendAllowed:false,channels:{CALL:false,EMAIL:false,SMS:false},
+      revisions:{CALL:0,EMAIL:0,SMS:0}})}));
+  await page.route(consentUrl,route=>{
+    const post=route.request().method()==='POST';
+    if(post){
+      const body=route.request().postDataJSON();
+      expect(body.channelCode).toBe('MESSENGER');
+      expect(body.expectedRevision).toBe(version);
+      enabled=body.enabled;version++;
+    }
+    return route.fulfill({status:post?201:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',
+        legalConsentVerified:false,sendAllowed:false,channels:{CALL:false,EMAIL:false,SMS:false,MESSENGER:enabled},
+        revisions:{CALL:0,EMAIL:0,SMS:0,MESSENGER:version},...(post?{replayed:false}:{})})});
+  });
+  await page.goto('/account/settings');
+  const panel=page.getByLabel('Тестовое согласие на сервисные уведомления CRM');
+  await expect(panel.getByLabel('Мессенджер',{exact:true})).not.toBeChecked();
+  await panel.getByLabel('Мессенджер',{exact:true}).check();
+  await panel.getByRole('button',{name:'Сохранить тестовый выбор: Мессенджер'}).click();
+  await expect(panel).toContainText('Тестовый выбор записан.');
+  await expect(panel.getByLabel('Звонок',{exact:true})).not.toBeChecked();
+  await expect(panel).toContainText('Отправка: запрещена.');
+  await panel.getByLabel('Мессенджер',{exact:true}).uncheck();
+  await panel.getByRole('button',{name:'Сохранить тестовый выбор: Мессенджер'}).click();
+  await expect(panel.getByLabel('Мессенджер',{exact:true})).not.toBeChecked();
+  await expect.poll(()=>version).toBe(2);
+});

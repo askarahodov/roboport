@@ -4,13 +4,14 @@ This is not legal consent evidence and never sends a message or calls a provider
 """
 from uuid import UUID,uuid4
 import hashlib
+from .auto_crm_mock_adapter import adapter_receipt
 import psycopg
 from .keyset_cursor import encode_cursor, decode_cursor
 
 from .session_lookup import session_subject
 from .auto_crm_leads import _authority,_lead,LeadDenied,LeadConflict
 
-CHANNELS=("CALL","EMAIL","SMS")
+CHANNELS=("CALL","EMAIL","SMS","MESSENGER")
 TEMPLATES=("BOOKING_REMINDER","SERVICE_UPDATE","POST_SERVICE_REVIEW")
 PURPOSE="SERVICE_UPDATE"
 
@@ -173,7 +174,8 @@ def create_mock_message(conn,token,org,loc,lead_id,key,channel,template):
             return {"replayed":True,"syntheticOnly":True,"sendAllowed":False,
                     "messageId":str(row[0]),"channelCode":channel,
                     "templateCode":template,"status":"MOCK_ONLY",
-                    "createdAt":row[1].isoformat()}
+                    "createdAt":row[1].isoformat(),
+                    "adapter":adapter_receipt(row[0],channel,template)}
         try:
             row=conn.execute("""
               INSERT INTO auto_crm_mock_outbox
@@ -188,7 +190,8 @@ def create_mock_message(conn,token,org,loc,lead_id,key,channel,template):
         return {"replayed":False,"syntheticOnly":True,"sendAllowed":False,
                 "messageId":str(row[0]),"channelCode":channel,
                 "templateCode":template,"status":"MOCK_ONLY",
-                "createdAt":row[1].isoformat()}
+                "createdAt":row[1].isoformat(),
+                "adapter":adapter_receipt(row[0],channel,template)}
 
 
 def list_mock_messages(conn,token,org,loc,lead_id,cursor=None):
@@ -217,6 +220,8 @@ def list_mock_messages(conn,token,org,loc,lead_id,cursor=None):
                   "templateCode":template,
                   "status":"MOCK_ONLY" if flags[channel] and event_ids.get(channel)==snapshot else "SUPPRESSED",
                   "createdAt":stamp.isoformat(),
+                  "adapter":adapter_receipt(ident,channel,template)
+                    if flags[channel] and event_ids.get(channel)==snapshot else None,
                 } for ident,channel,template,snapshot,stamp in rows[:100]]}
         if len(rows)>100:
             result["nextCursor"]=encode_cursor(rows[99][4],rows[99][0],scope,token)

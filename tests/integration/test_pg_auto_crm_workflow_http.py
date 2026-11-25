@@ -161,8 +161,8 @@ def test_synthetic_service_consent_gates_inert_outbox_and_unsubscribe(monkeypatc
     assert initial.json()=={
         "syntheticOnly":True,"purposeCode":"SERVICE_UPDATE",
         "legalConsentVerified":False,"sendAllowed":False,
-        "channels":{"CALL":False,"EMAIL":False,"SMS":False},
-        "revisions":{"CALL":0,"EMAIL":0,"SMS":0},
+        "channels":{"CALL":False,"EMAIL":False,"SMS":False,"MESSENGER":False},
+        "revisions":{"CALL":0,"EMAIL":0,"SMS":0,"MESSENGER":0},
     }
     manager=session(http,d,d["manager"])
     denied=http.post(detail+"/mock-messages",headers=manager,json={
@@ -387,3 +387,61 @@ def test_complete_mock_history_over_100_and_live_suppression(monkeypatch):
     assert http.get(path,params={"cursor":cursor}).status_code==422
     session(http,d,d["client_a"])
     assert http.get(path,params={"cursor":cursor}).status_code==403
+
+
+def test_four_offline_adapters_require_separate_consent_and_replay_stable_receipt(monkeypatch):
+    from hashlib import sha256
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    base=crm(org,loc)
+    intake=session(http,d,d["intake"])
+    created=http.post(base+"/leads",headers=intake,json=lead_payload(d))
+    assert created.status_code==201,created.text
+    lead=created.json()["leadId"]
+    path=base+"/leads/"+lead+"/mock-messages"
+    consent="/api/v1/dev/account/crm-contact-consent"
+    ids=set()
+    for channel,adapter in (("CALL","MOCK_IP_TELEPHONY"),("EMAIL","MOCK_EMAIL"),
+                            ("SMS","MOCK_SMS"),("MESSENGER","MOCK_MESSENGER")):
+        payload={"channelCode":channel,"templateCode":"SERVICE_UPDATE","requestKey":str(uuid4())}
+        manager=session(http,d,d["manager"])
+        assert http.post(path,headers=manager,json=payload).status_code==409
+        owner=session(http,d,d["client_a"])
+        changed=http.post(consent,headers=owner,json={"channelCode":channel,"enabled":True,
+                            "expectedRevision":0,"requestKey":str(uuid4())})
+        assert changed.status_code==201,changed.text
+        manager=session(http,d,d["manager"])
+        first=http.post(path,headers=manager,json=payload)
+        assert first.status_code==201,first.text
+        record=first.json()
+        assert record["messageId"] not in ids
+        ids.add(record["messageId"])
+        receipt=record["adapter"]
+        assert receipt=={"schemaVersion":1,"adapterCode":adapter,
+            "receiptSha256":sha256(("crm-mock-v1|"+record["messageId"]+"|"+channel+
+                                  "|SERVICE_UPDATE|"+adapter).encode("ascii")).hexdigest(),
+            "networkAllowed":False,"delivered":False}
+        assert record["sendAllowed"] is False
+        replay=http.post(path,headers=manager,json=payload)
+        assert replay.status_code==200,replay.text
+        assert replay.json()["adapter"]==receipt
+        queue=http.get(path,headers=manager).json()["items"]
+        assert next(x for x in queue if x["messageId"]==record["messageId"])["adapter"]==receipt
+        owner=session(http,d,d["client_a"])
+        assert http.post(consent,headers=owner,json={"channelCode":channel,"enabled":False,
+                        "expectedRevision":1,"requestKey":str(uuid4())}).status_code==201
+        manager=session(http,d,d["manager"])
+        assert http.post(path,headers=manager,json=payload).status_code==409
+        suppressed=next(x for x in http.get(path,headers=manager).json()["items"]
+                        if x["messageId"]==record["messageId"])
+        assert suppressed["status"]=="SUPPRESSED" and suppressed["adapter"] is None
+        owner=session(http,d,d["client_a"])
+        assert http.post(consent,headers=owner,json={"channelCode":channel,"enabled":True,
+                        "expectedRevision":2,"requestKey":str(uuid4())}).status_code==201
+        manager=session(http,d,d["manager"])
+        assert http.post(path,headers=manager,json=payload).status_code==409
+        assert next(x for x in http.get(path,headers=manager).json()["items"]
+                    if x["messageId"]==record["messageId"])["adapter"] is None
+    manager=session(http,d,d["manager"])
+    assert http.get(path.replace(str(loc),str(foreign_loc)),headers=manager).status_code==403
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT count(*) FROM auto_crm_mock_outbox WHERE lead_id=%s",(lead,)).fetchone()==(4,)
