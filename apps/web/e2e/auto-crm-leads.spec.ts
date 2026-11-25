@@ -477,8 +477,8 @@ test('inbound contact keeps exact request after lost response and access denial'
   const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const record={interactionId:id,actorId:owner,ownerId:owner,sourceCode:'WEB',
     channelCode:'CALL',outcomeCode:'CALLBACK_REQUIRED',direction:'INBOUND_SIM',
-    createdAt:'2030-01-01T10:00:00Z'};
-  const envelope={syntheticOnly:true,sendAllowed:false,leadId:lead};
+    createdAt:'2030-01-01T10:00:00Z',callbackTaskId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',callbackDueAt:''};
+  const envelope={syntheticOnly:true,sendAllowed:false,leadId:lead,viewerId:owner};
   const posts:any[]=[];
   let denied=false;
   await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',
@@ -489,10 +489,12 @@ test('inbound contact keeps exact request after lost response and access denial'
       if(req.method()==='POST'){
         posts.push(req.postDataJSON());
         expect(posts.at(-1)).toEqual(posts[0]);
+        record.callbackDueAt=posts[0].callbackDueAt;
+        expect(posts[0].expectedActorId).toBe(owner);
         if(posts.length===1)return route.abort('failed');
         if(posts.length===2){denied=true;return route.fulfill({status:403,body:'{}'});}
         return route.fulfill({status:200,contentType:'application/json',
-          body:JSON.stringify({...envelope,replayed:true,item:record})});
+          body:JSON.stringify({...envelope,replayed:true,requestKey:posts[0].requestKey,item:record})});
       }
       return route.fulfill({status:denied?403:200,contentType:'application/json',
         body:JSON.stringify(denied?{}:{...envelope,items:posts.length?[record]:[],nextCursor:null})});
@@ -506,9 +508,19 @@ test('inbound contact keeps exact request after lost response and access denial'
   const panel=page.getByRole('region',{name:'Журнал тестовых контактов'});
   await panel.getByRole('button',{name:'Загрузить журнал контактов'}).click();
   await panel.getByLabel('Результат входящего контакта').selectOption('CALLBACK_REQUIRED');
+  const tomorrow=new Date(Date.now()+86400000);
+  const local=new Date(tomorrow.getTime()-tomorrow.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  await panel.getByLabel('Срок обратного контакта').fill(local);
   await panel.getByRole('button',{name:'Записать входящий контакт'}).click();
   const retry=panel.getByRole('button',{name:'Повторить контакт с тем же ключом'});
   await expect(panel).toContainText('Ответ неизвестен');
+  // Destroy the component and reload the page, then recover only after a new scoped GET.
+  await page.reload();
+  await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  await panel.getByRole('button',{name:'Загрузить журнал контактов'}).click();
+  await expect(retry).toBeEnabled();
+  await expect(panel.getByRole('button',{name:'Записать входящий контакт'})).toBeDisabled();
   await retry.click();
   await expect(panel.getByRole('alert')).toContainText('Доступ к журналу контактов запрещён');
   await expect(panel.getByRole('listitem')).toHaveCount(0);
@@ -521,6 +533,7 @@ test('inbound contact keeps exact request after lost response and access denial'
   await expect(panel.getByRole('listitem')).toHaveCount(1);
   await expect(retry).toHaveCount(0);
   expect(posts).toHaveLength(3);
+  await expect(panel).toContainText('Задача обратного контакта:');
   await panel.getByText('Аудит контакта').click();
   await expect(panel).toContainText(id);
   denied=true;

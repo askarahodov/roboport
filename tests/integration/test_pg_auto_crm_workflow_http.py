@@ -460,17 +460,21 @@ def test_inbound_interaction_journal_concurrent_retry_owner_audit_pagination_and
     detail=base+"/"+str(lead_id)
     endpoint=detail+"/interactions"
     key=uuid4()
-    payload={"requestKey":str(key),"channelCode":"CALL","outcomeCode":"CALLBACK_REQUIRED"}
+    due=datetime.now(timezone.utc)+timedelta(days=2)
+    payload={"requestKey":str(key),"channelCode":"CALL","outcomeCode":"CALLBACK_REQUIRED",
+             "callbackDueAt":due.isoformat(),"expectedActorId":str(d["intake"])}
     assert http.post(endpoint,json=payload).status_code==403
     assert http.post(endpoint,headers=intake,json={**payload,"phone":"synthetic"}).status_code==422
     assert http.post(endpoint,headers=intake,json={**payload,"channelCode":"UNKNOWN"}).status_code==422
     assert http.get(endpoint).json()["items"]==[]
+    assert http.post(endpoint,headers=intake,json={**payload,"expectedActorId":str(d["manager"])}).status_code==403
+    assert http.post(endpoint,headers=intake,json={**payload,"callbackDueAt":(due-timedelta(days=3)).isoformat()}).status_code==422
     barrier=Barrier(2)
     def concurrent_write():
         with psycopg.connect(DSN) as db:
             barrier.wait(timeout=10)
             return record_interaction(db,d["tokens"][d["intake"]],org,loc,lead_id,key,
-                                      "CALL","CALLBACK_REQUIRED")
+                                      "CALL","CALLBACK_REQUIRED",due,d["intake"])
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures=[pool.submit(concurrent_write) for _ in range(2)]
         one,two=[future.result(timeout=20) for future in futures]
@@ -479,10 +483,15 @@ def test_inbound_interaction_journal_concurrent_retry_owner_audit_pagination_and
     original=one["item"]
     assert original["ownerId"]==original["actorId"]==str(d["intake"])
     assert original["sourceCode"]=="WEB" and original["direction"]=="INBOUND_SIM"
+    assert original["callbackTaskId"] and original["callbackDueAt"]==due.isoformat()
+    tasks=http.get(detail+"/tasks").json()["items"]
+    assert len(tasks)==1 and tasks[0]["taskId"]==original["callbackTaskId"] and tasks[0]["taskCode"]=="CALL_BACK"
+    assert http.get(crm(org,loc)+"/inbox").json()["items"][0]["taskId"]==original["callbackTaskId"]
     replay=http.post(endpoint,headers=intake,json=payload)
     assert replay.status_code==200 and replay.json()["item"]==original
     assert replay.json()["sendAllowed"] is False
-    assert http.post(endpoint,headers=intake,json={**payload,"outcomeCode":"DECLINED"}).status_code==409
+    assert http.post(endpoint,headers=intake,json={**payload,"callbackDueAt":(due+timedelta(days=1)).isoformat()}).status_code==409
+    assert http.post(endpoint,headers=intake,json={**payload,"outcomeCode":"DECLINED","callbackDueAt":None}).status_code==409
     assert http.get(detail).json()["status"]=="NEW"
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT count(*) FROM auto_crm_mock_outbox WHERE lead_id=%s",(lead_id,)).fetchone()==(0,)
@@ -514,15 +523,17 @@ def test_inbound_interaction_journal_concurrent_retry_owner_audit_pagination_and
     assert http.get(endpoint).status_code==403
     assert http.post(endpoint,headers=intake,json=payload).status_code==403
     manager=session(http,d,d["manager"])
-    assert http.post(endpoint,headers=manager,json=payload).status_code==409
-    next_record=http.post(endpoint,headers=manager,json={**payload,"requestKey":str(uuid4())})
+    assert http.post(endpoint,headers=manager,json=payload).status_code==403
+    manager_payload={**payload,"expectedActorId":str(d["manager"])}
+    assert http.post(endpoint,headers=manager,json=manager_payload).status_code==409
+    next_record=http.post(endpoint,headers=manager,json={**manager_payload,"requestKey":str(uuid4())})
     assert next_record.status_code==201,next_record.text
     assert next_record.json()["item"]["ownerId"]==str(d["manager"])
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT owner_id FROM auto_crm_interaction WHERE id=%s",(original["interactionId"],)).fetchone()==(d["intake"],)
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
     assert http.get(endpoint).status_code==403
-    assert http.post(endpoint,headers=manager,json={**payload,"requestKey":str(uuid4())}).status_code==403
+    assert http.post(endpoint,headers=manager,json={**manager_payload,"requestKey":str(uuid4())}).status_code==403
 
 
 def test_deal_waits_for_reassignment_and_denies_former_intake(monkeypatch):

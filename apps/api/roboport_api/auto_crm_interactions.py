@@ -20,7 +20,7 @@ def _item(row):
             "sourceCode":source,"channelCode":channel,"outcomeCode":outcome,
             "direction":"INBOUND_SIM","createdAt":stamp.isoformat(),
             "callbackTaskId":str(task_id) if task_id else None,
-            "callbackDueAt":due.isoformat() if due else None}
+            "callbackDueAt":due.astimezone(timezone.utc).isoformat() if due else None}
 
 
 def _envelope(lead_id,actor):

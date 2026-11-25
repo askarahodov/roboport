@@ -111,7 +111,10 @@ export function CrmInteractions({base,leadId}:{base:string;leadId:string}){
         headers:{'Content-Type':'application/json','X-CSRF-Token':c.csrfToken},body:JSON.stringify(request)});
       if(control.signal.aborted)return;
       if([401,403,404].includes(r.status)){if(!retry)sessionStorage.removeItem(storageKey(endpoint,viewer));deny();return;}
-      if(r.status===409||r.status===422){sessionStorage.removeItem(storageKey(endpoint,viewer));setPending(null);setMessage('Запись отклонена. Сверьте журнал.');refresh=true;return;}
+      if(r.status===409||r.status===422){
+        if(!retry){sessionStorage.removeItem(storageKey(endpoint,viewer));setPending(null);}
+        setMessage(retry?'Повтор не подтверждён. Исходный ключ сохранён; сверяйте журнал.':'Запись отклонена. Сверьте журнал.');refresh=true;return;
+      }
       if(!r.ok)throw Error('http');
       const result=envelope(await r.json(),leadId);
       if(control.signal.aborted)return;
@@ -156,7 +159,8 @@ export function CrmInteractions({base,leadId}:{base:string;leadId:string}){
         onClick={()=>void submit({channelCode:channel,outcomeCode:outcome,requestKey:crypto.randomUUID(),
           expectedActorId:viewer,callbackDueAt:outcome==='CALLBACK_REQUIRED'&&due?new Date(due).toISOString():null},false)}>
         Записать входящий контакт</button>
-      {pending&&<button type="button" disabled={busy} onClick={()=>void submit(pending,true)}>Повторить контакт с тем же ключом</button>}
+      {pending&&<><p>Незавершённый запрос: {channels[pending.channelCode]} · {outcomes[pending.outcomeCode]}{pending.callbackDueAt&&' · '+new Date(pending.callbackDueAt).toLocaleString('ru-RU')}.</p>
+        <button type="button" disabled={busy} onClick={()=>void submit(pending,true)}>Повторить контакт с тем же ключом</button></>}
       {rows.length===0?<p>Контактов нет.</p>:<ol>{rows.map(row=><li key={row.interactionId} style={{overflowWrap:'anywhere'}}>
         {channels[row.channelCode]} · {outcomes[row.outcomeCode]} · {new Date(row.createdAt).toLocaleString('ru-RU')}
         {row.callbackTaskId&&<p>Задача обратного контакта: {row.callbackTaskId} · срок {new Date(row.callbackDueAt!).toLocaleString('ru-RU')}. В очереди CRM.</p>}
