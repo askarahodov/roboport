@@ -269,3 +269,82 @@ test('mock history reaches later records and rechecks consent on every page',asy
   await panel.getByRole('button',{name:'Следующая страница макетов'}).click();
   await expect(panel).toHaveCount(0);
 });
+
+
+test('messenger consent is independent of call and has no delivery permission',async({page})=>{
+  let enabled=false,version=0;
+  await page.route('**/api/v1/dev/account/crm-contact-preferences',r=>r.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,sendAllowed:false,channels:{CALL:false,EMAIL:false,SMS:false},
+      revisions:{CALL:0,EMAIL:0,SMS:0}})}));
+  await page.route(consentUrl,route=>{
+    const post=route.request().method()==='POST';
+    if(post){
+      const body=route.request().postDataJSON();
+      expect(body.channelCode).toBe('MESSENGER');
+      expect(body.expectedRevision).toBe(version);
+      enabled=body.enabled;version++;
+    }
+    return route.fulfill({status:post?201:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,purposeCode:'SERVICE_UPDATE',
+        legalConsentVerified:false,sendAllowed:false,channels:{CALL:false,EMAIL:false,SMS:false,MESSENGER:enabled},
+        revisions:{CALL:0,EMAIL:0,SMS:0,MESSENGER:version},...(post?{replayed:false}:{})})});
+  });
+  await page.goto('/account/settings');
+  const panel=page.getByLabel('Тестовое согласие на сервисные уведомления CRM');
+  await expect(panel.getByLabel('Мессенджер',{exact:true})).not.toBeChecked();
+  await panel.getByLabel('Мессенджер',{exact:true}).check();
+  await panel.getByRole('button',{name:'Сохранить тестовый выбор: Мессенджер'}).click();
+  await expect(panel).toContainText('Тестовый выбор записан.');
+  await expect(panel.getByLabel('Звонок',{exact:true})).not.toBeChecked();
+  await expect(panel).toContainText('Отправка: запрещена.');
+  await panel.getByLabel('Мессенджер',{exact:true}).uncheck();
+  await panel.getByRole('button',{name:'Сохранить тестовый выбор: Мессенджер'}).click();
+  await expect(panel.getByLabel('Мессенджер',{exact:true})).not.toBeChecked();
+  await expect.poll(()=>version).toBe(2);
+});
+
+
+test('messenger revoke replay without channel receipt remains unknown until exact confirmation',async({page})=>{
+  const posts:any[]=[];
+  await page.route('**/api/v1/dev/account/crm-contact-preferences',r=>r.fulfill({
+    status:200,contentType:'application/json',
+    body:JSON.stringify({syntheticOnly:true,sendAllowed:false,channels:{CALL:false,EMAIL:false,SMS:false},
+      revisions:{CALL:0,EMAIL:0,SMS:0}})}));
+  const snapshot={syntheticOnly:true,purposeCode:'SERVICE_UPDATE',legalConsentVerified:false,sendAllowed:false};
+  await page.route(consentUrl,route=>{
+    const post=route.request().method()==='POST';
+    if(post){
+      posts.push(route.request().postDataJSON());
+      expect(posts.at(-1)).toEqual(posts[0]);
+      if(posts.length===1)return route.abort('failed');
+      if(posts.length===2)return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({...snapshot,replayed:true,channels:{CALL:false,EMAIL:false,SMS:false},
+          revisions:{CALL:0,EMAIL:0,SMS:0}})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({...snapshot,...(post?{replayed:true}:{}),
+        channels:{CALL:false,EMAIL:false,SMS:false,MESSENGER:!post},
+        revisions:{CALL:0,EMAIL:0,SMS:0,MESSENGER:post?2:1}})});
+  });
+  await page.goto('/account/settings');
+  const panel=page.getByLabel('Тестовое согласие на сервисные уведомления CRM');
+  const checkbox=panel.getByLabel('Мессенджер',{exact:true});
+  const save=panel.getByRole('button',{name:'Сохранить тестовый выбор: Мессенджер'});
+  const retry=panel.getByRole('button',{name:'Повторить с тем же ключом'});
+  await expect(checkbox).toBeChecked();
+  await checkbox.uncheck();
+  await save.click();
+  await expect(panel).toContainText('Ответ неизвестен.');
+  await retry.click();
+  await expect(panel).toContainText('Ответ неизвестен.');
+  await expect(save).toBeDisabled();
+  await expect(retry).toBeEnabled();
+  await expect(panel).not.toContainText('Тестовый выбор записан.');
+  await retry.click();
+  await expect(panel).toContainText('Тестовый выбор записан.');
+  await expect(checkbox).not.toBeChecked();
+  await expect(retry).toHaveCount(0);
+  expect(posts).toHaveLength(3);
+  expect(posts[0]).toMatchObject({channelCode:'MESSENGER',enabled:false,expectedRevision:1});
+});
