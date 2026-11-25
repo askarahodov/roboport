@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel,ConfigDict,ValidationError
 
 from .auth_http import _mutation_ok
+from .auto_crm_deal import read_deal
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auto_crm_leads import (
     LeadDenied,LeadConflict,create_lead,transition_lead,lead_detail,list_leads,
@@ -122,3 +123,19 @@ async def crm_stage(org_id:str,loc_id:str,lead_id:str,request:Request):
             return _error(request,exc)
     return JSONResponse(content=result,status_code=200 if result["replayed"] else 201,
                         headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/leads/{lead_id}/deal")
+def crm_deal(org_id:str,loc_id:str,lead_id:str,request:Request):
+    scoped=_context(request,org_id,loc_id,lead_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,(org,loc,lead)=scoped
+    try:
+        with psycopg.connect(dsn) as db:
+            result=read_deal(db,request.cookies.get("rp_session",""),org,loc,lead)
+    except (LeadDenied,LeadConflict) as exc:
+        return _error(request,exc)
+    except (psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
+        return _response(request,409,"CONFLICT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
