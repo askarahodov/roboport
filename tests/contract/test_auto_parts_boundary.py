@@ -50,11 +50,27 @@ def test_invalid_item_not_accepted(input_value):
     assert_unavailable(input_value)
 
 
-def test_cross_never_proves_applicability():
-    valid = sample() | {"applicability": "VERIFIED"}
-    assert parse_provider_part(valid).applicability == Applicability.VERIFIED
-    assert parse_provider_part(valid, is_cross=True).applicability == Applicability.UNVERIFIED
-    assert parse_provider_parts([valid], is_cross=True)[0].applicability == Applicability.UNVERIFIED
+@pytest.mark.parametrize("is_cross", [False, True])
+@pytest.mark.parametrize("claimed,expected", [
+    ("VERIFIED", Applicability.UNVERIFIED),
+    ("UNVERIFIED", Applicability.UNVERIFIED),
+    ("UNKNOWN", Applicability.UNKNOWN),
+])
+def test_untrusted_catalog_never_proves_vehicle_fitment(is_cross, claimed, expected):
+    raw = sample() | {"applicability": claimed}
+    part = parse_provider_part(raw, is_cross=is_cross)
+    assert part.applicability == expected
+    assert parse_provider_parts([raw], is_cross=is_cross) == (part,)
+    assert part.provider == raw["provider"]
+    assert part.source_revision == raw["source_revision"]
+    assert part.article == raw["article"]
+    assert raw["applicability"] == claimed
+
+
+def test_default_parser_cannot_promote_provider_claim():
+    raw = sample() | {"applicability": "VERIFIED"}
+    assert parse_provider_part(raw).applicability == Applicability.UNVERIFIED
+    assert parse_provider_parts([raw])[0].applicability == Applicability.UNVERIFIED
 
 
 def test_batch_is_atomic_and_bounded():

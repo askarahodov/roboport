@@ -30,7 +30,7 @@
 
 Модуль `apps/api/roboport_api/auto_parts_boundary.py` предоставляет чистые функции `parse_provider_part`, `parse_provider_parts`, `provider_error`. Это **не сетевой клиент, не публичный API и не доказательство наличия лицензии**. Используется исключительно при будущей интеграции после legal/security gate.
 
-Нормализация запрещает пропуск обязательных полей `provider/source_revision/retrieved_at/brand/article/applicability`, принимает только корректную ISO-дату с timezone и один из явных статусов. Любая неверная карточка отвергает **весь** batch; предел batch — 1000 записей. Для данных cross-поиска `VERIFIED` принудительно понижается до `UNVERIFIED` — совпадение номера само по себе не является доказательством применяемости. При 429 возвращается `RATE_LIMITED`, 401/403 — `LICENSE_REQUIRED`, 404 — `NOT_FOUND`; timeout и все прочие коды дают `UNAVAILABLE`. Внешние response bodies, URL и токены никогда не включаются в исключения.
+Нормализация запрещает пропуск обязательных полей `provider/source_revision/retrieved_at/brand/article/applicability`, принимает только корректную ISO-дату с timezone и один из явных статусов. Любая неверная карточка отвергает **весь** batch; предел batch — 1000 записей. Для всех внешних карточек `VERIFIED` принудительно понижается до `UNVERIFIED` — ни OEM-поиск по артикулу, ни cross не содержат проверенного доказательства применяемости к конкретному автомобилю. `UNKNOWN` сохраняется. Параметр `is_cross` сохранён для совместимости Python-вызовов, но не повышает доверие. При 429 возвращается `RATE_LIMITED`, 401/403 — `LICENSE_REQUIRED`, 404 — `NOT_FOUND`; timeout и все прочие коды дают `UNAVAILABLE`. Внешние response bodies, URL и токены никогда не включаются в исключения.
 
 Проверка: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_parts_boundary.py`. Интеграция с внешним клиентом, аутентификация запросов, аудит прав и UI **planned** в #111 и #115, не являются частью #233.
 
@@ -60,7 +60,7 @@
 
 ## Универсальная OEM sandbox boundary (#111, current-dev)
 
-`apps/api/roboport_api/auto_oem_sandbox.py` содержит `OemSandboxAdapter` с внедряемой функцией `transport(kind, article)`. Это проверяемая **граница для тестового ответа**, но не реальный HTTP-клиент и не договор с PartsAPI.ru или plan.parts. Без credentials и проверенных условий поставщика реальные запросы не выполняются. Каталожные ответы обрабатываются через `parse_provider_parts`; при `alternatives` даже входной `VERIFIED` понижается до `UNVERIFIED`. Пустая выдача не превращается в доказательство отсутствия или совместимости детали.
+`apps/api/roboport_api/auto_oem_sandbox.py` содержит `OemSandboxAdapter` с внедряемой функцией `transport(kind, article)`. Это проверяемая **граница для тестового ответа**, но не реальный HTTP-клиент и не договор с PartsAPI.ru или plan.parts. Без credentials и проверенных условий поставщика реальные запросы не выполняются. Каталожные ответы обрабатываются через `parse_provider_parts`; при обоих видах поиска даже входной `VERIFIED` понижается до `UNVERIFIED`. Пустая выдача не превращается в доказательство отсутствия или совместимости детали.
 
 `INVALID_INPUT` отклоняется до вызова провайдера; 429 → `RATE_LIMITED`, 401/403 → `LICENSE_REQUIRED`, timeout/5xx и неверный batch → `UNAVAILABLE`. Внешние URL, bodies и secrets не попадут в сообщения доменных ошибок. Проверка: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_oem_sandbox.py`.
 
@@ -92,3 +92,8 @@
 ## Внутренняя номенклатура СТО — current-dev #447
 
 Поверх неизменяемых `auto_stock_sku` добавлен внутренний каталог с category/UOM/barcode/brand, versioned purchase/sale minor prices, offline analog и неразрушающий historical-FK alias для безопасных дублей, а также ограниченный XLSX preview/commit/export. Это **не** подтверждение OEM-применяемости: внутренние аналоги только подсказки, внешние каталоги/лицензии/поставщики по #111 всё ещё planned. [Подробный рабочий процесс, API, миграция и тесты](SKU_CATALOG.md).
+
+
+### Граница доверия OEM-карточки (#111/#115/#165, current-dev)
+
+Offline parser и sandbox не принимают утверждение провайдера `VERIFIED` как подтверждение применяемости. Поиск по артикулу не принимает VIN/автомобиль, а provenance описывает происхождение карточки, не конкретное доказательство fitment. Поэтому любой внешний `VERIFIED` становится `UNVERIFIED` независимо от режима OEM/cross; `UNKNOWN` остаётся неизвестным, остальные поля сохраняются, неверный статус отклоняет весь пакет. Это изменение только внутреннего offline Python-контракта. Отдельная проверка привязки детали к автомобилю, лицензии, актуального источника и полномочий мастера остаётся planned; не создавать автоматических резервов или заказов из этой карточки. Проверка без сети: `PYTHONPATH=apps/api python -m pytest -q tests/contract/test_auto_parts_boundary.py tests/contract/test_auto_oem_sandbox.py tests/contract/test_auto_partsapi.py`. API/DDL/UI не меняются; реальных запросов PartsAPI нет. #119 остаётся закрытым для production.

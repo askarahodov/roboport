@@ -30,7 +30,7 @@ class OemSandboxAdapter:
                 raise CatalogError(CatalogErrorCode.UNAVAILABLE)
             if status != 200:
                 raise provider_error(status)
-            # No external cross reference may imply verified VIN fitment.
+            # Neither article search nor cross search carries vehicle-specific evidence.
             return parse_provider_parts(data, is_cross=alternatives)
         except CatalogError:
             raise
