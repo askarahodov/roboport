@@ -1,7 +1,7 @@
 """Хронология подтверждения и отзыва автомобильной связи (#112/#165)."""
 from alembic import op
 
-revision = "0143_auto_vehicle_link_chronology"
+revision = "0143_auto_vehicle_link_time"
 down_revision = "0142_auto_crm_interactions"
 branch_labels = None
 depends_on = None
