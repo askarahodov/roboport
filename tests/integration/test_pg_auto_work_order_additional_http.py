@@ -341,3 +341,47 @@ def test_concurrent_extra_publications_and_consent_serialize(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("""SELECT count(*) FROM auto_work_order_extra_decision
           WHERE work_order_id=%s""",(order,)).fetchone()[0]==1
+
+
+def test_extra_version_edit_permission_and_exact_replay(monkeypatch):
+    from test_pg_auto_document_access_http import admin,set_rule,url as policies_url
+    d,org,loc,order,_,additional,base=setup(monkeypatch)
+    http=TestClient(app,base_url="https://127.0.0.1")
+    endpoint=extra_path(org,loc,order)
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["other"])
+
+    def policy(allowed):
+        owner=session(http,d,d["other"])
+        response=set_rule(http,policies_url(org),owner,loc=loc,user=d["intake"],
+                          cap="EDIT",allowed=allowed)
+        assert response.status_code==201,response.text
+
+    first=quote(additional,base,discount=0)
+    second=quote(additional,base,version=1,discount=0,rate=12000)
+    policy(False)
+    manager=session(http,d,d["intake"])
+    initial=http.post(endpoint,headers=manager,json=first)
+    assert initial.status_code==201,initial.text
+    assert http.post(endpoint,headers=manager,json=first).status_code==200
+    assert http.post(endpoint,headers=manager,json=second).status_code==403
+    policy(True)
+    manager=session(http,d,d["intake"])
+    revised=http.post(endpoint,headers=manager,json=second)
+    assert revised.status_code==201,revised.text
+    assert revised.json()["latestVersion"]==2
+    assert http.post(endpoint,headers=manager,json=second).status_code==200
+    policy(False)
+    manager=session(http,d,d["intake"])
+    denied=http.post(endpoint,headers=manager,json=second)
+    assert denied.status_code==403,denied.text
+    assert denied.headers["cache-control"]=="no-store"
+    assert "items" not in denied.json()
+    assert http.post(endpoint,headers=manager,json={**second,"expectedVersion":0}).status_code==409
+    assert http.post(endpoint,headers=manager,json=first).status_code==200
+    policy(True)
+    manager=session(http,d,d["intake"])
+    assert http.post(endpoint,headers=manager,json=second).status_code==200
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT version FROM auto_work_order_extra_revision "
+                          "WHERE work_order_id=%s ORDER BY version",(order,)).fetchall()==[(1,),(2,)]

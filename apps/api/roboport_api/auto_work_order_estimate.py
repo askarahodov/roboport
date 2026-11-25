@@ -197,6 +197,11 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
                                     "ESTIMATE","READ",order=order)
             require_document_access(conn,token,org,loc,("MANAGER",),
                                     "ESTIMATE","CREATE",order=order)
+            # Первая публикация создаёт смету; новая версия меняет
+            # действующее предложение, сохраняя предыдущий снимок.
+            if expected_version>0:
+                require_document_access(conn,token,org,loc,("MANAGER",),
+                                        "ESTIMATE","EDIT",order=order)
             require_document_access(conn,token,org,loc,("MANAGER",),
                                     "ESTIMATE","PRICE_SALES",order=order)
             if advanced and any(item["discountBps"]>0 for item in supplied.values()):
@@ -257,11 +262,12 @@ def publish_auto_estimate(conn,token,org,loc,order,*,request_key,expected_versio
                              "materials":materials,"totalMinor":total,
                              "currency":"RUB"})
         existing=conn.execute("""
-          SELECT fingerprint FROM auto_work_order_estimate_revision
+          SELECT fingerprint,version,actor_id FROM auto_work_order_estimate_revision
           WHERE work_order_id=%s AND request_key=%s
         """,(order,request_key)).fetchone()
         if existing is not None:
-            if existing[0].strip()!=digest:
+            if (existing[0].strip()!=digest or existing[1]!=expected_version+1
+                    or existing[2]!=actor):
                 raise AutoEstimateConflict("KEY_REUSED")
             return {"ok":True,"replayed":True,**_estimate_state(conn,order)}
         state=_estimate_state(conn,order)
