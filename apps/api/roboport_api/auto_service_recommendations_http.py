@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .auth_http import _mutation_ok
+from .auto_maintenance_queue import read_maintenance_queue, QueueDenied, QueueInvalid
 from .auto_vehicle_claim_http import _request_dsn, _response
 from .auto_service_recommendations import (
     RecommendationDenied, RecommendationConflict, read_recommendations,
@@ -193,4 +194,31 @@ def search_services(org_id:str,loc_id:str,order_id:str,request:Request):
                                                  org,loc,order,queries[0] if queries else "")
         except (RecommendationDenied,RecommendationConflict) as exc:
             return _error(request,exc)
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/maintenance-queue")
+def maintenance_queue(org_id:str,loc_id:str,request:Request):
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        org,loc=UUID(org_id),UUID(loc_id)
+        query=request.query_params
+        if any(len(query.getlist(k))>1 for k in ("mode","horizon","cursor")):
+            raise ValueError("duplicate")
+        horizon=query.get("horizon","30")
+        if horizon not in ("7","30","90"):
+            raise ValueError("horizon")
+        mode=query.get("mode","ALL")
+        cursor=query.get("cursor")
+        if cursor=="":
+            raise ValueError("cursor")
+        with psycopg.connect(dsn) as db:
+            result=read_maintenance_queue(db,request.cookies.get("rp_session",""),org,loc,
+                                          mode,int(horizon),cursor)
+    except QueueDenied:
+        return _response(request,403,"FORBIDDEN")
+    except (QueueInvalid,ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
     return JSONResponse(content=result,headers={"Cache-Control":"no-store"})

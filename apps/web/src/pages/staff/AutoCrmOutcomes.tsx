@@ -1,4 +1,5 @@
 import React from 'react';
+import {AutoMaintenanceQueue} from './AutoMaintenanceQueue';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const day=/^\d{4}-\d{2}-\d{2}$/;
@@ -134,6 +135,7 @@ export function AutoCrmOutcomes(){
       onChange={e=>{reset();setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input aria-label="UUID филиала" value={loc}
       onChange={e=>{reset();setLoc(e.target.value);}}/></label>
+    <AutoMaintenanceQueue key={org+':'+loc} org={org} loc={loc}/>
     <label>С даты создания <input type="date" aria-label="С даты создания"
       value={from} onChange={e=>{reset();setFrom(e.target.value);}}/></label>
     <label>По дату создания <input type="date" aria-label="По дату создания"
