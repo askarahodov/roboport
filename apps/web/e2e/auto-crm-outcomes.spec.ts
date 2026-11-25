@@ -124,12 +124,13 @@ test('branch maintenance queue filters deadlines, pages and clears on revoke',as
   await page.route('**/crm/maintenance-queue?*',r=>{
     const u=new URL(r.request().url());
     const mode=u.searchParams.get('mode'),horizon=Number(u.searchParams.get('horizon'));
+    const reasonCode=u.searchParams.get('reasonCode');
     const next=u.searchParams.has('cursor');
     return r.fulfill({status:deny?403:200,contentType:'application/json',body:JSON.stringify(deny?{}:{
       syntheticOnly:true,sendAllowed:false,basis:'UNBOOKED_ACTIVE_DUE_DATE',organizationId:org,locationId:loc,
-      localDay:'2030-01-01',timeZone:'Europe/Berlin',mode,horizonDays:horizon,
-      items:mode==='OVERDUE'?[]:next?[row(25)]:Array.from({length:25},(_,i)=>row(i)),
-      nextCursor:mode==='OVERDUE'||next?null:'opaqueCursor'})});
+      localDay:'2030-01-01',timeZone:'Europe/Berlin',mode,horizonDays:horizon,reasonCode,
+      items:mode==='OVERDUE'||reasonCode==='DEFERRED'?[]:next?[row(25)]:Array.from({length:25},(_,i)=>row(i)),
+      nextCursor:mode==='OVERDUE'||reasonCode==='DEFERRED'||next?null:'opaqueCursor'})});
   });
   await page.setViewportSize({width:390,height:844});
   await page.goto('/staff/auto-crm-outcomes');
@@ -151,6 +152,15 @@ test('branch maintenance queue filters deadlines, pages and clears on revoke',as
   await queue.getByLabel('Горизонт ТО').selectOption('7');
   await load.click();
   await expect(queue.locator('tbody tr')).toHaveCount(25);
+  await queue.getByLabel('Причина рекомендации').selectOption('DEFERRED');
+  await load.click();
+  await expect(queue).toContainText('Рекомендаций к сроку нет');
+  await queue.getByLabel('Причина рекомендации').selectOption('PERIODIC');
+  await load.click();
+  await expect(queue.locator('tbody tr')).toHaveCount(25);
+  const link=queue.getByRole('link',{name:'Открыть план ТО'}).first();
+  await expect(link).toHaveAttribute('href','/staff/auto-order-workspace?'+new URLSearchParams({org,loc,
+    order:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',tab:'recommendations'}));
   deny=true;
   await load.click();
   await expect(queue.getByRole('alert')).toContainText('Доступ к очереди ТО запрещён');

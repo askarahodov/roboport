@@ -205,7 +205,7 @@ def maintenance_queue(org_id:str,loc_id:str,request:Request):
     try:
         org,loc=UUID(org_id),UUID(loc_id)
         query=request.query_params
-        if any(len(query.getlist(k))>1 for k in ("mode","horizon","cursor")):
+        if any(len(query.getlist(k))>1 for k in ("mode","horizon","cursor","reasonCode")):
             raise ValueError("duplicate")
         horizon=query.get("horizon","30")
         if horizon not in ("7","30","90"):
@@ -216,7 +216,7 @@ def maintenance_queue(org_id:str,loc_id:str,request:Request):
             raise ValueError("cursor")
         with psycopg.connect(dsn) as db:
             result=read_maintenance_queue(db,request.cookies.get("rp_session",""),org,loc,
-                                          mode,int(horizon),cursor)
+                                          mode,int(horizon),cursor,query.get("reasonCode","ALL"))
     except QueueDenied:
         return _response(request,403,"FORBIDDEN")
     except (QueueInvalid,ValueError,TypeError):

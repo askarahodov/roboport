@@ -26,7 +26,7 @@ def test_queue_dto_no_customer_data_or_unbounded_page():
          "reasonCode":"PERIODIC","baselineKm":100,"dueDate":"2030-01-02","dueKm":200,"status":"UPCOMING"}
     page={"syntheticOnly":True,"sendAllowed":False,"basis":"UNBOOKED_ACTIVE_DUE_DATE",
           "organizationId":ident,"locationId":ident,"localDay":"2030-01-01","timeZone":"Europe/Berlin",
-          "mode":"ALL","horizonDays":30,"items":[row],"nextCursor":None}
+          "mode":"ALL","horizonDays":30,"reasonCode":"ALL","items":[row],"nextCursor":None}
     assert check.is_valid(page)
     assert not check.is_valid({**page,"items":[row]*26})
     assert not check.is_valid({**page,"sendAllowed":True})

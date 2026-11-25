@@ -238,6 +238,9 @@ def test_branch_maintenance_queue_pagination_local_date_and_live_document_policy
     assert len({x["recommendationId"] for x in page["items"]+second.json()["items"]})==27
     assert http.get(path,params={"mode":"ALL","cursor":cursor}).status_code==422
     assert http.get(path,params={"horizon":"7"}).json()["items"]==[]
+    assert http.get(path,params={"reasonCode":"DEFERRED"}).json()["items"]==[]
+    assert len(http.get(path,params={"reasonCode":"PERIODIC"}).json()["items"])==25
+    assert http.get(path,params={"mode":"UPCOMING","horizon":"30","reasonCode":"PERIODIC","cursor":cursor}).status_code==422
     assert http.get(path+"?mode=ALL&mode=OVERDUE").status_code==422
     assert http.get(path.replace(str(loc),str(uuid4()))).status_code==403
     class FutureClock(datetime):

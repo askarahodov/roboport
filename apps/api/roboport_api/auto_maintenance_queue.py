@@ -9,6 +9,7 @@ from .auto_document_access import require_document_access,DocumentPolicyDenied
 from .keyset_cursor import encode_cursor,decode_cursor
 
 MODES=("ALL","OVERDUE","UPCOMING")
+REASONS=("ALL","PERIODIC","DEFERRED","FOLLOWUP")
 PAGE=25
 
 
@@ -20,9 +21,9 @@ class QueueInvalid(ValueError):
     pass
 
 
-def read_maintenance_queue(conn,token,org,loc,mode="ALL",horizon=30,cursor=None):
+def read_maintenance_queue(conn,token,org,loc,mode="ALL",horizon=30,cursor=None,reason="ALL"):
     if (type(org) is not UUID or type(loc) is not UUID or mode not in MODES
-        or type(horizon) is not int or horizon not in (7,30,90)):
+        or type(horizon) is not int or horizon not in (7,30,90) or reason not in REASONS):
         raise QueueInvalid("INVALID_INPUT")
     with conn.transaction():
         if not organization_role_allows(conn,token,org,"MANAGER",loc,for_mutation=True):
@@ -43,7 +44,7 @@ def read_maintenance_queue(conn,token,org,loc,mode="ALL",horizon=30,cursor=None)
         except (ZoneInfoNotFoundError,TypeError,ValueError):
             raise QueueDenied("FORBIDDEN") from None
         end=today+timedelta(days=horizon)
-        scope=sha256(f"maintenance:{org}:{loc}:{mode}:{horizon}:{today}".encode()).hexdigest()[:32]
+        scope=sha256(f"maintenance:{org}:{loc}:{mode}:{horizon}:{today}:{reason}".encode()).hexdigest()[:32]
         try:
             position=decode_cursor(cursor,scope,token) if cursor is not None else None
         except ValueError:
@@ -63,6 +64,7 @@ def read_maintenance_queue(conn,token,org,loc,mode="ALL",horizon=30,cursor=None)
             AND origin.location_id=w.location_id AND origin.canceled_at IS NULL
           WHERE w.organization_id=%s AND w.location_id=%s
             AND (%s::timestamptz IS NULL OR w.created_at >= %s::timestamptz)
+            AND (%s='ALL' OR r.reason_code=%s)
             AND r.due_date<=%s
             AND (%s<>'OVERDUE' OR r.due_date<%s)
             AND (%s<>'UPCOMING' OR r.due_date>=%s)
@@ -87,11 +89,11 @@ def read_maintenance_queue(conn,token,org,loc,mode="ALL",horizon=30,cursor=None)
               WHERE v.recommendation_id=r.id AND booking.canceled_at IS NULL
             )
           ORDER BY r.due_date,r.id LIMIT %s
-        """,(org,loc,cutoff,cutoff,end,mode,today,mode,today,*after,PAGE+1)).fetchall()
+        """,(org,loc,cutoff,cutoff,reason,reason,end,mode,today,mode,today,*after,PAGE+1)).fetchall()
         page=rows[:PAGE]
         return {"syntheticOnly":True,"sendAllowed":False,"basis":"UNBOOKED_ACTIVE_DUE_DATE",
                 "organizationId":str(org),"locationId":str(loc),"localDay":today.isoformat(),
-                "timeZone":branch[0],"mode":mode,"horizonDays":horizon,
+                "timeZone":branch[0],"mode":mode,"horizonDays":horizon,"reasonCode":reason,
                 "items":[{"recommendationId":str(i),"workOrderId":str(w),
                           "serviceCode":code,"title":title,"reasonCode":reason,
                           "baselineKm":baseline,"dueDate":due.isoformat(),"dueKm":km,

@@ -76,6 +76,20 @@
               "maxLength": 256,
               "pattern": "^[A-Za-z0-9_-]+$"
             }
+          },
+          {
+            "in": "query",
+            "name": "reasonCode",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "PERIODIC",
+                "DEFERRED",
+                "FOLLOWUP"
+              ],
+              "default": "ALL"
+            }
           }
         ],
         "responses": {
@@ -217,7 +231,8 @@
           "mode",
           "horizonDays",
           "items",
-          "nextCursor"
+          "nextCursor",
+          "reasonCode"
         ],
         "properties": {
           "syntheticOnly": {
@@ -274,6 +289,14 @@
             "minLength": 1,
             "maxLength": 256,
             "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "reasonCode": {
+            "enum": [
+              "ALL",
+              "PERIODIC",
+              "DEFERRED",
+              "FOLLOWUP"
+            ]
           }
         }
       },
