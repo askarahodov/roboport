@@ -86,7 +86,8 @@ export function CustomerCrmServiceConsent(){
       // более свежий журнал после изменения другим сеансом.
       if((response.status!==201||replayed!==false)&&(response.status!==200||replayed!==true))
         throw Error('receipt');
-      if(current<item.expectedRevision+1||
+      if(!Number.isSafeInteger(current)||typeof result.channels[item.channelCode]!=='boolean'||
+        current<item.expectedRevision+1||
         (replayed===false&&current!==item.expectedRevision+1)||
         (current===item.expectedRevision+1&&result.channels[item.channelCode]!==item.enabled))
         throw Error('receipt');
