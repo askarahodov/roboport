@@ -1,4 +1,6 @@
 import React from 'react';
+import {CrmDealCard} from './CrmDealCard';
+import {CrmInteractions} from './CrmInteractions';
 
 type StageCode='NEW'|'QUALIFIED'|'BOOKED'|'LOST';
 type LossReason='PRICE'|'TIMING'|'NO_RESPONSE'|'OTHER';
@@ -76,6 +78,7 @@ export function AutoCrmKanban(){
   const [message,setMessage]=React.useState('');
   const [busy,setBusy]=React.useState(false);
   const [editLead,setEditLead]=React.useState('');
+  const [openDeal,setOpenDeal]=React.useState('');
   const [moveStage,setMoveStage]=React.useState<StageCode>('QUALIFIED');
   const [appointment,setAppointment]=React.useState('');
   const [reason,setReason]=React.useState<LossReason>('PRICE');
@@ -212,6 +215,12 @@ export function AutoCrmKanban(){
             <p>Обращение: {item.leadId}</p>
             <p>Ответственный: {item.ownerId}</p>
             <p>Источник: {sourceNames[item.sourceCode]}</p>
+            <button type="button" disabled={busy} onClick={()=>setOpenDeal(openDeal===item.leadId?'':item.leadId)}>
+              {openDeal===item.leadId?'Скрыть карточку сделки':'Открыть карточку сделки'}</button>
+            {openDeal===item.leadId&&<React.Fragment key={base+':'+item.leadId}>
+              <CrmDealCard base={base+'/leads'} leadId={item.leadId}/>
+              <CrmInteractions base={base+'/leads'} leadId={item.leadId}/>
+            </React.Fragment>}
             {item.visitNumber!==undefined&&<p>Цикл обращения №{item.visitNumber}</p>}
             {['BOOKED','LOST'].includes(item.stageCode)&&<button type="button"
               disabled={busy||pending!==null} onClick={()=>void repeat(item)}>Создать повторное обращение</button>}

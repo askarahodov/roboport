@@ -1,5 +1,6 @@
 """Synthetic-only CRM lead HTTP: tenant-scoped, CSRF-protected mutations."""
 from uuid import UUID
+from datetime import datetime
 
 import psycopg
 from fastapi import APIRouter,Request
@@ -7,6 +8,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel,ConfigDict,ValidationError
 
 from .auth_http import _mutation_ok
+from .auto_crm_deal import read_deal
+from .auto_crm_interactions import list_interactions, record_interaction, CallbackDeadlineExpired
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auto_crm_leads import (
     LeadDenied,LeadConflict,create_lead,transition_lead,lead_detail,list_leads,
@@ -120,5 +123,83 @@ async def crm_stage(org_id:str,loc_id:str,lead_id:str,request:Request):
             )
         except (LeadDenied,LeadConflict) as exc:
             return _error(request,exc)
+    return JSONResponse(content=result,status_code=200 if result["replayed"] else 201,
+                        headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/leads/{lead_id}/deal")
+def crm_deal(org_id:str,loc_id:str,lead_id:str,request:Request):
+    scoped=_context(request,org_id,loc_id,lead_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,(org,loc,lead)=scoped
+    try:
+        with psycopg.connect(dsn) as db:
+            result=read_deal(db,request.cookies.get("rp_session",""),org,loc,lead)
+    except (LeadDenied,LeadConflict) as exc:
+        return _error(request,exc)
+    except (psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
+        return _response(request,409,"CONFLICT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+class InteractionBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    channelCode:str
+    outcomeCode:str
+    requestKey:UUID
+    callbackDueAt:datetime|None=None
+    expectedActorId:UUID|None=None
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/leads/{lead_id}/interactions")
+def crm_interactions(org_id:str,loc_id:str,lead_id:str,request:Request):
+    scoped=_context(request,org_id,loc_id,lead_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,(org,loc,lead)=scoped
+    with psycopg.connect(dsn) as db:
+        try:
+            cursors=request.query_params.getlist("cursor")
+            if len(cursors)>1 or (cursors and not cursors[0]):
+                raise LeadDenied("INVALID_INPUT")
+            result=list_interactions(db,request.cookies.get("rp_session",""),org,loc,lead,
+                                     cursors[0] if cursors else None)
+        except (LeadDenied,LeadConflict) as exc:
+            return _error(request,exc)
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/leads/{lead_id}/interactions")
+async def crm_interaction(org_id:str,loc_id:str,lead_id:str,request:Request):
+    scoped=_context(request,org_id,loc_id,lead_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,(org,loc,lead)=scoped
+    try:
+        body=InteractionBody.model_validate(await request.json())
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            result=record_interaction(db,request.cookies.get("rp_session",""),org,loc,lead,
+                                      body.requestKey,body.channelCode,body.outcomeCode,
+                                      body.callbackDueAt,body.expectedActorId)
+        except CallbackDeadlineExpired:
+            # Exact lookup already checked under the same lead lock. A stale
+            # retry cannot create a task for a deadline that has passed.
+            return JSONResponse(status_code=422,content={
+                "code":"CALLBACK_DEADLINE_EXPIRED","requestId":request.state.request_id,
+                "syntheticOnly":True,"sendAllowed":False,"leadId":str(lead),
+                "requestKey":str(body.requestKey),
+                "viewerId":str(body.expectedActorId) if body.expectedActorId else None,
+                "callbackDueAt":body.callbackDueAt.isoformat(),
+            },headers={"Cache-Control":"no-store"})
+        except (LeadDenied,LeadConflict) as exc:
+            return _error(request,exc)
+        except (psycopg.errors.DeadlockDetected,psycopg.errors.SerializationFailure):
+            return _response(request,409,"CONFLICT")
     return JSONResponse(content=result,status_code=200 if result["replayed"] else 201,
                         headers={"Cache-Control":"no-store"})

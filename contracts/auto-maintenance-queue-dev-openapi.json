@@ -1,0 +1,306 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "БоксРитм — закрытая очередь планового ТО",
+    "version": "0.1.0-dev",
+    "description": "Только синтетический HTTPS loopback, ROBOport_SYNTHETIC_AUTO_API=1 и ROBOport_SYNTHETIC_AUTH_API=1. Не публикуется в production OpenAPI. Не отправляет сообщения."
+  },
+  "x-synthetic-only": true,
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ],
+  "paths": {
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/maintenance-queue": {
+      "get": {
+        "operationId": "readMaintenanceQueueDev",
+        "summary": "Очередь активных рекомендаций без повторной записи",
+        "description": "MANAGER, актуальные права INTAKE_ACT READ и исторический cutoff. Дата филиала, сортировка dueDate/recommendationId, 25 строк. Курсор привязан к сессии, филиалу, фильтру, горизонту и календарному дню; повторные параметры запрещены. Отменённый повторный визит возвращает рекомендацию, отозванный proof исключает. При изменении прав перечитывать с первой страницы.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "loc_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "OVERDUE",
+                "UPCOMING"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "in": "query",
+            "name": "horizon",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                7,
+                30,
+                90
+              ],
+              "default": 30
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Текущая страница",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceQueue"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующих прав",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Синтетическая функция выключена",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный scope, фильтр или курсор",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    },
+    "schemas": {
+      "MaintenanceItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recommendationId",
+          "workOrderId",
+          "serviceCode",
+          "title",
+          "reasonCode",
+          "baselineKm",
+          "dueDate",
+          "dueKm",
+          "status"
+        ],
+        "properties": {
+          "recommendationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workOrderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serviceCode": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "PERIODIC",
+              "DEFERRED",
+              "FOLLOWUP"
+            ]
+          },
+          "baselineKm": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000000
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "dueKm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 2000000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OVERDUE",
+              "UPCOMING"
+            ]
+          }
+        }
+      },
+      "MaintenanceQueue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "syntheticOnly",
+          "sendAllowed",
+          "basis",
+          "organizationId",
+          "locationId",
+          "localDay",
+          "timeZone",
+          "mode",
+          "horizonDays",
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "syntheticOnly": {
+            "const": true
+          },
+          "sendAllowed": {
+            "const": false
+          },
+          "basis": {
+            "const": "UNBOOKED_ACTIVE_DUE_DATE"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "localDay": {
+            "type": "string",
+            "format": "date"
+          },
+          "timeZone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "enum": [
+              "ALL",
+              "OVERDUE",
+              "UPCOMING"
+            ]
+          },
+          "horizonDays": {
+            "enum": [
+              7,
+              30,
+              90
+            ]
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/MaintenanceItem"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      },
+      "QueueError": {
+        "type": "object",
+        "required": [
+          "code",
+          "requestId"
+        ],
+        "properties": {
+          "code": {
+            "enum": [
+              "FORBIDDEN",
+              "NOT_FOUND",
+              "INVALID_INPUT"
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
