@@ -4,6 +4,7 @@ import {ServiceSurvey} from '../shared/ServiceSurvey';
 import { StaffCrmMockMessages } from './StaffCrmMockMessages';
 import {CrmDealCard} from './CrmDealCard';
 import {CrmInteractions} from './CrmInteractions';
+import {CrmLeadSearch} from './CrmLeadSearch';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Event={id:string;actorId:string;stageCode:'QUALIFIED'|'BOOKED'|'LOST';
@@ -238,11 +239,11 @@ export function AutoCrmLeads(){
     return ()=>controller.abort();
   },[org,loc,valid,loadedScope,status,inboxRevision,inboxCursor,inboxMode,taskRevision,revision]);
 
-  async function openInboxLead(leadId:string){
+  async function openInboxLead(leadId:string,forceRead=false){
     if(inboxOpening||busy||taskBusy||pendingLead!==null||pendingTask!==null||
        status!=='ready'||loadedScope!==scope)return;
     const existing=rows.find(x=>x.leadId===leadId);
-    if(existing){setSelected(leadId);setInboxMessage('');return;}
+    if(existing&&!forceRead){setSelected(leadId);setInboxMessage('');return;}
     setInboxOpening(true);setInboxMessage('');
     try{
       const response=await fetch(base+'/'+encodeURIComponent(leadId),{
@@ -446,6 +447,8 @@ export function AutoCrmLeads(){
         onClick={()=>void mutate(base,{customerLinkId:link,sourceCode:source})}>
         Создать обращение</button>
       <p>После записи или отказа можно начать новое обращение того же клиента. Пока предыдущее открыто, дубль запрещён.</p>
+      <CrmLeadSearch key={scope} org={org} loc={loc} disabled={busy||taskBusy||inboxOpening||pendingLead!==null||pendingTask!==null}
+        onOpen={id=>void openInboxLead(id,true)} onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);setStatus('denied');}}/>
       <h2>Журнал обращений</h2>
       {rows.length===0?<p>{leadCursor?'На этой странице обращений нет.':'Обращений пока нет.'}</p>:<label>Обращение
         <select aria-label="Обращение" value={selected} disabled={taskBusy||busy||pendingLead!==null}

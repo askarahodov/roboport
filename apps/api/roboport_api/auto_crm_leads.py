@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 from datetime import datetime
 import base64
 import binascii
+from hashlib import sha256
+from .keyset_cursor import encode_cursor,decode_cursor
 import psycopg
 
 from .auto_org_authority import organization_role_allows
@@ -287,3 +289,60 @@ def list_leads(conn,token,org,loc,cursor=None):
             if len(rows)>LEAD_PAGE_SIZE else None
         )
         return {"syntheticOnly":True,"items":items,"nextCursor":next_cursor}
+
+
+def search_leads(conn,token,org,loc,*,link=None,source="ALL",stage="ALL",cursor=None):
+    """Search all authorized cycles, not only the journal's loaded page."""
+    with conn.transaction():
+        actor,manager=_authority(conn,token,org,loc)
+        if ((link is not None and type(link) is not UUID) or
+            source not in ("ALL","WEB","PHONE","WALK_IN") or
+            stage not in ("ALL","NEW","QUALIFIED","BOOKED","LOST")):
+            raise LeadDenied("INVALID_INPUT")
+        scope=sha256(f"lead-search:{org}:{loc}:{link}:{source}:{stage}".encode()).hexdigest()[:32]
+        try:
+            after=decode_cursor(cursor,scope,token) if cursor is not None else None
+        except ValueError:
+            raise LeadDenied("INVALID_INPUT") from None
+        pos=(after[0],after[0],after[1]) if after else (None,None,None)
+        rows=conn.execute("""
+          SELECT lead.id,lead.created_at
+          FROM auto_crm_lead lead
+          LEFT JOIN LATERAL (
+            SELECT assignee_id FROM auto_crm_lead_assignment_event
+            WHERE lead_id=lead.id ORDER BY created_at DESC,id DESC LIMIT 1
+          ) assignment ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT stage_code FROM auto_crm_lead_stage
+            WHERE lead_id=lead.id ORDER BY created_at DESC,id DESC LIMIT 1
+          ) latest ON TRUE
+          WHERE lead.organization_id=%s AND lead.location_id=%s
+            AND (%s OR COALESCE(assignment.assignee_id,lead.owner_id)=%s)
+            AND (%s::uuid IS NULL OR lead.customer_link_id=%s::uuid)
+            AND (%s='ALL' OR lead.source_code=%s)
+            AND (%s='ALL' OR COALESCE(latest.stage_code,'NEW')=%s)
+            AND (%s::timestamptz IS NULL OR (lead.created_at,lead.id)<(%s,%s))
+            AND EXISTS(
+              SELECT 1 FROM auto_vehicle_customer_link p
+              JOIN auto_vehicle_location_binding b ON b.vehicle_id=p.vehicle_id
+                AND b.location_id=lead.location_id
+              JOIN auto_service_location l ON l.id=b.location_id
+                AND l.organization_id=lead.organization_id AND l.disabled_at IS NULL
+              JOIN auto_organization o ON o.id=l.organization_id AND o.disabled_at IS NULL
+              WHERE p.id=lead.customer_link_id AND p.verified_at IS NOT NULL
+                AND p.verified_by IS NOT NULL AND p.revoked_at IS NULL
+            )
+          ORDER BY lead.created_at DESC,lead.id DESC LIMIT %s
+        """,(org,loc,manager,actor,link,link,source,source,stage,stage,*pos,LEAD_PAGE_SIZE+1)).fetchall()
+        page=rows[:LEAD_PAGE_SIZE]
+        items=[]
+        for ident,_ in page:
+            state=_state(conn,_lead(conn,org,loc,ident,actor,manager))
+            if stage!="ALL" and state["status"]!=stage:
+                raise LeadConflict("SEARCH_CHANGED")
+            items.append({k:state[k] for k in ("leadId","customerLinkId","ownerId","sourceCode",
+                                               "status","createdAt","visitNumber")})
+        return {"syntheticOnly":True,"organizationId":str(org),"locationId":str(loc),
+                "customerLinkId":str(link) if link else None,"sourceCode":source,"stageCode":stage,
+                "items":items,"nextCursor":encode_cursor(page[-1][1],page[-1][0],scope,token)
+                  if len(rows)>LEAD_PAGE_SIZE else None}

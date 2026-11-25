@@ -1,0 +1,302 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Закрытый поиск CRM",
+    "version": "0.1.0-dev",
+    "description": "Synthetic HTTPS only; live ACL, no PII, excluded from public OpenAPI."
+  },
+  "x-synthetic-only": true,
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ],
+  "paths": {
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/lead-search": {
+      "get": {
+        "operationId": "searchCrmLeadsDev",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "loc_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerLinkId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sourceCode",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "WEB",
+                "PHONE",
+                "WALK_IN"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stageCode",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "NEW",
+                "QUALIFIED",
+                "BOOKED",
+                "LOST"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Авторизованные обращения, 25 строк",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Доступ запрещён",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Функция выключена",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Изменение этапа или конфликт",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Неверный фильтр или курсор",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    },
+    "schemas": {
+      "SearchRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "leadId",
+          "customerLinkId",
+          "ownerId",
+          "sourceCode",
+          "status",
+          "createdAt",
+          "visitNumber"
+        ],
+        "properties": {
+          "leadId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerLinkId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourceCode": {
+            "enum": [
+              "WEB",
+              "PHONE",
+              "WALK_IN"
+            ]
+          },
+          "status": {
+            "enum": [
+              "NEW",
+              "QUALIFIED",
+              "BOOKED",
+              "LOST"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "visitNumber": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "SearchPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "syntheticOnly",
+          "organizationId",
+          "locationId",
+          "customerLinkId",
+          "sourceCode",
+          "stageCode",
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "syntheticOnly": {
+            "const": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerLinkId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "sourceCode": {
+            "type": "string",
+            "enum": [
+              "ALL",
+              "WEB",
+              "PHONE",
+              "WALK_IN"
+            ]
+          },
+          "stageCode": {
+            "type": "string",
+            "enum": [
+              "ALL",
+              "NEW",
+              "QUALIFIED",
+              "BOOKED",
+              "LOST"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/SearchRow"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "code",
+          "requestId"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
