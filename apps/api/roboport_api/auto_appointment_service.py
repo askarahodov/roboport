@@ -361,6 +361,9 @@ def create_appointment(conn: psycopg.Connection, token: str, organization: UUID,
             if (isinstance(exc,psycopg.errors.RaiseException) and
                 "appointment outside opening hours" in str(exc)):
                 raise AppointmentHoursClosed("LOCATION_CLOSED") from exc
+            if (isinstance(exc,psycopg.errors.RaiseException) and
+                "booking employee inactive" in str(exc)):
+                raise AppointmentConflict("employee unavailable") from exc
             # Конкурентные INSERT по exclusion могут завершиться SQLSTATE 40P01.
             # Сохранение через nested transaction уже отменено: клиент получает
             # управляемый конфликт, а не 500 с неизвестным исходом брони.
@@ -615,5 +618,8 @@ def reschedule_appointment(conn: psycopg.Connection, token: str,
             if (isinstance(exc,psycopg.errors.RaiseException) and
                 "appointment outside opening hours" in str(exc)):
                 raise AppointmentHoursClosed("LOCATION_CLOSED") from exc
+            if (isinstance(exc,psycopg.errors.RaiseException) and
+                "booking employee inactive" in str(exc)):
+                raise AppointmentConflict("employee unavailable") from exc
             raise AppointmentConflict("bay already reserved") from exc
         return fresh
