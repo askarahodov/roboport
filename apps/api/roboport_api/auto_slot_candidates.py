@@ -173,6 +173,8 @@ def candidate_slots(conn: psycopg.Connection, token: str, org: UUID,
               AND (%s::uuid IS NULL OR (
                 EXISTS (
                   SELECT 1 FROM auto_staff_shift shift
+                  JOIN app_user employee ON employee.id=shift.user_id
+                    AND employee.status='ACTIVE'
                   WHERE shift.user_id=%s AND shift.organization_id=%s
                     AND shift.location_id=%s AND shift.canceled_at IS NULL
                     AND shift.starts_at<=c.starts_at AND shift.ends_at>=c.ends_at
