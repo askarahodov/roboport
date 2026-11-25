@@ -114,3 +114,47 @@ test('CRM outcomes CSV export rechecks grants and clears report on 403',async({p
   await expect(page.getByRole('alert')).toContainText('Доступ запрещён');
   await expect(report).toHaveCount(0);
 });
+
+
+test('branch maintenance queue filters deadlines, pages and clears on revoke',async({page})=>{
+  let deny=false;
+  const row=(n:number)=>({recommendationId:'aaaaaaaa-aaaa-4aaa-8aaa-'+String(n).padStart(12,'0'),
+    workOrderId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',serviceCode:'TO-'+n,title:'Плановая замена',
+    reasonCode:'PERIODIC',baselineKm:41700,dueKm:50000,dueDate:'2030-01-02',status:'UPCOMING'});
+  await page.route('**/crm/maintenance-queue?*',r=>{
+    const u=new URL(r.request().url());
+    const mode=u.searchParams.get('mode'),horizon=Number(u.searchParams.get('horizon'));
+    const next=u.searchParams.has('cursor');
+    return r.fulfill({status:deny?403:200,contentType:'application/json',body:JSON.stringify(deny?{}:{
+      syntheticOnly:true,sendAllowed:false,basis:'UNBOOKED_ACTIVE_DUE_DATE',organizationId:org,locationId:loc,
+      localDay:'2030-01-01',timeZone:'Europe/Berlin',mode,horizonDays:horizon,
+      items:mode==='OVERDUE'?[]:next?[row(25)]:Array.from({length:25},(_,i)=>row(i)),
+      nextCursor:mode==='OVERDUE'||next?null:'opaqueCursor'})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-outcomes');
+  await scope(page);
+  const queue=page.getByRole('region',{name:'Очередь планового ТО'});
+  const load=queue.getByRole('button',{name:'Загрузить очередь ТО'});
+  await load.click();
+  await expect(queue.locator('tbody tr')).toHaveCount(25);
+  await queue.getByRole('button',{name:'Следующая страница ТО'}).click();
+  await expect(queue.locator('tbody tr')).toHaveCount(1);
+  await expect(queue).toContainText('TO-25');
+  await queue.getByRole('button',{name:'Первая страница ТО'}).click();
+  await expect(queue.locator('tbody tr')).toHaveCount(25);
+  await queue.getByLabel('Срок рекомендаций').selectOption('OVERDUE');
+  await expect(queue.getByRole('table')).toHaveCount(0);
+  await load.click();
+  await expect(queue).toContainText('Рекомендаций к сроку нет');
+  await queue.getByLabel('Срок рекомендаций').selectOption('UPCOMING');
+  await queue.getByLabel('Горизонт ТО').selectOption('7');
+  await load.click();
+  await expect(queue.locator('tbody tr')).toHaveCount(25);
+  deny=true;
+  await load.click();
+  await expect(queue.getByRole('alert')).toContainText('Доступ к очереди ТО запрещён');
+  await expect(queue.getByRole('table')).toHaveCount(0);
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+});

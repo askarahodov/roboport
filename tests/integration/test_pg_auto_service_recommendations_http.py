@@ -19,7 +19,8 @@ def test_plan_from_inspection_to_customer_and_corrected_recommendation(monkeypat
     http=api(monkeypatch)
     path=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/recommendations"
     today=datetime.now(timezone.utc).date()
-    due=today+timedelta(days=180)
+    due=today+timedelta(days=14)
+    queue=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/maintenance-queue"
     payload={"requestKey":str(uuid4()),"serviceId":str(service),
              "reasonCode":"PERIODIC","dueDate":due.isoformat(),"dueKm":50000}
     assert http.get(path).status_code==403
@@ -53,6 +54,9 @@ def test_plan_from_inspection_to_customer_and_corrected_recommendation(monkeypat
     assert item["baselineKm"]==41700 and item["dueKm"]==50000
     assert item["dueDate"]==due.isoformat() and item["status"]=="ACTIVE"
     assert item["actorId"]==str(d["intake"])
+    queued=http.get(queue)
+    assert queued.status_code==200,queued.text
+    assert [r["recommendationId"] for r in queued.json()["items"]]==[item["id"]]
     assert http.post(path,headers=manager,json=payload).json()["replayed"] is True
     assert http.post(path,headers=manager,json={**payload,"dueKm":51000}).status_code==409
     assert http.post(path,headers=manager,json={**payload,"requestKey":str(uuid4())}).status_code==409
@@ -92,6 +96,7 @@ def test_plan_from_inspection_to_customer_and_corrected_recommendation(monkeypat
     result=http.post(withdraw,headers=manager,json=cancel)
     assert result.status_code==201,result.text
     assert result.json()["items"][0]["status"]=="WITHDRAWN"
+    assert http.get(queue).json()["items"]==[]
     assert http.post(withdraw,headers=manager,json=cancel).json()["replayed"] is True
     assert http.post(withdraw,headers=manager,json={"requestKey":str(uuid4())}).status_code==409
     corrected={**payload,"requestKey":str(uuid4()),"dueKm":52000}
@@ -120,6 +125,10 @@ def test_plan_from_inspection_to_customer_and_corrected_recommendation(monkeypat
     assert made.status_code==201,made.text
     visit=made.json()["visit"]
     assert visit["status"]=="SCHEDULED" and visit["workOrderId"]!=str(order)
+    assert http.get(queue).status_code==403
+    token(http,d,d["intake"])
+    assert http.get(queue).json()["items"]==[]
+    customer=token(http,d,d["client_a"])
     replay=http.post(visit_path,headers=customer,json=booking)
     assert replay.status_code==200 and replay.json()["visit"]==visit
     assert http.post(visit_path,headers=customer,json={**booking,"requestKey":str(uuid4())}).status_code==409
@@ -137,6 +146,9 @@ def test_plan_from_inspection_to_customer_and_corrected_recommendation(monkeypat
     assert canceled.status_code==200,canceled.text
     current=next(r for r in http.get(path+"/customer").json()["items"] if r["id"]==active["id"])
     assert current["visit"]["status"]=="CANCELED"
+    token(http,d,d["intake"])
+    assert [r["recommendationId"] for r in http.get(queue).json()["items"]]==[active["id"]]
+    customer=token(http,d,d["client_a"])
     assert http.post(visit_path,headers=customer,json=booking).status_code==409
     new_booking={**booking,"requestKey":str(uuid4())}
     made_again=http.post(visit_path,headers=customer,json=new_booking)
@@ -185,3 +197,77 @@ def test_two_managers_cannot_publish_duplicate_active_plan(monkeypatch):
     with psycopg.connect(DSN) as db:
         assert db.execute("SELECT count(*) FROM auto_service_recommendation WHERE work_order_id=%s",
                           (order,)).fetchone()==(1,)
+
+
+def test_branch_maintenance_queue_pagination_local_date_and_live_document_policy(monkeypatch):
+    from test_pg_auto_document_access_http import admin,set_rule,url as policy_url
+    from roboport_api import auto_maintenance_queue
+    from zoneinfo import ZoneInfo
+    d,org,loc,order,service,foreign,_=scenario()
+    http=api(monkeypatch)
+    path=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/crm/maintenance-queue"
+    assert http.get(path).status_code==403
+    with psycopg.connect(DSN) as db:
+        admin(db,org,d["manager"])
+        submit_work_order_inspection(db,d["tokens"][d["intake"]],org,loc,order,
+            odometer_km=41700,fuel_percent=65,tyres_ok=True,lights_ok=True,
+            fluid_leak=False,exterior_code="CLEAR")
+        tz=db.execute("SELECT timezone_name FROM auto_service_location WHERE id=%s",(loc,)).fetchone()[0]
+        local_day=datetime.now(ZoneInfo(tz)).date()
+        due=datetime.now(timezone.utc).date()+timedelta(days=14)
+        for n in range(27):
+            service_id=uuid4()
+            db.execute("""INSERT INTO auto_service_catalog
+              (id,organization_id,location_id,code,title,duration_minutes)
+              VALUES(%s,%s,%s,%s,%s,30)""",(service_id,org,loc,f"QUEUE-{n:02}","SYNTHETIC QUEUE"))
+            create_recommendation(db,d["tokens"][d["intake"]],org,loc,order,key=uuid4(),
+                                  service=service_id,reason="PERIODIC",due=due,km=50000)
+    token(http,d,d["intake"])
+    first=http.get(path,params={"mode":"UPCOMING","horizon":"30"})
+    assert first.status_code==200,first.text
+    page=first.json()
+    assert first.headers["cache-control"]=="no-store"
+    assert page["localDay"]==local_day.isoformat() and page["timeZone"]==tz
+    assert page["sendAllowed"] is False and len(page["items"])==25
+    assert all(x["workOrderId"]==str(order) and x["status"]=="UPCOMING" for x in page["items"])
+    assert str(d["link"]) not in first.text and str(d["client_a"]) not in first.text
+    cursor=page["nextCursor"]
+    second=http.get(path,params={"mode":"UPCOMING","horizon":"30","cursor":cursor})
+    assert second.status_code==200,second.text
+    assert len(second.json()["items"])==2 and second.json()["nextCursor"] is None
+    assert len({x["recommendationId"] for x in page["items"]+second.json()["items"]})==27
+    assert http.get(path,params={"mode":"ALL","cursor":cursor}).status_code==422
+    assert http.get(path,params={"horizon":"7"}).json()["items"]==[]
+    assert http.get(path+"?mode=ALL&mode=OVERDUE").status_code==422
+    assert http.get(path.replace(str(loc),str(uuid4()))).status_code==403
+    class FutureClock(datetime):
+        @classmethod
+        def now(cls,tz=None):
+            return datetime.combine(due+timedelta(days=1),datetime.min.time(),tzinfo=tz)
+    monkeypatch.setattr(auto_maintenance_queue,"datetime",FutureClock)
+    overdue=http.get(path,params={"mode":"OVERDUE"})
+    assert overdue.status_code==200,overdue.text
+    assert len(overdue.json()["items"])==25 and all(x["status"]=="OVERDUE" for x in overdue.json()["items"])
+    assert http.get(path,params={"mode":"UPCOMING","horizon":"30","cursor":cursor}).status_code==422
+    assert http.get(path,params={"mode":"UPCOMING"}).json()["items"]==[]
+    owner=token(http,d,d["manager"])
+    deny=set_rule(http,policy_url(org),owner,role="MANAGER",loc=loc,user=d["intake"],
+                  document="INTAKE_ACT",cap="READ",allowed=False)
+    assert deny.status_code==201,deny.text
+    token(http,d,d["intake"])
+    assert http.get(path).status_code==403
+    owner=token(http,d,d["manager"])
+    cutoff=set_rule(http,policy_url(org),owner,role="MANAGER",loc=loc,user=d["intake"],
+                    document="INTAKE_ACT",cap="READ",allowed=True,not_before="2099-01-01T00:00:00Z")
+    assert cutoff.status_code==201,cutoff.text
+    token(http,d,d["intake"])
+    assert http.get(path).json()["items"]==[]
+    owner=token(http,d,d["manager"])
+    restored=set_rule(http,policy_url(org),owner,role="MANAGER",loc=loc,user=d["intake"],
+                      document="INTAKE_ACT",cap="READ",allowed=True)
+    assert restored.status_code==201,restored.text
+    token(http,d,d["intake"])
+    assert len(http.get(path).json()["items"])==25
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+    assert http.get(path).json()["items"]==[]
