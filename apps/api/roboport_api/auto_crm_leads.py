@@ -1,4 +1,4 @@
-"""Private synthetic CRM intake: one lead per verified link/source/branch.
+"""Private synthetic CRM intake: one active lead per verified link/source/branch and immutable repeat cycles.
 
 No phones, message payloads or outbound integrations. Stages are append-only;
 DB trigger independently enforces ordering and WorkOrder booking lineage.
@@ -61,7 +61,7 @@ def _lead(conn,org,loc,lead_id,actor,manager):
     row=conn.execute(
         """SELECT lead.id,lead.customer_link_id,
                   COALESCE(assignment.assignee_id,lead.owner_id) AS owner_id,
-                  lead.source_code,lead.request_key,lead.created_at
+                  lead.source_code,lead.request_key,lead.created_at,lead.visit_number
            FROM auto_crm_lead lead
            LEFT JOIN LATERAL(
              SELECT assignee_id FROM auto_crm_lead_assignment_event
@@ -96,7 +96,7 @@ def _state(conn,lead):
         "leadId":str(lead[0]),"customerLinkId":str(lead[1]),
         "ownerId":str(lead[2]),"sourceCode":lead[3],
         "status":events[-1][2] if events else "NEW",
-        "createdAt":lead[5].isoformat(),"syntheticOnly":True,
+        "createdAt":lead[5].isoformat(),"syntheticOnly":True,"visitNumber":lead[6],
         "events":[{
             "id":str(i),"actorId":str(actor),"stageCode":stage,
             "reasonCode":reason,"appointmentId":str(appointment) if appointment else None,
@@ -107,6 +107,21 @@ def _state(conn,lead):
             "createdAt":stamp.isoformat(),
         } for i,actor,assignee,stamp in assignments],
     }
+
+
+def latest_lead_cycle(conn,org,loc,link,source):
+    """Internal scoped cycle lookup. No previous lead identity is returned to clients."""
+    return conn.execute("""
+        SELECT lead.id,lead.visit_number,COALESCE(stage.stage_code,'NEW')
+        FROM auto_crm_lead lead
+        LEFT JOIN LATERAL (
+          SELECT stage_code FROM auto_crm_lead_stage
+          WHERE lead_id=lead.id ORDER BY created_at DESC,id DESC LIMIT 1
+        ) stage ON TRUE
+        WHERE lead.organization_id=%s AND lead.location_id=%s
+          AND lead.customer_link_id=%s AND lead.source_code=%s
+        ORDER BY lead.visit_number DESC LIMIT 1
+    """,(org,loc,link,source)).fetchone()
 
 
 def create_lead(conn,token,org,loc,link,source,key):
@@ -130,15 +145,21 @@ def create_lead(conn,token,org,loc,link,source,key):
                 raise LeadConflict("KEY_REUSED")
             lead=_lead(conn,org,loc,used[0],actor,manager)
             return {"replayed":True,**_state(conn,lead)}
+        latest=latest_lead_cycle(conn,org,loc,link,source)
+        if latest and latest[2] not in ("BOOKED","LOST"):
+            raise LeadConflict("ACTIVE_LEAD_EXISTS")
+        # Unique scope/visit and predecessor constraints independently reject
+        # competing new keys. Terminal stage evidence is never reopened.
         try:
             with conn.transaction():
                 ident=uuid4()
                 conn.execute(
                     """INSERT INTO auto_crm_lead(
                        id,organization_id,location_id,customer_link_id,
-                       owner_id,source_code,request_key)
-                       VALUES(%s,%s,%s,%s,%s,%s,%s)""",
-                    (ident,org,loc,link,actor,source,key),
+                       owner_id,source_code,request_key,visit_number,previous_lead_id)
+                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (ident,org,loc,link,actor,source,key,
+                     latest[1]+1 if latest else 1,latest[0] if latest else None),
                 )
         except (psycopg.errors.UniqueViolation,psycopg.errors.RaiseException,
                 psycopg.errors.CheckViolation) as exc:
@@ -157,9 +178,12 @@ def transition_lead(conn,token,org,loc,ident,key,stage,reason,appointment):
         raise LeadDenied("INVALID_INPUT")
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
+        # Take the mutation lock first, avoiding two concurrent SHARE-to-UPDATE
+        # upgrades. Scope and current owner are rechecked after the lock.
+        conn.execute("""SELECT id FROM auto_crm_lead
+                        WHERE id=%s AND organization_id=%s AND location_id=%s
+                        FOR UPDATE""",(ident,org,loc))
         lead=_lead(conn,org,loc,ident,actor,manager)
-        # Row locking serializes competing transitions and reuse detection.
-        conn.execute("SELECT id FROM auto_crm_lead WHERE id=%s FOR UPDATE",(ident,))
         existing=conn.execute(
             """SELECT lead_id,actor_id,stage_code,reason_code,appointment_id
                FROM auto_crm_lead_stage WHERE request_key=%s""",(key,),
