@@ -94,6 +94,10 @@ def upgrade():
       ON auto_vehicle_registration_event FOR EACH ROW EXECUTE FUNCTION reject_audit_mutation()
     """)
     op.execute("""
+      CREATE TRIGGER auto_vehicle_registration_event_no_truncate BEFORE TRUNCATE
+      ON auto_vehicle_registration_event FOR EACH STATEMENT EXECUTE FUNCTION reject_audit_mutation()
+    """)
+    op.execute("""
       CREATE FUNCTION guard_registered_auto_vehicle() RETURNS trigger
       LANGUAGE plpgsql AS $fn$
       BEGIN

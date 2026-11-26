@@ -38,7 +38,7 @@ test('регистрация атомарно создаёт pending, повто
   const panel=page.getByRole('region',{name:'Регистрация автомобиля в филиале'});
   await panel.getByLabel('UUID организации регистрации').fill(org);
   await panel.getByLabel('UUID филиала регистрации').fill(loc);
-  await panel.getByLabel('UUID клиента для регистрации').fill(customer);
+  await panel.getByLabel('UUID активного клиента (регистрация)').fill(customer);
   await panel.getByLabel('VIN нового автомобиля (необязательно)').fill(vin);
   await panel.getByLabel('Марка автомобиля').fill('Synthetic');
   await panel.getByLabel('Модель автомобиля').fill('Test');
@@ -60,6 +60,7 @@ test('регистрация атомарно создаёт pending, повто
   await panel.getByRole('button',{name:'Прочитать карточку регистрации'}).click();
   await expect(panel.getByRole('alert')).toContainText('Карточка недоступна');
   await expect(panel.getByLabel('Модель автомобиля')).toHaveCount(0);
+  await expect(page.getByLabel('UUID связи',{exact:true})).toHaveValue('');
   await expect(panel.getByText('VIN ••••1234',{exact:false})).toHaveCount(0);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });

@@ -46,6 +46,7 @@ export function StaffAutoClaims({ roles, legacyRoles = [] }: { roles: string[]; 
   const [revokeId, setRevokeId] = React.useState('');
   const [issued, setIssued] = React.useState<{ claimId: string; proof: string } | null>(null);
   const pendingKey = React.useRef<{ payload: string; key: string } | null>(null);
+  const registrationSelection=React.useRef<{vehicle:string;link:string}|null>(null);
   const reviewKey = React.useRef<{ payload: string; key: string } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [outcome, setOutcome] = React.useState<Outcome | null>(null);
@@ -160,7 +161,16 @@ export function StaffAutoClaims({ roles, legacyRoles = [] }: { roles: string[]; 
         незакреплённые fixtures используют прежнее объектное назначение. Создание связи
         не подтверждает владение автоматически.</p>
       {intake && <StaffVehicleRegistration mutate={mutate} onRegistered={(vehicle,link)=>{
+        registrationSelection.current={vehicle,link};
         setVehicleId(vehicle);setLinkId(link);setIssued(null);setConfirmReissue(false);
+      }} onCleared={()=>{
+        const previous=registrationSelection.current;
+        registrationSelection.current=null;
+        if(previous){
+          setVehicleId(value=>value===previous.vehicle?'':value);
+          setLinkId(value=>value===previous.link?'':value);
+          setIssued(null);setConfirmReissue(false);
+        }
       }} />}
       {intake && <div className="auto-claim-forms">
         <form onSubmit={e => { e.preventDefault(); createLink(); }}

@@ -16,8 +16,8 @@ function record(raw:unknown):Record<string,unknown>{
 const revision=(value:unknown):value is number=>typeof value==='number'&&
   Number.isInteger(value)&&value>=1&&value<=1000000;
 
-export function StaffVehicleRegistration({mutate,onRegistered}:{
-  mutate:Mutate;onRegistered:(vehicle:string,link:string)=>void;
+export function StaffVehicleRegistration({mutate,onRegistered,onCleared}:{
+  mutate:Mutate;onRegistered:(vehicle:string,link:string)=>void;onCleared:()=>void;
 }){
   const [org,setOrg]=React.useState(''),[loc,setLoc]=React.useState('');
   const [customer,setCustomer]=React.useState(''),[vin,setVin]=React.useState('');
@@ -36,11 +36,11 @@ export function StaffVehicleRegistration({mutate,onRegistered}:{
     (form.variant===''||validText(form.variant,160))&&(year===null||(
       /^[0-9]{4}$/.test(form.year)&&year>=1886&&year<=2100));
   function clear(){
-    setCustomer('');setVin('');setVehicle('');setCurrent(null);setEditable(false);
+    onCleared();setCustomer('');setVin('');setVehicle('');setCurrent(null);setEditable(false);
     setMasked(null);setForm(empty());setMessage(null);
   }
   function changeVehicle(value:string){
-    setVehicle(value);setCurrent(null);setEditable(false);setMasked(null);
+    onCleared();setVehicle(value);setCurrent(null);setEditable(false);setMasked(null);
     setForm(empty());setMessage(null);
   }
   async function load(){
@@ -61,7 +61,7 @@ export function StaffVehicleRegistration({mutate,onRegistered}:{
       setCurrent(data.revision);setMasked(data.vinLast4);setEditable(data.editable);
       if(!data.editable)setMessage({ok:false,text:'Правка недоступна: проверка владения уже началась или связь неактивна.'});
     }catch{
-      setMessage({ok:false,text:'Карточка недоступна. Проверьте филиал, сессию и полномочия.'});
+      onCleared();setMessage({ok:false,text:'Карточка недоступна. Проверьте филиал, сессию и полномочия.'});
     }finally{inFlight.current=false;setBusy(false);}
   }
   async function send(snap:Pending){
@@ -85,7 +85,7 @@ export function StaffVehicleRegistration({mutate,onRegistered}:{
     }catch(error){
       const code=error instanceof Error?error.message:'';
       if(/^HTTP 4[0-9]{2}$/.test(code)){
-        setPending(null);setCurrent(null);setEditable(false);setMasked(null);setForm(empty());setVin('');setCustomer('');
+        onCleared();setPending(null);setCurrent(null);setEditable(false);setMasked(null);setForm(empty());setVin('');setCustomer('');
         setMessage({ok:false,text:'Операция отклонена. Проверьте права, состояние и конфликт VIN или версии; перечитайте карточку.'});
       }else{
         setMessage({ok:false,text:'Результат неизвестен. Повторите тот же запрос с прежним ключом.'});
@@ -105,7 +105,7 @@ export function StaffVehicleRegistration({mutate,onRegistered}:{
     }
   }
   const createReady=validId(customer)&&(vin===''||/^[A-HJ-NPR-Z0-9]{17}$/.test(vin));
-  return <section aria-label="Регистрация автомобиля в филиале" className="auto-claim-panel">
+  return <section aria-label="Регистрация автомобиля в филиале" className="auto-claim-panel vehicle-registration">
     <h4>Регистрация автомобиля в филиале (dev)</h4>
     <p>Только синтетические данные. Новый автомобиль и ожидающая связь создаются вместе.
       Правка описания возможна до выдачи первого кода; VIN и филиал неизменяемы.</p>
@@ -121,7 +121,7 @@ export function StaffVehicleRegistration({mutate,onRegistered}:{
         <Button type="button" variant="secondary" onClick={()=>{clear();setMode('create');}}>Новый автомобиль</Button>{' '}
         <Button type="button" variant="secondary" onClick={()=>{clear();setMode('edit');}}>Загрузить существующую регистрацию</Button>
         {mode==='create'?<>
-          <FormField label="UUID клиента для регистрации" id="reg-customer">
+          <FormField label="UUID активного клиента (регистрация)" id="reg-customer">
             <input id="reg-customer" value={customer} onChange={e=>setCustomer(e.target.value)} autoComplete="off"/>
           </FormField>
           <FormField label="VIN нового автомобиля (необязательно)" id="reg-vin">

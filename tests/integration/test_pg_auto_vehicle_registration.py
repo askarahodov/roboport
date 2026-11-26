@@ -58,6 +58,14 @@ def test_registration_and_independent_claim(monkeypatch):
         result=created.json()
         vehicle,link=result["vehicleId"],result["linkId"]
         assert set(result)=={"vehicleId","linkId","revision","status"}
+        import json
+        from pathlib import Path
+        from jsonschema import Draft202012Validator, FormatChecker
+        spec=json.loads((Path(__file__).resolve().parents[2]/"contracts/auto-vehicle-registration-dev-openapi.json").read_text(encoding="utf-8"))
+        def check(name,body):
+            Draft202012Validator({**spec,"$ref":"#/components/schemas/"+name},
+                                 format_checker=FormatChecker()).validate(body)
+        check("Receipt",result)
         assert result["revision"]==1 and result["status"]=="PENDING"
         assert post(http,d,d["intake"],path,payload,key).json()==result
         assert post(http,d,d["intake"],path,{**payload,"model":"Changed"},key).status_code==409
@@ -66,6 +74,7 @@ def test_registration_and_independent_claim(monkeypatch):
         loaded=http.get(detail,params={"locationId":str(loc)})
         assert loaded.status_code==200 and loaded.json()["vinLast4"]==payload["vin"][-4:]
         assert "vin" not in loaded.json() and loaded.json()["editable"] is True
+        check("Details",loaded.json())
         assert http.get(detail,params={"locationId":str(other_loc)}).status_code==403
         revised=edit_body(payload,1,"Revised")
         edit_key=uuid4()
@@ -89,6 +98,9 @@ def test_registration_and_independent_claim(monkeypatch):
             with pytest.raises(psycopg.errors.RaiseException):
                 with db.transaction():
                     db.execute("DELETE FROM auto_vehicle_registration_event WHERE vehicle_id=%s",(vehicle,))
+            with pytest.raises(psycopg.errors.RaiseException):
+                with db.transaction():
+                    db.execute("TRUNCATE auto_vehicle_registration_event")
         http.cookies.set("rp_session",d["tokens"][d["client_a"]])
         assert http.get("/api/v1/dev/auto/vehicles/"+vehicle).status_code==404
         issue=_act(http,d,d["other"],f"/api/v1/dev/auto/links/{link}/issue-proof")
