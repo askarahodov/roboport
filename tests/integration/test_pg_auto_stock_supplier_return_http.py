@@ -151,3 +151,87 @@ def test_supplier_return_manager_queue_full_draft_to_approval_lifecycle(monkeypa
             db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
                        (grant_id,))
         assert client.get(review,params=params).status_code==403
+
+
+def test_competing_return_documents_cannot_spend_another_receipt_quantity_or_vat(monkeypatch):
+    """Two distinct documents, enough physical stock, one source receipt budget."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from roboport_api.auto_stock_receipt_document import (
+        create_receipt_document,accept_receipt_document,
+    )
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,sku,lot,receipt=setup_receipt(db,d,3)
+        value(db,d,org,loc,receipt,vat=601)
+        # Another valued receipt in the SAME lot must not increase the first
+        # receipt's return budget. Physical stock can satisfy both drafts.
+        other=create_receipt_document(db,d["tokens"][d["intake"]],org,loc,lot,
+                                      uuid4(),4,"SECOND-SOURCE")
+        accept_receipt_document(db,d["tokens"][d["manager"]],org,loc,other,uuid4())
+        value(db,d,org,loc,other,unit=2000,vat=799)
+        assert balance(db,sku)==(8,0) and allocated(db,lot)==7
+    base=f"/api/v1/dev/auto/organizations/{org}/warehouse/supplier-returns"
+    body={"locationId":str(loc),"sourceReceiptId":str(receipt),"quantity":2,
+          "reason":"Контроль возврата","supplierReference":"RMA-COMPETING"}
+    keys=[uuid4(),uuid4()]
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        drafts=[post(http,d,d["intake"],base,body,key) for key in keys]
+        assert all(x.status_code==201 for x in drafts),[x.text for x in drafts]
+        docs=[x.json()["documentId"] for x in drafts]
+        assert docs[0]!=docs[1]
+    gate=Barrier(2)
+    approval_keys=[uuid4(),uuid4()]
+    def compete(index):
+        with TestClient(app,base_url="https://127.0.0.1") as http:
+            gate.wait(timeout=10)
+            return post(http,d,d["manager"],base+"/approvals",
+                {"locationId":str(loc),"documentId":docs[index]},approval_keys[index])
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses=list(pool.map(compete,range(2)))
+    assert sorted(x.status_code for x in responses)==[201,409],[x.text for x in responses]
+    winner=next(i for i,x in enumerate(responses) if x.status_code==201)
+    loser=1-winner
+    with psycopg.connect(DSN) as db:
+        assert balance(db,sku)==(6,0) and allocated(db,lot)==5
+        assert db.execute("""SELECT sum(d.quantity),sum(a.purchase_net_attributed_minor),
+                   sum(a.purchase_vat_attributed_minor)
+            FROM auto_stock_supplier_return_document d
+            JOIN auto_stock_supplier_return_acceptance a ON a.document_id=d.id
+            WHERE d.source_receipt_id=%s""",(receipt,)).fetchone()==(2,2500,400)
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        # A new impossible draft is rejected, while exact old draft and
+        # approval replay are still valid. The losing draft stays in audit.
+        denied=post(http,d,d["intake"],base,body)
+        assert denied.status_code==409,denied.text
+        assert "no-store" in denied.headers["cache-control"]
+        assert post(http,d,d["intake"],base,body,keys[winner]).json()==drafts[winner].json()
+        assert post(http,d,d["manager"],base+"/approvals",
+            {"locationId":str(loc),"documentId":docs[winner]},approval_keys[winner]).json()==responses[winner].json()
+        assert post(http,d,d["manager"],base+"/approvals",
+            {"locationId":str(loc),"documentId":docs[loser]},approval_keys[loser]).status_code==409
+        last=post(http,d,d["intake"],base,{**body,"quantity":1})
+        assert last.status_code==201,last.text
+        assert post(http,d,d["manager"],base+"/approvals",
+            {"locationId":str(loc),"documentId":last.json()["documentId"]}).status_code==201
+        assert post(http,d,d["intake"],base,{**body,"quantity":1}).status_code==409
+        separate=post(http,d,d["intake"],base,{**body,"sourceReceiptId":str(other),"quantity":1})
+        assert separate.status_code==201,separate.text
+        assert post(http,d,d["manager"],base+"/approvals",
+            {"locationId":str(loc),"documentId":separate.json()["documentId"]}).status_code==201
+    with psycopg.connect(DSN) as db:
+        assert balance(db,sku)==(4,0) and allocated(db,lot)==3
+        rows=db.execute("""SELECT d.source_receipt_id,sum(d.quantity),
+              sum(a.purchase_net_attributed_minor),sum(a.purchase_vat_attributed_minor)
+            FROM auto_stock_supplier_return_document d
+            JOIN auto_stock_supplier_return_acceptance a ON a.document_id=d.id
+            WHERE d.source_receipt_id IN (%s,%s) GROUP BY d.source_receipt_id""",
+            (receipt,other)).fetchall()
+        assert {x[0]:x[1:] for x in rows}=={receipt:(3,3750,601),other:(1,2000,199)}
+        assert db.execute("""SELECT count(*) FROM auto_stock_supplier_return_document
+                             WHERE source_receipt_id=%s""",(receipt,)).fetchone()==(3,)
+        assert db.execute("""SELECT count(*) FROM auto_stock_lot_disposition
+                             WHERE lot_id=%s AND action='SUPPLIER_RETURN'""",(lot,)).fetchone()==(3,)
