@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from datetime import datetime,timedelta,timezone
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 import psycopg
@@ -246,12 +247,15 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
     import csv,io
     from hashlib import sha256
     # Derive the local date from actual immutable rows, avoiding midnight CI races.
-    first_day=min(x["createdAt"][:10] for x in fp["items"]+rest.json()["items"])
-    day=max(x["createdAt"][:10] for x in fp["items"]+rest.json()["items"])
+    zone=ZoneInfo("Europe/Berlin")  # _fixture configures this branch explicitly.
+    local_days=[datetime.fromisoformat(x["createdAt"]).astimezone(zone).date().isoformat()
+                for x in fp["items"]+rest.json()["items"]]
+    first_day=min(local_days)
+    day=max(local_days)
     filters={"ownerId":str(d["intake"]),"fromDay":first_day,"toDay":day,"sourceCode":"WALK_IN"}
     period=http.get(search,params=filters)
     assert period.status_code==200,period.text
-    assert period.json()["ownerId"]==str(d["intake"]) and period.json()["timeZone"]=="UTC"
+    assert period.json()["ownerId"]==str(d["intake"]) and period.json()["timeZone"]=="Europe/Berlin"
     assert period.json()["nextCursor"]
     assert http.get(search,params={**filters,"ownerId":str(d["manager"]),
         "cursor":period.json()["nextCursor"]}).status_code==422
@@ -392,3 +396,37 @@ def test_repeat_lead_cycle_after_terminal_keeps_history_and_rejects_concurrent_d
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
     assert http.post(base,headers=h,json={**first,"requestKey":str(key)}).status_code==403
     assert http.get(base).json()["items"]==[]
+
+
+@pytest.mark.parametrize("day,start,end",[
+    ("2030-03-31","2030-03-30T23:00:00+00:00","2030-03-31T22:00:00+00:00"),
+    ("2030-10-27","2030-10-26T22:00:00+00:00","2030-10-27T23:00:00+00:00"),
+])
+def test_lead_search_and_export_local_dst_boundaries(monkeypatch,day,start,end):
+    from test_pg_auto_crm_funnel_http import new_link
+    import csv,io
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    start,end=datetime.fromisoformat(start),datetime.fromisoformat(end)
+    assert (end-start).total_seconds() in (23*3600,25*3600)
+    instants=(start-timedelta(seconds=1),start,end-timedelta(seconds=1),end)
+    ids=[]
+    with psycopg.connect(DSN) as db:
+        for instant in instants:
+            ident=uuid4(); ids.append(str(ident))
+            link=new_link(db,d,loc)
+            db.execute("""INSERT INTO auto_crm_lead
+              (id,organization_id,location_id,customer_link_id,owner_id,source_code,request_key,created_at)
+              VALUES(%s,%s,%s,%s,%s,'WEB',%s,%s)""",
+              (ident,org,loc,link,d["intake"],uuid4(),instant))
+    search=url(org,loc).replace("/leads","/lead-search")
+    query={"fromDay":day,"toDay":day,"ownerId":str(d["intake"])}
+    for actor in (d["intake"],d["manager"]):
+        session(http,d,actor)
+        page=http.get(search,params=query)
+        assert page.status_code==200,page.text
+        assert page.json()["timeZone"]=="Europe/Berlin"
+        assert [x["leadId"] for x in page.json()["items"]]==[ids[2],ids[1]]
+        result=http.get(search+"/export",params=query)
+        assert result.status_code==200,result.text
+        assert result.headers["x-crm-row-count"]=="2"
+        assert [x["leadId"] for x in csv.DictReader(io.StringIO(result.content.decode("utf-8-sig")))]==[ids[2],ids[1]]

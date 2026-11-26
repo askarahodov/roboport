@@ -662,15 +662,16 @@ test('CRM owner and period export validates digest and revocation',async({page})
   const {createHash}=await import('node:crypto');
   const bytes=Buffer.from('\ufeffleadId,customerLinkId,ownerId,sourceCode,status,createdAt,visitNumber\r\n'+
     [lead,link,owner,'WEB','NEW','2030-01-01T10:00:00Z','1'].join(',')+'\r\n');
-  let denied=false,corrupt=true;
-  await page.route('**/crm/lead-search*',r=>{
+  let denied=false,corrupt=true,exportReads=0;
+  // A single-star glob cannot cross the /export path separator.
+  await page.route(/\/crm\/lead-search(?:\/export)?\?/,r=>{
     const u=new URL(r.request().url());
     expect(u.searchParams.get('ownerId')).toBe(owner);
     expect(u.searchParams.get('fromDay')).toBe('2030-01-01');
     expect(u.searchParams.get('toDay')).toBe('2030-01-02');
-    if(u.pathname.endsWith('/export'))return r.fulfill({status:denied?403:200,body:bytes,
+    if(u.pathname.endsWith('/export')){exportReads++;return r.fulfill({status:denied?403:200,body:bytes,
       headers:{'Content-Type':'text/csv','X-CRM-SHA256':corrupt?'0'.repeat(64):createHash('sha256').update(bytes).digest('hex'),
-        'X-CRM-Row-Count':'1'}});
+        'X-CRM-Row-Count':'1'}});}
     return r.fulfill({json:{syntheticOnly:true,organizationId:org,locationId:loc,customerLinkId:null,
       sourceCode:'ALL',stageCode:'ALL',ownerId:owner,fromDay:'2030-01-01',toDay:'2030-01-02',timeZone:'Europe/Berlin',
       items:[{leadId:lead,customerLinkId:link,ownerId:owner,sourceCode:'WEB',status:'NEW',visitNumber:1,createdAt:'2030-01-01T10:00:00Z'}],nextCursor:null}});
@@ -687,10 +688,12 @@ test('CRM owner and period export validates digest and revocation',async({page})
   await expect(panel).toContainText('Europe/Berlin');
   const button=panel.getByRole('button',{name:'Скачать все найденные обращения (CSV)'});
   await button.click();await expect(panel).toContainText('Выгрузка не подтверждена');
+  expect(exportReads).toBe(1);
   corrupt=false;
   const download=page.waitForEvent('download');await button.click();
   expect((await download).suggestedFilename()).toBe('synthetic-crm-leads.csv');
   await expect(panel).toContainText('Выгружено обращений: 1');
   denied=true;await button.click();
   await expect(panel).toHaveCount(0);
+  expect(exportReads).toBe(3);
 });
