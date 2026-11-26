@@ -12,6 +12,7 @@ from test_pg_baseline import DSN
 from test_pg_auto_work_order_estimate_http import scenario,api,token,path as estimate_path
 from test_pg_auto_stock_ledger import sku,record,balance
 from test_pg_auto_order_service_http import scenario as order_scenario
+from test_pg_auto_work_tariffs_http import validate_pricing_response
 
 
 def setup(monkeypatch):
@@ -46,27 +47,35 @@ def complex_body(extra,part,consumable,key=None,code="SYN-COMPLEX"):
 def test_full_complex_catalog_atomic_stock_and_customer_material_quote(monkeypatch):
     d,org,loc,order,base_svc,extra,part,consumable,http=setup(monkeypatch)
     catalog,selected=paths(org,loc,order)
-    assert http.get(catalog).status_code==403
+    validate_pricing_response(http.get(catalog), "Error", 403)
     manager=token(http,d,d["intake"])
-    assert http.get(catalog).json()["items"]==[]
+    assert validate_pricing_response(http.get(catalog), "ComplexCatalog", 200).json()["items"]==[]
     key=uuid4()
     payload=complex_body(extra,part,consumable,key=key)
     assert http.post(catalog,json=payload).status_code==403
+    # Несуществующий филиал в действующей организации не должен давать 500.
+    foreign_catalog=catalog.replace(str(loc),str(uuid4()))
+    denied=validate_pricing_response(http.post(foreign_catalog,headers=manager,json=payload), "Error", 403)
+    assert denied.json()["code"]=="FORBIDDEN"
     created=http.post(catalog,headers=manager,json=payload)
-    assert created.status_code==201,created.text
+    validate_pricing_response(created, "ComplexMutation", 201)
     ident=created.json()["complex"]["id"]
     assert created.json()["complex"]["materials"][0]["itemKind"] in ("PART","CONSUMABLE")
-    assert http.post(catalog,headers=manager,json=payload).json()["replayed"] is True
+    assert validate_pricing_response(http.post(catalog,headers=manager,json=payload),
+                                     "ComplexMutation", 200).json()["replayed"] is True
     assert http.post(catalog,headers=manager,json={
         **payload,"title":"Tampered"}).status_code==409
-    assert http.get(catalog).json()["items"][0]["id"]==ident
+    assert validate_pricing_response(http.get(catalog), "ComplexCatalog", 200).json()["items"][0]["id"]==ident
+    assert validate_pricing_response(http.get(selected), "Selections", 200).json()["items"]==[]
     selection_key=uuid4()
     selected_body={"complexId":ident,"requestKey":str(selection_key)}
     assert http.post(selected,json=selected_body).status_code==403
     bound=http.post(selected,headers=manager,json=selected_body)
-    assert bound.status_code==201,bound.text
+    validate_pricing_response(bound, "SelectionMutation", 201)
+    validate_pricing_response(http.get(selected), "Selections", 200)
     assert len(bound.json()["items"][0]["materialReceipts"])==2
-    assert http.post(selected,headers=manager,json=selected_body).json()["replayed"] is True
+    assert validate_pricing_response(http.post(selected,headers=manager,json=selected_body),
+                                     "SelectionMutation", 200).json()["replayed"] is True
     assert http.post(selected,headers=manager,json={
         "complexId":str(uuid4()),"requestKey":str(selection_key)}).status_code==409
     assert http.post(selected,headers=manager,json={

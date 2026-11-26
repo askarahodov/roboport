@@ -127,9 +127,9 @@ def create_complex(conn,token,org,loc,*,request_key,code,title,services,material
         # take branch SHARE, avoiding two concurrent SHARE→UPDATE upgrades.
         try:
             _org_policy_lock(conn,org)
+            _branch_lock(conn,org,loc)
         except TariffDenied:
             raise ComplexDenied("FORBIDDEN") from None
-        _branch_lock(conn,org,loc)
         actor=_scope(conn,token,org,loc)
         _priced_scope(conn,token,org,loc,"CREATE")
         prior=conn.execute("""

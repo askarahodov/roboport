@@ -14,6 +14,20 @@ from test_pg_auto_stock_service import grant
 from test_pg_baseline import DSN
 
 
+
+def validate_pricing_response(response, schema, status):
+    """Проверяем фактический HTTP DTO, а не только образец JSON."""
+    from pathlib import Path
+    from jsonschema import Draft202012Validator, FormatChecker
+    spec = json.loads((Path(__file__).resolve().parents[2] /
+                       "contracts/auto-work-pricing-dev-openapi.json").read_text(encoding="utf-8"))
+    assert response.status_code == status, response.text
+    assert response.headers["cache-control"] == "no-store"
+    Draft202012Validator({**spec, "$ref": "#/components/schemas/" + schema},
+                         format_checker=FormatChecker()).validate(response.json())
+    return response
+
+
 def setup(monkeypatch):
     d,org,loc,order,service,foreign,_=scenario()
     http=api(monkeypatch)
@@ -36,18 +50,19 @@ def test_branch_tariffs_need_independent_approval_and_enforce_quote(monkeypatch)
     d,org,loc,order,service,foreign,http=setup(monkeypatch)
     policies=policy_url(org,loc)
     quote=estimate_path(org,loc,order)
-    assert http.get(policies).status_code==403
+    validate_pricing_response(http.get(policies), "Error", 403)
     proposer=token(http,d,d["intake"])
-    assert http.get(policies).json()["items"]==[]
+    assert validate_pricing_response(http.get(policies), "TariffState", 200).json()["items"]==[]
     body=proposal(key=uuid4())
     assert http.post(policies,json=body).status_code==403
     assert http.post(policies,headers=proposer,json={
         **body,"rateMinorPerHour":-1}).status_code==422
     first=http.post(policies,headers=proposer,json=body)
-    assert first.status_code==201,first.text
+    validate_pricing_response(first, "TariffMutation", 201)
     row=first.json()["items"][0]
     assert row["version"]==1 and row["approvedBy"] is None
-    assert http.post(policies,headers=proposer,json=body).json()["replayed"] is True
+    assert validate_pricing_response(http.post(policies,headers=proposer,json=body),
+                                     "TariffMutation", 200).json()["replayed"] is True
     assert http.post(policies,headers=proposer,json={
         **body,"rateMinorPerHour":10002}).status_code==409
     assert http.post(policies,headers=proposer,json=proposal(version=1)
@@ -58,10 +73,10 @@ def test_branch_tariffs_need_independent_approval_and_enforce_quote(monkeypatch)
     approve_key=uuid4()
     accepted=http.post(policies+"/"+row["id"]+"/approve",
         headers=checker,json={"requestKey":str(approve_key)})
-    assert accepted.status_code==201,accepted.text
+    validate_pricing_response(accepted, "TariffMutation", 201)
     assert accepted.json()["active"]["MASTER"]["id"]==row["id"]
-    assert http.post(policies+"/"+row["id"]+"/approve",
-        headers=checker,json={"requestKey":str(approve_key)}).json()["replayed"] is True
+    assert validate_pricing_response(http.post(policies+"/"+row["id"]+"/approve",
+        headers=checker,json={"requestKey":str(approve_key)}), "TariffMutation", 200).json()["replayed"] is True
 
     proposer=token(http,d,d["intake"])
     # Once governed, arbitrary manual prices and unapproved rate/discount are forbidden.
