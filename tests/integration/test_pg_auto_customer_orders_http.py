@@ -1,6 +1,9 @@
 """PG17 contract: customer sees original customer-linked WorkOrders, not new owner's history."""
 from datetime import datetime,timedelta,timezone
 from uuid import uuid4
+import json
+from pathlib import Path
+from jsonschema import Draft202012Validator,FormatChecker
 import psycopg
 from fastapi.testclient import TestClient
 from roboport_api.main import app
@@ -16,6 +19,15 @@ from test_pg_auto_demo_close_http import ready as finished_scenario
 
 
 PREFIX="/api/v1/dev/auto/customer/orders"
+SPEC=json.loads((Path(__file__).resolve().parents[2]/"contracts/auto-customer-orders-dev-openapi.json").read_text(encoding="utf-8"))
+
+
+def contract(response,name,status):
+    assert response.status_code==status,response.text
+    assert response.headers["cache-control"]=="no-store"
+    Draft202012Validator({**SPEC,"$ref":"#/components/schemas/"+name},
+                         format_checker=FormatChecker()).validate(response.json())
+    return response.json()
 
 
 def client(monkeypatch):
@@ -32,15 +44,15 @@ def login(http,d,user):
 def test_exact_customer_link_prevents_new_owner_from_inheriting_old_work_order(monkeypatch):
     d,org,loc,order,service,_,_=estimate_scenario()
     http=client(monkeypatch)
-    assert http.get(PREFIX).status_code==401
+    contract(http.get(PREFIX),"Error",401)
     login(http,d,d["manager"])
-    assert http.get(PREFIX).status_code==403
+    contract(http.get(PREFIX),"Error",403)
     login(http,d,d["client_b"])
-    assert http.get(PREFIX).json()["items"]==[]
-    assert http.get(PREFIX+"/"+str(order)).status_code==404
+    assert contract(http.get(PREFIX),"Page",200)["items"]==[]
+    contract(http.get(PREFIX+"/"+str(order)),"NotFound",404)
     login(http,d,d["client_a"])
     response=http.get(PREFIX)
-    assert response.status_code==200,response.text
+    contract(response,"Page",200)
     assert response.headers["cache-control"]=="no-store"
     assert response.json()["syntheticOnly"] is True
     assert response.json()["releaseAllowed"] is False
@@ -52,7 +64,7 @@ def test_exact_customer_link_prevents_new_owner_from_inheriting_old_work_order(m
     assert "customerId" not in str(response.json())
     assert "vin" not in listed["vehicle"]
     detail=http.get(PREFIX+"/"+str(order))
-    assert detail.status_code==200,detail.text
+    contract(detail,"Detail",200)
     assert detail.json()["estimates"]==[]
     assert detail.json()["inspection"] is None
     assert detail.json()["document"] is None
@@ -86,8 +98,7 @@ def test_quote_timeline_consent_document_and_live_revocations(monkeypatch):
     http=client(monkeypatch)
     login(http,d,d["client_a"])
     view=http.get(PREFIX+"/"+str(order))
-    assert view.status_code==200,view.text
-    payload=view.json()
+    payload=contract(view,"Detail",200)
     assert payload["estimates"][-1]["version"]==1
     assert payload["estimates"][-1]["decision"]=="APPROVED"
     assert payload["canDecide"] is False
@@ -144,8 +155,8 @@ def test_unapproved_quote_and_changed_booking_are_visible_only_to_bound_customer
                                      "requestKey":str(uuid4()),"decision":"APPROVED"},
              headers={"Origin":"https://127.0.0.1",
                       "X-CSRF-Token":d["csrf"][d["client_a"]]})
-    assert response.status_code==201,response.text
-    assert http.get(PREFIX+"/"+str(order)).json()["canDecide"] is False
+    contract(response,"MutationReceipt",201)
+    assert contract(http.get(PREFIX+"/"+str(order)),"Detail",200)["canDecide"] is False
     with psycopg.connect(DSN) as db:
         cancel_appointment(db,d["tokens"][d["intake"]],org,appt)
     after=http.get(PREFIX+"/"+str(order)).json()
@@ -173,7 +184,7 @@ def test_keyset_cursor_bound_to_session_and_revalidates_current_acl(monkeypatch)
     assert len(page2.json()["items"])==10
     assert not set(i["id"] for i in page1.json()["items"]).intersection(
         i["id"] for i in page2.json()["items"])
-    assert http.get(PREFIX+"?limit=0").status_code==422
+    contract(http.get(PREFIX+"?limit=0"),"Error",422)
     assert http.get(PREFIX+"?limit=10&limit=20").status_code==422
     assert http.get(PREFIX,params={"cursor":"xyz"}).status_code==422
     assert http.get(PREFIX+"?cursor=abc&cursor=abc").status_code==422

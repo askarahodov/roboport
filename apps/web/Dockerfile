@@ -9,6 +9,7 @@ COPY apps/web/ ./
 COPY design /design
 # Генератор из /app читает ../../contracts; в образе это /contracts.
 COPY contracts/auto-dev-openapi.yaml /contracts/auto-dev-openapi.yaml
+COPY contracts/auto-customer-orders-dev-openapi.json /contracts/auto-customer-orders-dev-openapi.json
 RUN npm run build
 
 FROM nginx:alpine

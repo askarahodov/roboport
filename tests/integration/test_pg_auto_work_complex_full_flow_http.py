@@ -146,6 +146,15 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     assert all(p["policyId"]==policy_id for p in snapshot["tariffs"])
 
     customer=token(http,d,d["client_a"])
+    from pathlib import Path
+    from jsonschema import Draft202012Validator,FormatChecker
+    spec=json.loads((Path(__file__).resolve().parents[2]/"contracts/auto-customer-orders-dev-openapi.json").read_text(encoding="utf-8"))
+    history=http.get("/api/v1/dev/auto/customer/orders/"+str(order))
+    assert history.status_code==200,history.text
+    Draft202012Validator({**spec,"$ref":"#/components/schemas/Detail"},
+        format_checker=FormatChecker()).validate(history.json())
+    assert history.json()["estimates"][-1]==snapshot
+    assert history.json()["canDecide"] is True
     assert http.get(estimate).json()["items"][0]["materialLines"]==snapshot["materialLines"]
     assert http.post(estimate+"/decision",headers=customer,json={
         "requestKey":str(uuid4()),"revisionId":snapshot["id"],
