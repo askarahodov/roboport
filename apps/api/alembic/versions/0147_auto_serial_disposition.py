@@ -100,6 +100,9 @@ def upgrade():
         END IF;
         IF NOT FOUND OR doc.lot_id<>p.lot_id OR doc.quantity<>p.quantity
            OR NOT (NEW.serial_id=ANY(doc.serial_ids)) OR doc.actor<>NEW.actor_id
+           OR EXISTS (SELECT 1 FROM auto_stock_serial_disposition e WHERE e.disposition_id=p.id
+                     AND (e.writeoff_decision_id,e.supplier_acceptance_id)
+                       IS DISTINCT FROM (NEW.writeoff_decision_id,NEW.supplier_acceptance_id))
         THEN RAISE EXCEPTION 'Выбытие не соответствует утверждённому акту'; END IF;
         PERFORM check_auto_serial_disposition_selection(doc.lot_id,doc.receipt,ARRAY[NEW.serial_id]);
         NEW.created_at:=doc.stamp;
@@ -118,13 +121,13 @@ def upgrade():
       BEGIN
         IF TG_TABLE_NAME='auto_stock_writeoff_decision' THEN
           IF NEW.action<>'APPROVE' THEN RETURN NULL; END IF;
-          SELECT lot_id,serial_ids FROM auto_stock_writeoff_document WHERE id=NEW.document_id INTO d;
+          SELECT lot_id,serial_ids INTO d FROM auto_stock_writeoff_document WHERE id=NEW.document_id;
           PERFORM check_auto_serial_disposition_selection(d.lot_id,NULL,d.serial_ids);
           INSERT INTO auto_stock_serial_disposition(serial_id,disposition_id,action,writeoff_decision_id,actor_id)
           SELECT id,NEW.disposition_id,'WRITE_OFF',NEW.id,NEW.actor_id FROM unnest(d.serial_ids) x(id);
         ELSE
-          SELECT lot_id,serial_ids,source_receipt_id FROM auto_stock_supplier_return_document
-            WHERE id=NEW.document_id INTO d;
+          SELECT lot_id,serial_ids,source_receipt_id INTO d FROM auto_stock_supplier_return_document
+            WHERE id=NEW.document_id;
           PERFORM check_auto_serial_disposition_selection(d.lot_id,d.source_receipt_id,d.serial_ids);
           INSERT INTO auto_stock_serial_disposition(serial_id,disposition_id,action,supplier_acceptance_id,actor_id)
           SELECT id,NEW.disposition_id,'SUPPLIER_RETURN',NEW.id,NEW.accepted_by FROM unnest(d.serial_ids) x(id);

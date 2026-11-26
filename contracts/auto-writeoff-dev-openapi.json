@@ -1,0 +1,717 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "БоксРитм — списание запчастей (dev)",
+    "version": "0.1.0-dev",
+    "description": "Synthetic HTTPS loopback; не production. Непустой serialIds соответствует всему quantity, пустой — прежний количественный режим."
+  },
+  "x-synthetic-only": true,
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ],
+  "paths": {
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/writeoffs": {
+      "get": {
+        "operationId": "writeoffWorkspaceDev",
+        "summary": "Журнал актов и доступные партии",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ALL",
+                "PENDING",
+                "APPROVED",
+                "REJECTED",
+                "CANCELED"
+              ]
+            },
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "required": false
+          },
+          {
+            "name": "lotCursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Разрешённые акты и партии",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет полномочий или CSRF"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "409": {
+            "description": "Конфликт ключа, состояния или остатка"
+          },
+          "422": {
+            "description": "Недопустимые данные"
+          }
+        }
+      },
+      "post": {
+        "operationId": "writeoffDraftDev",
+        "summary": "Неизменяемый черновик",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Draft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Точный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReceipt"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Создано",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет полномочий или CSRF"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "409": {
+            "description": "Конфликт ключа, состояния или остатка"
+          },
+          "422": {
+            "description": "Недопустимые данные"
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/writeoffs/{document_id}/decisions": {
+      "post": {
+        "operationId": "writeoffDecideDev",
+        "summary": "Независимое решение либо отмена автором",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "document_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Decision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Точный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionReceipt"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Создано",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет полномочий или CSRF"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "409": {
+            "description": "Конфликт ключа, состояния или остатка"
+          },
+          "422": {
+            "description": "Недопустимые данные"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    },
+    "schemas": {
+      "Draft": {
+        "type": "object",
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "reasonCode": {
+            "enum": [
+              "DAMAGED",
+              "EXPIRED",
+              "UNUSABLE",
+              "OTHER"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 240
+          },
+          "serialIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 50,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "locationId",
+          "lotId",
+          "quantity",
+          "reasonCode",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "Decision": {
+        "type": "object",
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "enum": [
+              "APPROVE",
+              "CANCEL",
+              "REJECT"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 240
+          }
+        },
+        "required": [
+          "locationId",
+          "action",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "DraftReceipt": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "syntheticOnly": {
+            "const": true
+          }
+        },
+        "required": [
+          "documentId",
+          "replayed",
+          "syntheticOnly"
+        ],
+        "additionalProperties": false
+      },
+      "DecisionReceipt": {
+        "type": "object",
+        "properties": {
+          "decisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "syntheticOnly": {
+            "const": true
+          }
+        },
+        "required": [
+          "decisionId",
+          "replayed",
+          "syntheticOnly"
+        ],
+        "additionalProperties": false
+      },
+      "Lot": {
+        "type": "object",
+        "properties": {
+          "lotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "article": {
+            "type": "string"
+          },
+          "batchCode": {
+            "type": "string"
+          },
+          "binCode": {
+            "type": "string"
+          },
+          "available": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          }
+        },
+        "required": [
+          "lotId",
+          "article",
+          "batchCode",
+          "binCode",
+          "available"
+        ],
+        "additionalProperties": false
+      },
+      "Entry": {
+        "type": "object",
+        "properties": {
+          "lotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "article": {
+            "type": "string"
+          },
+          "batchCode": {
+            "type": "string"
+          },
+          "binCode": {
+            "type": "string"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "reasonCode": {
+            "enum": [
+              "DAMAGED",
+              "EXPIRED",
+              "UNUSABLE",
+              "OTHER"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 240
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED",
+              "CANCELED"
+            ]
+          },
+          "canReview": {
+            "type": "boolean"
+          },
+          "canCancel": {
+            "type": "boolean"
+          },
+          "serialIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 50,
+            "uniqueItems": true
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 240
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "dispositionId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stockEventId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lotDebitId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "note",
+                  "actorId",
+                  "createdAt",
+                  "dispositionId",
+                  "stockEventId",
+                  "lotDebitId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "lotId",
+          "article",
+          "batchCode",
+          "binCode",
+          "documentId",
+          "quantity",
+          "reasonCode",
+          "note",
+          "createdBy",
+          "createdAt",
+          "status",
+          "canReview",
+          "canCancel",
+          "serialIds",
+          "decision"
+        ],
+        "additionalProperties": false
+      },
+      "Workspace": {
+        "type": "object",
+        "properties": {
+          "syntheticOnly": {
+            "const": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "canDraft": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            }
+          },
+          "lots": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/Lot"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nextLotCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "syntheticOnly",
+          "organizationId",
+          "locationId",
+          "canDraft",
+          "items",
+          "lots",
+          "nextCursor",
+          "nextLotCursor"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

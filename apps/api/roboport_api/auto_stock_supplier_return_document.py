@@ -68,7 +68,7 @@ def draft_supplier_return(conn:psycopg.Connection,token:str,
         # Match the existing approval/ledger serialization key. A new draft
         # cannot claim quantity already returned against this receipt, even
         # when another receipt replenished the same physical lot. Preserve
-        # exact replay; the SQL procedure still checks actor and payload.
+        # exact replay only for the same actor and complete canonical payload.
         conn.execute("SELECT id FROM auto_stock_sku WHERE id=%s FOR UPDATE",(row[1],))
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None: raise AutoStockDenied("FORBIDDEN")
@@ -79,13 +79,12 @@ def draft_supplier_return(conn:psycopg.Connection,token:str,
             if prior[1:]!=(receipt_id,org,loc,quantity,reason,supplier_reference,actor,serials):
                 raise AutoStockConflict("CONFLICT")
             return prior[0]
-        if prior is None:
-            returned=conn.execute("""SELECT COALESCE(sum(d.quantity),0)
-                FROM auto_stock_supplier_return_document d
-                JOIN auto_stock_supplier_return_acceptance a ON a.document_id=d.id
-                WHERE d.source_receipt_id=%s""",(receipt_id,)).fetchone()[0]
-            if returned+quantity>row[2]:
-                raise AutoStockConflict("CONFLICT")
+        returned=conn.execute("""SELECT COALESCE(sum(d.quantity),0)
+            FROM auto_stock_supplier_return_document d
+            JOIN auto_stock_supplier_return_acceptance a ON a.document_id=d.id
+            WHERE d.source_receipt_id=%s""",(receipt_id,)).fetchone()[0]
+        if returned+quantity>row[2]:
+            raise AutoStockConflict("CONFLICT")
         ident=uuid4()
         # Новая колонка включается непосредственно в неизменяемый акт.
         # Исходный trigger проверяет accepted/valued receipt и устанавливает actor.

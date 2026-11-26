@@ -25,13 +25,14 @@ def test_serial_disposition_full_lifecycle(monkeypatch):
     d=_scenario()
     warehouse,manager=d["intake"],d["manager"]
     with psycopg.connect(DSN) as db:
-        org,loc,sku,lot,receipt=setup_receipt(db,d,3)
+        org,loc,sku,lot,receipt=setup_receipt(db,d,4)
         value(db,d,org,loc,receipt,vat=601)
         serials=[register_lot_serial(db,d["tokens"][warehouse],org,loc,lot,uuid4(),
-                    "SYN-"+uuid4().hex) for _ in range(3)]
-        asserted=provenance.propose(db,d["tokens"][warehouse],org,loc,serials[0],receipt,uuid4())
-        provenance.approve(db,d["tokens"][manager],org,loc,UUID(asserted["assertionId"]),uuid4())
-    s1,s2,s3=map(str,serials)
+                    "SYN-"+uuid4().hex) for _ in range(4)]
+        for serial in (serials[0],serials[2]):
+            asserted=provenance.propose(db,d["tokens"][warehouse],org,loc,serial,receipt,uuid4())
+            provenance.approve(db,d["tokens"][manager],org,loc,UUID(asserted["assertionId"]),uuid4())
+    s1,s2,s3,s4=map(str,serials)
     root=f"/api/v1/dev/auto/organizations/{org}/warehouse"
     sr=root+"/supplier-returns"
     wo=root+"/writeoffs"
@@ -44,6 +45,18 @@ def test_serial_disposition_full_lifecycle(monkeypatch):
         assert post(http,d,warehouse,sr,{**supplier,"quantity":2,"serialIds":[s1,s1]}).status_code==422
         assert post(http,d,warehouse,wo,{**writeoff,"serialIds":[str(uuid4())]}).status_code==409
         assert post(http,d,warehouse,wo,writeoff,csrf=False).status_code==403
+        # Детерминированно проверяем именно возврат поставщику до гонки.
+        separate=post(http,d,warehouse,sr,{**supplier,"serialIds":[s3]})
+        assert separate.status_code==201,separate.text
+        separate_payload={**scope,"documentId":separate.json()["documentId"]}
+        separate_key=uuid4()
+        accepted=post(http,d,manager,sr+"/approvals",separate_payload,separate_key)
+        assert accepted.status_code==201,accepted.text
+        assert post(http,d,manager,sr+"/approvals",separate_payload,separate_key).json()==accepted.json()
+        with psycopg.connect(DSN) as db:
+            assert allocated(db,lot)==3 and balance(db,sku)==(4,0)
+            assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",(serials[2],)).fetchone()==("SUPPLIER_RETURNED",)
+            assert db.execute("SELECT purchase_net_attributed_minor,purchase_vat_attributed_minor FROM auto_stock_supplier_return_acceptance WHERE id=%s",(accepted.json()["approvalId"],)).fetchone()==(1250,150)
         key=uuid4()
         created=post(http,d,warehouse,sr,supplier,key)
         assert created.status_code==201,created.text
@@ -61,7 +74,13 @@ def test_serial_disposition_full_lifecycle(monkeypatch):
         assert actual.status_code==201,actual.text
         http.cookies.set("rp_session",d["tokens"][manager])
         assert http.get(sr+"/pending",params=scope).json()["items"][0]["serialIds"]==[s1]
-        assert any(x["serialIds"]==[s2] for x in http.get(wo,params=scope).json()["items"])
+        snapshot=http.get(wo,params=scope).json()
+        assert any(x["serialIds"]==[s2] for x in snapshot["items"])
+        import json
+        from pathlib import Path
+        from jsonschema import Draft202012Validator,FormatChecker
+        spec=json.loads((Path(__file__).resolve().parents[2]/"contracts/auto-writeoff-dev-openapi.json").read_text(encoding="utf-8"))
+        Draft202012Validator({**spec,"$ref":"#/components/schemas/Workspace"},format_checker=FormatChecker()).validate(snapshot)
         approve={**scope,"documentId":document}
         assert post(http,d,warehouse,sr+"/approvals",approve).status_code==403
         barrier=Barrier(2)
@@ -83,7 +102,7 @@ def test_serial_disposition_full_lifecycle(monkeypatch):
             assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",(serials[1],)).fetchone()==("IN_STOCK",)
             assert db.execute("SELECT count(*) FROM auto_stock_serial_disposition WHERE serial_id=%s",(serials[0],)).fetchone()==(1,)
             if results[0].status_code==201:
-                assert db.execute("SELECT purchase_net_attributed_minor,purchase_vat_attributed_minor FROM auto_stock_supplier_return_acceptance WHERE document_id=%s",(document,)).fetchone()==(1250,200)
+                assert db.execute("SELECT purchase_net_attributed_minor,purchase_vat_attributed_minor FROM auto_stock_supplier_return_acceptance WHERE document_id=%s",(document,)).fetchone()==(1250,150)
             with pytest.raises(psycopg.errors.RaiseException):
                 with db.transaction():
                     db.execute("DELETE FROM auto_stock_serial_disposition WHERE serial_id=%s",(serials[0],))
@@ -100,6 +119,8 @@ def test_serial_disposition_full_lifecycle(monkeypatch):
         with psycopg.connect(DSN) as db:
             assert allocated(db,lot)==1 and balance(db,sku)==(2,0)
             assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",(serials[1],)).fetchone()==("WRITTEN_OFF",)
-            assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",(serials[2],)).fetchone()==("IN_STOCK",)
+            assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",(serials[2],)).fetchone()==("SUPPLIER_RETURNED",)
+            assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",(serials[3],)).fetchone()==("IN_STOCK",)
             db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE organization_id=%s AND user_id=%s AND role_code='MANAGER'",(org,manager))
         assert post(http,d,manager,target,payload,approval_key).status_code==403
+        assert post(http,d,manager,sr+"/approvals",separate_payload,separate_key).status_code==403
