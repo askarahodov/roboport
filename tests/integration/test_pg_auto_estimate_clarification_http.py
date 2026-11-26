@@ -46,6 +46,18 @@ def test_two_role_ask_answer_requote_and_client_decision(monkeypatch):
     assert questioned.json()["items"][-1]["clarificationReason"]=="PRICE"
     assert questioned.json()["items"][-1]["clarificationResolution"] is None
     assert questioned.headers["cache-control"]=="no-store"
+    history="/api/v1/dev/auto/customer/orders/"+str(order)
+    import json
+    from pathlib import Path
+    from jsonschema import Draft202012Validator,FormatChecker
+    spec=json.loads((Path(__file__).resolve().parents[2]/"contracts/auto-customer-orders-dev-openapi.json").read_text(encoding="utf-8"))
+    def validate(name,body):
+        return Draft202012Validator({**spec,"$ref":"#/components/schemas/"+name},
+                                   format_checker=FormatChecker()).is_valid(body)
+    assert validate("MutationReceipt",questioned.json())
+    blocked_history=client.get(history)
+    assert blocked_history.status_code==200 and validate("Detail",blocked_history.json())
+    assert blocked_history.json()["canDecide"] is False
     assert ask(client,url,rev,headers=customer,key=key).status_code==200
     assert ask(client,url,rev,headers=customer,key=key,reason="TIMING").status_code==409
     assert ask(client,url,rev,headers=customer).status_code==409
@@ -67,6 +79,7 @@ def test_two_role_ask_answer_requote_and_client_decision(monkeypatch):
     assert answer(client,url,rev,"EXPLAINED",headers=manager,key=reply_key).status_code==409
     # Still cannot approve the old version: manager must actually issue a new one.
     customer=token(client,d,d["client_a"])
+    assert client.get(history).json()["canDecide"] is False
     assert client.post(url+"/decision",headers=customer,json={
         "revisionId":rev,"requestKey":str(uuid4()),"decision":"APPROVED"
     }).status_code==409
@@ -77,6 +90,7 @@ def test_two_role_ask_answer_requote_and_client_decision(monkeypatch):
     new_revision=updated.json()["items"][-1]["id"]
     assert updated.json()["latestVersion"]==2
     customer=token(client,d,d["client_a"])
+    assert client.get(history).json()["canDecide"] is True
     assert ask(client,url,rev,headers=customer).status_code==409
     decision=client.post(url+"/decision",headers=customer,json={
         "revisionId":new_revision,"requestKey":str(uuid4()),"decision":"APPROVED"})

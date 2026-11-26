@@ -9,9 +9,12 @@ const service='55555555-5555-4555-8555-555555555555';
 const stamp='2030-01-01T10:00:00Z';
 type Quote={id:string;version:number;currency:'RUB';totalMinor:number;
   digest:string;decision:'APPROVED'|'DECLINED'|null;createdAt:string;decidedAt:string|null;
-  lines:{serviceId:string;code:string;title:string;durationMinutes:number;amountMinor:number}[]};
+  lines:{serviceId:string;code:string;title:string;durationMinutes:number;amountMinor:number}[];
+  diagnostics:unknown[];tariffs:unknown[];materialLines:unknown[];
+  clarificationId:string|null;clarificationReason:string|null;clarificationResolution:string|null};
 const quote:Quote={id:revision,version:1,currency:'RUB',totalMinor:12500,
   digest:'a'.repeat(64),decision:null,createdAt:stamp,decidedAt:null,
+  diagnostics:[],tariffs:[],materialLines:[],clarificationId:null,clarificationReason:null,clarificationResolution:null,
   lines:[{serviceId:service,code:'SYN-SVC',title:'Синтетическая диагностика',
     durationMinutes:30,amountMinor:12500}]};
 const card={id:order,organizationId:organization,locationId:location,
@@ -19,8 +22,8 @@ const card={id:order,organizationId:organization,locationId:location,
   vehicle:{make:'Synthetic',model:'Sedan',modelYear:2026,vinLast4:'6543'},
   appointment:{startsAt:stamp,endsAt:'2030-01-01T11:00:00Z',status:'SCHEDULED'}};
 function detail(decision:'APPROVED'|'DECLINED'|null=null){
-  return {...card,estimates:[{...quote,decision}],latestVersion:1,
-    inspection:{odometerKm:20000,fuelPercent:65,tyresOk:true,lightsOk:true,
+  return {...card,estimates:[{...quote,decision,decidedAt:decision?stamp:null}],latestVersion:1,
+    inspection:{id:'88888888-8888-4888-8888-888888888888',odometerKm:20000,fuelPercent:65,tyresOk:true,lightsOk:true,
       fluidLeak:false,exteriorCode:'CLEAR',createdAt:stamp},
     qcStatus:decision==='APPROVED'?'QC_PASSED':'PENDING_QC',
     workStatus:decision==='APPROVED'?'QC_ACCEPTED':'NOT_APPROVED',
@@ -63,7 +66,8 @@ test('authenticated 390/1280 customer discovers own order, reviews quote and app
     expect(data.requestKey).toMatch(/^[0-9a-f-]{36}$/);
     approved=true;calls.push('consent');
     return route.fulfill({status:201,contentType:'application/json',
-      body:JSON.stringify({ok:true})});
+      body:JSON.stringify({ok:true,replayed:false,items:detail('APPROVED').estimates,
+        latestVersion:1,syntheticOnly:true,releaseAllowed:false})});
   });
   await page.setViewportSize({width:390,height:844});
   await page.goto('/account/auto-orders');
@@ -316,4 +320,74 @@ test('customer answers own survey, verifies receipt and loses access on revoke',
   await section.getByRole('button',{name:'Обновить опрос'}).click();
   await expect(section).toHaveCount(0);
   await expect(page.getByText('Оценка: 4 из 5.',{exact:false})).toHaveCount(0);
+});
+
+
+test('полная смета с материалами и уточнением: решение только после разъяснения',async({page})=>{
+  await auth(page);
+  let asked=false,explained=false,lost=true,approved=false;
+  const requests:string[]=[];
+  const material={selectionId:revision,skuId:service,article:'SYN-FILTER',itemKind:'PART',
+    quantity:2,unitPriceMinor:800,amountMinor:1600};
+  const consumable={...material,article:'SYN-OIL',itemKind:'CONSUMABLE',quantity:1,unitPriceMinor:0,amountMinor:0};
+  function current(){
+    const state=detail(approved?'APPROVED':null);
+    return {...state,canDecide:!approved&&(!asked||explained),estimates:[{...state.estimates[0],
+      totalMinor:14100,materialLines:[material,consumable],
+      diagnostics:[{serviceId:service,findingCode:'FAULT_CONFIRMED',severityCode:'SOON'}],
+      clarificationId:asked?'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa':null,
+      clarificationReason:asked?'PRICE':null,clarificationResolution:explained?'EXPLAINED':null}]};
+  }
+  await page.route('**/api/v1/dev/auto/customer/orders?*',r=>r.fulfill({status:200,
+    contentType:'application/json',body:JSON.stringify({items:[card],nextCursor:null,syntheticOnly:true,releaseAllowed:false})}));
+  await page.route('**/api/v1/dev/auto/customer/orders/'+order,r=>r.fulfill({status:200,contentType:'application/json',body:JSON.stringify(current())}));
+  await page.route('**/api/v1/auth/csrf',r=>r.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"mock"}'}));
+  await page.route('**/estimates/clarification',r=>{
+    requests.push(r.request().postData()??'');expect(r.request().postDataJSON()).toMatchObject({revisionId:revision,reasonCode:'PRICE'});
+    asked=true;if(lost){lost=false;return r.abort('failed');}
+    return r.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      ok:true,replayed:true,items:current().estimates,latestVersion:1,syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.route('**/estimates/decision',r=>{
+    expect(r.request().postDataJSON()).toMatchObject({revisionId:revision,decision:'APPROVED'});
+    approved=true;return r.fulfill({status:201,contentType:'application/json',body:JSON.stringify({
+      ok:true,replayed:false,items:current().estimates,latestVersion:1,syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/auto-orders');
+  await page.getByRole('button',{name:'Подробнее о заказе '+order}).click();
+  await expect(page.getByText('Версия 1: 14100 коп. (RUB)')).toBeVisible();
+  await expect(page.getByText('SYN-FILTER · Запчасть · 2 ед. × 800 коп. = 1600 коп.')).toBeVisible();
+  await expect(page.getByText('SYN-OIL · Расходный материал · 1 ед. × 0 коп. = 0 коп.')).toBeVisible();
+  await expect(page.getByText('Неисправность подтверждена · В ближайшее время')).toBeVisible();
+  await page.getByRole('button',{name:'Запросить уточнение последней версии'}).click();
+  await expect(page.getByText('Неизвестный результат.',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Повторить то же уточнение'}).click();
+  await expect(page.getByRole('button',{name:'Подробнее о заказе '+order})).toBeVisible();
+  await expect(page.getByText('Ожидается ответ управляющего',{exact:false})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Согласовать последнюю версию'})).toHaveCount(0);
+  expect(requests).toHaveLength(2);expect(requests[0]).toBe(requests[1]);
+  explained=true;
+  await page.getByRole('button',{name:'Обновить заказ-наряды'}).click();
+  await expect(page.getByText('Получено разъяснение',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Согласовать последнюю версию'}).click();
+  await expect(page.getByText('Решение: APPROVED')).toBeVisible();
+});
+
+test('аномальный DTO не предлагает согласование и не раскрывает лишние поля',async({page})=>{
+  await auth(page);
+  let raw:unknown={...detail(),estimates:[{...quote,totalMinor:1}]};
+  await page.route('**/api/v1/dev/auto/customer/orders?*',r=>r.fulfill({status:200,
+    contentType:'application/json',body:JSON.stringify({items:[card],nextCursor:null,syntheticOnly:true,releaseAllowed:false})}));
+  await page.route('**/api/v1/dev/auto/customer/orders/'+order,r=>r.fulfill({status:200,
+    contentType:'application/json',body:JSON.stringify(raw)}));
+  await page.goto('/account/auto-orders');
+  await page.getByRole('button',{name:'Подробнее о заказе '+order}).click();
+  await expect(page.getByText('Не удалось прочитать карточку. Обновите список.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Согласовать последнюю версию'})).toHaveCount(0);
+  raw={...detail(),organizationId:'99999999-9999-4999-8999-999999999999',vin:'SYNTHETIC-PRIVATE'};
+  await page.getByRole('button',{name:'Обновить заказ-наряды'}).click();
+  await expect(page.getByText('Не удалось прочитать карточку. Обновите список.')).toBeVisible();
+  await expect(page.getByText('SYNTHETIC-PRIVATE')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Согласовать последнюю версию'})).toHaveCount(0);
 });
