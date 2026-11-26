@@ -8,6 +8,7 @@ from openapi_spec_validator import validate_spec
 from roboport_api.main import app
 from roboport_api.auto_appointment_http import router as staff_router
 from roboport_api.auto_customer_booking_http import router as customer_router
+from roboport_api.auto_opening_hours_http import router as opening_router
 
 SPEC=json.loads((Path(__file__).resolve().parents[2] /
                  "contracts/auto-booking-dev-openapi.json").read_text(encoding="utf-8"))
@@ -23,7 +24,7 @@ def test_booking_contract_routes_private_and_complete():
     validate_spec(SPEC)
     assert SPEC["x-synthetic-only"] is True
     assert SPEC["servers"]==[{"url":"https://127.0.0.1"}]
-    actual={(route.path,method.lower()) for router in (staff_router,customer_router)
+    actual={(route.path,method.lower()) for router in (staff_router,customer_router,opening_router)
             for route in router.routes for method in route.methods}
     declared={(path,method) for path,operations in SPEC["paths"].items()
               for method in operations}
@@ -61,3 +62,23 @@ def test_booking_contract_bounds_and_no_private_fields():
     customer["organizationId"]=ID
     assert validator("CustomerCreate").is_valid(customer)
     assert not validator("CustomerCreate").is_valid({**customer,"employeeId":ID})
+
+
+def test_opening_hours_contract_bounds_and_read_write_shapes():
+    window={"weekday":1,"opensMinute":0,"closesMinute":1440}
+    body={"expectedVersion":0,"windows":[window]}
+    assert validator("OpeningUpdate").is_valid(body)
+    assert not validator("OpeningUpdate").is_valid({**body,"expectedVersion":True})
+    assert not validator("OpeningUpdate").is_valid({**body,"windows":[window,window]})
+    assert not validator("OpeningUpdate").is_valid({**body,"closedDates":["2030-02-30"]})
+    assert not validator("OpeningUpdate").is_valid({**body,"closedDates":["2030-01-01"]*2})
+    assert not validator("OpeningWindow").is_valid({**window,"closesMinute":1441})
+    state={"configured":False,"version":0,"windows":[],"closedDates":[],
+           "timeZone":"Europe/Berlin","syntheticOnly":True}
+    assert validator("OpeningState").is_valid(state)
+    assert not validator("OpeningState").is_valid({**state,"version":1})
+    assert not validator("OpeningState").is_valid({**state,"windows":[window]})
+    saved={k:v for k,v in state.items() if k!="timeZone"}
+    saved.update(configured=True,version=1,windows=[window])
+    assert validator("OpeningSaved").is_valid(saved)
+    assert not validator("OpeningSaved").is_valid({**saved,"version":0})
