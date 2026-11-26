@@ -57,3 +57,14 @@ def test_automotive_identity_and_authority_relations_are_shared_review_not_legac
         "catalog_model",
     ):
         assert classify(name) == "legacy-or-unclassified"
+
+
+def test_catalog_graph_does_not_deparse_sensitive_definitions():
+    from scripts.inspect_legacy_db_surface import _CATALOG_GRAPH_SQL
+    query=_CATALOG_GRAPH_SQL.lower()
+    for forbidden in ("prosrc","probin","pg_get_functiondef","pg_get_expr",
+                      "pg_describe_object","polqual","polwithcheck","adbin",
+                      "relacl","proacl","rolname"):
+        assert forbidden not in query
+    for expected in ("pg_depend","pg_proc","pg_type","pg_attrdef","pg_policy"):
+        assert expected in query

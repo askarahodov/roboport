@@ -2,7 +2,8 @@
 """Read-only PostgreSQL schema dependency inventory for automotive cutover (#165).
 
 Prints catalog metadata only: relations, foreign-key and view dependencies,
-user triggers and their function identities.
+catalog objects/edges, partition and sequence links, routine identities and RLS flags.
+No SQL bodies, defaults, policy predicates, role names or business values.
 Never scans business rows, extracts object keys, or authorizes decommission.
 Requires an explicitly configured synthetic loopback PostgreSQL instance.
 """
@@ -58,6 +59,172 @@ def classify(name: str) -> str:
     if name in SHARED_RELATIONS:
         return "shared-review"
     return "legacy-or-unclassified"
+
+
+# A bounded allowlist of catalog classes. Unlike pg_describe_object(),
+# explicit identity fields never deparse stored expressions or routine bodies.
+# OIDs are used only within the query; the report is stable across dumps when
+# the same names/signatures and column ordinals are restored.
+_CATALOG_GRAPH_SQL = """
+    WITH namespaces AS (
+        SELECT oid,nspname FROM pg_namespace
+        WHERE nspname NOT IN ('pg_catalog','information_schema')
+          AND nspname !~ '^pg_'
+    ), objects AS (
+        SELECT 'pg_class'::regclass::oid AS classid,c.oid,n.nspname AS schema,
+               CASE c.relkind WHEN 'r' THEN 'table' WHEN 'p' THEN 'partitioned_table'
+                 WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized_view'
+                 WHEN 'S' THEN 'sequence' WHEN 'i' THEN 'index'
+                 WHEN 'I' THEN 'partitioned_index' WHEN 'f' THEN 'foreign_table'
+                 WHEN 'c' THEN 'composite_relation' END AS kind,
+               c.relname::text AS name,NULL::text AS owner_name,
+               ARRAY[]::text[] AS arguments
+        FROM pg_class c JOIN namespaces n ON n.oid=c.relnamespace
+        WHERE c.relkind IN ('r','p','v','m','S','i','I','f','c')
+        UNION ALL
+        SELECT 'pg_proc'::regclass::oid,p.oid,n.nspname,
+               CASE p.prokind WHEN 'p' THEN 'procedure' WHEN 'a' THEN 'aggregate'
+                 WHEN 'w' THEN 'window_function' ELSE 'function' END,
+               p.proname::text,NULL::text,
+               ARRAY(SELECT format('%I.%I',tn.nspname,t.typname)
+                     FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY a(type_oid,pos)
+                     JOIN pg_type t ON t.oid=a.type_oid
+                     JOIN pg_namespace tn ON tn.oid=t.typnamespace ORDER BY a.pos)
+        FROM pg_proc p JOIN namespaces n ON n.oid=p.pronamespace
+        UNION ALL
+        SELECT 'pg_type'::regclass::oid,t.oid,n.nspname,
+               'type',t.typname::text,NULL::text,ARRAY[]::text[]
+        FROM pg_type t JOIN namespaces n ON n.oid=t.typnamespace
+        UNION ALL
+        SELECT 'pg_constraint'::regclass::oid,k.oid,n.nspname,
+               'constraint',k.conname::text,COALESCE(c.relname,t.typname)::text,ARRAY[]::text[]
+        FROM pg_constraint k JOIN namespaces n ON n.oid=k.connamespace
+        LEFT JOIN pg_class c ON c.oid=k.conrelid
+        LEFT JOIN pg_type t ON t.oid=k.contypid
+        UNION ALL
+        SELECT 'pg_attrdef'::regclass::oid,d.oid,n.nspname,
+               'column_default',d.adnum::text,c.relname::text,ARRAY[]::text[]
+        FROM pg_attrdef d JOIN pg_class c ON c.oid=d.adrelid
+        JOIN namespaces n ON n.oid=c.relnamespace
+        UNION ALL
+        SELECT 'pg_rewrite'::regclass::oid,w.oid,n.nspname,
+               'rewrite_rule',w.rulename::text,c.relname::text,ARRAY[]::text[]
+        FROM pg_rewrite w JOIN pg_class c ON c.oid=w.ev_class
+        JOIN namespaces n ON n.oid=c.relnamespace
+        UNION ALL
+        SELECT 'pg_trigger'::regclass::oid,t.oid,n.nspname,
+               'trigger',t.tgname::text,c.relname::text,ARRAY[]::text[]
+        FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+        JOIN namespaces n ON n.oid=c.relnamespace WHERE NOT t.tgisinternal
+        UNION ALL
+        SELECT 'pg_policy'::regclass::oid,p.oid,n.nspname,
+               'policy',p.polname::text,c.relname::text,ARRAY[]::text[]
+        FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid
+        JOIN namespaces n ON n.oid=c.relnamespace
+    ), identities AS (
+        SELECT classid,oid,schema,kind,
+               jsonb_build_object('schema',schema,'kind',kind,'name',name,
+                   'ownerRelation',owner_name,'argumentTypes',arguments) AS identity
+        FROM objects
+    ), edges AS (
+        SELECT DISTINCT src.identity AS source,dst.identity AS target,
+               d.objsubid AS source_column,d.refobjsubid AS target_column,
+               d.deptype::text AS dependency_type,
+               src.schema<>dst.schema AS cross_schema
+        FROM pg_depend d
+        JOIN identities src ON (src.classid,src.oid)=(d.classid,d.objid)
+        JOIN identities dst ON (dst.classid,dst.oid)=(d.refclassid,d.refobjid)
+        WHERE src.schema='public' OR dst.schema='public'
+    ), selected AS (
+        SELECT identity FROM identities WHERE schema='public'
+        UNION SELECT source FROM edges
+        UNION SELECT target FROM edges
+    )
+    SELECT jsonb_build_object(
+        'objects',COALESCE((SELECT jsonb_agg(identity ORDER BY identity)
+                           FROM selected),'[]'::jsonb),
+        'edges',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+            'source',source,'target',target,'sourceColumn',source_column,
+            'targetColumn',target_column,'dependencyType',dependency_type,
+            'crossSchema',cross_schema)
+            ORDER BY source,target,source_column,target_column,dependency_type)
+            FROM edges),'[]'::jsonb))
+"""
+
+
+def _catalog_inventory(conn: psycopg.Connection) -> dict[str, object]:
+    graph=conn.execute(_CATALOG_GRAPH_SQL).fetchone()[0]
+    # pg_inherits includes attached partitions and inheritance, including
+    # partitioned indexes; do not infer retention from attachment.
+    inheritance=[
+        {"parentSchema":ps,"parent":pn,"parentKind":pk,
+         "childSchema":cs,"child":cn,"childKind":ck,
+         "isPartition":partition,"crossSchema":ps!=cs}
+        for ps,pn,pk,cs,cn,ck,partition in conn.execute("""
+            SELECT np.nspname,p.relname,p.relkind::text,
+                   nc.nspname,c.relname,c.relkind::text,c.relispartition
+            FROM pg_inherits i JOIN pg_class p ON p.oid=i.inhparent
+            JOIN pg_class c ON c.oid=i.inhrelid
+            JOIN pg_namespace np ON np.oid=p.relnamespace
+            JOIN pg_namespace nc ON nc.oid=c.relnamespace
+            WHERE np.nspname='public' OR nc.nspname='public'
+            ORDER BY np.nspname,p.relname,nc.nspname,c.relname
+        """).fetchall()
+    ]
+    # Sequence ownership (a=owned by, i=identity) is distinct from use in a
+    # default expression, which is represented by the catalog graph.
+    sequences=[
+        {"sequenceSchema":ss,"sequence":sn,"tableSchema":ts,"table":tn,
+         "columnOrdinal":col,"dependencyType":dep,"crossSchema":ss!=ts}
+        for ss,sn,ts,tn,col,dep in conn.execute("""
+            SELECT ns.nspname,s.relname,nt.nspname,t.relname,
+                   d.refobjsubid,d.deptype::text
+            FROM pg_depend d
+            JOIN pg_class s ON d.classid='pg_class'::regclass AND s.oid=d.objid
+              AND s.relkind='S'
+            JOIN pg_class t ON d.refclassid='pg_class'::regclass AND t.oid=d.refobjid
+              AND t.relkind IN ('r','p')
+            JOIN pg_namespace ns ON ns.oid=s.relnamespace
+            JOIN pg_namespace nt ON nt.oid=t.relnamespace
+            WHERE d.deptype IN ('a','i') AND d.refobjsubid>0
+              AND (ns.nspname='public' OR nt.nspname='public')
+            ORDER BY ns.nspname,s.relname,nt.nspname,t.relname,d.refobjsubid
+        """).fetchall()
+    ]
+    # RLS is an inventory signal, not an effective privilege computation.
+    # Never include polqual/polwithcheck, pg_get_expr(), rolname or grants.
+    rls=[
+        {"schema":schema,"table":table,"enabled":enabled,"forced":forced,
+         "policies":policies}
+        for schema,table,enabled,forced,policies in conn.execute("""
+            SELECT n.nspname,c.relname,c.relrowsecurity,c.relforcerowsecurity,
+                COALESCE(jsonb_agg(jsonb_build_object('name',p.polname,
+                    'command',p.polcmd::text,'permissive',p.polpermissive,
+                    'roleCount',cardinality(p.polroles),
+                    'includesPublic',0::oid=ANY(p.polroles))
+                    ORDER BY p.polname) FILTER(WHERE p.oid IS NOT NULL),'[]'::jsonb)
+            FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            LEFT JOIN pg_policy p ON p.polrelid=c.oid
+            WHERE n.nspname='public' AND c.relkind IN ('r','p')
+              AND (c.relrowsecurity OR c.relforcerowsecurity OR p.oid IS NOT NULL)
+            GROUP BY n.nspname,c.relname,c.relrowsecurity,c.relforcerowsecurity
+            ORDER BY n.nspname,c.relname
+        """).fetchall()
+    ]
+    return {
+        "catalogObjects":graph["objects"],"catalogDependencies":graph["edges"],
+        "inheritance":inheritance,"sequenceOwnership":sequences,"rowSecurity":rls,
+        "catalogCoverage":{
+            "scope":"public-and-direct-cross-schema-edges",
+            "classes":["pg_class","pg_proc","pg_type","pg_constraint",
+                       "pg_attrdef","pg_rewrite","pg_trigger","pg_policy"],
+            "systemSchemasExcluded":True,
+            "completeDependencyGraph":False,
+            "exclusions":["dynamic-sql-and-routine-bodies","external-clients",
+                          "roles-and-effective-grants","extension-and-other-catalog-classes",
+                          "data-and-object-storage","transitive-external-only-edges"],
+        },
+    }
 
 
 def inspect_schema(conn: psycopg.Connection) -> dict[str, object]:
@@ -120,13 +287,22 @@ def inspect_schema(conn: psycopg.Connection) -> dict[str, object]:
             ORDER BY vn.nspname, v.relname, rn.nspname, r.relname
         """).fetchall()
     ]
+    catalog=_catalog_inventory(conn)
     return {
         "scope": "public-schema-metadata-only",
         "status": "INVENTORY_ONLY_NOT_DECOMMISSION_APPROVAL",
         "releaseAllowed": False, "dropAllowed": False,
         "relations": relations, "foreignKeys": foreign_keys, "triggers": triggers,
         "viewDependencies": view_dependencies,
+        **catalog,
         "summary": {
+            "catalogObjects":len(catalog["catalogObjects"]),
+            "catalogDependencies":len(catalog["catalogDependencies"]),
+            "crossSchemaCatalogDependencies":sum(
+                edge["crossSchema"] for edge in catalog["catalogDependencies"]),
+            "inheritance":len(catalog["inheritance"]),
+            "sequenceOwnership":len(catalog["sequenceOwnership"]),
+            "rowSecurityTables":len(catalog["rowSecurity"]),
             "relations": len(relations), "foreignKeys": len(foreign_keys),
             "crossBoundaryForeignKeys": sum(item["crossBoundary"] for item in foreign_keys),
             "triggers": len(triggers),
