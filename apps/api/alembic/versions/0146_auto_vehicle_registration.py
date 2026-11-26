@@ -164,12 +164,139 @@ def upgrade():
       ON auto_vehicle_customer_link FOR EACH ROW
       EXECUTE FUNCTION guard_registered_vehicle_verification()
     """)
+    # Для новых регистраций не допускаем подмену цепочки issue → redeem → review
+    # вставкой готового VERIFIED claim или правкой claimant/reviewer без полномочий.
+    # Доказательство самого секрета остаётся в приложении; роль владельца БД
+    # и production IAM не входят в этот dev guard.
+    op.execute("""
+      CREATE FUNCTION guard_registered_vehicle_claim_transition() RETURNS trigger
+      LANGUAGE plpgsql AS $fn$
+      DECLARE scope record; staff_actor uuid; required_role text;
+      BEGIN
+        SELECT e.vehicle_id,e.organization_id,e.location_id,l.customer_id,l.revoked_at,l.verified_at
+          INTO scope
+        FROM auto_vehicle_customer_link l
+        JOIN auto_vehicle_registration_event e ON e.vehicle_id=l.vehicle_id AND e.revision=1
+        WHERE l.id=NEW.link_id FOR SHARE OF l;
+        IF NOT FOUND THEN RETURN NEW; END IF;
+        IF scope.revoked_at IS NOT NULL OR scope.verified_at IS NOT NULL THEN
+          RAISE EXCEPTION 'registered claim link not pending';
+        END IF;
+        IF TG_OP='INSERT' THEN
+          IF NEW.status<>'PENDING' OR NEW.claimant_id IS NOT NULL
+             OR NEW.reviewed_by IS NOT NULL OR NEW.proof_attempts<>0 THEN
+            RAISE EXCEPTION 'registered claim must start pending';
+          END IF;
+          staff_actor:=NEW.issued_by;
+          required_role:='INTAKE';
+        ELSE
+          IF OLD.claimant_id IS NULL AND NEW.claimant_id IS NOT NULL THEN
+            IF OLD.status<>'PENDING' OR NEW.status<>'PENDING'
+               OR NEW.proof_attempts<>OLD.proof_attempts+1
+               OR NOT EXISTS (
+                 SELECT 1 FROM account_customer_link acl
+                 JOIN app_user u ON u.id=acl.user_id AND u.status='ACTIVE'
+                 JOIN user_role ur ON ur.user_id=u.id AND ur.role_code='CLIENT'
+                  AND ur.revoked_at IS NULL AND (ur.expires_at IS NULL OR ur.expires_at>now())
+                 WHERE acl.user_id=NEW.claimant_id AND acl.customer_id=scope.customer_id
+                   AND acl.revoked_at IS NULL FOR SHARE OF acl,u,ur
+               ) THEN RAISE EXCEPTION 'registered claim claimant unavailable'; END IF;
+          END IF;
+          IF OLD.status='PENDING' AND NEW.status<>'PENDING' THEN
+            IF OLD.claimant_id IS NULL OR NEW.claimant_id IS DISTINCT FROM OLD.claimant_id
+               OR NEW.proof_attempts<>OLD.proof_attempts
+               OR NOT EXISTS (
+                 SELECT 1 FROM auto_vehicle_claim_audit a WHERE a.claim_id=OLD.id
+                  AND a.link_id=OLD.link_id AND a.actor_id=OLD.claimant_id
+                  AND a.action='PROOF_ACCEPTED'
+               ) OR EXISTS (
+                 SELECT 1 FROM auto_vehicle_registration_event e WHERE e.vehicle_id=scope.vehicle_id
+                  AND e.actor_id=NEW.reviewed_by
+               ) OR NOT EXISTS (
+                 SELECT 1 FROM account_customer_link acl
+                 JOIN app_user u ON u.id=acl.user_id AND u.status='ACTIVE'
+                 JOIN user_role ur ON ur.user_id=u.id AND ur.role_code='CLIENT'
+                  AND ur.revoked_at IS NULL AND (ur.expires_at IS NULL OR ur.expires_at>now())
+                 WHERE acl.user_id=OLD.claimant_id AND acl.customer_id=scope.customer_id
+                   AND acl.revoked_at IS NULL FOR SHARE OF acl,u,ur
+               ) THEN RAISE EXCEPTION 'registered claim needs independent reviewed proof'; END IF;
+            staff_actor:=NEW.reviewed_by;
+            required_role:='MANAGER';
+          END IF;
+        END IF;
+        IF required_role IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM auto_organization_role_grant g
+          JOIN app_user u ON u.id=g.user_id AND u.status='ACTIVE'
+          JOIN auto_service_location l ON l.id=scope.location_id
+            AND l.organization_id=scope.organization_id AND l.disabled_at IS NULL
+          JOIN auto_organization o ON o.id=scope.organization_id AND o.disabled_at IS NULL
+          WHERE g.user_id=staff_actor AND g.organization_id=scope.organization_id
+            AND g.role_code=required_role AND g.revoked_at IS NULL
+            AND (g.location_id=scope.location_id OR g.location_id IS NULL)
+          FOR SHARE OF g,u,l,o
+        ) THEN RAISE EXCEPTION 'registered claim staff scope denied'; END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE TRIGGER auto_registered_claim_transition BEFORE INSERT OR UPDATE
+      ON auto_vehicle_claim FOR EACH ROW
+      EXECUTE FUNCTION guard_registered_vehicle_claim_transition()
+    """)
+    op.execute("""
+      CREATE FUNCTION check_registered_vehicle_claim_audit() RETURNS trigger
+      LANGUAGE plpgsql AS $fn$
+      DECLARE expected_action text; expected_actor uuid;
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM auto_vehicle_registration_event e
+          JOIN auto_vehicle_customer_link l ON l.vehicle_id=e.vehicle_id
+          WHERE l.id=NEW.link_id
+        ) THEN RETURN NULL; END IF;
+        IF TG_OP='INSERT' THEN
+          expected_action:='ISSUED';
+          expected_actor:=NEW.issued_by;
+        ELSIF OLD.claimant_id IS NULL AND NEW.claimant_id IS NOT NULL THEN
+          expected_action:='PROOF_ACCEPTED';
+          expected_actor:=NEW.claimant_id;
+        ELSIF OLD.status='PENDING' AND NEW.status<>'PENDING' THEN
+          expected_action:=NEW.status;
+          expected_actor:=NEW.reviewed_by;
+          IF NEW.status='VERIFIED' AND NOT EXISTS (
+            SELECT 1 FROM auto_vehicle_customer_link l
+            WHERE l.id=NEW.link_id AND l.verified_at IS NOT NULL
+              AND l.verified_by=NEW.reviewed_by
+          ) THEN RAISE EXCEPTION 'registered claim verification must apply to link'; END IF;
+        ELSIF NEW.proof_attempts>OLD.proof_attempts THEN
+          expected_action:='PROOF_REJECTED';
+          -- Аудит неуспешных попыток уже ведёт сервис; эта проверка
+          -- касается только действий, способных предоставить владение.
+          RETURN NULL;
+        ELSE RETURN NULL;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM auto_vehicle_claim_audit a WHERE a.link_id=NEW.link_id
+            AND a.claim_id=NEW.id AND a.actor_id=expected_actor AND a.action=expected_action
+        ) THEN RAISE EXCEPTION 'registered claim transition lacks audit'; END IF;
+        RETURN NULL;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE CONSTRAINT TRIGGER auto_registered_claim_audit
+      AFTER INSERT OR UPDATE ON auto_vehicle_claim DEFERRABLE INITIALLY DEFERRED
+      FOR EACH ROW EXECUTE FUNCTION check_registered_vehicle_claim_audit()
+    """)
     op.execute("REVOKE ALL ON auto_vehicle_registration_event FROM PUBLIC")
+    op.execute("REVOKE ALL ON FUNCTION guard_registered_vehicle_claim_transition(),check_registered_vehicle_claim_audit() FROM PUBLIC")
 
 
 def downgrade():
     if op.get_bind().execute(text("SELECT 1 FROM auto_vehicle_registration_event LIMIT 1")).first():
         raise RuntimeError("История регистрации существует: требуется согласованный rollback")
+    op.execute("DROP TRIGGER auto_registered_claim_audit ON auto_vehicle_claim")
+    op.execute("DROP FUNCTION check_registered_vehicle_claim_audit()")
+    op.execute("DROP TRIGGER auto_registered_claim_transition ON auto_vehicle_claim")
+    op.execute("DROP FUNCTION guard_registered_vehicle_claim_transition()")
     op.execute("DROP TRIGGER auto_registered_vehicle_verification ON auto_vehicle_customer_link")
     op.execute("DROP FUNCTION guard_registered_vehicle_verification()")
     op.execute("DROP TRIGGER auto_vehicle_registration_write_guard ON auto_vehicle")

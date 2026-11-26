@@ -99,6 +99,8 @@ def issue_auto_proof(
         (claim_id, link_id, issuer, hashlib.sha256(proof.encode()).hexdigest()),
     )
     _audit(conn, link=link_id, claim=claim_id, actor=issuer, action="ISSUED")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit DEFERRED")
     return claim_id, proof
 
 
@@ -221,6 +223,8 @@ def redeem_auto_proof(
     status = "PENDING_REVIEW" if valid else "REJECTED"
     _audit(conn, link=row[0], claim=claim_id, actor=actor,
            action="PROOF_ACCEPTED" if valid else "PROOF_REJECTED")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit DEFERRED")
     retry_remember(conn, actor, claim_id, "redeem", idempotency_key, payload, status)
     return status
 
@@ -292,6 +296,8 @@ def review_auto_claim(
             (reviewer, row[0]),
         )
     _audit(conn, link=row[0], claim=claim_id, actor=reviewer, action=outcome)
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit DEFERRED")
     retry_remember(
         conn, reviewer, claim_id, "review", idempotency_key,
         {"approve": approve}, outcome,

@@ -95,6 +95,20 @@ def test_registration_and_independent_claim(monkeypatch):
                 with db.transaction():
                     db.execute("UPDATE auto_vehicle_customer_link SET verified_at=now(),verified_by=%s WHERE id=%s",
                                (d["manager"],link))
+            with pytest.raises(psycopg.errors.RaiseException,match="must start pending"):
+                with db.transaction():
+                    db.execute("""
+                      INSERT INTO auto_vehicle_claim(id,link_id,issued_by,proof_hash,proof_expires_at,
+                        proof_attempts,claimant_id,claimed_at,reviewed_by,reviewed_at,status)
+                      VALUES(%s,%s,%s,%s,now()+interval '20 minutes',1,%s,now(),%s,now(),'VERIFIED')
+                    """,(uuid4(),link,d["other"],"a"*64,d["client_a"],d["manager"]))
+            with pytest.raises(psycopg.errors.RaiseException,match="lacks audit"):
+                with db.transaction():
+                    db.execute("""
+                      INSERT INTO auto_vehicle_claim(id,link_id,issued_by,proof_hash,proof_expires_at)
+                      VALUES(%s,%s,%s,%s,now()+interval '20 minutes')
+                    """,(uuid4(),link,d["other"],"b"*64))
+                    db.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
             with pytest.raises(psycopg.errors.RaiseException):
                 with db.transaction():
                     db.execute("DELETE FROM auto_vehicle_registration_event WHERE vehicle_id=%s",(vehicle,))
@@ -106,11 +120,46 @@ def test_registration_and_independent_claim(monkeypatch):
         issue=_act(http,d,d["other"],f"/api/v1/dev/auto/links/{link}/issue-proof")
         assert issue.status_code==200,issue.text
         claim,proof=issue.json()["claimId"],issue.json()["proof"]
+        with psycopg.connect(DSN) as db:
+            with pytest.raises(psycopg.errors.RaiseException,match="lacks audit"):
+                with db.transaction():
+                    db.execute("""
+                      UPDATE auto_vehicle_claim SET claimant_id=%s,claimed_at=now(),proof_attempts=1
+                      WHERE id=%s
+                    """,(d["client_a"],claim))
+                    db.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
+            with pytest.raises(psycopg.errors.RaiseException,match="claimant unavailable"):
+                with db.transaction():
+                    db.execute("""
+                      UPDATE auto_vehicle_claim SET claimant_id=%s,claimed_at=now(),proof_attempts=1
+                      WHERE id=%s
+                    """,(d["client_b"],claim))
+            assert db.execute("SELECT claimant_id,proof_attempts,status FROM auto_vehicle_claim WHERE id=%s",(claim,)).fetchone()==(None,0,"PENDING")
         assert post(http,d,d["intake"],detail+"/revisions",edit_body(payload,2,"Later")).status_code==409
         assert http.get(detail,params={"locationId":str(loc)}).json()["editable"] is False
         redeem=_act(http,d,d["client_a"],f"/api/v1/dev/auto/claims/{claim}/redeem",json={"proof":proof})
         assert redeem.json()["status"]=="PENDING_REVIEW",redeem.text
         review=f"/api/v1/dev/auto/claims/{claim}/review"
+        with psycopg.connect(DSN) as db:
+            with pytest.raises(psycopg.errors.RaiseException,match="independent reviewed proof"):
+                with db.transaction():
+                    db.execute("""
+                      UPDATE auto_vehicle_claim SET reviewed_by=%s,reviewed_at=now(),status='VERIFIED'
+                      WHERE id=%s
+                    """,(d["intake"],claim))
+            with pytest.raises(psycopg.errors.RaiseException,match="staff scope denied"):
+                with db.transaction():
+                    db.execute("""
+                      UPDATE auto_vehicle_claim SET reviewed_by=%s,reviewed_at=now(),status='VERIFIED'
+                      WHERE id=%s
+                    """,(d["client_b"],claim))
+            with pytest.raises(psycopg.errors.RaiseException,match="must apply to link"):
+                with db.transaction():
+                    db.execute("""
+                      UPDATE auto_vehicle_claim SET reviewed_by=%s,reviewed_at=now(),status='VERIFIED'
+                      WHERE id=%s
+                    """,(d["manager"],claim))
+                    db.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
         assert _act(http,d,d["intake"],review,json={"approve":True}).status_code==403
         assert _act(http,d,d["manager"],review,json={"approve":True}).json()["status"]=="VERIFIED"
         http.cookies.set("rp_session",d["tokens"][d["client_a"]])
