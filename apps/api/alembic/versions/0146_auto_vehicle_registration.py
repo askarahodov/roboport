@@ -138,12 +138,36 @@ def upgrade():
       AFTER INSERT ON auto_vehicle_registration_event DEFERRABLE INITIALLY DEFERRED
       FOR EACH ROW EXECUTE FUNCTION check_auto_vehicle_registration_applied()
     """)
+    op.execute("""
+      CREATE FUNCTION guard_registered_vehicle_verification() RETURNS trigger
+      LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF OLD.verified_at IS NULL AND NEW.verified_at IS NOT NULL
+           AND EXISTS (SELECT 1 FROM auto_vehicle_registration_event e
+                       WHERE e.vehicle_id=NEW.vehicle_id) THEN
+          IF EXISTS (SELECT 1 FROM auto_vehicle_registration_event e
+                     WHERE e.vehicle_id=NEW.vehicle_id AND e.actor_id=NEW.verified_by)
+             OR NOT EXISTS (
+               SELECT 1 FROM auto_vehicle_claim c WHERE c.link_id=NEW.id
+                 AND c.status='VERIFIED' AND c.reviewed_by=NEW.verified_by
+             ) THEN RAISE EXCEPTION 'registered vehicle requires independent verification'; END IF;
+        END IF;
+        RETURN NEW;
+      END $fn$
+    """)
+    op.execute("""
+      CREATE TRIGGER auto_registered_vehicle_verification BEFORE UPDATE OF verified_at,verified_by
+      ON auto_vehicle_customer_link FOR EACH ROW
+      EXECUTE FUNCTION guard_registered_vehicle_verification()
+    """)
     op.execute("REVOKE ALL ON auto_vehicle_registration_event FROM PUBLIC")
 
 
 def downgrade():
     if op.get_bind().execute(text("SELECT 1 FROM auto_vehicle_registration_event LIMIT 1")).first():
         raise RuntimeError("История регистрации существует: требуется согласованный rollback")
+    op.execute("DROP TRIGGER auto_registered_vehicle_verification ON auto_vehicle_customer_link")
+    op.execute("DROP FUNCTION guard_registered_vehicle_verification()")
     op.execute("DROP TRIGGER auto_vehicle_registration_write_guard ON auto_vehicle")
     op.execute("DROP FUNCTION guard_registered_auto_vehicle()")
     op.execute("DROP TABLE auto_vehicle_registration_event")

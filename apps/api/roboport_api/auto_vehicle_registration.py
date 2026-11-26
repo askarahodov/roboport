@@ -183,5 +183,10 @@ def registration_details(db,token,org,loc,vehicle):
     with db.transaction():
         _actor(db,token,org,loc)
         row,editable=_row(db,org,loc,vehicle)
+        if editable:
+            try:
+                _eligible(db,row[7])
+            except RegistrationDenied:
+                editable=False
         return {"vehicleId":str(vehicle),"revision":row[0],"make":row[1],"model":row[2],
                 "variant":row[3],"modelYear":row[4],"vinLast4":row[5],"editable":editable}

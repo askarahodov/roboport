@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert, Button, Card, FormField } from '../../ui';
 import { ManagerIntakeAssignments } from './ManagerIntakeAssignments';
+import { StaffVehicleRegistration } from './StaffVehicleRegistration';
 
 // Только синтетический loopback API. UUID клиента и машины сами по себе не дают полномочий.
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -158,6 +159,9 @@ export function StaffAutoClaims({ roles, legacyRoles = [] }: { roles: string[]; 
         проверяет активную роль в организации и филиал неизменяемой привязки; старые
         незакреплённые fixtures используют прежнее объектное назначение. Создание связи
         не подтверждает владение автоматически.</p>
+      {intake && <StaffVehicleRegistration mutate={mutate} onRegistered={(vehicle,link)=>{
+        setVehicleId(vehicle);setLinkId(link);setIssued(null);setConfirmReissue(false);
+      }} />}
       {intake && <div className="auto-claim-forms">
         <form onSubmit={e => { e.preventDefault(); createLink(); }}
           aria-label="Создание ожидающей связи">

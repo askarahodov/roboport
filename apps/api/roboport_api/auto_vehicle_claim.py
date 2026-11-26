@@ -244,6 +244,13 @@ def review_auto_claim(
     reviewer = _role_scoped(conn, manager_token, "MANAGER", row[5])
     if reviewer in (row[1], row[2]) or row[2] is None or row[3] is None:
         raise VehicleClaimRejected("independent reviewer required")
+    # Участник регистрации или правки карточки не может подтвердить владение,
+    # даже если другой приёмщик выдал код и участник имеет роль MANAGER.
+    if conn.execute("""
+        SELECT 1 FROM auto_vehicle_registration_event
+        WHERE vehicle_id=%s AND actor_id=%s LIMIT 1
+    """,(row[5],reviewer)).fetchone():
+        raise VehicleClaimRejected("independent reviewer required")
     # Проверяем живое полномочие claimant даже после финального решения.
     # Независимое review удерживает клиентские полномочия до commit;
     # отзыв до этой проверки даст отказ, после неё ожидает завершения.
