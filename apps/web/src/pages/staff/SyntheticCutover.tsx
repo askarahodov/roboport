@@ -116,7 +116,7 @@ export function SyntheticCutover(){
       if(response.status===409||response.status===422){
         setConfirm(false);setReceipt(null);setReconciled(false);
         setStatus(response.status===409?'Конфликт импорта или сверки. Повторите предварительную проверку тех же файлов.':
-          'Неверный формат, состав, контрольная сумма или филиал. Проверьте искусственные CSV.');return;
+          'Неверный формат, состав, контрольная сумма или филиал. Проверьте искусственные CSV/XLSX и сопоставление колонок.');return;
       }
       if(!response.ok)throw Error('response');
       if(operation==='export'){
@@ -146,7 +146,7 @@ export function SyntheticCutover(){
             typeof entry.sha256!=='string'||!hash.test(entry.sha256))throw Error('prepare');
           const raw=Uint8Array.from(atob(entry.base64),c=>c.charCodeAt(0));
           if(!raw.length||raw.length>1000000||await digest(raw.buffer)!==entry.sha256)throw Error('prepare');
-          canonical[n]=new File([raw],n,{type:'text/csv'});
+          canonical[n]=new File([raw.buffer],n,{type:'text/csv'});
         }
         if(!current())return;
         setFiles(canonical);setMapping({});setReceipt(null);

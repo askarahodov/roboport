@@ -76,6 +76,9 @@ def test_whole_private_cutover_preview_commit_recovery_export_and_revocation(tmp
     preview=http.post(root+"preview",json=initial,headers=headers)
     assert preview.status_code==200,preview.text
     verified=preview.json()
+    assert proof["bundleSha256"] == verified["bundleSha256"]
+    assert proof["batchIds"] == verified["batchIds"]
+    assert proof["counts"] == verified["counts"]
     assert verified["writes"]==0 and verified["productionApproved"] is False
     assert verified["counts"]=={"vehicles":1,"services":2,"stockRows":5,"skus":2,"receipts":2}
     assert preview.headers["cache-control"]=="no-store"

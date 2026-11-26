@@ -4,6 +4,7 @@ import binascii
 import csv
 from hashlib import sha256
 import io
+from zlib import error as ZlibError
 
 from scripts.auto_migration_dry_run import COLUMNS as INVENTORY
 from scripts.auto_vehicle_migration_preflight import COLUMNS as VEHICLE
@@ -57,7 +58,7 @@ def _encode(rows):
     # shared strings могут многократно ссылаться на один большой текст.
     output = bytearray()
     for number, row in enumerate(rows):
-        if number > MAX_ROWS or any(len(cell) > MAX_FILE for cell in row):
+        if number > MAX_ROWS or sum(len(cell) for cell in row) > MAX_FILE:
             raise PrepareDenied("INPUT_LIMIT")
         line = io.StringIO(newline="")
         csv.writer(line, lineterminator="\r\n").writerow(row)
@@ -100,6 +101,6 @@ def normalize_sources(body):
         except PrepareDenied:
             raise
         except (UnicodeError, csv.Error, SyntheticWorkbookDenied, ValueError,
-                binascii.Error, RuntimeError, OSError, NotImplementedError, OverflowError):
+                binascii.Error, RuntimeError, OSError, NotImplementedError, OverflowError, ZlibError):
             raise PrepareDenied("INVALID_SOURCE") from None
     return {"syntheticOnly": True, "files": result}

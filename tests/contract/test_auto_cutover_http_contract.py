@@ -103,3 +103,17 @@ def test_mixed_xlsx_preparation_and_unsafe_formula(tmp_path):
     files["inventory.csv"].update(base64=base64.b64encode(raw).decode(), sha256=sha256(raw).hexdigest())
     with pytest.raises(PrepareDenied):
         normalize_sources(body)
+
+
+def test_prepare_preserves_unmapped_csv_and_denies_extra_columns():
+    from roboport_api.auto_cutover_prepare import normalize_sources, PrepareDenied
+    original = sample()
+    body = {"syntheticOnly": True, "files": {
+        name: {**entry, "format": "CSV", "mapping": None}
+        for name, entry in original["files"].items()}}
+    assert normalize_sources(body) == original
+    raw = base64.b64decode(body["files"]["vehicles.csv"]["base64"])
+    raw = raw.replace(b"source_system\n", b"source_system,owner\n").rstrip(b"\n") + b",PERSON\n"
+    body["files"]["vehicles.csv"].update(base64=base64.b64encode(raw).decode(), sha256=sha256(raw).hexdigest())
+    with pytest.raises(PrepareDenied):
+        normalize_sources(body)
