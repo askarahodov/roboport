@@ -2,61 +2,16 @@ import React from 'react';
 import {ServiceSurvey} from '../shared/ServiceSurvey';
 import {AutoServiceRecommendations} from '../shared/AutoServiceRecommendations';
 
-type Vehicle={make:string;model:string;modelYear:number|null;vinLast4:string|null};
-type Appointment={startsAt:string;endsAt:string;status:'SCHEDULED'|'CANCELED'};
-type Card={id:string;organizationId:string;locationId:string;createdAt:string;
-  vehicle:Vehicle;appointment:Appointment};
-type QuoteLine={serviceId:string;code:string;title:string;durationMinutes:number;amountMinor:number};
-type Quote={id:string;version:number;currency:'RUB';totalMinor:number;digest:string;
-  decision:'APPROVED'|'DECLINED'|null;lines:QuoteLine[];createdAt:string;decidedAt:string|null};
-type Work={serviceId:string;title:string;actualMinutes:number};
-type Doc={id:string;sha256:string;createdAt:string;type:string};
-type Detail=Card&{estimates:Quote[];latestVersion:number;inspection:null|{
-  odometerKm:number;fuelPercent:number;tyresOk:boolean;lightsOk:boolean;
-  fluidLeak:boolean;exteriorCode:string;createdAt:string
-};qcStatus:string;workStatus:string;labor:Work[];document:Doc|null;
-  canDecide:boolean;syntheticOnly:true;legalGatePassed:false;releaseAllowed:false};
-type Page={items:Card[];nextCursor:string|null;syntheticOnly:true;releaseAllowed:false};
+import {parseCustomerOrderPage,parseCustomerOrderDetail,parseCustomerQuoteReceipt} from '../../shared/api/autoCustomerOrdersDevClient';
+import type {Card,Detail,Reason} from '../../shared/api/autoCustomerOrdersDevClient';
+
 type Pending={path:string;body:string};
 type Status='loading'|'ready'|'denied'|'error';
-const uid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SIZE=20;
-
-function validCard(data:unknown):data is Card{
-  if(!data||typeof data!=='object')return false;
-  const c=data as Record<string,unknown>;
-  if(![c.id,c.organizationId,c.locationId].every(x=>typeof x==='string'&&uid.test(x))||
-     typeof c.createdAt!=='string'||!c.vehicle||typeof c.vehicle!=='object'||
-     !c.appointment||typeof c.appointment!=='object')return false;
-  const v=c.vehicle as Record<string,unknown>, a=c.appointment as Record<string,unknown>;
-  return typeof v.make==='string'&&typeof v.model==='string'&&
-    (v.vinLast4===null||(typeof v.vinLast4==='string'&&v.vinLast4.length===4))&&
-    typeof a.startsAt==='string'&&typeof a.endsAt==='string'&&
-    (a.status==='SCHEDULED'||a.status==='CANCELED');
-}
-
-function parsePage(raw:unknown):Page{
-  if(!raw||typeof raw!=='object')throw Error('invalid list');
-  const v=raw as Record<string,unknown>;
-  if(v.syntheticOnly!==true||v.releaseAllowed!==false||
-     !Array.isArray(v.items)||v.items.length>SIZE||!v.items.every(validCard)||
-     !(v.nextCursor===null||(typeof v.nextCursor==='string'&&/^[A-Za-z0-9_-]{1,256}$/.test(v.nextCursor)))){
-    throw Error('invalid list');
-  }
-  return v as Page;
-}
-
-function parseDetail(raw:unknown):Detail{
-  if(!validCard(raw))throw Error('invalid detail');
-  const d=raw as unknown as Record<string,unknown>;
-  if(d.syntheticOnly!==true||d.releaseAllowed!==false||d.legalGatePassed!==false||
-     !Array.isArray(d.estimates)||d.estimates.length>30||
-     !Array.isArray(d.labor)||d.labor.length>50||
-     typeof d.latestVersion!=='number'||typeof d.workStatus!=='string'||
-     typeof d.qcStatus!=='string'||typeof d.canDecide!=='boolean')throw Error('invalid detail');
-  return raw as Detail;
-}
-
+const clarificationLabels:Record<Reason,string>={PRICE:'Стоимость',WORK_SCOPE:'Состав работ',TIMING:'Сроки',OTHER:'Другой вопрос'};
+const findingLabels={NO_FAULT:'Неисправность не выявлена',MAINTENANCE_DUE:'Требуется обслуживание',FAULT_CONFIRMED:'Неисправность подтверждена',FURTHER_CHECK:'Нужна дополнительная проверка'};
+const severityLabels={ROUTINE:'Планово',SOON:'В ближайшее время',URGENT:'Срочно'};
+const qualificationLabels={GENERAL:'Общие работы',DIAGNOSTIC:'Диагностика',MASTER:'Мастер'};
 function date(t:string){
   const stamp=new Date(t);
   return Number.isNaN(stamp.valueOf())?'Дата не определена':stamp.toLocaleString('ru-RU');
@@ -72,6 +27,7 @@ export function CustomerAutoOrders(){
   const [detailStatus,setDetailStatus]=React.useState<Status>('loading');
   const [busy,setBusy]=React.useState(false),[pending,setPending]=React.useState<Pending|null>(null);
   const [message,setMessage]=React.useState('');
+  const [clarificationReason,setClarificationReason]=React.useState<Reason>('PRICE');
   const generation=React.useRef(0);
   const listAbort=React.useRef<AbortController|null>(null);
   const detailAbort=React.useRef<AbortController|null>(null);
@@ -100,7 +56,7 @@ export function CustomerAutoOrders(){
           if(controller.signal.aborted||epoch!==generation.current)return;
           if([401,403,404].includes(res.status)){deny();return;}
           if(!res.ok)throw Error('http');
-          const data=parsePage(await res.json());
+          const data=parseCustomerOrderPage(await res.json(),SIZE);
           if(controller.signal.aborted)return;
           for(const item of data.items){
             if(!result.some(x=>x.id===item.id))result.push(item);
@@ -123,6 +79,9 @@ export function CustomerAutoOrders(){
   React.useEffect(()=>{
     setDetail(null);setPending(null);
     if(!selected||status!=='ready')return;
+    const expected=items.find(x=>x.id===selected);
+    if(!expected)return;
+    setClarificationReason('PRICE');
     const controller=new AbortController();
     detailAbort.current=controller;
     const epoch=generation.current;
@@ -136,7 +95,7 @@ export function CustomerAutoOrders(){
         deny();return;
       }
       if(!res.ok)throw Error('http');
-      const data=parseDetail(await res.json());
+      const data=parseCustomerOrderDetail(await res.json(),expected);
       if(!current())return;
       if(data.id!==selected)throw Error('mismatched order');
       setDetail(data);setDetailStatus('ready');
@@ -174,6 +133,8 @@ export function CustomerAutoOrders(){
         setStatus('loading');setRefresh(n=>n+1);return;
       }
       if(!response.ok)throw Error('unknown');
+      parseCustomerQuoteReceipt(await response.json(),body);
+      if(!current())return;
       setPending(null);setStatus('loading');setRefresh(n=>n+1);
     }catch{
       if(!current())return;
@@ -192,6 +153,15 @@ export function CustomerAutoOrders(){
     void act(path,JSON.stringify({
       revisionId:last.id,requestKey:crypto.randomUUID(),decision:value,
     }));
+  }
+
+  const last=detail?.estimates.at(-1);
+  const canClarify=!!detail&&!!last&&detail.appointment.status==='SCHEDULED'&&last.decision===null&&last.clarificationId===null;
+  function clarify(){
+    if(!detail||!last||!canClarify||busy||pending)return;
+    const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(detail.organizationId)
+      +'/locations/'+encodeURIComponent(detail.locationId)+'/orders/'+encodeURIComponent(detail.id)+'/estimates/clarification';
+    void act(path,JSON.stringify({revisionId:last.id,requestKey:crypto.randomUUID(),reasonCode:clarificationReason}));
   }
 
   function update(){
@@ -249,10 +219,34 @@ export function CustomerAutoOrders(){
             <p>Решение: {e.decision??(e.version===detail.latestVersion?
               'ОЖИДАЕТ ВАШЕГО РЕШЕНИЯ':'ЗАМЕНЕНА НОВОЙ ВЕРСИЕЙ')}</p>
             <ul>{e.lines.map(line=><li key={line.serviceId}>
-              {line.title}: {line.amountMinor} коп.</li>)}</ul>
+              <span>{line.title}: {line.amountMinor} коп.</span>
+              {'pricingMethod' in line&&<p>{qualificationLabels[line.qualificationCode]}:
+                {' '}{line.durationMinutes} мин., ставка {line.rateMinorPerHour} коп./ч.
+                {line.pricingMethod==='NORM_HOUR_FACTORED'&&<>
+                  {' '}Количество {line.quantity}, коэффициент {line.coefficientBps/10000},
+                  скидка {line.discountBps/100}%.</>}
+              </p>}
+              {e.diagnostics.filter(d=>d.serviceId===line.serviceId).map(d=>
+                <p key={d.serviceId}>{findingLabels[d.findingCode]} · {severityLabels[d.severityCode]}</p>)}
+            </li>)}</ul>
+            {!!e.materialLines.length&&<><p>Запчасти и расходные материалы</p>
+              <ul>{e.materialLines.map((m,i)=><li key={m.selectionId+':'+m.skuId+':'+i}>
+                {m.article} · {m.itemKind==='PART'?'Запчасть':'Расходный материал'} ·
+                {' '}{m.quantity} ед. × {m.unitPriceMinor} коп. = {m.amountMinor} коп.
+              </li>)}</ul></>}
+            {e.clarificationId!==null&&<p>Уточнение: {clarificationLabels[e.clarificationReason!]} ·
+              {' '}{e.clarificationResolution==='EXPLAINED'?'Получено разъяснение':
+                e.clarificationResolution==='NEW_VERSION_REQUIRED'?'Ожидается новая версия':'Ожидается ответ управляющего'}.</p>}
           </li>)}</ol>}
+        {canClarify&&!pending&&<div>
+          <label>Причина уточнения сметы <select disabled={busy} value={clarificationReason}
+            onChange={e=>setClarificationReason(e.target.value as Reason)}>
+            {Object.entries(clarificationLabels).map(([id,label])=><option key={id} value={id}>{label}</option>)}
+          </select></label>
+          <button type="button" disabled={busy} onClick={clarify}>Запросить уточнение последней версии</button>
+        </div>}
         {detail.canDecide&&!pending&&<div>
-          <p>Проверьте последнюю версию, перечень работ и сумму перед решением.</p>
+          <p>Проверьте последнюю версию, перечень работ, материалы, диагностику и полную сумму перед решением.</p>
           <button type="button" disabled={busy}
             onClick={()=>decide('APPROVED')}>Согласовать последнюю версию</button>
           <button type="button" disabled={busy}

@@ -10,7 +10,7 @@
     "generate:api": "openapi-typescript ../../contracts/openapi.yaml -o src/shared/api/schema.d.ts",
     "test:e2e": "playwright test",
     "test:docs:e2e": "playwright test --config playwright.docs.config.ts",
-    "generate:api:auto-dev": "openapi-typescript ../../contracts/auto-dev-openapi.yaml -o src/shared/api/autoDevSchema.d.ts"
+    "generate:api:auto-dev": "openapi-typescript ../../contracts/auto-dev-openapi.yaml -o src/shared/api/autoDevSchema.d.ts && openapi-typescript ../../contracts/auto-customer-orders-dev-openapi.json -o src/shared/api/autoCustomerOrdersDevSchema.d.ts"
   },
   "dependencies": {
     "react": "19.2.0",

@@ -1,0 +1,1562 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "БоксРитм — история и согласование смет клиента (dev)",
+    "version": "0.1.0-dev",
+    "description": "Закрытый synthetic HTTPS loopback. Доступ по исходной verified customer link. Только существующие серверные операции. Не mobile auth и не production contract."
+  },
+  "x-synthetic-only": true,
+  "x-release-blocked-by": [
+    "#119",
+    "#117"
+  ],
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ],
+  "paths": {
+    "/api/v1/dev/auto/customer/orders": {
+      "get": {
+        "operationId": "listCustomerOrdersDev",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30,
+              "default": 20
+            },
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,256}$"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Заказы исходного клиента",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Нет сессии",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Доступ запрещён",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Недоступный ресурс или выключенный dev API",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/customer/orders/{order_id}": {
+      "get": {
+        "operationId": "customerOrderDetailDev",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Собственная карточка",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Нет сессии",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Доступ запрещён",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Недоступный ресурс или выключенный dev API",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/estimates/decision": {
+      "post": {
+        "operationId": "decideCustomerQuoteDev",
+        "summary": "Точная последняя версия, независимая проверка доступа",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "loc_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "order_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Decision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Точный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationReceipt"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Новое решение или запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Доступ запрещён",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Недоступный ресурс или выключенный dev API",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Конфликт версии, ключа или состояния",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/estimates/clarification": {
+      "post": {
+        "operationId": "clarifyCustomerQuoteDev",
+        "summary": "Уточнение конкретной последней версии",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "loc_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "order_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Clarification"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Точный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationReceipt"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Новое решение или запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Доступ запрещён",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Недоступный ресурс или выключенный dev API",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Конфликт версии, ключа или состояния",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    },
+    "schemas": {
+      "Vehicle": {
+        "type": "object",
+        "properties": {
+          "make": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modelYear": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1886,
+                "maximum": 2100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vinLast4": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-HJ-NPR-Z0-9]{4}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "make",
+          "model",
+          "modelYear",
+          "vinLast4"
+        ],
+        "additionalProperties": false
+      },
+      "Appointment": {
+        "type": "object",
+        "properties": {
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SCHEDULED",
+              "CANCELED"
+            ]
+          }
+        },
+        "required": [
+          "startsAt",
+          "endsAt",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Card": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "vehicle": {
+            "$ref": "#/components/schemas/Vehicle"
+          },
+          "appointment": {
+            "$ref": "#/components/schemas/Appointment"
+          }
+        },
+        "required": [
+          "id",
+          "organizationId",
+          "locationId",
+          "createdAt",
+          "vehicle",
+          "appointment"
+        ],
+        "additionalProperties": false
+      },
+      "Page": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            },
+            "maxItems": 30,
+            "minItems": 0
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,256}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "syntheticOnly": {
+            "const": true,
+            "type": "boolean"
+          },
+          "releaseAllowed": {
+            "const": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "syntheticOnly",
+          "releaseAllowed"
+        ],
+        "additionalProperties": false
+      },
+      "QuoteLine": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "serviceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "durationMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "amountMinor": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000
+              }
+            },
+            "required": [
+              "serviceId",
+              "code",
+              "title",
+              "durationMinutes",
+              "amountMinor"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "serviceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "durationMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "amountMinor": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              "pricingMethod": {
+                "type": "string",
+                "enum": [
+                  "NORM_HOUR"
+                ]
+              },
+              "qualificationCode": {
+                "type": "string",
+                "enum": [
+                  "GENERAL",
+                  "DIAGNOSTIC",
+                  "MASTER"
+                ]
+              },
+              "rateMinorPerHour": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000000000
+              }
+            },
+            "required": [
+              "serviceId",
+              "code",
+              "title",
+              "durationMinutes",
+              "amountMinor",
+              "pricingMethod",
+              "qualificationCode",
+              "rateMinorPerHour"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "serviceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "durationMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "amountMinor": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              "pricingMethod": {
+                "type": "string",
+                "enum": [
+                  "NORM_HOUR_FACTORED"
+                ]
+              },
+              "qualificationCode": {
+                "type": "string",
+                "enum": [
+                  "GENERAL",
+                  "DIAGNOSTIC",
+                  "MASTER"
+                ]
+              },
+              "rateMinorPerHour": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000000000
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20
+              },
+              "coefficientBps": {
+                "type": "integer",
+                "minimum": 10000,
+                "maximum": 30000
+              },
+              "discountBps": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2500
+              }
+            },
+            "required": [
+              "serviceId",
+              "code",
+              "title",
+              "durationMinutes",
+              "amountMinor",
+              "pricingMethod",
+              "qualificationCode",
+              "rateMinorPerHour",
+              "quantity",
+              "coefficientBps",
+              "discountBps"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Material": {
+        "type": "object",
+        "properties": {
+          "selectionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skuId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "article": {
+            "type": "string",
+            "minLength": 1
+          },
+          "itemKind": {
+            "type": "string",
+            "enum": [
+              "PART",
+              "CONSUMABLE"
+            ]
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "unitPriceMinor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "amountMinor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          }
+        },
+        "required": [
+          "selectionId",
+          "skuId",
+          "article",
+          "itemKind",
+          "quantity",
+          "unitPriceMinor",
+          "amountMinor"
+        ],
+        "additionalProperties": false
+      },
+      "Diagnostic": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "findingCode": {
+            "type": "string",
+            "enum": [
+              "NO_FAULT",
+              "MAINTENANCE_DUE",
+              "FAULT_CONFIRMED",
+              "FURTHER_CHECK"
+            ]
+          },
+          "severityCode": {
+            "type": "string",
+            "enum": [
+              "ROUTINE",
+              "SOON",
+              "URGENT"
+            ]
+          }
+        },
+        "required": [
+          "serviceId",
+          "findingCode",
+          "severityCode"
+        ],
+        "additionalProperties": false
+      },
+      "Tariff": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "qualificationCode": {
+            "type": "string",
+            "enum": [
+              "GENERAL",
+              "DIAGNOSTIC",
+              "MASTER"
+            ]
+          },
+          "rateMinorPerHour": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000000000
+          },
+          "maxDiscountBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2500
+          }
+        },
+        "required": [
+          "serviceId",
+          "policyId",
+          "version",
+          "qualificationCode",
+          "rateMinorPerHour",
+          "maxDiscountBps"
+        ],
+        "additionalProperties": false
+      },
+      "Quote": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "totalMinor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "RUB"
+            ]
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteLine"
+            },
+            "maxItems": 50,
+            "minItems": 1
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Diagnostic"
+            },
+            "maxItems": 50,
+            "minItems": 0
+          },
+          "tariffs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tariff"
+            },
+            "maxItems": 50,
+            "minItems": 0
+          },
+          "materialLines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Material"
+            },
+            "maxItems": 100,
+            "minItems": 0
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "APPROVED",
+                  "DECLINED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clarificationId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clarificationReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "PRICE",
+                  "WORK_SCOPE",
+                  "TIMING",
+                  "OTHER"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clarificationResolution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "EXPLAINED",
+                  "NEW_VERSION_REQUIRED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "totalMinor",
+          "currency",
+          "digest",
+          "lines",
+          "diagnostics",
+          "tariffs",
+          "materialLines",
+          "decision",
+          "createdAt",
+          "decidedAt",
+          "clarificationId",
+          "clarificationReason",
+          "clarificationResolution"
+        ],
+        "additionalProperties": false
+      },
+      "Inspection": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "odometerKm": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000000
+          },
+          "fuelPercent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "tyresOk": {
+            "type": "boolean"
+          },
+          "lightsOk": {
+            "type": "boolean"
+          },
+          "fluidLeak": {
+            "type": "boolean"
+          },
+          "exteriorCode": {
+            "type": "string",
+            "enum": [
+              "CLEAR",
+              "DAMAGE",
+              "UNCHECKED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "odometerKm",
+          "fuelPercent",
+          "tyresOk",
+          "lightsOk",
+          "fluidLeak",
+          "exteriorCode",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "Labor": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actualMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          }
+        },
+        "required": [
+          "serviceId",
+          "title",
+          "actualMinutes"
+        ],
+        "additionalProperties": false
+      },
+      "Document": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "SYNTHETIC_PRE_HANDOVER_PREVIEW"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sha256",
+          "createdAt",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "Detail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "vehicle": {
+            "$ref": "#/components/schemas/Vehicle"
+          },
+          "appointment": {
+            "$ref": "#/components/schemas/Appointment"
+          },
+          "estimates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Quote"
+            },
+            "maxItems": 30,
+            "minItems": 0
+          },
+          "latestVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30
+          },
+          "inspection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Inspection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "qcStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_INSPECTED",
+              "PENDING_QC",
+              "QC_PASSED",
+              "QC_FAILED"
+            ]
+          },
+          "workStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_APPROVED",
+              "APPROVED",
+              "IN_PROGRESS",
+              "READY_FOR_QC",
+              "QC_ACCEPTED"
+            ]
+          },
+          "labor": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Labor"
+            },
+            "maxItems": 70,
+            "minItems": 0
+          },
+          "document": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Document"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canDecide": {
+            "type": "boolean"
+          },
+          "syntheticOnly": {
+            "const": true,
+            "type": "boolean"
+          },
+          "legalGatePassed": {
+            "const": false,
+            "type": "boolean"
+          },
+          "releaseAllowed": {
+            "const": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "organizationId",
+          "locationId",
+          "createdAt",
+          "vehicle",
+          "appointment",
+          "estimates",
+          "latestVersion",
+          "inspection",
+          "qcStatus",
+          "workStatus",
+          "labor",
+          "document",
+          "canDecide",
+          "syntheticOnly",
+          "legalGatePassed",
+          "releaseAllowed"
+        ],
+        "additionalProperties": false
+      },
+      "Decision": {
+        "type": "object",
+        "properties": {
+          "revisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestKey": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "APPROVED",
+              "DECLINED"
+            ]
+          }
+        },
+        "required": [
+          "revisionId",
+          "requestKey",
+          "decision"
+        ],
+        "additionalProperties": false
+      },
+      "Clarification": {
+        "type": "object",
+        "properties": {
+          "revisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestKey": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "PRICE",
+              "WORK_SCOPE",
+              "TIMING",
+              "OTHER"
+            ]
+          }
+        },
+        "required": [
+          "revisionId",
+          "requestKey",
+          "reasonCode"
+        ],
+        "additionalProperties": false
+      },
+      "MutationReceipt": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Quote"
+            },
+            "maxItems": 30,
+            "minItems": 0
+          },
+          "latestVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30
+          },
+          "syntheticOnly": {
+            "const": true,
+            "type": "boolean"
+          },
+          "releaseAllowed": {
+            "const": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "replayed",
+          "items",
+          "latestVersion",
+          "syntheticOnly",
+          "releaseAllowed"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "code",
+          "requestId"
+        ],
+        "additionalProperties": false
+      },
+      "NotFound": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "NOT_FOUND"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "requestId"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

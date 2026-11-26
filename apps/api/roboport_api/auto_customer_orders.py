@@ -162,6 +162,8 @@ def customer_order_details(conn,token,order):
           },
           "canDecide":bool(quote["items"] and
               quote["items"][-1]["decision"] is None and
+              (quote["items"][-1]["clarificationId"] is None or
+               quote["items"][-1]["clarificationResolution"]=="EXPLAINED") and
               not row[-1]),
           "syntheticOnly":True,"legalGatePassed":False,"releaseAllowed":False,
         })
