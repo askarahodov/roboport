@@ -1,12 +1,14 @@
 # Автомобильный production release: консолидированная проверка готовности (#119)
 
+Целевая серверная платформа — Linux-only по [решению заказчика 26.11.2026](https://github.com/askarahodov/roboport/issues/119#issuecomment-7187571899). Исторические прогоны 7 jobs не переписываются; текущий release verifier проверяет ровно шесть jobs на актуальном main SHA. Windows CMD bootstrap не входит в scope, браузерные клиенты Windows не исключены. Production approval отсутствует.
+
 **Состояние проверки:** 30.10.2026; **решение: BLOCKED — production release не разрешён**.
 
 Документ — единая карта критериев приёмки и недостающих доказательств, а не подписанное release approval. Статусы основаны на GitHub Issues и подтверждённых синтетических CI; закрытие отдельной Issue или 5/5 PASS не означает выполнение критериев производства.
 
 ## Что реально подтверждено
 
-- В CI `.github/workflows/ci.yml`: семь jobs — `impact`, `docs`, `postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`; PG17 Alembic upgrade→downgrade→upgrade и синтетический `pg_dump/pg_restore` на disposable стенде, контрактные и браузерные тесты, Docsify навигация и ссылки.
+- В CI `.github/workflows/ci.yml`: шесть Linux jobs — `impact`, `docs`, `postgres`, `api`, `web`, `browser-e2e`; PG17 Alembic upgrade→downgrade→upgrade и синтетический `pg_dump/pg_restore` на disposable стенде, контрактные и браузерные тесты, Docsify навигация и ссылки.
 - PR [#298](https://github.com/askarahodov/roboport/pull/298): 5/5 CI PASS; merge `3fffbbb4a47a060b7e66659877f535ff59237a1b`. Ранее [#297](https://github.com/askarahodov/roboport/pull/297) аналогично прошёл 5/5. Тесты проверяют dev-контур, не production tenant enforcement.
 - `scripts/check_auto_release_evidence.py` валидирует только структуру восьми категорий JSON и безопасный синтаксис URL/времени. Скрипт **не** проверяет доступность и подлинность evidence, независимость/полномочия подписанта или юридическую допустимость.
 - `docs/operations/SECURITY_RELEASE_GATES.md` прямо запрещает реальные клиентские данные, платежи и внешний запуск без отдельного approval.
@@ -28,7 +30,7 @@
 ## Проверка, воспроизводимая на disposable окружении
 
 1. Сверить exact release commit и отсутствие непроверенных изменений в `main`. Работать только с synthetic fixtures без настоящих ПДн и платежей.
-2. Проверить статус `.github/workflows/ci.yml` на нужном SHA: все **семь** jobs `success`; отчёт приложить с commit SHA, URL и заключением. Контрактные/PG17/browser тесты не пропускать.
+2. Проверить статус `.github/workflows/ci.yml` на нужном SHA: все **шесть** Linux jobs `success`; отчёт приложить с commit SHA, URL и заключением. Контрактные/PG17/browser тесты не пропускать.
 3. Проверить миграции и восстановление по postgres job: Alembic upgrade→downgrade→upgrade и `pg_dump/pg_restore` на disposable базе. Отдельно нужен **production-like** rehearsal на авторизованной обезличенной копии, проверка целостности, согласованные RPO/RTO и rollback.
 4. Пройти все пользовательские и operator сценарии, включая отказ доступа чужого tenant, отзыв роли, негативные BOLA, финансовые и документные операции.
 5. Предъявить для **каждой** из восьми категорий оригинальную, проверяемую запись с owner, исходным артефактом, датой/версией и независимым подписантом; сверить с `docs/operations/SECURITY_RELEASE_GATES.md`.
@@ -43,7 +45,7 @@ Issue #119 и production release можно рассматривать к зак
 
 ## Автоматическая проверка происхождения CI для релизного SHA
 
-`python scripts/check_auto_release_ci.py --sha <40-hex-main-commit> --run-id <github-actions-run-id>` проверяет через GitHub API, что указанный прогон относится ровно к нужному SHA, событию `push` основной ветки `main`, стандартному `.github/workflows/ci.yml`, завершился `success`, а все семь jobs (`impact`, `docs`, `postgres`, `api`, `web`, `browser-e2e`, `windows-cmd`) присутствуют и завершились `success`. Неполная страница job API (в том числе больше 100 jobs), пропущенные/отменённые проверки, ошибки сети или неверный SHA блокируют результат. Для ограничений GitHub API можно задать `GITHUB_TOKEN` из секретов окружения; значение не логируется.
+`python scripts/check_auto_release_ci.py --sha <40-hex-main-commit> --run-id <github-actions-run-id>` проверяет через GitHub API, что указанный прогон относится ровно к нужному SHA, событию `push` основной ветки `main`, стандартному `.github/workflows/ci.yml`, завершился `success`, а все шесть Linux jobs (`impact`, `docs`, `postgres`, `api`, `web`, `browser-e2e`) присутствуют и завершились `success`. Неполная страница job API (в том числе больше 100 jobs), пропущенные/отменённые проверки, ошибки сети или неверный SHA блокируют результат. Для ограничений GitHub API можно задать `GITHUB_TOKEN` из секретов окружения; значение не логируется.
 
 Это только независимая от self-reported JSON проверка *технического* CI run; она не является юридическим/безопасностным одобрением, не подтверждает подпись артефактов и не снимает остальные BLOCKED строки матрицы. `tests/contract/test_auto_release_ci.py` выполняет негативные проверки без сетевых вызовов.
 
@@ -133,3 +135,11 @@ GET `/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id
 ### Синтетические финансовые начисления через защищённый HTTP
 
 POST `/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/{order_id}/financial-events` принимает JSON `{action:"CHARGE"|"CREDIT",amountMinor:integer,reason:string}` и обязательный UUID-заголовок `Idempotency-Key`. Требуются прямая HTTPS loopback-связь, dev-флаги, cookie-сессия, CSRF, действующая автомобильная роль MANAGER для организации/филиала и подтверждённая связь клиента с автомобилем. Повтор того же ключа и payload возвращает тот же `eventId` (201), несовместимый повтор или превышающий остаток CREDIT возвращает 409, невалидный payload — 422, недостаток полномочий — 403, отключённый dev-контур — 404. Реальные платежи, ККТ/СБП, НДС, клиентское подтверждение сметы и бухгалтерский учёт не реализуются этим маршрутом; он не предназначен для production.
+
+## Единый gate всех OpenAPI-контрактов (#119, CI-first)
+
+Вместо двух жёстко заданных файлов `python -m scripts.check_openapi_inventory` автоматически проверяет `contracts/openapi.yaml` и все `contracts/auto-*-openapi.{yaml,yml,json}`. На PR `--base-sha` читает точный fetched base Git object: удаление целого контракта, пути, метода, ответа, свойства, media type или заголовка блокируется; изменения operationId, security и именованных security schemes, именованных request/response/parameter/header компонентов, эффективных параметров, вложенных типов, обязательности, schema bounds/enum/format и composition проверяются консервативно. Новый файл автоматически включается. Все схемы валидируются, дубли ключей и внешние ссылки отклоняются до валидатора. Закрытые auto contracts требуют synthetic-only, единственный HTTPS loopback, cookie rp_session, dev path, localSession на каждой операции; server overrides, callbacks и webhooks вне проверенной границы запрещены. Контрактный тест дополнительно сравнивает все private paths с фактическим `app.openapi()`.
+
+Выполняется в существующем API job без нового workflow; main/manual проверяют текущее состояние, PR также сравнивает base. Это ограниченный консервативный diff, не полноценное семантическое сравнение $ref, параметров, всех JSON Schema keywords, HTTP поведения или security review. Изменение ограничений может требовать отдельного согласованного решения; не отключать gate ради зелёного отчёта. Никаких новых API/DDL, production и внешних запросов валидатора. Откат — revert кода gate/tests/docs.
+
+По результатам независимого review #624: эффективные параметры разрешаются по локальным ссылкам и сопоставляются по `(in,name)` с operation override, в том числе цепочки ссылок. Новый обязательный параметр через `$ref` блокируется. Схемы и ссылки сохраняющихся response headers сравниваются как в inline, так и в named responses; обязательность нового requestBody через `$ref` также учитывается. Неподдерживаемые, циклические и отсутствующие ссылки отклоняются; тесты добавлены в тот же PR. Это по-прежнему консервативный diff, не полный semantic validator.

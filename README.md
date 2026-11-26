@@ -36,7 +36,7 @@
 
 Стек: Python 3.13, FastAPI, PostgreSQL 17, Alembic, React 19, TypeScript 5, Vite, Node.js 24, Playwright, Docsify. Версии сверять по [проверенному стеку](docs/TECH_STACK.md) и lockfile, не по тексту README.
 
-Dev PostgreSQL/Keycloak/MinIO: [локальный стенд](infra/dev/LOCAL_STACK.md). Для Windows CMD и Docker Compose использовать [руководство окружения](docs/operations/DEV_ENVIRONMENT.md). Выполнять только на синтетических данных.
+Dev PostgreSQL/Keycloak/MinIO: [локальный стенд](infra/dev/LOCAL_STACK.md). Серверная платформа и dev/CI — Linux; [руководство окружения](docs/operations/DEV_ENVIRONMENT.md). Клиенты используют поддерживаемые браузеры, в том числе на Windows. Выполнять только на синтетических данных.
 
 ```bash
 python -m pip install -r apps/api/requirements-dev.txt -c apps/api/constraints-py313.txt
@@ -45,7 +45,7 @@ python scripts/check_contract.py
 cd apps/web && npm ci && npm run build
 ```
 
-Полный PostgreSQL17 и Playwright E2E запускаются в CI; локальный запуск требует отдельного тестового Postgres с миграциями. Финальная проверка PR и post-merge main: 5 обязательных job (PG/API/Web/Linux browser/Windows CMD), независимое ревью и актуальная документация на русском.
+Полный PostgreSQL17 и Playwright E2E запускаются в CI; локальный запуск требует отдельного тестового Postgres с миграциями. Финальная проверка PR и post-merge main: 6 обязательных Linux jobs (impact/docs/PG/API/Web/browser E2E), независимое ревью и актуальная документация на русском.
 
 ## Безопасность и границы релиза
 

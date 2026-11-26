@@ -1,5 +1,7 @@
 # ROBOport — локальный синтетический стенд (#84)
 
+Целевая серверная среда — Linux (решение заказчика 26.11.2026, #119). Использовать Linux shell и Docker Engine/Compose; native Windows bootstrap не поддерживается. Синтетический стенд не является production deployment.
+
 Это **dev-контур**, не production. Порты БД/MinIO/Keycloak привязаны к loopback. Нельзя загружать реальные заявки, документы или клиентские данные.
 
 ## Предварительные требования
@@ -37,6 +39,10 @@ Docker Engine + Compose v2, Python 3.13 (venv), Node.js 24, npm, OpenSSL; дос
 
 Для синтетических локальных учётных записей используется `/account/login`; для Keycloak — `/api/v1/dev/oidc/start`. Сохраняйте эти два способа различными: прежние E2E доказывают Keycloak Code+PKCE, а локальный запуск требует отдельной сквозной ручной проверки из #76.
 
-API проверка: `curl --cacert infra/dev/tls/local.crt https://127.0.0.1:8444/health/live` не подходит: `/health` не проксируется через Vite. Используйте `curl --cacert infra/dev/tls/local.crt https://127.0.0.1:8445/health/live`. Проверка same-origin: `curl --cacert infra/dev/tls/local.crt https://127.0.0.1:8444/api/v1/catalog/brands`.
+API проверка: `curl --cacert infra/dev/tls/local.crt https://127.0.0.1:8444/health/live` не подходит: `/health` не проксируется через Vite. Используйте `curl --cacert infra/dev/tls/local.crt https://127.0.0.1:8445/health/live`. Проверка same-origin: `curl -fsS --cacert infra/dev/tls/local.crt https://127.0.0.1:8444/api/v1/meta`. Удалённый legacy `/api/v1/catalog/brands` должен возвращать 404; это отрицательная проверка, не readiness.
 
 **Важно:** Vite — dev-only server, не production reverse proxy. Самоподписанный TLS и отключенная проверка сертификата в локальном proxy никогда не переносятся в production. Привязка к 127.0.0.1 обязательна.
+
+## Автоматический smoke Linux (#119)
+
+В `.github/workflows/local-stack.yml` после Compose bootstrap и проверки Keycloak realm discovery запускается FastAPI по прямому loopback HTTPS с проверкой временного сертификата. `scripts/check_local_stack_smoke.py` проверяет current automotive meta, отказ legacy catalog (404), анонимный отказ (401), реальный вход seeded synthetic customer A, `/api/v1/auth/me` с ожидаемым subject UUID, приватный автомобильный список из PostgreSQL (пустой на свежем стенде), no-store, CSRF logout, удаление cookie, анонимный 401 и отдельный 401 при replay исходного session cookie (серверный отзыв). Никаких токенов/паролей в отчёте; не заменяет отдельный OIDC PKCE, полный PG17/browser CI и production readiness. `/health/ready` пока намеренно 503, не использовать как фиктивный PASS. Feature push не дублирует PR smoke; main push и PR сохраняют симметричный path scope.

@@ -1,12 +1,24 @@
 name: ROBOport local stack smoke
 on:
   push:
+    branches: [main]
     paths:
       - 'infra/dev/compose.local.yml'
       - 'infra/dev/bootstrap-local.sh'
       - 'infra/dev/local.env.example'
       - 'infra/dev/LOCAL_STACK.md'
       - 'tests/fixtures/keycloak-realm.json'
+      - 'scripts/seed_synthetic_users.py'
+      - 'scripts/check_local_stack_smoke.py'
+      - 'tests/bootstrap/test_local_stack_smoke.py'
+      - 'apps/api/roboport_api/main.py'
+      - 'apps/api/roboport_api/auth_http.py'
+      - 'apps/api/roboport_api/auto_vehicle_http.py'
+      - 'apps/api/roboport_api/auto_vehicle_read.py'
+      - 'apps/api/roboport_api/session*.py'
+      - 'apps/api/alembic/**'
+      - 'apps/api/requirements*.txt'
+      - 'apps/api/constraints*.txt'
       - '.github/workflows/local-stack.yml'
   pull_request:
     paths:
@@ -14,6 +26,18 @@ on:
       - 'infra/dev/bootstrap-local.sh'
       - 'infra/dev/local.env.example'
       - 'infra/dev/LOCAL_STACK.md'
+      - 'tests/fixtures/keycloak-realm.json'
+      - 'scripts/seed_synthetic_users.py'
+      - 'scripts/check_local_stack_smoke.py'
+      - 'tests/bootstrap/test_local_stack_smoke.py'
+      - 'apps/api/roboport_api/main.py'
+      - 'apps/api/roboport_api/auth_http.py'
+      - 'apps/api/roboport_api/auto_vehicle_http.py'
+      - 'apps/api/roboport_api/auto_vehicle_read.py'
+      - 'apps/api/roboport_api/session*.py'
+      - 'apps/api/alembic/**'
+      - 'apps/api/requirements*.txt'
+      - 'apps/api/constraints*.txt'
       - '.github/workflows/local-stack.yml'
   workflow_dispatch:
 permissions:
@@ -61,15 +85,25 @@ jobs:
             sleep 2
           done
           test "$READY" = 1
-          export ROBOport_DATABASE_URL=postgresql+psycopg://roboport:synthetic-ci-db-pass-12345678@127.0.0.1:5432/roboport
-          PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000 >/tmp/roboport-local-api.log 2>&1 &
+          set -a
+          source infra/dev/.env.local
+          set +a
+          export ROBOport_DATABASE_URL="postgresql+psycopg://roboport:${ROBO_DEV_DB_PASSWORD}@127.0.0.1:5432/roboport"
+          export ROBOport_SYNTHETIC_AUTH_API=1 ROBOport_SYNTHETIC_AUTO_API=1
+          PYTHONPATH=apps/api python -m uvicorn roboport_api.main:app --host 127.0.0.1 --port 8445 \
+            --ssl-keyfile infra/dev/tls/local.key --ssl-certfile infra/dev/tls/local.crt \
+            --no-proxy-headers >/tmp/roboport-local-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          READY=0
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/health/live | grep -q alive; then break; fi
+            if curl -fsS --cacert infra/dev/tls/local.crt https://127.0.0.1:8445/health/live >/dev/null 2>&1; then
+              READY=1; break
+            fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8000/api/v1/catalog/brands | grep -q '"items"'
+          test "$READY" = 1
+          python -m scripts.check_local_stack_smoke
       - name: Infrastructure logs on failure
         if: failure()
         run: |
