@@ -33,7 +33,8 @@ def check(client, password):
                               json={"login": LOGIN, "password": password}),
                    200, "synthetic login")
     csrf = login.json().get("csrfToken")
-    if not isinstance(csrf, str) or not csrf or not client.cookies.get("rp_session"):
+    session = client.cookies.get("rp_session")
+    if not isinstance(csrf, str) or not csrf or not session:
         raise RuntimeError("missing synthetic session or CSRF")
     me = expect(client.get("/api/v1/auth/me"), 200, "database-backed identity")
     expected = str(uuid5(NAMESPACE_URL, "roboport-dev-only://" + LOGIN))
@@ -47,7 +48,12 @@ def check(client, password):
                     200, "synthetic logout")
     if logout.json() != {"loggedOut": True}:
         raise RuntimeError("unexpected logout receipt")
-    expect(client.get(VEHICLES), 401, "post-logout vehicle access")
+    if client.cookies.get("rp_session") is not None:
+        raise RuntimeError("logout did not clear session cookie")
+    expect(client.get(VEHICLES), 401, "post-logout anonymous vehicle access")
+    # Do not let cookie deletion hide a server-side session revocation regression.
+    expect(client.get(VEHICLES, headers={"Cookie": "rp_session=" + session}),
+           401, "revoked session replay")
 
 
 def main():
@@ -62,7 +68,7 @@ def main():
     with httpx.Client(base_url=ORIGIN, verify=context, trust_env=False,
                       follow_redirects=False, timeout=10.0) as client:
         check(client, password)
-    print("LOCAL STACK SMOKE PASS: HTTPS, automotive meta, retired 404, synthetic login, PostgreSQL identity/vehicles, logout and denied access")
+    print("LOCAL STACK SMOKE PASS: HTTPS, automotive meta, retired 404, synthetic login, PostgreSQL identity/vehicles, logout, cookie removal and revoked session replay denied")
 
 
 if __name__ == "__main__":
