@@ -153,8 +153,8 @@ export function WarehouseSupplierOrders(){
           ['DRAFT','ACCEPTED','VALUED'].includes(x.stage)&&Number.isFinite(Date.parse(x.createdAt)))||
          !(d.nextDeliveryId===null||uuid.test(d.nextDeliveryId)))throw Error('invalid detail');
       // Re-read current price visibility; don't retain a previously visible list price.
-      setRows(prev=>prev.map(row=>row.orderId===id?{...row,purchaseUnitMinor:d.order.purchaseUnitMinor,
-        purchasePriceHidden:d.order.purchasePriceHidden}:row));
+      setRows(prev=>prev.map(row=>d.order.purchasePriceHidden?{...row,purchaseUnitMinor:null,purchasePriceHidden:true}:
+        row.orderId===id?{...row,purchaseUnitMinor:d.order.purchaseUnitMinor,purchasePriceHidden:false}:row));
       setDetail(d);setDetailStatus('ready');
     }catch{if(current())setDetailStatus('error');}
   }
@@ -176,7 +176,7 @@ export function WarehouseSupplierOrders(){
       selectedSupplierId:offers[chosen].supplier_id,selectedOfferId:offers[chosen].offer_id};
   }
   async function submit(kind:Pending['kind'],retry?:Pending){
-    if(busy||(!retry&&pending))return;
+    if(busy||listStatus==='loading'||(!retry&&pending))return;
     if(!retry&&(
       kind==='order'?!orderOk:
       kind==='delivery'?!(scopeOk&&uuid.test(selectedOrder)&&validQty(receiptQty)&&
@@ -197,7 +197,7 @@ export function WarehouseSupplierOrders(){
     if(snap.org!==context.current.org||snap.loc!==context.current.loc)return;
     const seq=++mutationSeq.current;
     const current=()=>seq===mutationSeq.current&&snap.org===context.current.org&&snap.loc===context.current.loc;
-    setBusy(true);setMessage('');detailSeq.current++;detailAbort.current?.abort();setDetail(null);setDetailStatus('idle');
+    requestSeq.current++;setBusy(true);setMessage('');detailSeq.current++;detailAbort.current?.abort();setDetail(null);setDetailStatus('idle');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{
         method:'POST',credentials:'include',cache:'no-store',

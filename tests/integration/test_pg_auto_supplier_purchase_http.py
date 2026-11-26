@@ -171,7 +171,15 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         with psycopg.connect(DSN) as db:
             publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
                 document="SUPPLIER_ORDER",cap="PRICE_PURCHASE",allowed=True,not_before=None)
+        from datetime import datetime,timedelta,timezone
         with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
+                document="SUPPLIER_ORDER",cap="READ",allowed=True,not_before=datetime.now(timezone.utc)+timedelta(days=1))
+        assert http.get(detail_url,params=query).status_code==403
+        assert http.get(base,params={**query,"state":"CANCELED"}).json()["items"]==[]
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
+                document="SUPPLIER_ORDER",cap="READ",allowed=True,not_before=None)
             assert balance(db,item)==(3,0) and allocated(db,lot)==2
             db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
                        (grant_id,))

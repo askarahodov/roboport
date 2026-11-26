@@ -23,7 +23,8 @@ export function WarehouseReceiving(){
   const [lot,setLot]=React.useState('');
   const [quantity,setQuantity]=React.useState('1');
   const [reference,setReference]=React.useState('');
-  const [documentId,setDocumentId]=React.useState(initialScope.current.document);
+  const [documentId,setDocumentId]=React.useState(initialScope.current.org&&initialScope.current.loc?initialScope.current.document:'');
+  const initialLink=React.useRef(true);
   const [acceptanceId,setAcceptanceId]=React.useState('');
   const [valuationId,setValuationId]=React.useState('');
   const [currency,setCurrency]=React.useState('RUB');
@@ -47,7 +48,9 @@ export function WarehouseReceiving(){
     readSequence.current.accept+=1;readSequence.current.value+=1;
     setReviews({accept:emptyReview(),value:emptyReview()});
     setPending(null);setMessage('');setLots([]);
-    setListState('idle');setDocumentId(org===initialScope.current.org&&location===initialScope.current.loc?initialScope.current.document:'');setAcceptanceId('');setValuationId('');
+    setListState('idle');
+    if(org!==initialScope.current.org||location!==initialScope.current.loc)initialLink.current=false;
+    setDocumentId(initialLink.current&&org&&location?initialScope.current.document:'');setAcceptanceId('');setValuationId('');
     setBoundPurchase('');setPriceRevision('');setUnitCost('0');setQuotedAt(new Date().toISOString());
   },[org,location]);
   const validScope=uuid.test(org.trim())&&uuid.test(location.trim());

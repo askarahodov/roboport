@@ -210,3 +210,30 @@ test('receipt handoff carries only identifiers and never submits on navigation',
   await expect(page.getByLabel('UUID приходного документа')).toHaveValue(documentId);
   expect(writes).toBe(0);
 });
+
+
+test('branch change during CSRF never dispatches old procurement mutation',async({page})=>{
+  let started=false,posts=0;
+  let release!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  await page.route('**/api/v1/auth/csrf',async route=>{
+    started=true;await held;
+    await route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}).catch(()=>{});
+  });
+  await page.route('**/warehouse/supplier-orders**',route=>{
+    if(route.request().method()==='POST')posts++;
+    return route.fulfill({status:403,body:'{}'});
+  });
+  await page.goto('/staff/warehouse-supplier-orders');
+  await fillOrder(page);
+  await page.getByRole('button',{name:'Создать заказ поставщику'}).click();
+  await expect.poll(()=>started).toBe(true);
+  try{
+    await page.getByLabel('UUID филиала').fill('99999999-9999-4999-8999-999999999999');
+    await page.getByLabel('UUID филиала').fill(loc);
+    await expect(page.getByRole('button',{name:'Создать заказ поставщику'})).toBeEnabled();
+  }finally{release();}
+  await page.getByRole('button',{name:'Обновить заказы'}).click();
+  await expect(page.getByRole('alert')).toContainText('403/404');
+  expect(posts).toBe(0);
+});
