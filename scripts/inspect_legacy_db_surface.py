@@ -9,6 +9,7 @@ Requires an explicitly configured synthetic loopback PostgreSQL instance.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -64,7 +65,7 @@ def classify(name: str) -> str:
 # A bounded allowlist of catalog classes. Unlike pg_describe_object(),
 # explicit identity fields never deparse stored expressions or routine bodies.
 # OIDs are used only within the query; the report is stable across dumps when
-# the same names/signatures and column ordinals are restored.
+# the same names/signatures and column identities are restored.
 _CATALOG_GRAPH_SQL = """
     WITH namespaces AS (
         SELECT oid,nspname FROM pg_namespace
@@ -103,8 +104,9 @@ _CATALOG_GRAPH_SQL = """
         LEFT JOIN pg_type t ON t.oid=k.contypid
         UNION ALL
         SELECT 'pg_attrdef'::regclass::oid,d.oid,n.nspname,
-               'column_default',d.adnum::text,c.relname::text,ARRAY[]::text[]
+               'column_default',a.attname::text,c.relname::text,ARRAY[]::text[]
         FROM pg_attrdef d JOIN pg_class c ON c.oid=d.adrelid
+        JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum
         JOIN namespaces n ON n.oid=c.relnamespace
         UNION ALL
         SELECT 'pg_rewrite'::regclass::oid,w.oid,n.nspname,
@@ -129,11 +131,16 @@ _CATALOG_GRAPH_SQL = """
     ), edges AS (
         SELECT DISTINCT src.identity AS source,dst.identity AS target,
                d.objsubid AS source_column,d.refobjsubid AS target_column,
+               sa.attname::text AS source_column_name,ta.attname::text AS target_column_name,
                d.deptype::text AS dependency_type,
                src.schema<>dst.schema AS cross_schema
         FROM pg_depend d
         JOIN identities src ON (src.classid,src.oid)=(d.classid,d.objid)
         JOIN identities dst ON (dst.classid,dst.oid)=(d.refclassid,d.refobjid)
+        LEFT JOIN pg_attribute sa ON d.classid='pg_class'::regclass
+          AND sa.attrelid=d.objid AND sa.attnum=d.objsubid AND d.objsubid>0
+        LEFT JOIN pg_attribute ta ON d.refclassid='pg_class'::regclass
+          AND ta.attrelid=d.refobjid AND ta.attnum=d.refobjsubid AND d.refobjsubid>0
         WHERE src.schema='public' OR dst.schema='public'
     ), selected AS (
         SELECT identity FROM identities WHERE schema='public'
@@ -145,7 +152,8 @@ _CATALOG_GRAPH_SQL = """
                            FROM selected),'[]'::jsonb),
         'edges',COALESCE((SELECT jsonb_agg(jsonb_build_object(
             'source',source,'target',target,'sourceColumn',source_column,
-            'targetColumn',target_column,'dependencyType',dependency_type,
+            'targetColumn',target_column,'sourceColumnName',source_column_name,
+            'targetColumnName',target_column_name,'dependencyType',dependency_type,
             'crossSchema',cross_schema)
             ORDER BY source,target,source_column,target_column,dependency_type)
             FROM edges),'[]'::jsonb))
@@ -175,15 +183,17 @@ def _catalog_inventory(conn: psycopg.Connection) -> dict[str, object]:
     # default expression, which is represented by the catalog graph.
     sequences=[
         {"sequenceSchema":ss,"sequence":sn,"tableSchema":ts,"table":tn,
-         "columnOrdinal":col,"dependencyType":dep,"crossSchema":ss!=ts}
-        for ss,sn,ts,tn,col,dep in conn.execute("""
+         "columnOrdinal":col,"columnName":column_name,
+         "dependencyType":dep,"crossSchema":ss!=ts}
+        for ss,sn,ts,tn,col,column_name,dep in conn.execute("""
             SELECT ns.nspname,s.relname,nt.nspname,t.relname,
-                   d.refobjsubid,d.deptype::text
+                   d.refobjsubid,a.attname,d.deptype::text
             FROM pg_depend d
             JOIN pg_class s ON d.classid='pg_class'::regclass AND s.oid=d.objid
               AND s.relkind='S'
             JOIN pg_class t ON d.refclassid='pg_class'::regclass AND t.oid=d.refobjid
               AND t.relkind IN ('r','p')
+            JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=d.refobjsubid
             JOIN pg_namespace ns ON ns.oid=s.relnamespace
             JOIN pg_namespace nt ON nt.oid=t.relnamespace
             WHERE d.deptype IN ('a','i') AND d.refobjsubid>0
@@ -313,7 +323,86 @@ def inspect_schema(conn: psycopg.Connection) -> dict[str, object]:
     }
 
 
-def main() -> int:
+_RESTORE_SECTIONS=("relations","foreignKeys","triggers","viewDependencies",
+                   "catalogObjects","catalogDependencies","inheritance",
+                   "sequenceOwnership","rowSecurity","catalogCoverage")
+
+
+def restore_differences(source: dict, clone: dict) -> list[str]:
+    """Сравнить именованные метаданные, а не локальные OID/attnum."""
+    def normalized(section, value):
+        if section not in ("catalogDependencies","sequenceOwnership"):
+            return value
+        result=[]
+        for row in value:
+            item=dict(row)
+            if section=="catalogDependencies":
+                for ordinal,name in (("sourceColumn","sourceColumnName"),("targetColumn","targetColumnName")):
+                    # Не скрывать неразрешённый атрибут при нормализации.
+                    if item[ordinal]==0 or item[name] is not None:
+                        item.pop(ordinal)
+            elif item["columnName"] is not None:
+                item.pop("columnOrdinal")
+            result.append(item)
+        return sorted(result,key=lambda x:json.dumps(x,sort_keys=True))
+    return [section for section in _RESTORE_SECTIONS
+            if section not in source or section not in clone or
+            normalized(section,source[section])!=normalized(section,clone[section])]
+
+
+def _restore_parameters(raw, synthetic_flag, ci_flag):
+    """Только фиксированная пара disposable PG17 баз CI; не выбирать произвольный clone."""
+    values=connection_parameters(raw,synthetic_flag)
+    if ci_flag!="1" or values is None:
+        return None
+    dsn,hostaddr=values
+    options=conninfo_to_dict(dsn)
+    if (set(options)!={"host","port","user","password","dbname"}
+        or options.get("host")!="127.0.0.1" or options.get("port")!="5432"
+        or options.get("user")!="roboport" or options.get("dbname")!="roboport"):
+        return None
+    return dsn,hostaddr
+
+
+def _read_report(dsn,hostaddr,database=None):
+    kwargs={"hostaddr":hostaddr,"connect_timeout":5,"options":"-c search_path=pg_catalog"}
+    if database is not None:
+        kwargs["dbname"]=database
+    with psycopg.connect(dsn,**kwargs) as conn:
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        if database is not None:
+            actual,version=conn.execute("""
+                SELECT current_database(),current_setting('server_version_num')::integer
+            """).fetchone()
+            if actual!=database or not 170000<=version<180000:
+                raise ValueError("unexpected restore database")
+        return inspect_schema(conn)
+
+
+def main(argv=None) -> int:
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compare-restored",action="store_true")
+    args=parser.parse_args(argv)
+    if args.compare_restored:
+        values=_restore_parameters(os.environ.get("ROBOport_DATABASE_URL",""),
+            os.environ.get("ROBOport_SYNTHETIC_AUTO_API",""),
+            os.environ.get("ROBOport_CATALOG_RESTORE_CI",""))
+        if values is None:
+            print("BLOCKED: disposable PG17 restore comparison required",file=sys.stderr)
+            return 2
+        try:
+            source=_read_report(*values,"roboport")
+            clone=_read_report(*values,"roboport_restored")
+            differences=restore_differences(source,clone)
+        except (psycopg.Error,ValueError,KeyError,TypeError):
+            print("BLOCKED: PostgreSQL restore catalog comparison unavailable",file=sys.stderr)
+            return 2
+        if differences:
+            # Только фиксированные имена разделов, никаких объектов/DDL/DSN.
+            print("BLOCKED: restored catalog mismatch: "+", ".join(differences),file=sys.stderr)
+            return 2
+        print("CATALOG RESTORE PASS: metadata objects, dependencies, ownership and RLS; releaseAllowed=false")
+        return 0
     values = connection_parameters(
         os.environ.get("ROBOport_DATABASE_URL", ""),
         os.environ.get("ROBOport_SYNTHETIC_AUTO_API", ""),
@@ -323,9 +412,7 @@ def main() -> int:
         return 2
     dsn, hostaddr = values
     try:
-        with psycopg.connect(dsn, hostaddr=hostaddr, connect_timeout=5) as conn:
-            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            result = inspect_schema(conn)
+        result = _read_report(dsn,hostaddr)
     except psycopg.Error:
         # Never log DSN, DB errors, or connection credentials.
         print("BLOCKED: PostgreSQL schema inventory unavailable", file=sys.stderr)

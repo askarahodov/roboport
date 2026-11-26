@@ -134,6 +134,10 @@ jobs:
           docker exec "$PG_CONTAINER" pg_dump -U roboport -Fc -f /tmp/roboport-synthetic.dump roboport
           docker exec "$PG_CONTAINER" createdb -U roboport roboport_restored
           docker exec "$PG_CONTAINER" pg_restore -U roboport --exit-on-error -d roboport_restored /tmp/roboport-synthetic.dump
+          # Compare schema dependency metadata before any clone-only probes.
+          # Fixed disposable PG17 pair; no catalog names or definitions in logs.
+          ROBOport_SYNTHETIC_AUTO_API=1 ROBOport_CATALOG_RESTORE_CI=1 \
+            python -m scripts.inspect_legacy_db_surface --compare-restored
           # Confirm restored *live* synthetic booking/order/stock/finance graph
           # against the exact pre-dump snapshot, then challenge restored
           # immutable, cancellation, exclusion and tenant boundary triggers.
