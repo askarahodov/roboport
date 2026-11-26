@@ -21,7 +21,7 @@ def valid(name, payload):
 def test_private_routes_security_and_response_contract():
     validate_spec(SPEC)
     assert SPEC["x-synthetic-only"] is True
-    expected = {(BASE, "GET"), (BASE, "POST"),
+    expected = {(BASE, "GET"), (BASE, "POST"), (BASE + "/{order_id}", "GET"),
                 (BASE + "/{order_id}/receipts", "POST"),
                 (BASE + "/{order_id}/cancel", "POST")}
     assert {(p, m.upper()) for p, ops in SPEC["paths"].items() for m in ops} == expected

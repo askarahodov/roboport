@@ -70,6 +70,14 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         assert_contract(listed, "OrderPage")
         assert listed.json()["items"][0]["orderId"]==ident
         assert listed.json()["items"][0]["outstandingQuantity"]==4
+        detail_url=base+"/"+ident
+        query={"locationId":str(loc)}
+        detail=http.get(detail_url,params=query)
+        assert detail.status_code==200,detail.text
+        assert_contract(detail,"PurchaseDetail")
+        assert detail.json()["offers"]==offers and detail.json()["deliveries"]==[]
+        assert detail.json()["availableAtOrder"]==1 and detail.json()["desiredQuantity"]==5
+        assert http.get(detail_url,params={"locationId":str(uuid4())}).status_code==403
         receipt_url=base+"/"+ident+"/receipts"
         one_data={"locationId":str(loc),"quantity":2,"supplierReference":"SUPPLIER-DELIVERY-001"}
         delivery_key=uuid4()
@@ -132,6 +140,37 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         assert (line["orderedQuantity"],line["documentedQuantity"],
                 line["acceptedQuantity"],line["valuedQuantity"],
                 line["canceledQuantity"],line["outstandingQuantity"])==(4,3,2,2,1,0)
+        detail=http.get(detail_url,params={**query,"limit":"1"})
+        assert detail.status_code==200,detail.text
+        assert_contract(detail,"PurchaseDetail")
+        first=detail.json()
+        assert len(first["deliveries"])==1 and first["nextDeliveryId"]
+        second_page=http.get(detail_url,params={**query,"limit":"1","afterDeliveryId":first["nextDeliveryId"]})
+        assert second_page.status_code==200,second_page.text
+        assert_contract(second_page,"PurchaseDetail")
+        assert {x["stage"] for x in first["deliveries"]+second_page.json()["deliveries"]}=={"DRAFT","VALUED"}
+        assert second_page.json()["nextDeliveryId"] is None
+        for state,expected in (("CANCELED",1),("AWAITING_ACCEPTANCE",1),("OUTSTANDING",0),("COMPLETE",0)):
+            filtered=http.get(base,params={**query,"state":state,"workOrderId":str(order)})
+            assert filtered.status_code==200,filtered.text
+            assert len(filtered.json()["items"])==expected
+        assert http.get(base,params={**query,"state":"INVALID"}).status_code==422
+        assert http.get(base,params={**query,"workOrderId":str(uuid4())}).json()["items"]==[]
+        assert http.get(detail_url,params={**query,"afterDeliveryId":"bad"}).status_code==422
+        from roboport_api.auto_document_access import publish_policy
+        from test_pg_auto_document_access_http import admin
+        with psycopg.connect(DSN) as db:
+            admin(db,org,d["manager"])
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
+                document="SUPPLIER_ORDER",cap="PRICE_PURCHASE",allowed=False,not_before=None)
+        hidden=http.get(detail_url,params=query)
+        assert hidden.status_code==200,hidden.text
+        assert_contract(hidden,"PurchaseDetail")
+        assert hidden.json()["offers"] is None and hidden.json()["order"]["purchaseUnitMinor"] is None
+        assert hidden.json()["order"]["purchasePriceHidden"] is True
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
+                document="SUPPLIER_ORDER",cap="PRICE_PURCHASE",allowed=True,not_before=None)
         with psycopg.connect(DSN) as db:
             assert balance(db,item)==(3,0) and allocated(db,lot)==2
             db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
@@ -139,6 +178,7 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         assert post(http,d,d["intake"],receipt_url,one_data).status_code==403
         http.cookies.set("rp_session",d["tokens"][d["intake"]])
         assert http.get(base,params={"locationId":str(loc)}).status_code==403
+        assert http.get(detail_url,params=query).status_code==403
         http.cookies.set("rp_session",d["tokens"][d["manager"]])
         assert http.get(base,params={"locationId":str(loc)}).status_code==200
 

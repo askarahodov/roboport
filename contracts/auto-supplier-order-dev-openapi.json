@@ -201,6 +201,33 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "workOrderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "OUTSTANDING",
+                "AWAITING_ACCEPTANCE",
+                "AWAITING_VALUATION",
+                "COMPLETE",
+                "CANCELED"
+              ],
+              "default": "ALL"
+            },
+            "description": "Независимые фильтры количества; ожидание приёмки и оценки может пересекаться с отменой остатка."
           }
         ],
         "responses": {
@@ -546,6 +573,139 @@
           },
           "409": {
             "description": "Конфликт состояния, дефицита, срока или ключа",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-orders/{order_id}": {
+      "get": {
+        "operationId": "readSupplierPurchaseDetail",
+        "summary": "Карточка закупки и история приходов",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "afterDeliveryId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Карточка доступного заказа; сравнение предложений целиком скрывается без PRICE_PURCHASE",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующей сессии, CSRF или разрешения на объект/роль/филиал",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Синтетический API выключен",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -1019,6 +1179,156 @@
             "type": "string"
           }
         }
+      },
+      "PurchaseDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryId",
+          "documentId",
+          "quantity",
+          "createdAt",
+          "stage"
+        ],
+        "properties": {
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ACCEPTED",
+              "VALUED"
+            ]
+          }
+        }
+      },
+      "PurchaseDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "syntheticOnly",
+          "order",
+          "desiredQuantity",
+          "availableAtOrder",
+          "createdAt",
+          "quotedAt",
+          "expiresAt",
+          "offers",
+          "deliveries",
+          "nextDeliveryId"
+        ],
+        "properties": {
+          "syntheticOnly": {
+            "type": "boolean",
+            "const": true
+          },
+          "order": {
+            "$ref": "#/components/schemas/OrderRow"
+          },
+          "desiredQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "availableAtOrder": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "quotedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "offers": {
+            "anyOf": [
+              {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 5,
+                "items": {
+                  "$ref": "#/components/schemas/Offer"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliveries": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/PurchaseDelivery"
+            }
+          },
+          "nextDeliveryId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "order": {
+                  "properties": {
+                    "purchasePriceHidden": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "purchasePriceHidden"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "offers": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "offers": {
+                  "type": "array"
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }
