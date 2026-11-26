@@ -110,6 +110,10 @@ def place_supplier_order(conn: psycopg.Connection, token: str,
             raise AutoStockConflict("REPLAY_MISMATCH")
         # Exact replay stays possible after offer expiry; no *new* order may
         # be created against a stale quote.
+        # Сравнение новых предложений в разных валютах не разрешено.
+        # Исторический точный replay выше сохраняет прежнюю семантику.
+        if any(x.currency != "RUB" for x in parsed):
+            raise AutoStockDenied("INVALID_INPUT")
         if selected.expires_at <= datetime.now(timezone.utc):
             raise AutoStockConflict("EXPIRED_QUOTE")
         # Reschedule keeps auto_appointment.booking_id immutable, while
