@@ -15,7 +15,7 @@ const uid=(x:unknown):x is string=>typeof x==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4
 const text=(x:unknown)=>typeof x==='string'&&x.trim().length>0;
 const integer=(x:unknown,min:number,max=Number.MAX_SAFE_INTEGER):x is number=>
   typeof x==='number'&&Number.isSafeInteger(x)&&x>=min&&x<=max;
-const money=(x:unknown)=>integer(x,0,1e12);
+const money=(x:unknown):x is number=>integer(x,0,1e12);
 const hash=(x:unknown)=>typeof x==='string'&&/^[0-9a-f]{64}$/.test(x);
 const date=(x:unknown):x is string=>typeof x==='string'&&
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(x)&&Number.isFinite(Date.parse(x));
