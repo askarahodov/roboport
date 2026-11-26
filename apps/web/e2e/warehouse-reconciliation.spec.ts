@@ -67,7 +67,11 @@ test('manager reads receipt valuation and attributed supplier return, live price
           sourceRevision:'QUOTE-1',quotedAt:stamp,returnedQuantity:'1',returnedNetMinor:'1250',returnedVatMinor:'200'}}]:
         [{documentId:event,createdAt:stamp,sourceReceiptId:receipt,lotId:lot,quantity:'1',supplierReference:'RMA-1',
           reason:'Синтетический брак',status:'ACCEPTED',acceptanceId:event,acceptedAt:stamp,dispositionId:lot,
-          attribution:{currency:'RUB',netMinor:'1250',vatMinor:'200'}}];
+          attribution:{currency:'RUB',netMinor:'1250',vatMinor:'200'}},
+         {documentId:'99999999-9999-4999-8999-999999999999',createdAt:stamp,sourceReceiptId:receipt,lotId:lot,
+          quantity:'2',supplierReference:'RMA-CANCEL',reason:'Синтетический черновик',
+          status:'CANCELED',acceptanceId:null,acceptedAt:null,dispositionId:null,attribution:null,
+          decision:{id:'77777777-7777-4777-8777-777777777777',note:'Ошибочный черновик',createdAt:stamp}}];
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({...scoped,skuId:sku,kind,items,nextCursor:null})});
     }
     return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({...scoped,canViewPurchases:true,
@@ -82,8 +86,11 @@ test('manager reads receipt valuation and attributed supplier return, live price
   await expect(page.getByText('входной НДС 601',{exact:false})).toBeVisible();
   await expect(page.getByText('Подтверждённые возвраты: 1 ед.',{exact:false})).toBeVisible();
   await page.getByRole('button',{name:'Возвраты поставщику SYN-PART'}).click();
+  await expect(page.getByText('RMA-CANCEL',{exact:false})).toContainText('Отменён');
+  await expect(page.getByText('Ошибочный черновик',{exact:false})).toBeVisible();
   await expect(page.getByText('RMA-1 · 1 ед. · Подтверждён')).toBeVisible();
-  await expect(page.getByText('исходный приход '+receipt,{exact:false})).toBeVisible();
+  await expect(page.getByRole('listitem').filter({hasText:'RMA-1 · 1 ед. · Подтверждён'})
+    .getByText('исходный приход '+receipt,{exact:false})).toBeVisible();
   denied=true;
   await page.getByRole('button',{name:'Приходы и оценка SYN-PART'}).click();
   await expect(page.getByRole('alert')).toContainText('Доступ к сверке склада запрещён');

@@ -1,0 +1,830 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "БоксРитм — закрытый жизненный цикл возврата поставщику",
+    "version": "0.1.0-dev",
+    "description": "Только синтетический HTTPS loopback с ROBOport_SYNTHETIC_AUTO_API=1 и ROBOport_SYNTHETIC_AUTH_API=1. Не production API, не юридическая кредит-нота."
+  },
+  "x-synthetic-only": true,
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ],
+  "paths": {
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns": {
+      "post": {
+        "operationId": "draftSupplierReturnDev",
+        "summary": "Создать акт возврата",
+        "description": "WAREHOUSE, SUPPLIER_ORDER READ/CREATE, оценённый принятый приход, UUID запроса, допустимое количество; черновик без проводок.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Draft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Записано или точный авторизованный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет сессии, CSRF, scope, действующей роли или полномочий"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "409": {
+            "description": "Конфликт состояния, количества или ключа"
+          },
+          "422": {
+            "description": "Некорректные параметры запроса"
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns/approvals": {
+      "post": {
+        "operationId": "approveSupplierReturnDev",
+        "summary": "Утвердить акт",
+        "description": "Независимый MANAGER, READ/CLOSE, остаток и лимит исходного прихода, одно терминальное решение, физическая и стоимостная запись.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Approval"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Записано или точный авторизованный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет сессии, CSRF, scope, действующей роли или полномочий"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "409": {
+            "description": "Конфликт состояния, количества или ключа"
+          },
+          "422": {
+            "description": "Некорректные параметры запроса"
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns/decisions": {
+      "post": {
+        "operationId": "decideSupplierReturnDev",
+        "summary": "Отменить или отклонить акт",
+        "description": "CANCEL — автор WAREHOUSE; REJECT — другой MANAGER. READ/CLOSE и cutoff; без проводок, одно терминальное решение.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Decision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Записано или точный авторизованный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет сессии, CSRF, scope, действующей роли или полномочий"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "409": {
+            "description": "Конфликт состояния, количества или ключа"
+          },
+          "422": {
+            "description": "Некорректные параметры запроса"
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns/pending": {
+      "get": {
+        "operationId": "pendingSupplierReturnsDev",
+        "summary": "Очередь открытых актов",
+        "description": "review — чужие акты MANAGER; own — собственные акты WAREHOUSE. READ без исторического cutoff, действующая роль и филиал; терминальные акты исключены.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "afterDocumentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "review",
+                "own"
+              ],
+              "default": "review"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Страница очереди",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет доступа"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "422": {
+            "description": "Некорректные параметры"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    },
+    "schemas": {
+      "Draft": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "locationId",
+          "sourceReceiptId",
+          "quantity",
+          "reason",
+          "supplierReference"
+        ],
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourceReceiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 240
+          },
+          "supplierReference": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 160
+          }
+        }
+      },
+      "Approval": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "locationId",
+          "documentId"
+        ],
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "Decision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "locationId",
+          "documentId",
+          "action",
+          "note"
+        ],
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "enum": [
+              "CANCEL",
+              "REJECT"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 240
+          }
+        }
+      },
+      "DraftReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "documentId"
+        ],
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ApprovalReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "approvalId"
+        ],
+        "properties": {
+          "approvalId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "DecisionReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decisionId"
+        ],
+        "properties": {
+          "decisionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PendingItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "documentId",
+          "sourceReceiptId",
+          "lotId",
+          "article",
+          "batchCode",
+          "binCode",
+          "quantity",
+          "reason",
+          "supplierReference"
+        ],
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourceReceiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "article": {
+            "type": "string"
+          },
+          "batchCode": {
+            "type": "string"
+          },
+          "binCode": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 240
+          },
+          "supplierReference": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 160
+          }
+        }
+      },
+      "PendingPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "syntheticOnly",
+          "items",
+          "nextDocumentId"
+        ],
+        "properties": {
+          "syntheticOnly": {
+            "const": true
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/PendingItem"
+            }
+          },
+          "nextDocumentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ReconciliationReturn": {
+        "description": "DTO возврата в коммерческой детализации сверки, kind=supplier-returns. Не содержит реквизитов клиента или налогового документа.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "documentId",
+              "createdAt",
+              "sourceReceiptId",
+              "lotId",
+              "quantity",
+              "supplierReference",
+              "reason",
+              "status",
+              "acceptanceId",
+              "acceptedAt",
+              "dispositionId",
+              "attribution"
+            ],
+            "properties": {
+              "documentId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "sourceReceiptId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lotId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "quantity": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "supplierReference": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 160
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 240
+              },
+              "status": {
+                "const": "DRAFT"
+              },
+              "acceptanceId": {
+                "type": "null"
+              },
+              "acceptedAt": {
+                "type": "null"
+              },
+              "dispositionId": {
+                "type": "null"
+              },
+              "attribution": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "documentId",
+              "createdAt",
+              "sourceReceiptId",
+              "lotId",
+              "quantity",
+              "supplierReference",
+              "reason",
+              "status",
+              "acceptanceId",
+              "acceptedAt",
+              "dispositionId",
+              "attribution"
+            ],
+            "properties": {
+              "documentId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "sourceReceiptId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lotId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "quantity": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "supplierReference": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 160
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 240
+              },
+              "status": {
+                "const": "ACCEPTED"
+              },
+              "acceptanceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "acceptedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "dispositionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "attribution": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "currency",
+                  "netMinor",
+                  "vatMinor"
+                ],
+                "properties": {
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$"
+                  },
+                  "netMinor": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                  },
+                  "vatMinor": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "documentId",
+              "createdAt",
+              "sourceReceiptId",
+              "lotId",
+              "quantity",
+              "supplierReference",
+              "reason",
+              "status",
+              "acceptanceId",
+              "acceptedAt",
+              "dispositionId",
+              "attribution",
+              "decision"
+            ],
+            "properties": {
+              "documentId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "sourceReceiptId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lotId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "quantity": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "supplierReference": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 160
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 240
+              },
+              "status": {
+                "enum": [
+                  "CANCELED",
+                  "REJECTED"
+                ]
+              },
+              "acceptanceId": {
+                "type": "null"
+              },
+              "acceptedAt": {
+                "type": "null"
+              },
+              "dispositionId": {
+                "type": "null"
+              },
+              "attribution": {
+                "type": "null"
+              },
+              "decision": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "note",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 240
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
