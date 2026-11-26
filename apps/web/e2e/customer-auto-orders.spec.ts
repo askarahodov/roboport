@@ -362,7 +362,7 @@ test('полная смета с материалами и уточнением:
   await expect(page.getByText('Неисправность подтверждена · В ближайшее время')).toBeVisible();
   await page.getByRole('button',{name:'Запросить уточнение последней версии'}).click();
   await expect(page.getByText('Неизвестный результат.',{exact:false})).toBeVisible();
-  await page.getByRole('button',{name:'Повторить то же решение'}).click();
+  await page.getByRole('button',{name:'Повторить то же уточнение'}).click();
   await expect(page.getByRole('button',{name:'Подробнее о заказе '+order})).toBeVisible();
   await expect(page.getByText('Ожидается ответ управляющего',{exact:false})).toBeVisible();
   await expect(page.getByRole('button',{name:'Согласовать последнюю версию'})).toHaveCount(0);

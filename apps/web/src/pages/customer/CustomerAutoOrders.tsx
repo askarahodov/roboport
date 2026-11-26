@@ -220,7 +220,7 @@ export function CustomerAutoOrders(){
               'ОЖИДАЕТ ВАШЕГО РЕШЕНИЯ':'ЗАМЕНЕНА НОВОЙ ВЕРСИЕЙ')}</p>
             <ul>{e.lines.map(line=><li key={line.serviceId}>
               <span>{line.title}: {line.amountMinor} коп.</span>
-              {'pricingMethod' in line&&<p>{qualificationLabels[line.qualificationCode]}:
+              {'pricingMethod' in line&&(line.pricingMethod==='NORM_HOUR'||line.pricingMethod==='NORM_HOUR_FACTORED')&&<p>{qualificationLabels[line.qualificationCode]}:
                 {' '}{line.durationMinutes} мин., ставка {line.rateMinorPerHour} коп./ч.
                 {line.pricingMethod==='NORM_HOUR_FACTORED'&&<>
                   {' '}Количество {line.quantity}, коэффициент {line.coefficientBps/10000},
@@ -271,7 +271,7 @@ export function CustomerAutoOrders(){
       {message&&<p role="alert">{message}</p>}
       {pending&&detail&&<div role="group" aria-label="Повтор неизвестного решения">
         <button type="button" disabled={busy} onClick={()=>void act(pending.path,pending.body)}>
-          Повторить то же решение</button>
+          {pending.path.endsWith('/clarification')?'Повторить то же уточнение':'Повторить то же решение'}</button>
         <button type="button" disabled={busy} onClick={()=>{
           setPending(null);update();
         }}>Перечитать карточку</button>
