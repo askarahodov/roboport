@@ -1,5 +1,8 @@
 """Real FastAPI + PostgreSQL order→partial receipt→maker/checker, reject bad ACL."""
 from uuid import uuid4
+import json
+from pathlib import Path
+from jsonschema import Draft202012Validator, FormatChecker
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +12,16 @@ from test_pg_auto_supplier_purchase import environment
 from test_pg_baseline import DSN
 from test_pg_auto_stock_ledger import balance
 from test_pg_auto_stock_lot_allocation import allocated
+
+
+SPEC = json.loads((Path(__file__).resolve().parents[2] /
+                   "contracts/auto-supplier-order-dev-openapi.json").read_text(encoding="utf-8"))
+
+
+def assert_contract(response, name):
+    assert response.headers["cache-control"] == "no-store"
+    Draft202012Validator({**SPEC, "$ref": "#/components/schemas/" + name},
+                         format_checker=FormatChecker()).validate(response.json())
 
 
 def post(http,d,user,url,body,key=None):
@@ -45,6 +58,7 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         key=uuid4()
         a=post(http,d,d["intake"],base,body,key)
         assert a.status_code==201,a.text
+        assert_contract(a, "OrderReceipt")
         assert a.json()["orderedQuantity"]==4
         assert a.json()["syntheticOnly"] is True
         assert post(http,d,d["intake"],base,body,key).json()==a.json()
@@ -53,6 +67,7 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         http.cookies.set("rp_session",d["tokens"][d["manager"]])
         listed=http.get(base,params={"locationId":str(loc)})
         assert listed.status_code==200
+        assert_contract(listed, "OrderPage")
         assert listed.json()["items"][0]["orderId"]==ident
         assert listed.json()["items"][0]["outstandingQuantity"]==4
         receipt_url=base+"/"+ident+"/receipts"
@@ -60,6 +75,7 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         delivery_key=uuid4()
         created=post(http,d,d["intake"],receipt_url,one_data,delivery_key)
         assert created.status_code==201,created.text
+        assert_contract(created, "DeliveryReceipt")
         assert created.json()["syntheticOnly"] is True
         assert post(http,d,d["intake"],receipt_url,one_data,delivery_key).json()==created.json()
         with psycopg.connect(DSN) as db:
@@ -104,12 +120,14 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         cancel_url=base+"/"+ident+"/cancel"
         canceled=post(http,d,d["intake"],cancel_url,{"locationId":str(loc)})
         assert canceled.status_code==201,canceled.text
+        assert_contract(canceled, "CancelReceipt")
         assert canceled.json()["canceledQuantity"]==1
         assert post(http,d,d["intake"],receipt_url,one_data).status_code==409
         assert post(http,d,d["intake"],cancel_url,{"locationId":str(loc)}).status_code==409
         http.cookies.set("rp_session",d["tokens"][d["intake"]])
         after=http.get(base,params={"locationId":str(loc)})
         assert after.status_code==200,after.text
+        assert_contract(after, "OrderPage")
         line=after.json()["items"][0]
         assert (line["orderedQuantity"],line["documentedQuantity"],
                 line["acceptedQuantity"],line["valuedQuantity"],
@@ -150,6 +168,26 @@ def test_http_no_cross_scope_csrf_bad_quotes_and_gating(monkeypatch):
         wrong_currency=[dict(x) for x in offers]
         wrong_currency[0]["currency"]="USD"
         assert post(http,d,d["intake"],base,{**body,"offers":wrong_currency}).status_code==422
+        # Даже невыбранное предложение не может смешать валюты нового заказа.
+        mixed = [dict(x) for x in offers]
+        mixed[1]["currency"] = "USD"
+        invalid = post(http,d,d["intake"],base,{**body,"offers":mixed})
+        assert invalid.status_code == 422, invalid.text
+        assert_contract(invalid, "Error")
+        with psycopg.connect(DSN) as db:
+            assert db.execute("SELECT count(*) FROM auto_supplier_purchase_order WHERE work_order_id=%s",
+                              (order,)).fetchone() == (0,)
+        for params in ({}, {"locationId":str(loc),"limit":"NaN"},
+                       {"locationId":str(loc),"limit":"51"},
+                       {"locationId":str(loc),"limit":"1.0"},
+                       {"locationId":str(loc),"afterOrderId":"bad"},
+                       [("locationId",str(loc)),("limit","1"),("limit","2")],
+                       [("locationId",str(loc)),("locationId",str(uuid4()))],
+                       [("locationId",str(loc)),("afterOrderId",str(uuid4())),
+                        ("afterOrderId",str(uuid4()))]):
+            invalid = http.get(base, params=params)
+            assert invalid.status_code == 422, invalid.text
+            assert_contract(invalid, "Error")
         q=http.get(base,params={"locationId":str(uuid4())})
         assert q.status_code==403
         monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","0")

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel,ConfigDict,Field,StrictInt,ValidationError
 from .auto_vehicle_claim_http import _request_dsn,_response
 from .auth_http import _mutation_ok
+from .auto_vehicle_http import _page_int
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 from .auto_supplier_purchase import (
     place_supplier_order,record_supplier_delivery,cancel_supplier_remainder,
@@ -71,20 +72,24 @@ async def create_supplier_order(org_id:str,request:Request):
 
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-orders")
-def get_supplier_orders(org_id:str,request:Request,locationId:str,
-                        limit:int=20,afterOrderId:str|None=None):
+def get_supplier_orders(org_id:str,request:Request,locationId:str|None=None,
+                        limit:str="20",afterOrderId:str|None=None):
     dsn=_request_dsn(request)
     if isinstance(dsn,JSONResponse):return dsn
     try:
-        org=UUID(org_id);loc=UUID(locationId)
+        org=UUID(org_id);loc=UUID(locationId) if locationId is not None else None
         after=UUID(afterOrderId) if afterOrderId is not None else None
-        if not 1<=limit<=50:raise ValueError("limit")
+        page_limit=_page_int(limit,minimum=1,maximum=50)
+        if (loc is None or page_limit is None or any(
+                len(request.query_params.getlist(key))>1
+                for key in ("locationId","limit","afterOrderId"))):
+            raise ValueError("invalid pagination")
     except (ValueError,TypeError):
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
             items,nxt=list_supplier_orders(db,request.cookies.get("rp_session",""),
-                                           org,loc,limit,after)
+                                           org,loc,page_limit,after)
         except AutoStockDenied:
             return _response(request,403,"FORBIDDEN")
     return JSONResponse(content={"syntheticOnly":True,"items":items,
