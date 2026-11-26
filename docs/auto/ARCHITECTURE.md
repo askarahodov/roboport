@@ -6,6 +6,8 @@
 React 19, TypeScript, Vite; FastAPI/Python; PostgreSQL 17 + Alembic migrations 0001–0072 (по дереву `apps/api/alembic/versions` на 30.10.2026); OpenAPI, RBAC/ACL, sessions/OIDC, MinIO, estimate versioning, inventory, outbox. Исходная предметная область — робототехника.
 
 ## Decision
+**Серверная платформа (решение заказчика 26.11.2026):** Linux-only для backend/API, PostgreSQL, контейнеров и эксплуатации. Windows native server/CI не требуется; веб-клиенты на Windows не исключены. [Dev окружение](../operations/DEV_ENVIRONMENT.md), #119 production gate остаётся обязательным.
+
 Модульный монолит и Strangler Pattern. Существующие таблицы и API не переименовывать и не удалять до регрессионного доказательства; автомобильные контексты добавлять отдельными модулями и миграциями. Основание: ADR-001.md.
 
 ## Контексты

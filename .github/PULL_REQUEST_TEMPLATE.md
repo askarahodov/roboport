@@ -1,5 +1,5 @@
 ## Связанные задачи
-- Issue: #
+- Refs # (закрытие Issue вручную после полного DoD и успешного post-merge main CI)
 
 ## Цель и область изменений
 - Цель:
@@ -7,9 +7,14 @@
 - Влияние на API/DDL/ACL:
 
 ## Проверки
-- Проверенные команды и exit codes:
-- Unit / integration / E2E:
-- Ссылка на GitHub Actions run:
+- GitHub Actions run URL / точный HEAD SHA:
+- Jobs, unit / integration / E2E / build / docs: фактические результаты (команды и exit codes из доступных логов):
+- Skipped / PENDING / BLOCKED и причины:
+- Локальный запуск: не требуется (CI-first, решение заказчика 26.11.2026).
+- Независимый Code Review на точном HEAD, unresolved findings:
+- Security Review / ручная приёмка / другие обязательные approvals (если требуются):
+- Merge gate: актуальная база, main CI, обязательные checks, отсутствие конфликтов; полномочие заказчика 26.11.2026 по AGENTS.md.
+- Post-merge main CI (после merge):
 - Что не проверено и почему:
 
 ## Документация (обязательно)

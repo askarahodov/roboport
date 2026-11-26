@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-JOBS = ("postgres", "api", "web", "browser-e2e", "windows-cmd")
+JOBS = ("postgres", "api", "web", "browser-e2e")
 FULL = frozenset(JOBS)
 CRITICAL = (
     "apps/api/alembic/", "infra/", ".github/workflows/",
@@ -142,9 +142,9 @@ def impact(paths: list[str], *, full: bool = False,
             if not path.endswith((".css", ".scss", ".svg", ".png", ".webp")):
                 required.add("browser-e2e")
         elif path.startswith("apps/web/"):
-            required.update(("web", "browser-e2e", "windows-cmd"))
+            required.update(("web", "browser-e2e"))
         elif path.startswith(("docs/", ".github/ISSUE_TEMPLATE/")) or path.endswith(".md"):
-            pass  # Docs gate always runs; the five release jobs stay skipped on docs PR.
+            pass  # Docs gate always runs; the four scoped jobs stay skipped on docs PR.
         else:
             return set(FULL), True
     return required, full_pg

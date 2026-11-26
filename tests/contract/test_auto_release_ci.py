@@ -17,7 +17,7 @@ def sample():
     return run, {"total_count": len(jobs), "jobs": jobs}
 
 
-def test_verified_main_push_requires_all_seven_jobs():
+def test_verified_main_push_requires_all_six_linux_jobs():
     run, jobs = sample()
     assert validate_run(run, jobs, SHA) == ()
     for name in REQUIRED_JOBS:
@@ -86,7 +86,7 @@ def test_release_jobs_match_actual_workflow():
     workflow = yaml.safe_load((Path(__file__).resolve().parents[2] /
                                ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     assert REQUIRED_JOBS == set(workflow["jobs"])
-    assert {"impact","docs","postgres","api","web","browser-e2e","windows-cmd"} == REQUIRED_JOBS
+    assert {"impact","docs","postgres","api","web","browser-e2e"} == REQUIRED_JOBS
 
 
 def test_unknown_job_and_changed_run_attempt_block():
@@ -102,3 +102,12 @@ def test_unknown_job_and_changed_run_attempt_block():
     errors=validate_stable_run(run,after,jobs,SHA,run["id"])
     assert "RUN_CHANGED_DURING_VERIFICATION" in errors
     assert "RUN_NOT_VERIFIED" in errors and "JOB_RUN_MISMATCH" in errors
+
+
+def test_old_windows_job_is_not_current_release_evidence():
+    run, jobs = sample()
+    historical = deepcopy(jobs["jobs"][0])
+    historical["name"] = "windows-cmd"
+    jobs["jobs"].append(historical)
+    jobs["total_count"] += 1
+    assert "UNEXPECTED_JOB" in validate_run(run, jobs, SHA)

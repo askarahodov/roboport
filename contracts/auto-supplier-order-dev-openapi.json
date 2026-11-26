@@ -1,0 +1,1025 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "БоксРитм — закрытый цикл закупки поставщика",
+    "version": "0.1.0-dev",
+    "description": "Только synthetic HTTPS loopback, ROBOport_SYNTHETIC_AUTO_API=1 и ROBOport_SYNTHETIC_AUTH_API=1; без настоящих заказов, EDI, платежей, OEM fitment или production API."
+  },
+  "x-synthetic-only": true,
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ],
+  "paths": {
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-orders": {
+      "post": {
+        "operationId": "createSupplierOrderDev",
+        "summary": "Создать заявку на дефицит",
+        "description": "WAREHOUSE + CREATE/READ/PRICE_PURCHASE и scope; 2–5 предложений минимум двух поставщиков, один артикул, выбранная RUB котировка не истекла. Новые сравнения только RUB. Без прихода на склад.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Order"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Записано или точный авторизованный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующей сессии, CSRF или разрешения на объект/роль/филиал",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Синтетический API выключен",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Конфликт состояния, дефицита, срока или ключа",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listSupplierOrdersDev",
+        "summary": "Список заказов",
+        "description": "WAREHOUSE/MANAGER + READ, исторический cutoff. При отсутствии PRICE_PURCHASE цена null и purchasePriceHidden=true. UUID cursor; повторные query параметры запрещены.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "afterOrderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Страница разрешённых заказов",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующей сессии, CSRF или разрешения на объект/роль/филиал",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Синтетический API выключен",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-orders/{order_id}/receipts": {
+      "post": {
+        "operationId": "recordSupplierDeliveryDev",
+        "summary": "Создать черновик частичного прихода",
+        "description": "WAREHOUSE + EDIT/READ, действующий филиал, объём не выше остатка заказа. Без физической проводки до отдельной приёмки MANAGER.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Delivery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Записано или точный авторизованный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующей сессии, CSRF или разрешения на объект/роль/филиал",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Синтетический API выключен",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Конфликт состояния, дефицита, срока или ключа",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-orders/{order_id}/cancel": {
+      "post": {
+        "operationId": "cancelSupplierRemainderDev",
+        "summary": "Отменить непоставленный остаток",
+        "description": "WAREHOUSE + CLOSE/READ, отменяется только недокументированное количество; история остаётся.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cancel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Записано или точный авторизованный повтор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelReceipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующей сессии, CSRF или разрешения на объект/роль/филиал",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Синтетический API выключен",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Конфликт состояния, дефицита, срока или ключа",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    },
+    "schemas": {
+      "Offer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "offer_id",
+          "supplier_id",
+          "source_revision",
+          "quoted_at",
+          "expires_at",
+          "currency",
+          "unit_purchase_minor",
+          "available_quantity",
+          "article"
+        ],
+        "properties": {
+          "offer_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "supplier_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "quoted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "description": "Новые заказы — только RUB для всех предложений; другие коды допускаются только в точном повторе ранее сохранённого пакета."
+          },
+          "unit_purchase_minor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000000
+          },
+          "available_quantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "article": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "delivery_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 365,
+            "default": 0
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "locationId",
+          "workOrderId",
+          "lotId",
+          "desiredQuantity",
+          "offers",
+          "selectedSupplierId",
+          "selectedOfferId"
+        ],
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workOrderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "desiredQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "offers": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/Offer"
+            }
+          },
+          "selectedSupplierId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "selectedOfferId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          }
+        }
+      },
+      "Delivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "locationId",
+          "quantity",
+          "supplierReference"
+        ],
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "supplierReference": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 160,
+            "pattern": "^\\S(?:.*\\S)$"
+          }
+        }
+      },
+      "Cancel": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "locationId"
+        ],
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "OrderReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "orderedQuantity",
+          "syntheticOnly"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderedQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "syntheticOnly": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "DeliveryReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryId",
+          "documentId",
+          "syntheticOnly"
+        ],
+        "properties": {
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "syntheticOnly": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "CancelReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cancelId",
+          "canceledQuantity",
+          "syntheticOnly"
+        ],
+        "properties": {
+          "cancelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "canceledQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "syntheticOnly": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "OrderRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "workOrderId",
+          "lotId",
+          "article",
+          "orderedQuantity",
+          "supplierId",
+          "offerId",
+          "quoteRevision",
+          "purchaseUnitMinor",
+          "purchasePriceHidden",
+          "currency",
+          "documentedQuantity",
+          "acceptedQuantity",
+          "valuedQuantity",
+          "canceledQuantity",
+          "outstandingQuantity"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workOrderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "article": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "orderedQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          },
+          "supplierId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "offerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "quoteRevision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "\\S"
+          },
+          "purchaseUnitMinor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "purchasePriceHidden": {
+            "type": "boolean"
+          },
+          "currency": {
+            "const": "RUB",
+            "type": "string"
+          },
+          "documentedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "acceptedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "valuedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "canceledQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "outstandingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "purchasePriceHidden": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "purchaseUnitMinor": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "purchaseUnitMinor": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000000000
+                }
+              }
+            }
+          }
+        ]
+      },
+      "OrderPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "syntheticOnly",
+          "items",
+          "nextOrderId"
+        ],
+        "properties": {
+          "syntheticOnly": {
+            "type": "boolean",
+            "const": true
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/OrderRow"
+            }
+          },
+          "nextOrderId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "requestId"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "FORBIDDEN",
+              "NOT_FOUND",
+              "CONFLICT",
+              "INVALID_INPUT"
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
