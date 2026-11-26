@@ -1,4 +1,5 @@
 import React from 'react';
+import {parseSerialIds,validSerialIds} from './serialDisposition';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const id=(x:unknown):x is string=>typeof x==='string'&&uuid.test(x);
 const integer=(x:unknown):x is string=>typeof x==='string'&&/^(0|[1-9][0-9]{0,18})$/.test(x);
@@ -11,7 +12,7 @@ type Action='APPROVE'|'REJECT'|'CANCEL';
 type Lot={lotId:string;article:string;batchCode:string;binCode:string;available:string};
 type Decision={id:string;note:string;actorId:string;createdAt:string;dispositionId:string|null;stockEventId:string|null;lotDebitId:string|null};
 type Entry=Omit<Lot,'available'>&{documentId:string;quantity:string;reasonCode:Reason;note:string;createdBy:string;createdAt:string;
-  status:Status;canReview:boolean;canCancel:boolean;decision:Decision|null};
+  status:Status;canReview:boolean;canCancel:boolean;decision:Decision|null;serialIds?:string[]};
 type Snapshot={syntheticOnly:true;organizationId:string;locationId:string;canDraft:boolean;items:Entry[];lots:Lot[];nextCursor:string|null;nextLotCursor:string|null};
 type Pending={path:string;key:string;body:string;field:'documentId'|'decisionId'};
 type Pages={cursor?:string;lotCursor?:string};
@@ -27,7 +28,7 @@ function parse(raw:unknown,org:string,loc:string):Snapshot{
     !d.lots.every(x=>lotOk(x)&&integer(x.available))||new Set(d.lots.map(x=>x.lotId)).size!==d.lots.length||
     !Array.isArray(d.items)||d.items.length>50||(d.nextCursor!==null&&d.items.length!==50)||
     !d.items.every(x=>lotOk(x)&&id(x.documentId)&&integer(x.quantity)&&BigInt(x.quantity)>0n&&BigInt(x.quantity)<=1000000000n&&
-      Object.hasOwn(reasons,x.reasonCode)&&typeof x.note==='string'&&id(x.createdBy)&&stamp(x.createdAt)&&
+      (x.serialIds===undefined||validSerialIds(x.serialIds,Number(x.quantity)))&&Object.hasOwn(reasons,x.reasonCode)&&typeof x.note==='string'&&id(x.createdBy)&&stamp(x.createdAt)&&
       Object.hasOwn(labels,x.status)&&typeof x.canReview==='boolean'&&typeof x.canCancel==='boolean'&&!(x.canReview&&x.canCancel)&&
       (x.status==='PENDING'?x.decision===null:!x.canReview&&!x.canCancel&&!!x.decision&&id(x.decision.id)&&
         id(x.decision.actorId)&&stamp(x.decision.createdAt)&&typeof x.decision.note==='string'&&
@@ -45,6 +46,8 @@ export function WarehouseWriteoffs(){
   const [data,setData]=React.useState<Snapshot|null>(null);
   const [lot,setLot]=React.useState('');
   const [qty,setQty]=React.useState('1');
+  const [serialText,setSerialText]=React.useState('');
+  const serialIds=parseSerialIds(serialText,Number(qty));
   const [reason,setReason]=React.useState<Reason>('DAMAGED');
   const [note,setNote]=React.useState('');
   const [decision,setDecision]=React.useState<{id:string;action:Action}|null>(null);
@@ -57,11 +60,11 @@ export function WarehouseWriteoffs(){
   const validScope=id(org.trim())&&id(loc.trim());
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+'/warehouse/writeoffs';
   const selected=data?.lots.find(x=>x.lotId===lot);
-  const canDraft=!!data?.canDraft&&!!selected&&integer(qty)&&BigInt(qty)>0n&&BigInt(qty)<=1000000000n&&BigInt(qty)<=BigInt(selected.available)&&noteOk(note);
+  const canDraft=!!data?.canDraft&&!!selected&&integer(qty)&&BigInt(qty)>0n&&BigInt(qty)<=1000000000n&&BigInt(qty)<=BigInt(selected.available)&&noteOk(note)&&serialIds!==null;
   const target=data?.items.find(x=>x.documentId===decision?.id);
   const canDecide=!!target&&!!decision&&(decision.action==='CANCEL'?target.canCancel:target.canReview)&&noteOk(decisionNote);
   function clear(){
-    op.current?.abort();op.current=null;setData(null);setPages({});setLot('');setQty('1');setNote('');
+    op.current?.abort();op.current=null;setData(null);setPages({});setLot('');setQty('1');setNote('');setSerialText('');
     setDecision(null);setDecisionNote('');setPending(null);setBusy(false);setMessage('');setDenied(false);
   }
   function deny(){clear();setDenied(true);}
@@ -70,7 +73,7 @@ export function WarehouseWriteoffs(){
     if(!validScope||op.current||pending)return;
     const c=new AbortController();op.current=c;setBusy(true);setDenied(false);
     setDecision(null);setDecisionNote('');
-    if(!next.cursor&&!next.lotCursor){setData(null);setLot('');}
+    if(!next.cursor&&!next.lotCursor){setData(null);setLot('');setSerialText('');}
     try{
       const params=new URLSearchParams({locationId:loc.trim(),q:query.trim(),status});
       for(const [k,v] of Object.entries(next))if(v)params.set(k,v);
@@ -109,7 +112,7 @@ export function WarehouseWriteoffs(){
       if(c.signal.aborted)return;
       if(raw.syntheticOnly!==true||!id(raw[snap.field])||
         !((res.status===201&&raw.replayed===false)||(res.status===200&&raw.replayed===true)))throw Error('receipt');
-      setPending(null);setData(null);setDecision(null);setDecisionNote('');setLot('');setNote('');
+      setPending(null);setData(null);setDecision(null);setDecisionNote('');setLot('');setNote('');setSerialText('');
       setMessage((snap.field==='documentId'?'Акт создан. Остатки не изменены. ':'Решение записано. ')+raw[snap.field]+'. Обновите журнал.');
     }catch{if(!c.signal.aborted)setMessage('Результат неизвестен. Повторите исходную операцию с тем же ключом.');}
     finally{if(op.current===c){op.current=null;setBusy(false);}}
@@ -120,7 +123,7 @@ export function WarehouseWriteoffs(){
     <p>Кладовщик готовит акт. Другой управляющий утверждает или отклоняет его. Только утверждение уменьшает физический остаток и размещение; резерв защищён.</p>
     <label>UUID организации <input value={org} disabled={locked} onChange={e=>{clear();setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input value={loc} disabled={locked} onChange={e=>{clear();setLoc(e.target.value);}}/></label>
-    <label>Поиск партии или артикула <input value={query} maxLength={80} disabled={locked} onChange={e=>{setQuery(e.target.value);setData(null);setPages({});setLot('');setDecision(null);}}/></label>
+    <label>Поиск партии или артикула <input value={query} maxLength={80} disabled={locked} onChange={e=>{setQuery(e.target.value);setData(null);setPages({});setLot('');setSerialText('');setDecision(null);}}/></label>
     <label>Статус актов <select value={status} disabled={locked} onChange={e=>{setStatus(e.target.value);setData(null);setPages({});setDecision(null);}}>
       <option value="ALL">Все</option>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
     <button type="button" disabled={!validScope||locked} onClick={()=>void load()}>Загрузить партии и акты</button>
@@ -129,22 +132,28 @@ export function WarehouseWriteoffs(){
     {message&&<p role="status">{message}</p>}
     {data?.canDraft&&<section aria-label="Подготовка списания">
       <h2>Новый акт</h2>
-      <label>Партия для списания <select value={lot} disabled={locked} onChange={e=>setLot(e.target.value)}>
+      <label>Партия для списания <select value={lot} disabled={locked} onChange={e=>{setLot(e.target.value);setSerialText('');}}>
         <option value="">Выберите партию</option>{data.lots.map(x=><option key={x.lotId} value={x.lotId}>{x.article} · {x.batchCode} · {x.binCode} · доступно {x.available}</option>)}</select></label>
       {data.nextLotCursor&&<button type="button" disabled={locked} onClick={()=>void load({...pages,lotCursor:data.nextLotCursor!})}>Следующие партии</button>}
       {pages.lotCursor&&<button type="button" disabled={locked} onClick={()=>void load({...pages,lotCursor:undefined})}>Первые партии</button>}
       <label>Количество <input type="number" min={1} max={1000000000} step={1} value={qty} disabled={locked} onChange={e=>setQty(e.target.value)}/></label>
+      <label>UUID серий для списания (необязательно, через пробел или запятую)
+        <textarea value={serialText} maxLength={2000} disabled={locked} onChange={e=>setSerialText(e.target.value)}/></label>
+      <p>Для серийного акта укажите ровно столько уникальных UUID, сколько единиц (до 50).
+        Пустой список — только количественное выбытие без идентификации серии.</p>
+      {serialIds===null&&<p role="alert">Нужен корректный список уникальных UUID серий по количеству акта.</p>}
       <label>Причина списания <select value={reason} disabled={locked} onChange={e=>setReason(e.target.value as Reason)}>
         {Object.entries(reasons).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
       <label>Обоснование списания <input value={note} maxLength={240} disabled={locked} onChange={e=>setNote(e.target.value)}/></label>
       <button type="button" disabled={!canDraft||locked} onClick={()=>void send({path:base,key:crypto.randomUUID(),field:'documentId',
-        body:JSON.stringify({locationId:loc.trim(),lotId:lot,quantity:Number(qty),reasonCode:reason,note})})}>Создать акт списания</button>
+        body:JSON.stringify({locationId:loc.trim(),lotId:lot,quantity:Number(qty),reasonCode:reason,note,...(serialIds?.length?{serialIds}:{})})})}>Создать акт списания</button>
     </section>}
     {data&&<section aria-label="Журнал списания">
       <h2>Журнал актов списания</h2>
       {!data.items.length?<p>Актов нет.</p>:<ol>{data.items.map(x=><li key={x.documentId}>
         <strong>{x.article} · {x.quantity} ед. · {labels[x.status]}</strong>
         <p>Партия {x.batchCode}, ячейка {x.binCode}. {reasons[x.reasonCode]}: {x.note}</p>
+        {!!x.serialIds?.length&&<p>Серии акта: {x.serialIds.join(', ')}</p>}
         <p>Акт {x.documentId} · автор {x.createdBy} · {new Date(x.createdAt).toLocaleString('ru-RU')}</p>
         {x.decision&&<details><summary>Решение и проводки</summary><p>{x.decision.note} · {x.decision.actorId}</p>
           {x.decision.stockEventId&&<p>Списание {x.decision.stockEventId} · снятие размещения {x.decision.lotDebitId}</p>}</details>}

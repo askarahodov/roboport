@@ -398,6 +398,16 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 160
+          },
+          "serialIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 50,
+            "uniqueItems": true,
+            "description": "Необязательный список всех идентифицированных единиц акта; при непустом списке длина равна quantity. Утверждение происхождения из указанного прихода обязательно."
           }
         }
       },
@@ -539,6 +549,16 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 160
+          },
+          "serialIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 50,
+            "uniqueItems": true,
+            "description": "Необязательный список всех идентифицированных единиц акта; при непустом списке длина равна quantity. Утверждение происхождения из указанного прихода обязательно."
           }
         }
       },
@@ -639,6 +659,16 @@
               },
               "attribution": {
                 "type": "null"
+              },
+              "serialIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "maxItems": 50,
+                "uniqueItems": true,
+                "description": "Необязательный список всех идентифицированных единиц акта; при непустом списке длина равна quantity. Утверждение происхождения из указанного прихода обязательно."
               }
             }
           },
@@ -727,6 +757,16 @@
                     "pattern": "^[0-9]+$"
                   }
                 }
+              },
+              "serialIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "maxItems": 50,
+                "uniqueItems": true,
+                "description": "Необязательный список всех идентифицированных единиц акта; при непустом списке длина равна quantity. Утверждение происхождения из указанного прихода обязательно."
               }
             }
           },
@@ -820,6 +860,16 @@
                     "format": "date-time"
                   }
                 }
+              },
+              "serialIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "maxItems": 50,
+                "uniqueItems": true,
+                "description": "Необязательный список всех идентифицированных единиц акта; при непустом списке длина равна quantity. Утверждение происхождения из указанного прихода обязательно."
               }
             }
           }

@@ -1,4 +1,5 @@
 import React from 'react';
+import {validSerialIds} from './serialDisposition';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ident=(v:unknown):v is string=>typeof v==='string'&&uuid.test(v);
 const integer=(v:unknown):v is string=>typeof v==='string'&&/^-?(0|[1-9][0-9]{0,18})$/.test(v);
@@ -16,7 +17,7 @@ type Lot={lotId:string;createdAt:string;batchCode:string;binCode:string;allocate
 type Event={eventId:string;createdAt:string;action:string;quantity:string};
 type Valuation={id:string;currency:string;unitNetMinor:string;netMinor:string;vatMinor:string;grossMinor:string;sourceRevision:string;quotedAt:string;returnedQuantity:string;returnedNetMinor:string;returnedVatMinor:string};
 type Receipt={documentId:string;createdAt:string;lotId:string;sourceReference:string;quantity:string;status:'DRAFT'|'ACCEPTED'|'VALUED';acceptanceId:string|null;acceptedAt:string|null;valuation:Valuation|null;pendingReturnCount:number};
-type SupplierReturn={documentId:string;createdAt:string;sourceReceiptId:string;lotId:string;quantity:string;supplierReference:string;reason:string;status:'DRAFT'|'ACCEPTED'|'CANCELED'|'REJECTED';acceptanceId:string|null;acceptedAt:string|null;dispositionId:string|null;attribution:{currency:string;netMinor:string;vatMinor:string}|null;decision?:{id:string;note:string;createdAt:string}};
+type SupplierReturn={documentId:string;createdAt:string;sourceReceiptId:string;lotId:string;quantity:string;supplierReference:string;reason:string;status:'DRAFT'|'ACCEPTED'|'CANCELED'|'REJECTED';acceptanceId:string|null;acceptedAt:string|null;dispositionId:string|null;attribution:{currency:string;netMinor:string;vatMinor:string}|null;decision?:{id:string;note:string;createdAt:string};serialIds?:string[]};
 type Detail={syntheticOnly:true;organizationId:string;locationId:string;skuId:string;kind:Kind;items:(Lot|Event|Receipt|SupplierReturn)[];nextCursor:string|null};
 const stamp=(v:unknown)=>typeof v==='string'&&Number.isFinite(Date.parse(v));
 function scoped(raw:unknown,org:string,loc:string){
@@ -52,7 +53,8 @@ function validReceipt(x:Receipt){
 }
 function validReturn(x:SupplierReturn){
   if(!ident(x.documentId)||!ident(x.sourceReceiptId)||!ident(x.lotId)||!nonnegative(x.quantity)||BigInt(x.quantity)<=0n||
-    typeof x.supplierReference!=='string'||typeof x.reason!=='string')return false;
+    typeof x.supplierReference!=='string'||typeof x.reason!=='string'||
+    (x.serialIds!==undefined&&!validSerialIds(x.serialIds,Number(x.quantity))))return false;
   const noPosting=x.acceptanceId===null&&x.acceptedAt===null&&x.dispositionId===null&&x.attribution===null;
   if(x.status==='DRAFT')return noPosting&&x.decision===undefined;
   if(x.status==='CANCELED'||x.status==='REJECTED')return noPosting&&!!x.decision&&ident(x.decision.id)&&
@@ -171,6 +173,7 @@ export function WarehouseReconciliation(){
           <p>Ожидают подтверждения: {x.pendingReturnCount}</p></li>:
         'sourceReceiptId' in x?<li key={x.documentId}><strong>{x.supplierReference} · {number(x.quantity)} ед. · {({ACCEPTED:'Подтверждён',DRAFT:'Черновик',CANCELED:'Отменён',REJECTED:'Отклонён'}[x.status])}</strong>
           <p>Возврат {x.documentId} · исходный приход {x.sourceReceiptId} · партия {x.lotId}</p><p>{x.reason}</p>
+          {!!x.serialIds?.length&&<p style={{overflowWrap:'anywhere'}}>Серии акта: {x.serialIds.join(', ')}</p>}
           {x.decision&&<p>Решение {x.decision.id} · {x.decision.note} · {new Date(x.decision.createdAt).toLocaleString('ru-RU')}</p>}
           {x.attribution&&<p>Атрибутировано: стоимость {number(x.attribution.netMinor)} · НДС {number(x.attribution.vatMinor)} ({x.attribution.currency}) · списание {x.dispositionId}</p>}</li>:
         'batchCode' in x?<li key={x.lotId}>{x.batchCode} · {x.binCode} · размещено {number(x.allocated)}<p>Партия {x.lotId}</p></li>:

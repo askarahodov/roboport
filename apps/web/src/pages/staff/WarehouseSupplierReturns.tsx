@@ -1,4 +1,5 @@
 import React from 'react';
+import {parseSerialIds,validSerialIds} from './serialDisposition';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Action='draft'|'approve'|'cancel'|'reject';
@@ -6,7 +7,7 @@ type View='review'|'own';
 type Pending={action:Action;org:string;loc:string;key:string;body:string;url:string};
 type ReviewItem={documentId:string;sourceReceiptId:string;lotId:string;
   article:string;batchCode:string;binCode:string;quantity:number;
-  reason:string;supplierReference:string};
+  reason:string;supplierReference:string;serialIds?:string[]};
 type ReviewState={status:'idle'|'loading'|'ready'|'denied'|'error';
   items:ReviewItem[];nextDocumentId:string|null;cursor:string|null;view:View};
 const emptyReview=():ReviewState=>({
@@ -18,6 +19,8 @@ export function WarehouseSupplierReturns(){
   const [loc,setLoc]=React.useState('');
   const [receipt,setReceipt]=React.useState('');
   const [qty,setQty]=React.useState('1');
+  const [serialText,setSerialText]=React.useState('');
+  const serialIds=parseSerialIds(serialText,Number(qty));
   const [reason,setReason]=React.useState('');
   const [reference,setReference]=React.useState('');
   const [document,setDocument]=React.useState('');
@@ -36,14 +39,14 @@ export function WarehouseSupplierReturns(){
     /^[1-9][0-9]*$/.test(qty)&&Number.isSafeInteger(Number(qty))&&
     Number(qty)<=1000000000&&reason.trim()===reason&&
     reason.length>=3&&reason.length<=240&&reference.trim()===reference&&
-    reference.length>=3&&reference.length<=160;
+    reference.length>=3&&reference.length<=160&&serialIds!==null;
   const canApprove=validScope&&uuid.test(document.trim());
   const canDecide=canApprove&&note===note.trim()&&note.length>=3&&note.length<=240&&
     !Array.from(note).some(character=>character.charCodeAt(0)<32);
   React.useEffect(()=>{
     reviewSequence.current+=1;
     setReview(emptyReview());
-    setDocument('');setApproval('');setDecision('');setNote('');
+    setDocument('');setApproval('');setDecision('');setNote('');setSerialText('');
   },[org,loc]);
   async function loadReview(after:string|null=null,force=false,view:View=review.view){
     if(!validScope||(!force&&(busy||!!pending||review.status==='loading')))return;
@@ -80,7 +83,8 @@ export function WarehouseSupplierReturns(){
               typeof row[key]==='string'&&(row[key] as string).length>0&&
               (row[key] as string).length<=240)&&
             Number.isSafeInteger(row.quantity)&&Number(row.quantity)>=1&&
-            Number(row.quantity)<=1000000000;
+            Number(row.quantity)<=1000000000&&
+            (row.serialIds===undefined||validSerialIds(row.serialIds,Number(row.quantity)));
         })||!(data.nextDocumentId===null||
           (typeof data.nextDocumentId==='string'&&uuid.test(data.nextDocumentId))))
         throw Error('invalid');
@@ -101,7 +105,7 @@ export function WarehouseSupplierReturns(){
         '/warehouse/supplier-returns'+(action==='approve'?'/approvals':action==='draft'?'':'/decisions'),
       body:JSON.stringify(action==='draft'?{
         locationId:loc.trim(),sourceReceiptId:receipt.trim(),
-        quantity:Number(qty),reason,supplierReference:reference
+        quantity:Number(qty),reason,supplierReference:reference,...(serialIds?.length?{serialIds}:{})
       }:{locationId:loc.trim(),documentId:document.trim(),
         ...(action==='cancel'||action==='reject'?{action:action.toUpperCase(),note}:{})})
     };
@@ -180,10 +184,15 @@ export function WarehouseSupplierReturns(){
       <h2>1. Подготовить возврат</h2>
       <label>UUID принятого прихода <input aria-label="UUID принятого прихода"
         value={receipt} disabled={busy||!!pending}
-        onChange={e=>setReceipt(e.target.value)}/></label>
+        onChange={e=>{setReceipt(e.target.value);setSerialText('');}}/></label>
       <label>Количество <input aria-label="Количество" type="number"
         min="1" max="1000000000" step="1" value={qty}
         disabled={busy||!!pending} onChange={e=>setQty(e.target.value)}/></label>
+      <label>UUID серий для возврата (необязательно, через пробел или запятую)
+        <textarea value={serialText} maxLength={2000} disabled={busy||!!pending} onChange={e=>setSerialText(e.target.value)}/></label>
+      <p>Для серийного возврата укажите уникальные UUID всех единиц (до 50), с независимо
+        подтверждённым происхождением из выбранного прихода.</p>
+      {serialIds===null&&<p role="alert">Нужен корректный список уникальных UUID серий по количеству акта.</p>}
       <label>Причина <input aria-label="Причина"
         value={reason} maxLength={240} disabled={busy||!!pending}
         onChange={e=>setReason(e.target.value)}/></label>
@@ -213,6 +222,7 @@ export function WarehouseSupplierReturns(){
             <strong>{item.article}</strong> · партия {item.batchCode} ·
             ячейка {item.binCode} · {item.quantity} шт.
             <p>Причина: {item.reason}; обращение: {item.supplierReference}</p>
+            {!!item.serialIds?.length&&<p style={{overflowWrap:'anywhere'}}>Серии акта: {item.serialIds.join(', ')}</p>}
             <button type="button" disabled={busy||!!pending}
               onClick={()=>{setDocument(item.documentId);setNote('');setApproval('');setDecision('');}}>
               Выбрать акт {item.documentId}</button>

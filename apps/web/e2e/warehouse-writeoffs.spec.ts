@@ -8,6 +8,7 @@ const reviewer='66666666-6666-4666-8666-666666666666';
 const event='77777777-7777-4777-8777-777777777777';
 const debit='88888888-8888-4888-8888-888888888888';
 const stamp='2030-01-01T00:00:00Z';
+const serial1='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',serial2='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 test('writeoff prepares immutable act, independent approval and exact retry',async({page})=>{
   let made=false,approved=false,manager=false,denied=false,lost=true;
@@ -16,7 +17,7 @@ test('writeoff prepares immutable act, independent approval and exact retry',asy
   const snapshot=()=>({syntheticOnly:true,organizationId:org,locationId:loc,canDraft:!manager,
     lots:manager?[]:[{...entry,available:approved?'3':'5'}],nextLotCursor:null,nextCursor:null,
     items:made?[{...entry,documentId:doc,quantity:'2',reasonCode:'DAMAGED',note:'Синтетическое повреждение',
-      createdBy:actor,createdAt:stamp,status:approved?'APPROVED':'PENDING',
+      createdBy:actor,createdAt:stamp,serialIds:[serial1,serial2],status:approved?'APPROVED':'PENDING',
       canReview:manager&&!approved,canCancel:!manager&&!approved,
       decision:approved?{id:reviewer,note:'Осмотрено управляющим',actorId:reviewer,createdAt:stamp,
         dispositionId:doc,stockEventId:event,lotDebitId:debit}:null}]:[]});
@@ -27,7 +28,7 @@ test('writeoff prepares immutable act, independent approval and exact retry',asy
     if(req.method()==='GET')return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(snapshot())});
     expect(req.headers()['x-csrf-token']).toBe('csrf');
     if(url.pathname.endsWith('/writeoffs')){
-      expect(req.postDataJSON()).toEqual({locationId:loc,lotId:lot,quantity:2,reasonCode:'DAMAGED',note:'Синтетическое повреждение'});
+      expect(req.postDataJSON()).toEqual({locationId:loc,lotId:lot,quantity:2,reasonCode:'DAMAGED',note:'Синтетическое повреждение',serialIds:[serial1,serial2]});
       made=true;
       return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({syntheticOnly:true,documentId:doc,replayed:false})});
     }
@@ -46,10 +47,14 @@ test('writeoff prepares immutable act, independent approval and exact retry',asy
   await page.getByLabel('Партия для списания').selectOption(lot);
   await page.getByLabel('Количество').fill('2');
   await page.getByLabel('Обоснование списания').fill('Синтетическое повреждение');
+  await page.getByLabel('UUID серий для списания',{exact:false}).fill(serial1);
+  await expect(page.getByRole('button',{name:'Создать акт списания'})).toBeDisabled();
+  await page.getByLabel('UUID серий для списания',{exact:false}).fill(serial2+', '+serial1);
   await page.getByRole('button',{name:'Создать акт списания'}).click();
   await expect(page.getByText('Остатки не изменены.',{exact:false})).toBeVisible();
   await load.click();
   await expect(page.getByText('SYN-PART · 2 ед. · Ожидает решения',{exact:true})).toBeVisible();
+  await expect(page.getByText('Серии акта: '+serial1+', '+serial2)).toBeVisible();
   await expect(page.getByRole('button',{name:'Утвердить акт'})).toHaveCount(0);
   manager=true;
   await load.click();

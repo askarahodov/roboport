@@ -7,6 +7,7 @@ import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
 from .auto_stock_service import AutoStockConflict, AutoStockDenied
+from .auto_stock_serial_disposition import normalize_serials
 from .auto_purchase_document_policy import require_purchase_document,receipt_history_date
 
 SQL_FAILURES=(psycopg.errors.RaiseException,psycopg.errors.UniqueViolation,
@@ -45,7 +46,7 @@ def _run(conn,token,org,loc,role,sql,args,*,cap,created_at):
 
 def draft_supplier_return(conn:psycopg.Connection,token:str,
     org:UUID,loc:UUID,receipt_id:UUID,request_id:UUID,
-    quantity:int,reason:str,supplier_reference:str)->UUID:
+    quantity:int,reason:str,supplier_reference:str,*,serial_ids=())->UUID:
     _validate(token,org,loc,receipt_id,request_id)
     if (type(quantity) is not int or not 1<=quantity<=1_000_000_000
       or type(reason) is not str or not 3<=len(reason)<=240
@@ -54,10 +55,11 @@ def draft_supplier_return(conn:psycopg.Connection,token:str,
       or not 3<=len(supplier_reference)<=160
       or supplier_reference!=supplier_reference.strip()):
         raise AutoStockDenied("INVALID_INPUT")
+    serials=normalize_serials(serial_ids,quantity)
     with conn.transaction():
         if not organization_role_allows(conn,token,org,"WAREHOUSE",loc,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
-        row=conn.execute("""SELECT id,sku_id,quantity FROM auto_stock_receipt_document
+        row=conn.execute("""SELECT id,sku_id,quantity,lot_id FROM auto_stock_receipt_document
             WHERE id=%s AND organization_id=%s AND location_id=%s FOR SHARE""",
             (receipt_id,org,loc)).fetchone()
         if row is None: raise AutoStockDenied("FORBIDDEN")
@@ -66,22 +68,41 @@ def draft_supplier_return(conn:psycopg.Connection,token:str,
         # Match the existing approval/ledger serialization key. A new draft
         # cannot claim quantity already returned against this receipt, even
         # when another receipt replenished the same physical lot. Preserve
-        # exact replay; the SQL procedure still checks actor and payload.
+        # exact replay only for the same actor and complete canonical payload.
         conn.execute("SELECT id FROM auto_stock_sku WHERE id=%s FOR UPDATE",(row[1],))
-        prior=conn.execute("""SELECT 1 FROM auto_stock_supplier_return_document
-            WHERE request_id=%s AND source_receipt_id=%s AND organization_id=%s
-              AND location_id=%s""",(request_id,receipt_id,org,loc)).fetchone()
-        if prior is None:
-            returned=conn.execute("""SELECT COALESCE(sum(d.quantity),0)
-                FROM auto_stock_supplier_return_document d
-                JOIN auto_stock_supplier_return_acceptance a ON a.document_id=d.id
-                WHERE d.source_receipt_id=%s""",(receipt_id,)).fetchone()[0]
-            if returned+quantity>row[2]:
+        actor=session_subject(conn,token,for_mutation=True)
+        if actor is None: raise AutoStockDenied("FORBIDDEN")
+        prior=conn.execute("""SELECT id,source_receipt_id,organization_id,location_id,
+              quantity,reason,supplier_reference,created_by,serial_ids
+            FROM auto_stock_supplier_return_document WHERE request_id=%s""",(request_id,)).fetchone()
+        if prior is not None:
+            if prior[1:]!=(receipt_id,org,loc,quantity,reason,supplier_reference,actor,serials):
                 raise AutoStockConflict("CONFLICT")
-        return _run(conn,token,org,loc,"WAREHOUSE",
-            "SELECT record_auto_stock_supplier_return_document(%s,%s,%s,%s,%s)",
-            (receipt_id,request_id,quantity,reason,supplier_reference),
-            cap="CREATE",created_at=history)
+            return prior[0]
+        returned=conn.execute("""SELECT COALESCE(sum(d.quantity),0)
+            FROM auto_stock_supplier_return_document d
+            JOIN auto_stock_supplier_return_acceptance a ON a.document_id=d.id
+            WHERE d.source_receipt_id=%s""",(receipt_id,)).fetchone()[0]
+        if returned+quantity>row[2]:
+            raise AutoStockConflict("CONFLICT")
+        ident=uuid4()
+        # Новая колонка включается непосредственно в неизменяемый акт.
+        # Исходный trigger проверяет accepted/valued receipt и устанавливает actor.
+        try:
+            with conn.transaction():
+                conn.execute("SELECT set_config('roboport.supplier_return_actor',%s,true)",(str(actor),))
+                conn.execute("""
+                  INSERT INTO auto_stock_supplier_return_document
+                    (id,request_id,organization_id,location_id,lot_id,sku_id,
+                     source_receipt_id,quantity,reason,supplier_reference,created_by,serial_ids)
+                  VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,(ident,request_id,org,loc,row[3],row[1],receipt_id,quantity,reason,
+                     supplier_reference,actor,serials))
+        except SQL_FAILURES:
+            raise AutoStockConflict("CONFLICT") from None
+        finally:
+            conn.execute("SELECT set_config('roboport.supplier_return_actor','',true)")
+        return ident
 
 
 def approve_supplier_return(conn:psycopg.Connection,token:str,
@@ -182,7 +203,7 @@ def pending_supplier_returns(conn:psycopg.Connection,token:str,org:UUID,loc:UUID
             raise AutoStockDenied("FORBIDDEN")
         rows=conn.execute("""
             SELECT d.id,d.source_receipt_id,d.lot_id,s.article,l.batch_code,
-                   b.code,d.quantity,d.reason,d.supplier_reference
+                   b.code,d.quantity,d.reason,d.supplier_reference,d.serial_ids
             FROM auto_stock_supplier_return_document d
             JOIN auto_stock_lot l ON l.id=d.lot_id
               AND l.organization_id=d.organization_id
@@ -218,6 +239,6 @@ def pending_supplier_returns(conn:psycopg.Connection,token:str,org:UUID,loc:UUID
             "documentId":str(document_id),"sourceReceiptId":str(receipt_id),
             "lotId":str(lot_id),"article":article,"batchCode":batch_code,
             "binCode":bin_code,"quantity":quantity,"reason":reason,
-            "supplierReference":reference,
+            "supplierReference":reference,"serialIds":[str(i) for i in serials],
         } for document_id,receipt_id,lot_id,article,batch_code,bin_code,
-              quantity,reason,reference in rows[:limit]],next_id)
+              quantity,reason,reference,serials in rows[:limit]],next_id)

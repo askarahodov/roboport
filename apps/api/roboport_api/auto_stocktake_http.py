@@ -538,6 +538,7 @@ def pending_supplier_return_http(org_id:str,request:Request,locationId:str,
 
 class SupplierReturnDraftBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
+    serialIds:list[UUID]=Field(default_factory=list,max_length=50)
     locationId: UUID
     sourceReceiptId: UUID
     quantity: StrictInt = Field(ge=1,le=1000000000)
@@ -559,6 +560,8 @@ async def draft_supplier_return_http(org_id:str,request:Request):
     try:
         org=UUID(org_id)
         data=SupplierReturnDraftBody.model_validate(await request.json())
+        if data.serialIds and (len(data.serialIds)!=data.quantity or len(set(data.serialIds))!=len(data.serialIds)):
+            raise ValueError("invalid serial selection")
         key=_key(request)
     except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
         return _response(request,422,"INVALID_INPUT")
@@ -568,7 +571,7 @@ async def draft_supplier_return_http(org_id:str,request:Request):
         try:
             ident=draft_supplier_return(db,request.cookies.get("rp_session",""),
                 org,data.locationId,data.sourceReceiptId,key,data.quantity,
-                data.reason,data.supplierReference)
+                data.reason,data.supplierReference,serial_ids=data.serialIds)
         except AutoStockDenied:
             return _response(request,403,"FORBIDDEN")
         except AutoStockConflict:
@@ -713,6 +716,7 @@ async def post_interbranch(org_id:str,request:Request):
 
 class WriteoffDraft(BaseModel):
     model_config=ConfigDict(extra="forbid")
+    serialIds:list[UUID]=Field(default_factory=list,max_length=50)
     locationId:UUID
     lotId:UUID
     quantity:StrictInt=Field(ge=1,le=1000000000)
@@ -761,6 +765,9 @@ async def _writeoff_mutation(org_id,request,document_id=None):
         org=UUID(org_id)
         document=UUID(document_id) if document_id is not None else None
         data=(WriteoffDecision if document else WriteoffDraft).model_validate(await request.json())
+        if isinstance(data,WriteoffDraft) and data.serialIds and (
+            len(data.serialIds)!=data.quantity or len(set(data.serialIds))!=len(data.serialIds)):
+            raise ValueError("invalid serial selection")
         key=_key(request)
     except (ValueError,TypeError,ValidationError,UnicodeDecodeError):
         return _response(request,422,"INVALID_INPUT")
@@ -770,7 +777,7 @@ async def _writeoff_mutation(org_id,request,document_id=None):
         try:
             if document is None:
                 result=draft(db,request.cookies.get("rp_session",""),org,data.locationId,
-                    data.lotId,key,data.quantity,data.reasonCode,data.note)
+                    data.lotId,key,data.quantity,data.reasonCode,data.note,serial_ids=data.serialIds)
             else:
                 result=decide(db,request.cookies.get("rp_session",""),org,data.locationId,
                     document,key,data.action,data.note)
