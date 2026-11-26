@@ -39,3 +39,67 @@ def test_scope_and_byte_bound_identity_and_private_route():
     with pytest.raises(CutoverInput):
         prepare_bundle(body,ORG,LOC,"preview")
     assert ROOT+"/{operation}" not in app.openapi()["paths"]
+
+
+
+def test_mapped_sources_preserve_scope_and_canonical_identity():
+    from roboport_api.auto_cutover_prepare import normalize_sources, PrepareDenied
+    import csv
+    import io
+    original = sample()
+    inputs = {}
+    for name, entry in original["files"].items():
+        rows = list(csv.reader(io.StringIO(base64.b64decode(entry["base64"]).decode())))
+        aliases = ["F" + str(i) for i in range(len(rows[0]))]
+        mapping = dict(zip(aliases, rows[0]))
+        stream = io.StringIO(newline="")
+        csv.writer(stream).writerows([aliases[::-1], *[row[::-1] for row in rows[1:]]])
+        raw = stream.getvalue().encode()
+        inputs[name] = {"base64": base64.b64encode(raw).decode(),
+                        "sha256": sha256(raw).hexdigest(), "format": "CSV", "mapping": mapping}
+    body = {"syntheticOnly": True, "files": inputs}
+    canonical = normalize_sources(body)
+    assert normalize_sources(body) == canonical
+    assert prepare_bundle(canonical, ORG, LOC, "preview")[2] == prepare_bundle(original, ORG, LOC, "preview")[2]
+    with pytest.raises(CutoverInput):
+        prepare_bundle(canonical, LOC, ORG, "preview")
+    for invalid in ({"F0": "record_type"}, {"F0": "owner"}):
+        with pytest.raises(PrepareDenied):
+            normalize_sources({**body, "files": {**inputs, "vehicles.csv": {
+                **inputs["vehicles.csv"], "mapping": invalid}}})
+    with pytest.raises(PrepareDenied):
+        normalize_sources({**body, "files": {**inputs, "inventory.csv": {
+            **inputs["inventory.csv"], "sha256": "0"*64}}})
+
+
+def test_mixed_xlsx_preparation_and_unsafe_formula(tmp_path):
+    import csv
+    import io
+    from test_auto_synthetic_xlsx import workbook
+    from roboport_api.auto_cutover_prepare import normalize_sources, PrepareDenied
+    original = sample()
+    files = {name: {**entry, "format": "CSV", "mapping": None}
+             for name, entry in original["files"].items()}
+    # Vehicle and service workbooks reuse the existing strict OOXML parser.
+    for name in ("vehicles.csv", "services.csv"):
+        rows = list(csv.reader(io.StringIO(base64.b64decode(files[name]["base64"]).decode())))
+        path = tmp_path / (name + ".xlsx")
+        workbook(path, rows[0], rows[1])
+        raw = path.read_bytes()
+        files[name] = {"base64": base64.b64encode(raw).decode(), "sha256": sha256(raw).hexdigest(),
+                       "format": "XLSX", "mapping": None}
+    body = {"syntheticOnly": True, "files": files}
+    assert prepare_bundle(normalize_sources(body), ORG, LOC, "preview")[2]["receipts"] == 1
+    # Inventory supports the same workbook path; a SKU-only file has zero receipts.
+    rows = list(csv.reader(io.StringIO(base64.b64decode(files["inventory.csv"]["base64"]).decode())))
+    path = tmp_path / "inventory.xlsx"
+    workbook(path, rows[0], rows[1])
+    raw = path.read_bytes()
+    files["inventory.csv"] = {"base64": base64.b64encode(raw).decode(), "sha256": sha256(raw).hexdigest(),
+                              "format": "XLSX", "mapping": None}
+    assert prepare_bundle(normalize_sources(body), ORG, LOC, "preview")[2]["receipts"] == 0
+    workbook(path, rows[0], rows[1], formula=True)
+    raw = path.read_bytes()
+    files["inventory.csv"].update(base64=base64.b64encode(raw).decode(), sha256=sha256(raw).hexdigest())
+    with pytest.raises(PrepareDenied):
+        normalize_sources(body)
