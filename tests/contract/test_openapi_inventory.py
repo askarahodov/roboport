@@ -134,3 +134,28 @@ def test_base_inventory_reads_exact_git_commit_and_includes_deleted_files(tmp_pa
         current_contracts(tmp_path), base_contracts(tmp_path, sha))
     with pytest.raises(ValueError):
         base_contracts(tmp_path, "--help")
+
+
+def test_named_component_and_effective_parameter_changes():
+    old = document()
+    path = "/api/v1/dev/auto/example"
+    old["components"]["parameters"] = {
+        "Limit": {"name": "limit", "in": "query", "schema": {"type": "integer", "maximum": 50}},
+    }
+    old["paths"][path]["parameters"] = [{"$ref": "#/components/parameters/Limit"}]
+    old["paths"][path]["post"]["parameters"] = [
+        {"name": "cursor", "in": "query", "schema": {"type": "string", "maxLength": 100}}]
+    new = deepcopy(old)
+    new["components"]["parameters"]["Limit"]["schema"]["maximum"] = 10
+    new["paths"][path]["post"]["parameters"][0]["schema"]["maxLength"] = 20
+    new["components"]["securitySchemes"]["localSession"]["name"] = "other"
+    errors = deep_changes(old, new)
+    assert any("CHANGED_SCHEMA_CONSTRAINT:parameters:Limit.maximum" in x for x in errors)
+    assert any("CHANGED_SCHEMA_CONSTRAINT:" in x and "cursor" in x for x in errors)
+    assert "CHANGED_SECURITY_SCHEME:localSession" in errors
+    new = deepcopy(old)
+    new["paths"][path]["parameters"] = []
+    assert any(x.startswith("REMOVED_EFFECTIVE_PARAMETER:") for x in deep_changes(old, new))
+    new = deepcopy(old)
+    new["components"]["securitySchemes"]["localSession"]["description"] = "Уточнение"
+    assert deep_changes(old, new) == []

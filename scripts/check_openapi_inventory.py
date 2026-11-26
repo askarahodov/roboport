@@ -188,8 +188,57 @@ def _content_changes(old, new, at):
     return errors
 
 
+def _parameter_changes(old, new, at):
+    errors = []
+    for key in ("$ref", "required", "style", "explode", "allowReserved"):
+        if old.get(key) != new.get(key):
+            errors.append(f"CHANGED_PARAMETER_CONTRACT:{at}:{key}")
+    errors.extend(_schema_changes(old.get("schema", {}), new.get("schema", {}), at))
+    errors.extend(_content_changes(old.get("content", {}), new.get("content", {}), at))
+    return errors
+
+
+def _parameters(path, op):
+    # Local named refs are compared in components separately. Preserve identity
+    # of each ref rather than collapsing all refs to the same (None, None).
+    result = {}
+    for entry in path.get("parameters", []) + op.get("parameters", []):
+        key = ("ref", entry["$ref"]) if "$ref" in entry else (entry["in"], entry["name"])
+        result[key] = entry
+    return result
+
+
+def _named_changes(old, new):
+    errors = []
+    left, right = old.get("components", {}), new.get("components", {})
+    for kind in ("securitySchemes", "parameters", "headers", "requestBodies", "responses"):
+        a, b = left.get(kind, {}), right.get(kind, {})
+        for name in a.keys() - b.keys():
+            errors.append(f"REMOVED_COMPONENT:{kind}:{name}")
+        for name in a.keys() & b.keys():
+            at = f"{kind}:{name}"
+            if kind == "securitySchemes":
+                # Description-only changes do not change the security mechanism.
+                if ({k: v for k, v in a[name].items() if k != "description"} !=
+                        {k: v for k, v in b[name].items() if k != "description"}):
+                    errors.append(f"CHANGED_SECURITY_SCHEME:{name}")
+            elif kind in ("parameters", "headers"):
+                errors.extend(_parameter_changes(a[name], b[name], at))
+            else:
+                # These named objects may be used by multiple operations.
+                if a[name].get("$ref") != b[name].get("$ref"):
+                    errors.append(f"CHANGED_COMPONENT_REFERENCE:{at}")
+                if b[name].get("required") is True and a[name].get("required") is not True:
+                    errors.append(f"NEW_REQUIRED_COMPONENT:{at}")
+                errors.extend(_content_changes(a[name].get("content", {}),
+                                               b[name].get("content", {}), at))
+                for header in a[name].get("headers", {}).keys() - b[name].get("headers", {}).keys():
+                    errors.append(f"REMOVED_COMPONENT_HEADER:{at}:{header}")
+    return errors
+
+
 def deep_changes(old, new):
-    errors = regressions(old, new)
+    errors = regressions(old, new) + _named_changes(old, new)
     a = old.get("components", {}).get("schemas", {})
     b = new.get("components", {}).get("schemas", {})
     for name in a.keys() & b.keys():
@@ -203,6 +252,11 @@ def deep_changes(old, new):
                 errors.append(f"CHANGED_OPERATION_ID:{at}")
             if a.get("security", old.get("security")) != b.get("security", new.get("security")):
                 errors.append(f"CHANGED_SECURITY:{at}")
+            params_a, params_b = _parameters(left, a), _parameters(right, b)
+            for key in params_a.keys() - params_b.keys():
+                errors.append(f"REMOVED_EFFECTIVE_PARAMETER:{at}:{key}")
+            for key in params_a.keys() & params_b.keys():
+                errors.extend(_parameter_changes(params_a[key], params_b[key], f"{at}:{key}"))
             body_a, body_b = a.get("requestBody", {}), b.get("requestBody", {})
             if body_b.get("required") is True and body_a.get("required") is not True:
                 errors.append(f"NEW_REQUIRED_BODY:{at}")
@@ -235,7 +289,7 @@ def check_inventory(current: dict[str, str], previous: dict[str, str] | None = N
             doc = load_contract(raw)
             if name != "contracts/openapi.yaml":
                 errors.extend(f"{name}:{reason}" for reason in private_boundary(doc))
-            if previous is not None and name in previous:
+            if previous is not None and name in previous and previous[name] != raw:
                 old = load_contract(previous[name])
                 errors.extend(f"{name}:{reason}" for reason in deep_changes(old, doc))
         except Exception:
