@@ -4,6 +4,8 @@ No phones, message payloads or outbound integrations. Stages are append-only;
 DB trigger independently enforces ordering and WorkOrder booking lineage.
 """
 from uuid import UUID, uuid4
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from hashlib import sha256
 from .keyset_cursor import encode_cursor,decode_cursor
 import psycopg
@@ -276,15 +278,45 @@ def list_leads(conn,token,org,loc,cursor=None):
         return {"syntheticOnly":True,"items":items,"nextCursor":next_cursor}
 
 
-def search_leads(conn,token,org,loc,*,link=None,source="ALL",stage="ALL",cursor=None):
+LEAD_EXPORT_LIMIT=250
+
+
+def search_leads(conn,token,org,loc,*,link=None,source="ALL",stage="ALL",cursor=None,
+                 owner=None,from_day=None,to_day=None,export=False):
     """Search all authorized cycles, not only the journal's loaded page."""
     with conn.transaction():
         actor,manager=_authority(conn,token,org,loc)
         if ((link is not None and type(link) is not UUID) or
             source not in ("ALL","WEB","PHONE","WALK_IN") or
-            stage not in ("ALL","NEW","QUALIFIED","BOOKED","LOST")):
+            stage not in ("ALL","NEW","QUALIFIED","BOOKED","LOST") or
+            (owner is not None and type(owner) is not UUID) or
+            (from_day is None)!=(to_day is None) or (export and cursor is not None)):
             raise LeadDenied("INVALID_INPUT")
-        scope=sha256(f"lead-search:{org}:{loc}:{link}:{source}:{stage}".encode()).hexdigest()[:32]
+        start=end=None
+        branch=conn.execute("""SELECT timezone_name FROM auto_service_location
+             WHERE id=%s AND organization_id=%s AND disabled_at IS NULL FOR SHARE""",
+             (loc,org)).fetchone()
+        if branch is None:
+            raise LeadDenied("FORBIDDEN")
+        try:
+            zone=ZoneInfo(branch[0])
+        except (ZoneInfoNotFoundError,ValueError,TypeError):
+            raise LeadDenied("FORBIDDEN") from None
+        if from_day is not None:
+            try:
+                first,last=date.fromisoformat(from_day),date.fromisoformat(to_day)
+                if (first.isoformat()!=from_day or last.isoformat()!=to_day or
+                    not 1<=(last-first).days+1<=31 or last==date.max):
+                    raise ValueError()
+                start=datetime.combine(first,datetime.min.time(),zone).astimezone(timezone.utc)
+                end=datetime.combine(last+timedelta(days=1),datetime.min.time(),zone).astimezone(timezone.utc)
+            except (ValueError,TypeError,OverflowError):
+                raise LeadDenied("INVALID_INPUT") from None
+        scope_text=f"lead-search:{org}:{loc}:{link}:{source}:{stage}"
+        if owner is not None or from_day is not None:
+            scope_text+=f":{owner}:{from_day}:{to_day}:{branch[0]}"
+        scope=sha256(scope_text.encode()).hexdigest()[:32]
+        limit=LEAD_EXPORT_LIMIT if export else LEAD_PAGE_SIZE
         try:
             after=decode_cursor(cursor,scope,token) if cursor is not None else None
         except ValueError:
@@ -306,6 +338,9 @@ def search_leads(conn,token,org,loc,*,link=None,source="ALL",stage="ALL",cursor=
             AND (%s::uuid IS NULL OR lead.customer_link_id=%s::uuid)
             AND (%s='ALL' OR lead.source_code=%s)
             AND (%s='ALL' OR COALESCE(latest.stage_code,'NEW')=%s)
+            AND (%s::uuid IS NULL OR COALESCE(assignment.assignee_id,lead.owner_id)=%s)
+            AND (%s::timestamptz IS NULL OR lead.created_at >= %s)
+            AND (%s::timestamptz IS NULL OR lead.created_at < %s)
             AND (%s::timestamptz IS NULL OR (lead.created_at,lead.id)<(%s,%s))
             AND EXISTS(
               SELECT 1 FROM auto_vehicle_customer_link p
@@ -318,16 +353,22 @@ def search_leads(conn,token,org,loc,*,link=None,source="ALL",stage="ALL",cursor=
                 AND p.verified_by IS NOT NULL AND p.revoked_at IS NULL
             )
           ORDER BY lead.created_at DESC,lead.id DESC LIMIT %s
-        """,(org,loc,manager,actor,link,link,source,source,stage,stage,*pos,LEAD_PAGE_SIZE+1)).fetchall()
-        page=rows[:LEAD_PAGE_SIZE]
+        """,(org,loc,manager,actor,link,link,source,source,stage,stage,
+              owner,owner,start,start,end,end,*pos,limit+1)).fetchall()
+        if export and len(rows)>limit:
+            raise LeadConflict("EXPORT_LIMIT")
+        page=rows[:limit]
         items=[]
         for ident,_ in page:
             state=_state(conn,_lead(conn,org,loc,ident,actor,manager))
-            if stage!="ALL" and state["status"]!=stage:
+            if ((stage!="ALL" and state["status"]!=stage) or
+                (owner is not None and state["ownerId"]!=str(owner))):
                 raise LeadConflict("SEARCH_CHANGED")
             items.append({k:state[k] for k in ("leadId","customerLinkId","ownerId","sourceCode",
                                                "status","createdAt","visitNumber")})
         return {"syntheticOnly":True,"organizationId":str(org),"locationId":str(loc),
                 "customerLinkId":str(link) if link else None,"sourceCode":source,"stageCode":stage,
-                "items":items,"nextCursor":encode_cursor(page[-1][1],page[-1][0],scope,token)
-                  if len(rows)>LEAD_PAGE_SIZE else None}
+                "ownerId":str(owner) if owner else None,"fromDay":from_day,"toDay":to_day,
+                "timeZone":branch[0],"items":items,
+                "nextCursor":encode_cursor(page[-1][1],page[-1][0],scope,token)
+                  if len(rows)>limit else None}

@@ -22,3 +22,12 @@ def test_search_contract_private_and_bounded():
     assert not check.is_valid({**page,"items":[row]*26})
     assert not check.is_valid({**page,"items":[{**row,"phone":"private"}]})
     assert not check.is_valid({**page,"nextCursor":"a"*257})
+
+
+def test_extended_search_export_contract():
+    export=PATH+"/export"
+    assert export not in app.openapi()["paths"]
+    assert [(r.path,m) for r in router.routes for m in r.methods if r.path==export]==[(export,"GET")]
+    op=SPEC["paths"][export]["get"]
+    assert {p["name"] for p in op["parameters"]}=={"org_id","loc_id","customerLinkId","sourceCode","stageCode","ownerId","fromDay","toDay"}
+    assert "text/csv" in op["responses"]["200"]["content"]

@@ -85,6 +85,30 @@
               "maxLength": 256,
               "pattern": "^[A-Za-z0-9_-]+$"
             }
+          },
+          {
+            "in": "query",
+            "name": "ownerId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fromDay",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "toDay",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
           }
         ],
         "responses": {
@@ -101,6 +125,169 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SearchPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Доступ запрещён",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Функция выключена",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Изменение этапа или конфликт",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Неверный фильтр или курсор",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/lead-search/export": {
+      "get": {
+        "operationId": "exportCrmLeadsDev",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "loc_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "customerLinkId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sourceCode",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "WEB",
+                "PHONE",
+                "WALK_IN"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stageCode",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "NEW",
+                "QUALIFIED",
+                "BOOKED",
+                "LOST"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ownerId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fromDay",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "toDay",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Все подходящие авторизованные обращения, до 250 строк, UTF-8 BOM",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              },
+              "X-CRM-SHA256": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "X-CRM-Row-Count": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 250
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -274,6 +461,31 @@
             "minLength": 1,
             "maxLength": 256,
             "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "ownerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "fromDay": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "toDay": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "timeZone": {
+            "type": "string",
+            "minLength": 1
           }
         }
       },

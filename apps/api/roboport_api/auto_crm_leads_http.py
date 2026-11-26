@@ -4,7 +4,10 @@ from datetime import datetime
 
 import psycopg
 from fastapi import APIRouter,Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse,Response
+from hashlib import sha256
+import csv
+from io import StringIO
 from pydantic import BaseModel,ConfigDict,ValidationError
 
 from .auth_http import _mutation_ok
@@ -209,24 +212,53 @@ async def crm_interaction(org_id:str,loc_id:str,lead_id:str,request:Request):
                         headers={"Cache-Control":"no-store"})
 
 
-@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/lead-search")
-def crm_lead_search(org_id:str,loc_id:str,request:Request):
+def _search_response(org_id,loc_id,request,*,export=False):
     scoped=_context(request,org_id,loc_id)
     if isinstance(scoped,JSONResponse):
         return scoped
     dsn,(org,loc)=scoped
     query=request.query_params
+    allowed={"customerLinkId","sourceCode","stageCode","ownerId","fromDay","toDay"}
+    if not export:
+        allowed.add("cursor")
     try:
-        if any(len(query.getlist(k))>1 for k in ("customerLinkId","sourceCode","stageCode","cursor")):
-            raise ValueError("duplicate")
+        if set(query)-allowed or any(len(query.getlist(k))!=1 for k in query):
+            raise ValueError("invalid query")
         link=UUID(query["customerLinkId"]) if "customerLinkId" in query else None
+        owner=UUID(query["ownerId"]) if "ownerId" in query else None
     except (ValueError,TypeError):
         return _response(request,422,"INVALID_INPUT")
     try:
         with psycopg.connect(dsn) as db:
             result=search_leads(db,request.cookies.get("rp_session",""),org,loc,
                 link=link,source=query.get("sourceCode","ALL"),stage=query.get("stageCode","ALL"),
-                cursor=query.get("cursor"))
+                owner=owner,from_day=query.get("fromDay"),to_day=query.get("toDay"),
+                cursor=query.get("cursor"),export=export)
     except (LeadDenied,LeadConflict) as exc:
         return _error(request,exc)
-    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+    except (psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
+        return _response(request,409,"CONFLICT")
+    if not export:
+        return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
+    # Только проверенные UUID, enums, даты и целое число, без свободных текстов.
+    stream=StringIO(newline="")
+    writer=csv.writer(stream,lineterminator="\r\n")
+    fields=("leadId","customerLinkId","ownerId","sourceCode","status","createdAt","visitNumber")
+    writer.writerow(fields)
+    writer.writerows([row[field] for field in fields] for row in result["items"])
+    data=stream.getvalue().encode("utf-8-sig")
+    return Response(content=data,media_type="text/csv",headers={
+        "Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+        "Content-Disposition":'attachment; filename="synthetic-crm-leads.csv"',
+        "X-CRM-SHA256":sha256(data).hexdigest(),"X-CRM-Row-Count":str(len(result["items"])),
+    })
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/lead-search")
+def crm_lead_search(org_id:str,loc_id:str,request:Request):
+    return _search_response(org_id,loc_id,request)
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/lead-search/export")
+def crm_lead_search_export(org_id:str,loc_id:str,request:Request):
+    return _search_response(org_id,loc_id,request,export=True)

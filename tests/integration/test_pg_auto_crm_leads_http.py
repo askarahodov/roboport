@@ -243,6 +243,33 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
     assert len({x["leadId"] for x in fp["items"]+rest.json()["items"]})==27
     assert http.get(search,params={"sourceCode":"WEB","stageCode":"NEW","cursor":fp["nextCursor"]}).status_code==422
     assert http.get(search,params={"stageCode":"BOOKED"}).json()["items"]==[]
+    import csv,io
+    from hashlib import sha256
+    day=datetime.now(timezone.utc).date().isoformat()
+    filters={"ownerId":str(d["intake"]),"fromDay":day,"toDay":day,"sourceCode":"WALK_IN"}
+    period=http.get(search,params=filters)
+    assert period.status_code==200,period.text
+    assert period.json()["ownerId"]==str(d["intake"]) and period.json()["timeZone"]=="UTC"
+    assert period.json()["nextCursor"]
+    assert http.get(search,params={**filters,"ownerId":str(d["manager"]),
+        "cursor":period.json()["nextCursor"]}).status_code==422
+    export=search+"/export"
+    report=http.get(export,params=filters)
+    assert report.status_code==200,report.text
+    assert report.headers["cache-control"]=="no-store"
+    assert report.headers["x-crm-sha256"]==sha256(report.content).hexdigest()
+    assert report.headers["x-crm-row-count"]=="27"
+    exported=list(csv.DictReader(io.StringIO(report.content.decode("utf-8-sig"))))
+    assert {row["leadId"] for row in exported}=={x["leadId"] for x in fp["items"]+rest.json()["items"]}
+    assert len(exported)==27 and set(exported[0])=={"leadId","customerLinkId","ownerId","sourceCode","status","createdAt","visitNumber"}
+    assert http.get(export,params={**filters,"cursor":fp["nextCursor"]}).status_code==422
+    assert http.get(export,params={"fromDay":day}).status_code==422
+    assert http.get(export,params={"fromDay":"2020-01-01","toDay":"2020-03-01"}).status_code==422
+    assert http.get(export,params={"ownerId":str(d["manager"])}).headers["x-crm-row-count"]=="0"
+    assert http.get(export.replace(str(loc),str(foreign_loc))).status_code==403
+    session(http,d,d["client_a"])
+    assert http.get(export).status_code==403
+    session(http,d,d["intake"])
     assert http.get(search+"?sourceCode=WEB&sourceCode=PHONE").status_code==422
     assert http.get(search.replace(str(loc),str(foreign_loc))).status_code==403
     session(http,d,d["client_a"])
@@ -276,6 +303,9 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
     assert len(after.json()["items"])==2
     assert victim not in after.text
     assert http.get(search,params={"customerLinkId":victim}).json()["items"]==[]
+    report=http.get(search+"/export")
+    assert report.status_code==200 and report.headers["x-crm-row-count"]=="27"
+    assert victim not in report.text
 
 
 def test_lead_cursor_roundtrip_order_and_noncanonical_rejected():
