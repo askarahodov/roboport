@@ -16,6 +16,7 @@
 | [ARCHITECTURE.md](auto/ARCHITECTURE.md) | planned / частично current | Границы автомобильных модулей, безопасность |
 | [DATA_MODEL.md](auto/DATA_MODEL.md) | current-dev | Автомобиль, связь с клиентом, immutable verification/revocation и границы истории |
 | [ADR-AUTO-001](auto/ADR-001.md) | current decision | Решение о поэтапной миграции |
+| [ADR-AUTO-002](auto/ADR-002-MOBILE.md) | proposed / planned | Архитектура native клиента, auth, модель угроз и условия приёмки |
 | [PARTS_CATALOG.md](auto/PARTS_CATALOG.md) | planned | Лицензированные OEM/aftermarket провайдеры |
 | [DOCUMENTATION_AUDIT.md](auto/DOCUMENTATION_AUDIT.md) | current | Сверка фактической реализации и устаревших разделов |
 | [Руководства по ролям](guides/INDEX.md) | частично current-dev / частично planned | Администратор, приёмщик, механик, склад, руководитель, бухгалтер, клиент |
