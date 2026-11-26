@@ -87,37 +87,28 @@ async function collectVisualEvidence(
             if(screen.staffDenied)
               await expect(page.getByRole('alert').first()).toBeVisible({timeout:3000});
             check='controls';
-            // Native and ARIA controls require a visible label or an explicit
-            // accessible name. Placeholder alone is not a label. The report
-            // records only a failure category, never form content or PII.
-            const unnamed=await page.evaluate(()=>{
-              const controls=Array.from(document.querySelectorAll<HTMLElement>(
-                'main button,main a[href],main input:not([type=hidden]),'+
-                'main select,main textarea,main [role=button],main [role=link]'));
-              return controls.filter(el=>{
-                if(!el.getClientRects().length)return false;
-                const st=getComputedStyle(el);
-                if(st.visibility==='hidden'||st.display==='none')return false;
-                if(el.getAttribute('aria-label')?.trim()||
-                   el.getAttribute('aria-labelledby')?.trim()||
-                   el.getAttribute('title')?.trim())return false;
-                if(el.closest('label')?.textContent?.trim())return false;
-                if(el instanceof HTMLInputElement && el.labels?.length &&
-                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
-                if(el instanceof HTMLSelectElement && el.labels?.length &&
-                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
-                if(el instanceof HTMLTextAreaElement && el.labels?.length &&
-                   Array.from(el.labels).some(label=>label.textContent?.trim()))return false;
-                // Option text and textarea values are NOT accessible
-                // names. Only actions can use their own text content.
-                if((el.matches('button,a,[role=button],[role=link]'))&&
-                   el.textContent?.trim())return false;
-                // SVG-only icon actions need their own accessible name,
-                // otherwise keyboard/screen-reader users get an empty control.
+            // Используем вычисленное accessible name Playwright, а не наличие
+            // атрибута: ссылка на несуществующий ID и скрытый текст не дают имени.
+            // Placeholder отдельно исключён как замена подписи поля.
+            const controls=await page.locator(
+              'main button,main a[href],main input:not([type=hidden]),'+
+              'main select,main textarea,main [role=button],main [role=link]'
+            ).filter({visible:true}).all();
+            const labels=page.getByLabel(/\S/);
+            const unnamed=await Promise.all(controls.map(async control=>{
+              const needsLabel=await control.evaluate(el=>
+                el.matches('input[placeholder],textarea[placeholder]') &&
+                !el.getAttribute('title')?.trim());
+              if(needsLabel && await control.and(labels).count()===0)return true;
+              try{
+                await expect(control).toHaveAccessibleName(/\S/,{timeout:750});
+                return false;
+              }catch{
+                // В manifest сохраняется только категория, не текст имени.
                 return true;
-              }).length;
-            });
-            if(unnamed>0)failureKinds.push('A11Y_UNNAMED_CONTROLS');
+              }
+            }));
+            if(unnamed.some(Boolean))failureKinds.push('A11Y_UNNAMED_CONTROLS');
             check='overflow';
             await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth),
               {message:'root overflow at '+screen.name+'/'+width,timeout:3000})
@@ -257,14 +248,22 @@ test('visual evidence continues after a deliberately broken screen',async({page}
   expect(JSON.stringify(manifest)).not.toMatch(/password|token|cookie/i);
 });
 
-test('accessibility evidence rejects unnamed button, select and textarea separately',
+test('accessibility evidence rejects unnamed controls and accepts real accessible names',
   async({page},testInfo)=>{
-    test.setTimeout(45_000);
+    test.setTimeout(120_000);
     await page.setViewportSize({width:390,height:844});
     const variants=[
       {name:'unnamed-button',control:'<button type="button"></button>'},
       {name:'unnamed-select',control:'<select><option>Ожидание</option></select>'},
       {name:'unnamed-textarea',control:'<textarea>Начальный текст</textarea>'},
+      {name:'dangling-label',control:'<button type="button" aria-labelledby="absent-visual-label"></button>'},
+      {name:'blank-label',control:'<span id="empty-visual-label"> </span><button type="button" aria-labelledby="empty-visual-label"></button>'},
+      {name:'hidden-text',control:'<button type="button"><span aria-hidden="true">Скрытая подпись</span></button>'},
+      {name:'placeholder-only',control:'<input placeholder="Не подпись">'},
+      {name:'placeholder-dangling-label',control:'<input placeholder="Не подпись" aria-labelledby="absent-visual-label">'},
+      {name:'valid-labelledby',control:'<span id="valid-visual-label">Действие</span><button type="button" aria-labelledby="valid-visual-label"></button>',pass:true},
+      {name:'valid-input',control:'<label for="visual-labelled-input">Название</label><input id="visual-labelled-input" placeholder="Подсказка">',pass:true},
+      {name:'valid-aria-label',control:'<button type="button" aria-label="Действие"><span aria-hidden="true">Иконка</span></button>',pass:true},
     ] as const;
     const screens:Screen[]=variants.map(v=>({
       name:v.name,path:'/dev/ui-gallery',access:'anonymous',
@@ -278,13 +277,19 @@ test('accessibility evidence rejects unnamed button, select and textarea separat
           main.insertAdjacentHTML('beforeend',html);
         },fixture.control);
       });
-    expect(report).toHaveLength(3);
-    for(const row of report){
+    expect(report).toHaveLength(variants.length);
+    expect(report.map(row=>row.screen)).toEqual(variants.map(v=>v.name));
+    for(const [index,row] of report.entries()){
+      const passed='pass' in variants[index];
       expect(row).toMatchObject({
-        checks:'FAIL',captured:true,failureKinds:['A11Y_UNNAMED_CONTROLS'],
+        checks:passed?'PASS':'FAIL',captured:true,
+        failureKinds:passed?[]:['A11Y_UNNAMED_CONTROLS'],
       });
       expect((await stat(testInfo.outputPath('visual',row.png))).size)
         .toBeGreaterThan(0);
     }
-    expect(failures).toEqual(variants.map(v=>v.name+': A11Y_UNNAMED_CONTROLS'));
+    expect(failures).toEqual(variants.filter(v=>!('pass' in v))
+      .map(v=>v.name+': A11Y_UNNAMED_CONTROLS'));
+    const manifest=JSON.parse(await readFile(testInfo.outputPath('visual','manifest.json'),'utf8'));
+    expect(manifest.scenarios).toEqual(report);
   });
