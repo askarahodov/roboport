@@ -347,3 +347,29 @@ Offline CLI теперь проверяет **не только** `manifest.json
 
 
 Подготовка трёх искусственных каталогов в закрытом браузере теперь предусматривает CSV/XLSX и явное сопоставление колонок до отдельного preview. Подробный контракт и ограничения: [SYNTHETIC_CUTOVER](SYNTHETIC_CUTOVER.md). Реальные источники и юридические основания не проверяются.
+
+
+## Сверка полного семидоменного синтетического комплекта перед cutover (#172)
+
+Новый offline инструмент `scripts/auto_migration_graph_preflight.py` проверяет одновременно три активируемых каталога (автомобили, услуги, SKU/STOCK) и четыре **неактивируемых** реестра (CUSTOMER, COUNTERPARTY, REPAIR_HISTORY, DOCUMENT). Это технический контракт для искусственной репетиции, не согласованная схема реальных источников. Предыдущий schema 1 provenance manifest остаётся без изменения; новый graph manifest является отдельным форматом. Никаких имён, контактов, текстов ремонтов и содержимого документов; только условные ссылки. Все семь источников CSV/XLSX, до 1 МБ и 2000 строк каждый, с явным взаимно однозначным mapping или каноническими заголовками. Повторяются проверки браузерного preview трёх каталогов, реестры проверяются по фактическим строкам, а не заявленным counts.
+
+Манифест JSON: `schema:1`, `synthetic_only:true`, `organization_id`, `location_id` (канонические UUID), `sources` — объект с ровно семью ключами `vehicles.csv`, `services.csv`, `inventory.csv`, `customers.csv`, `counterparties.csv`, `history.csv`, `documents.csv`. Для каждого — `file` (уникальное имя обычного файла в том же каталоге, прописные латинские буквы/цифры/точка/дефис/подчёркивание, без путей), `format` CSV или XLSX, `mapping` null или объект исходное→каноническое имя, `sha256` строчный SHA-256, `bytes` точный размер, `records` точное число строк данных. Для первых трёх файлов — прежний контракт [SYNTHETIC_CUTOVER](SYNTHETIC_CUTOVER.md). Общие поля четырёх остальных в точном порядке:
+
+```csv
+record_type,source_system,source_id,organization_id,location_id,legal_basis_ref,owner_proof_ref
+```
+
+| Реестр | record_type | Дополнительные поля после общих |
+|---|---|---|
+| customers.csv | CUSTOMER | нет |
+| counterparties.csv | COUNTERPARTY | нет |
+| history.csv | REPAIR_HISTORY | customer_system,customer_id,vehicle_system,vehicle_id,service_system,service_id,counterparty_system,counterparty_id |
+| documents.csv | DOCUMENT | history_system,history_id,document_sha256 |
+
+Для четырёх реестров `source_system=DEMO`, source_id и ссылки на доказательства имеют формат SYN-…; запрещены повторные (source_system,source_id) в одном реестре, чужой филиал, неполная ссылка и ссылка на отсутствующий объект. History ссылается на клиента, автомобиль, услугу через точные **source keys**, не по VIN. Ссылка на контрагента может отсутствовать целиком. DOCUMENT ссылается на историю и содержит только строку SHA-256, **не** проверенный документ. Никакая ссылка не создаёт customer link, согласие или право на историю.
+
+```bash
+PYTHONPATH=apps/api:. python -m scripts.auto_migration_graph_preflight --synthetic-only --expect-manifest-sha256 <trusted-lowercase-sha256> ./manifest.json
+```
+
+Получите ожидаемый SHA манифеста отдельно из доверенного источника. Exit 0 — техническая структура и все ссылки сходятся; exit 1 — общий код ошибки без содержимого или идентификаторов. Отчёт содержит counts всех доменов и `catalogBundleSha256`, который должен совпасть с существующим preview/commit/reconcile. `writes=0`, `approval=NOT_VERIFIED`, `release_allowed=false`, `documentPayloadsVerified=false` всегда сохраняются на успешном результате. Не импортировать четыре реестра в рабочие таблицы; это потребует утверждённых правовых оснований, модели прав/дедупликации на реальной целевой БД и независимых #119/#165 approvals. При отказе исправляйте искусственный исходник, формируйте новый манифест и повторно проверяйте весь комплект, не заменяйте отдельные уже активированные строки. Контрактные тесты проверяют mapping всех четырёх реестров через XLSX, точные counts, дубли, битые ссылки, лишние поля, формулы, digest, scope, повтор и CLI; PG17 HTTP тест связывает результат graph с реальным synthetic catalog commit/replay/reconcile/export. Откат — revert без изменения БД.

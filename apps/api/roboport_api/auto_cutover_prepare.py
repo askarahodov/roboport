@@ -78,29 +78,34 @@ def normalize_sources(body):
     result = {}
     for name, headers in HEADERS.items():
         entry = body["files"][name]
-        if (type(entry) is not dict or set(entry) != {"base64", "sha256", "format", "mapping"}
-                or type(entry["base64"]) is not str
-                or len(entry["base64"]) > 4 * ((MAX_FILE + 2) // 3)
-                or type(entry["sha256"]) is not str or entry["format"] not in ("CSV", "XLSX")):
-            raise PrepareDenied("SCHEMA")
-        try:
-            raw = base64.b64decode(entry["base64"], validate=True)
-            if (not 0 < len(raw) <= MAX_FILE or base64.b64encode(raw).decode() != entry["base64"]
-                    or sha256(raw).hexdigest() != entry["sha256"]):
-                raise PrepareDenied("SOURCE_MISMATCH")
-            mapping = _mapping(entry["mapping"], headers)
-            if entry["format"] == "CSV":
-                # Уже канонические CSV сохраняют исходную байтовую идентичность.
-                rows = _csv_rows(raw, headers, mapping)
-                checked = _encode(rows)
-                canonical = raw if mapping is None else checked
-            else:
-                canonical = _encode(_rows_from_xlsx(raw, headers, mapping))
-            result[name] = {"base64": base64.b64encode(canonical).decode(),
-                            "sha256": sha256(canonical).hexdigest()}
-        except PrepareDenied:
-            raise
-        except (UnicodeError, csv.Error, SyntheticWorkbookDenied, ValueError,
-                binascii.Error, RuntimeError, OSError, NotImplementedError, OverflowError, ZlibError):
-            raise PrepareDenied("INVALID_SOURCE") from None
+        result[name] = normalize_entry(entry, headers)
     return {"syntheticOnly": True, "files": result}
+
+
+def normalize_entry(entry, headers):
+    """Строгое преобразование одного источника, без сохранения на диск."""
+    if (type(entry) is not dict or set(entry) != {"base64", "sha256", "format", "mapping"}
+            or type(entry["base64"]) is not str
+            or len(entry["base64"]) > 4 * ((MAX_FILE + 2) // 3)
+            or type(entry["sha256"]) is not str or entry["format"] not in ("CSV", "XLSX")):
+        raise PrepareDenied("SCHEMA")
+    try:
+        raw = base64.b64decode(entry["base64"], validate=True)
+        if (not 0 < len(raw) <= MAX_FILE or base64.b64encode(raw).decode() != entry["base64"]
+                or sha256(raw).hexdigest() != entry["sha256"]):
+            raise PrepareDenied("SOURCE_MISMATCH")
+        mapping = _mapping(entry["mapping"], headers)
+        if entry["format"] == "CSV":
+            # Уже канонические CSV сохраняют исходную байтовую идентичность.
+            rows = _csv_rows(raw, headers, mapping)
+            checked = _encode(rows)
+            canonical = raw if mapping is None else checked
+        else:
+            canonical = _encode(_rows_from_xlsx(raw, headers, mapping))
+        return {"base64": base64.b64encode(canonical).decode(),
+                        "sha256": sha256(canonical).hexdigest()}
+    except PrepareDenied:
+        raise
+    except (UnicodeError, csv.Error, SyntheticWorkbookDenied, ValueError,
+            binascii.Error, RuntimeError, OSError, NotImplementedError, OverflowError, ZlibError):
+        raise PrepareDenied("INVALID_SOURCE") from None

@@ -73,6 +73,40 @@ def test_whole_private_cutover_preview_commit_recovery_export_and_revocation(tmp
     assert prepared.headers["cache-control"] == "no-store"
     initial = {"syntheticOnly": True, "files": proof["files"]}
     raw = {name: base64.b64decode(entry["base64"]) for name, entry in initial["files"].items()}
+    # Сверка всего семидоменного комплекта с тем же canonical catalog digest.
+    from scripts.auto_migration_graph_preflight import ALL_HEADERS, inspect_graph
+    graph_dir = tmp_path / "graph"
+    graph_dir.mkdir()
+    graph = {"schema": 1, "synthetic_only": True, "organization_id": str(org),
+             "location_id": str(loc), "sources": {}}
+    common = ("DEMO", "SYN-1", str(org), str(loc), "SYN-LEGAL", "SYN-PROOF")
+    history = ("REPAIR_HISTORY", *common, "DEMO", "SYN-1",
+               "DEMO", rows[1][1], "DEMO", "LABOR-1", "", "")
+    relations = {
+        "customers.csv": ("CUSTOMER", *common),
+        "counterparties.csv": ("COUNTERPARTY", *common),
+        "history.csv": history,
+        "documents.csv": ("DOCUMENT", *common, "DEMO", "SYN-1", "a"*64),
+    }
+    for name, columns in ALL_HEADERS.items():
+        if name in raw:
+            data = raw[name]
+        else:
+            stream = io.StringIO(newline="")
+            csv.writer(stream).writerows([columns, relations[name]])
+            data = stream.getvalue().encode()
+        filename = name.upper()
+        (graph_dir / filename).write_bytes(data)
+        graph["sources"][name] = {
+            "file": filename, "format": "CSV", "mapping": None, "sha256": sha256(data).hexdigest(),
+            "bytes": len(data), "records": len(list(csv.DictReader(io.StringIO(data.decode())))),
+        }
+    graph_file = graph_dir / "manifest.json"
+    graph_file.write_text(json.dumps(graph), encoding="utf-8")
+    graph_proof = inspect_graph(graph_file, expected_manifest_sha256=sha256(graph_file.read_bytes()).hexdigest())
+    assert graph_proof["ok"] and graph_proof["writes"] == 0
+    assert graph_proof["catalogBundleSha256"] == proof["bundleSha256"]
+    assert graph_proof["release_allowed"] is False
     preview=http.post(root+"preview",json=initial,headers=headers)
     assert preview.status_code==200,preview.text
     verified=preview.json()
