@@ -1,4 +1,5 @@
 import React from 'react';
+import {Link,useLocation} from 'react-router-dom';
 import {ServiceSurvey} from '../shared/ServiceSurvey';
 import {AutoServiceRecommendations} from '../shared/AutoServiceRecommendations';
 
@@ -18,12 +19,24 @@ function date(t:string){
 }
 
 export function CustomerAutoOrders(){
+  const location=useLocation();
+  const selected=new URLSearchParams(location.search).getAll('vehicleId');
+  if(selected.length>1||(selected.length===1&&(!selected[0]||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selected[0])))){
+    return <section aria-label="Мои автомобильные заказ-наряды"><p role="alert">Некорректный выбор автомобиля.</p>
+      <Link to="/account/auto-orders">Открыть все свои заказ-наряды</Link></section>;
+  }
+  const vehicleId=selected[0]?.toLowerCase()??'';
+  return <CustomerAutoOrdersView key={vehicleId} vehicleId={vehicleId}/>;
+}
+
+function CustomerAutoOrdersView({vehicleId}:{vehicleId:string}){
   const [items,setItems]=React.useState<Card[]>([]);
   const [status,setStatus]=React.useState<Status>('loading');
   const [pages,setPages]=React.useState(1),[refresh,setRefresh]=React.useState(0);
   const [more,setMore]=React.useState(false);
-  const [draft,setDraft]=React.useState<OrderFilters>(emptyOrderFilters);
-  const [filters,setFilters]=React.useState<OrderFilters>(emptyOrderFilters);
+  const [draft,setDraft]=React.useState<OrderFilters>(()=>({...emptyOrderFilters,vehicleId}));
+  const [filters,setFilters]=React.useState<OrderFilters>(()=>({...emptyOrderFilters,vehicleId}));
   const [filterError,setFilterError]=React.useState('');
   const [exporting,setExporting]=React.useState(false);
   const [exportError,setExportError]=React.useState('');
@@ -215,6 +228,7 @@ export function CustomerAutoOrders(){
     <p>Только синтетический стенд. История привязана к заказчику конкретного
       наряда, а не ко всем владельцам автомобиля. Реальной оплаты и выдачи нет.</p>
     <p><a href="/docs/#/guides/client.md">Инструкция по заказ-нарядам и сметам</a></p>
+    {vehicleId&&<p>История выбранного автомобиля. <Link to="/account/auto-orders">Все мои автомобили и заказ-наряды</Link></p>}
     <form aria-label="Фильтры истории заказов" onSubmit={event=>{event.preventDefault();applyFilters(draft);}}>
       <fieldset disabled={busy||!!pending||status==='denied'}>
         <legend>Найти свои заказ-наряды</legend>
@@ -231,7 +245,7 @@ export function CustomerAutoOrders(){
           onChange={e=>setDraft({...draft,toDay:e.target.value})}/></label>
         <p>Даты включительно, по местному времени каждого филиала. Не вводите VIN или персональные данные.</p>
         <button type="submit">Применить фильтры</button>
-        <button type="button" onClick={()=>{setDraft(emptyOrderFilters);applyFilters(emptyOrderFilters);}}>Сбросить фильтры</button>
+        <button type="button" onClick={()=>{const reset={...emptyOrderFilters,vehicleId};setDraft(reset);applyFilters(reset);}}>Сбросить фильтры</button>
       </fieldset>
     </form>
     {filterError&&<p role="alert">{filterError}</p>}

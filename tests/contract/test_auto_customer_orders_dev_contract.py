@@ -42,8 +42,8 @@ def test_history_filters_and_export_are_private_and_bounded():
     listing=SPEC["paths"][root]["get"]
     export=SPEC["paths"][root+"/export"]["get"]
     names=lambda op:{p["name"] for p in op["parameters"]}
-    assert names(listing)=={"limit","cursor","search","status","fromDay","toDay"}
-    assert names(export)=={"search","status","fromDay","toDay"}
+    assert names(listing)=={"limit","cursor","search","status","fromDay","toDay","vehicleId"}
+    assert names(export)=={"search","status","fromDay","toDay","vehicleId"}
     assert export["security"]==[{"localSession":[]}]
     assert export["responses"]["200"]["headers"]["Cache-Control"]["schema"]["const"]=="no-store"
     assert "text/csv" in export["responses"]["200"]["content"]

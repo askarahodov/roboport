@@ -84,7 +84,17 @@ def test_exact_customer_link_prevents_new_owner_from_inheriting_old_work_order(m
     assert [v["id"] for v in own["items"]]==[str(d["vehicle"])]
     assert http.get(PREFIX).json()["items"]==[]
     assert http.get(PREFIX+"/"+str(order)).status_code==404
+    # Новому владельцу UUID машины не открывает старые заказы и CSV.
+    vehicle_filter={"vehicleId":str(d["vehicle"])}
+    assert contract(http.get(PREFIX,params=vehicle_filter),"Page",200)["items"]==[]
+    exported=http.get(PREFIX+"/export",params=vehicle_filter)
+    assert exported.status_code==200
+    assert list(csv.DictReader(io.StringIO(exported.text)))==[]
     login(http,d,d["client_a"])
+    assert [x["id"] for x in contract(http.get(PREFIX,params=vehicle_filter),"Page",200)["items"]]==[str(order)]
+    exported=http.get(PREFIX+"/export",params=vehicle_filter)
+    assert exported.status_code==200
+    assert [x["orderId"] for x in csv.DictReader(io.StringIO(exported.text))]==[str(order)]
     assert http.get(PREFIX+"/"+str(order)).status_code==200
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
@@ -229,6 +239,10 @@ def test_filtered_history_and_csv_recheck_scope_and_cursor(monkeypatch):
     assert second["items"][0]["id"]!=first["items"][0]["id"]
     contract(http.get(PREFIX,params={**params,"status":"CANCELED","cursor":cursor}),"Error",422)
     contract(http.get(PREFIX,params={**params,"search":name+"x","cursor":cursor}),"Error",422)
+    contract(http.get(PREFIX,params={**params,"vehicleId":str(d["vehicle"]),"cursor":cursor}),"Error",422)
+    assert contract(http.get(PREFIX,params={"vehicleId":str(uuid4())}),"Page",200)["items"]==[]
+    contract(http.get(PREFIX,params={"vehicleId":"invalid"}),"Error",422)
+    contract(http.get(PREFIX+"/export?vehicleId=invalid"),"Error",422)
     canceled=contract(http.get(PREFIX,params={"status":"CANCELED"}),"Page",200)
     assert [x["id"] for x in canceled["items"]]==[str(order)]
     assert contract(http.get(PREFIX,params={"search":"%_"}),"Page",200)["items"]==[]

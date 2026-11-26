@@ -91,6 +91,16 @@
               "format": "date",
               "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
             }
+          },
+          {
+            "name": "vehicleId",
+            "in": "query",
+            "required": false,
+            "description": "UUID выбранного автомобиля; только заказы исходного подтверждённого заказчика, не наследование истории по VIN. Чужой или отсутствующий автомобиль даёт пустой набор.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -695,6 +705,16 @@
               "type": "string",
               "format": "date",
               "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "vehicleId",
+            "in": "query",
+            "required": false,
+            "description": "UUID выбранного автомобиля; только заказы исходного подтверждённого заказчика, не наследование истории по VIN. Чужой или отсутствующий автомобиль даёт пустой набор.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],

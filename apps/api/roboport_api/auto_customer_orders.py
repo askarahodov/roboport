@@ -100,7 +100,7 @@ _SELECT = """
 """
 
 
-def _filters(search, status, from_day, to_day):
+def _filters(search, status, from_day, to_day, vehicle_id):
     if (type(search) is not str or len(search)>64
         or any(ord(c)<32 or ord(c)==127 for c in search)
         or status not in ("ALL","SCHEDULED","CANCELED")):
@@ -120,11 +120,13 @@ def _filters(search, status, from_day, to_day):
     first,last=day(from_day),day(to_day)
     if first is not None and last is not None and first>last:
         raise CustomerOrderInvalid("INVALID_INPUT")
-    return search.strip(),status,first,last
+    if vehicle_id is not None and type(vehicle_id) is not UUID:
+        raise CustomerOrderInvalid("INVALID_INPUT")
+    return search.strip(),status,first,last,vehicle_id
 
 
 def _filtered_rows(conn,actor,filters,*,limit,position=None):
-    search,status,first,last=filters
+    search,status,first,last,vehicle_id=filters
     predicates=[]
     params=[actor]
     if search:
@@ -140,6 +142,10 @@ def _filtered_rows(conn,actor,filters,*,limit,position=None):
     if last is not None:
         predicates.append("(b.starts_at AT TIME ZONE loc.timezone_name)::date <= %s")
         params.append(last)
+    if vehicle_id is not None:
+        # UUID is a selector, not authority: original proof/customer ACL remains in _BASE.
+        predicates.append("a.vehicle_id=%s")
+        params.append(vehicle_id)
     if position:
         predicates.append("(w.created_at,w.id)<(%s,%s)")
         params.extend(position)
@@ -151,17 +157,19 @@ def _filtered_rows(conn,actor,filters,*,limit,position=None):
 
 
 def list_customer_orders(conn,token,*,limit=20,cursor=None,search="",status="ALL",
-                         from_day=None,to_day=None):
+                         from_day=None,to_day=None,vehicle_id=None):
     if type(limit) is not int or not 1<=limit<=30:
         raise CustomerOrderInvalid("INVALID_INPUT")
     if cursor is not None and (type(cursor) is not str or not 1<=len(cursor)<=256):
         raise CustomerOrderInvalid("INVALID_INPUT")
-    filters=_filters(search,status,from_day,to_day)
+    filters=_filters(search,status,from_day,to_day,vehicle_id)
     with conn.transaction():
         actor=_actor(conn,token)
         scope_key="customer-orders:v1:"+str(actor)
-        if filters!=("", "ALL", None, None):
+        if filters[-1] is not None:
             scope_key+=":"+json.dumps(filters,default=str,ensure_ascii=False,separators=(",",":"))
+        elif filters[:4]!=("", "ALL", None, None):
+            scope_key+=":"+json.dumps(filters[:4],default=str,ensure_ascii=False,separators=(",",":"))
         scope=hashlib.sha256(scope_key.encode()).hexdigest()[:32]
         position=None
         if cursor:
@@ -188,8 +196,9 @@ def _csv_text(value):
     return "'"+value if value.lstrip().startswith(("=","+","-","@")) else value
 
 
-def export_customer_orders(conn,token,*,search="",status="ALL",from_day=None,to_day=None):
-    filters=_filters(search,status,from_day,to_day)
+def export_customer_orders(conn,token,*,search="",status="ALL",from_day=None,to_day=None,
+                           vehicle_id=None):
+    filters=_filters(search,status,from_day,to_day,vehicle_id)
     with conn.transaction():
         actor=_actor(conn,token)
         rows=_filtered_rows(conn,actor,filters,limit=EXPORT_LIMIT+1)
