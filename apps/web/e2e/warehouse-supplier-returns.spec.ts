@@ -217,3 +217,26 @@ test('warehouse cancels own pending return, retries the same key and refreshes q
   expect(keys[0]).toBe(keys[1]);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+
+test('supplier return sends exact serial list, rejects duplicates and preserves retry',async({page})=>{
+  const serial1='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',serial2='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const sent:{key:string;body:unknown}[]=[];
+  await page.route('**/warehouse/supplier-returns',route=>{
+    sent.push({key:route.request().headers()['idempotency-key'],body:route.request().postDataJSON()});
+    return route.fulfill({status:sent.length===1?503:201,contentType:'application/json',
+      body:sent.length===1?'{}':JSON.stringify({documentId:doc})});
+  });
+  await setup(page);
+  const field=page.getByLabel('UUID серий для возврата',{exact:false});
+  await field.fill(serial1+' '+serial1);
+  await expect(page.getByRole('button',{name:'Создать акт возврата'})).toBeDisabled();
+  await field.fill(serial2+' '+serial1);
+  await page.getByRole('button',{name:'Создать акт возврата'}).click();
+  await expect(page.getByRole('alert').filter({hasText:'Неизвестный результат'})).toBeVisible();
+  await page.getByRole('button',{name:'Повторить с прежним ключом'}).click();
+  await expect(page.getByRole('status')).toContainText('Акт возврата поставщику создан');
+  expect(sent).toHaveLength(2);expect(sent[0]).toEqual(sent[1]);
+  expect(sent[0].body).toEqual({locationId:loc,sourceReceiptId:receipt,quantity:2,
+    reason:'Возврат брака',supplierReference:'RMA-2026-001',serialIds:[serial1,serial2]});
+});

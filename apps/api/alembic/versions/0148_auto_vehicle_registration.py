@@ -2,8 +2,8 @@
 from alembic import op
 from sqlalchemy import text
 
-revision = "0146_auto_vehicle_registration"
-down_revision = "0145_auto_return_terminal"
+revision = "0148_auto_vehicle_registration"
+down_revision = "0147_auto_serial_disposition"
 branch_labels = None
 depends_on = None
 
