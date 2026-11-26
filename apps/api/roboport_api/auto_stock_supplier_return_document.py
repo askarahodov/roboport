@@ -57,14 +57,31 @@ def draft_supplier_return(conn:psycopg.Connection,token:str,
     with conn.transaction():
         if not organization_role_allows(conn,token,org,"WAREHOUSE",loc,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
-        row=conn.execute("""SELECT id,created_at FROM auto_stock_receipt_document
+        row=conn.execute("""SELECT id,sku_id,quantity FROM auto_stock_receipt_document
             WHERE id=%s AND organization_id=%s AND location_id=%s FOR SHARE""",
             (receipt_id,org,loc)).fetchone()
         if row is None: raise AutoStockDenied("FORBIDDEN")
+        history=receipt_history_date(conn,org,loc,receipt_id)
+        require_purchase_document(conn,token,org,loc,"CREATE",created_at=history)
+        # Match the existing approval/ledger serialization key. A new draft
+        # cannot claim quantity already returned against this receipt, even
+        # when another receipt replenished the same physical lot. Preserve
+        # exact replay; the SQL procedure still checks actor and payload.
+        conn.execute("SELECT id FROM auto_stock_sku WHERE id=%s FOR UPDATE",(row[1],))
+        prior=conn.execute("""SELECT 1 FROM auto_stock_supplier_return_document
+            WHERE request_id=%s AND source_receipt_id=%s AND organization_id=%s
+              AND location_id=%s""",(request_id,receipt_id,org,loc)).fetchone()
+        if prior is None:
+            returned=conn.execute("""SELECT COALESCE(sum(d.quantity),0)
+                FROM auto_stock_supplier_return_document d
+                JOIN auto_stock_supplier_return_acceptance a ON a.document_id=d.id
+                WHERE d.source_receipt_id=%s""",(receipt_id,)).fetchone()[0]
+            if returned+quantity>row[2]:
+                raise AutoStockConflict("CONFLICT")
         return _run(conn,token,org,loc,"WAREHOUSE",
             "SELECT record_auto_stock_supplier_return_document(%s,%s,%s,%s,%s)",
             (receipt_id,request_id,quantity,reason,supplier_reference),
-            cap="CREATE",created_at=receipt_history_date(conn,org,loc,receipt_id))
+            cap="CREATE",created_at=history)
 
 
 def approve_supplier_return(conn:psycopg.Connection,token:str,
