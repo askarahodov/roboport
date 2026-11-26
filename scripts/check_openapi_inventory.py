@@ -198,14 +198,73 @@ def _parameter_changes(old, new, at):
     return errors
 
 
-def _parameters(path, op):
-    # Local named refs are compared in components separately. Preserve identity
-    # of each ref rather than collapsing all refs to the same (None, None).
+def _resolve_component(doc, entry, kind):
+    """Resolve local Reference Objects with exact JSON Pointer decoding.
+
+    Only named components of the expected kind are supported; malformed,
+    missing or cyclic references fail closed at the inventory boundary.
+    Reference Object description/summary do not override the wire contract.
+    """
+    prefix = f"#/components/{kind}/"
+    seen = set()
+    while "$ref" in entry:
+        ref = entry["$ref"]
+        if (not isinstance(ref, str) or not ref.startswith(prefix)
+                or ref in seen):
+            raise ValueError("unsupported or cyclic component reference")
+        token = ref[len(prefix):]
+        if not token or "/" in token or re.search(r"~(?![01])", token):
+            raise ValueError("unsupported component pointer")
+        # Component names are constrained by OpenAPI; reject percent-encoding
+        # rather than interpreting a different pointer from the validator.
+        if "%" in token:
+            raise ValueError("unsupported encoded component pointer")
+        seen.add(ref)
+        entry = doc["components"][kind][token.replace("~1", "/").replace("~0", "~")]
+        if not isinstance(entry, dict):
+            raise ValueError("invalid component")
+    return entry
+
+
+def _parameters(doc, path, op):
+    # Operation parameters override path parameters by effective (in, name),
+    # regardless of whether either declaration uses an inline or named object.
     result = {}
-    for entry in path.get("parameters", []) + op.get("parameters", []):
-        key = ("ref", entry["$ref"]) if "$ref" in entry else (entry["in"], entry["name"])
-        result[key] = entry
+    for level in (path, op):
+        local = {}
+        for entry in level.get("parameters", []):
+            effective = _resolve_component(doc, entry, "parameters")
+            key = (effective["in"], effective["name"])
+            if key in local:
+                raise ValueError("duplicate effective parameter")
+            local[key] = effective
+        result.update(local)
     return result
+
+
+def _header_changes(old_doc, new_doc, old_headers, new_headers, at):
+    # HTTP header names are case-insensitive; reject ambiguous duplicates.
+    def normalized(headers):
+        result = {}
+        for name, entry in headers.items():
+            key = name.lower()
+            if key in result:
+                raise ValueError("duplicate response header")
+            result[key] = (name, entry)
+        return result
+
+    a, b = normalized(old_headers), normalized(new_headers)
+    errors = [f"REMOVED_RESPONSE_HEADER:{at}:{a[key][0]}"
+              for key in a.keys() - b.keys()]
+    for key in a.keys() & b.keys():
+        old_name, old_entry = a[key]
+        _, new_entry = b[key]
+        location = f"{at}:{old_name}"
+        errors.extend(_parameter_changes(old_entry, new_entry, location))
+        errors.extend(_parameter_changes(
+            _resolve_component(old_doc, old_entry, "headers"),
+            _resolve_component(new_doc, new_entry, "headers"), location))
+    return errors
 
 
 def _named_changes(old, new):
@@ -232,8 +291,8 @@ def _named_changes(old, new):
                     errors.append(f"NEW_REQUIRED_COMPONENT:{at}")
                 errors.extend(_content_changes(a[name].get("content", {}),
                                                b[name].get("content", {}), at))
-                for header in a[name].get("headers", {}).keys() - b[name].get("headers", {}).keys():
-                    errors.append(f"REMOVED_COMPONENT_HEADER:{at}:{header}")
+                errors.extend(_header_changes(old, new, a[name].get("headers", {}),
+                                               b[name].get("headers", {}), at))
     return errors
 
 
@@ -252,28 +311,48 @@ def deep_changes(old, new):
                 errors.append(f"CHANGED_OPERATION_ID:{at}")
             if a.get("security", old.get("security")) != b.get("security", new.get("security")):
                 errors.append(f"CHANGED_SECURITY:{at}")
-            params_a, params_b = _parameters(left, a), _parameters(right, b)
+            params_a, params_b = _parameters(old, left, a), _parameters(new, right, b)
+            for key in params_b.keys() - params_a.keys():
+                if params_b[key].get("required") is True:
+                    errors.append(f"NEW_REQUIRED_EFFECTIVE_PARAMETER:{at}:{key}")
             for key in params_a.keys() - params_b.keys():
                 errors.append(f"REMOVED_EFFECTIVE_PARAMETER:{at}:{key}")
             for key in params_a.keys() & params_b.keys():
                 errors.extend(_parameter_changes(params_a[key], params_b[key], f"{at}:{key}"))
-            body_a, body_b = a.get("requestBody", {}), b.get("requestBody", {})
+            raw_a, raw_b = a.get("requestBody", {}), b.get("requestBody", {})
+            body_a = _resolve_component(old, raw_a, "requestBodies")
+            body_b = _resolve_component(new, raw_b, "requestBodies")
             if body_b.get("required") is True and body_a.get("required") is not True:
                 errors.append(f"NEW_REQUIRED_BODY:{at}")
             if "requestBody" in a and "requestBody" not in b:
                 errors.append(f"REMOVED_REQUEST_BODY:{at}")
-            if body_a.get("$ref") != body_b.get("$ref"):
+            if raw_a.get("$ref") != raw_b.get("$ref"):
                 errors.append(f"CHANGED_BODY_REFERENCE:{at}")
             errors.extend(_content_changes(body_a.get("content", {}), body_b.get("content", {}), at))
             for code in a.get("responses", {}).keys() & b.get("responses", {}).keys():
-                ra, rb = a["responses"][code], b["responses"][code]
-                if ra.get("$ref") != rb.get("$ref"):
+                raw_ra, raw_rb = a["responses"][code], b["responses"][code]
+                ra = _resolve_component(old, raw_ra, "responses")
+                rb = _resolve_component(new, raw_rb, "responses")
+                if raw_ra.get("$ref") != raw_rb.get("$ref"):
                     errors.append(f"CHANGED_RESPONSE_REFERENCE:{at}:{code}")
                 errors.extend(_content_changes(ra.get("content", {}), rb.get("content", {}),
                                                f"{at}:{code}"))
-                for name in ra.get("headers", {}).keys() - rb.get("headers", {}).keys():
-                    errors.append(f"REMOVED_RESPONSE_HEADER:{at}:{code}:{name}")
+                errors.extend(_header_changes(old, new, ra.get("headers", {}),
+                                               rb.get("headers", {}), f"{at}:{code}"))
     return errors
+
+
+def _verify_effective_components(doc):
+    for item in doc["paths"].values():
+        for verb in HTTP_METHODS.intersection(item):
+            op = item[verb]
+            _parameters(doc, item, op)
+            if "requestBody" in op:
+                _resolve_component(doc, op["requestBody"], "requestBodies")
+            for response in op.get("responses", {}).values():
+                resolved = _resolve_component(doc, response, "responses")
+                _header_changes(doc, doc, resolved.get("headers", {}),
+                                resolved.get("headers", {}), "response")
 
 
 def check_inventory(current: dict[str, str], previous: dict[str, str] | None = None):
@@ -287,6 +366,7 @@ def check_inventory(current: dict[str, str], previous: dict[str, str] | None = N
     for name, raw in sorted(current.items()):
         try:
             doc = load_contract(raw)
+            _verify_effective_components(doc)
             if name != "contracts/openapi.yaml":
                 errors.extend(f"{name}:{reason}" for reason in private_boundary(doc))
             if previous is not None and name in previous and previous[name] != raw:

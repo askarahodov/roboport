@@ -159,3 +159,84 @@ def test_named_component_and_effective_parameter_changes():
     new = deepcopy(old)
     new["components"]["securitySchemes"]["localSession"]["description"] = "Уточнение"
     assert deep_changes(old, new) == []
+
+
+@pytest.mark.parametrize("level", ["path", "operation"])
+def test_new_required_parameter_via_reference_blocks_but_optional_does_not(level):
+    old = document()
+    new = deepcopy(old)
+    path = "/api/v1/dev/auto/example"
+    new["components"]["parameters"] = {
+        "RequiredLimit": {"name": "limit", "in": "query", "required": True,
+                          "schema": {"type": "integer"}},
+        "Alias": {"$ref": "#/components/parameters/RequiredLimit"},
+    }
+    item = new["paths"][path]
+    target = item if level == "path" else item["post"]
+    target["parameters"] = [{"$ref": "#/components/parameters/Alias"}]
+    assert any(x.startswith("NEW_REQUIRED_EFFECTIVE_PARAMETER:") for x in deep_changes(old, new))
+    files = inventory()
+    after = {**files, PRIVATE: json.dumps(new)}
+    assert any("NEW_REQUIRED_EFFECTIVE_PARAMETER:" in x for x in check_inventory(after, files))
+    new["components"]["parameters"]["RequiredLimit"]["required"] = False
+    assert deep_changes(old, new) == []
+
+
+def test_effective_parameter_override_resolves_by_name_not_reference():
+    old = document()
+    path = "/api/v1/dev/auto/example"
+    old["components"]["parameters"] = {
+        "Base": {"name": "limit", "in": "query", "required": True, "schema": {"type": "integer"}},
+    }
+    old["paths"][path]["parameters"] = [{"$ref": "#/components/parameters/Base"}]
+    new = deepcopy(old)
+    new["paths"][path]["post"]["parameters"] = [
+        {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer"}}]
+    assert any("CHANGED_PARAMETER_CONTRACT:" in x and "required" in x
+               for x in deep_changes(old, new))
+
+
+@pytest.mark.parametrize("named", [False, True])
+def test_existing_response_header_schema_and_reference_changes(named):
+    old = document()
+    path = "/api/v1/dev/auto/example"
+    responses = old["paths"][path]["post"]["responses"]
+    if named:
+        old["components"]["responses"] = {"Result": responses["200"]}
+        responses["200"] = {"$ref": "#/components/responses/Result"}
+    response = old["components"]["responses"]["Result"] if named else responses["200"]
+    response["headers"]["Cache-Control"] = {"schema": {"type": "string", "const": "no-store"}}
+    new = deepcopy(old)
+    target = (new["components"]["responses"]["Result"] if named else
+              new["paths"][path]["post"]["responses"]["200"])
+    target["headers"]["Cache-Control"] = {"schema": {"type": "integer"}}
+    assert any("CHANGED_SCHEMA_type:" in x and "Cache-Control" in x for x in deep_changes(old, new))
+    new = deepcopy(old)
+    target = (new["components"]["responses"]["Result"] if named else
+              new["paths"][path]["post"]["responses"]["200"])
+    new["components"]["headers"] = {"Cache": {"schema": {"type": "integer"}}}
+    target["headers"]["Cache-Control"] = {"$ref": "#/components/headers/Cache"}
+    assert any("CHANGED_PARAMETER_CONTRACT:" in x and "Cache-Control" in x
+               for x in deep_changes(old, new))
+
+
+def test_required_request_body_reference_cannot_bypass_gate():
+    old = document()
+    path = "/api/v1/dev/auto/example"
+    new = deepcopy(old)
+    body = new["paths"][path]["post"]["requestBody"]
+    new["components"]["requestBodies"] = {"Required": {**body, "required": True}}
+    new["paths"][path]["post"]["requestBody"] = {"$ref": "#/components/requestBodies/Required"}
+    assert "NEW_REQUIRED_BODY:POST:" + path in deep_changes(old, new)
+
+
+def test_invalid_effective_references_fail_closed():
+    for components in (
+        {"A": {"$ref": "#/components/parameters/B"}, "B": {"$ref": "#/components/parameters/A"}},
+        {"A": {"$ref": "#/components/parameters/Missing"}},
+    ):
+        new = document()
+        new["components"]["parameters"] = components
+        new["paths"]["/api/v1/dev/auto/example"]["post"]["parameters"] = [
+            {"$ref": "#/components/parameters/A"}]
+        assert check_inventory({**inventory(), PRIVATE: json.dumps(new)})
