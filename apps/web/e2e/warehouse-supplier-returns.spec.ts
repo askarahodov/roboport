@@ -192,7 +192,7 @@ test('warehouse cancels own pending return, retries the same key and refreshes q
     }
     expect(req.url().endsWith('/decisions')).toBe(true);
     expect(req.postDataJSON()).toEqual({locationId:loc,documentId:doc,
-      action:'CANCEL',note:'Ошибочный черновик'});
+      action:'CANCEL',note:'Ошибка RMA-123'});
     keys.push(req.headers()['idempotency-key']);
     if(keys.length===1)return route.fulfill({status:503,body:'unknown'});
     canceled=true;
@@ -204,7 +204,9 @@ test('warehouse cancels own pending return, retries the same key and refreshes q
   const queue=page.getByLabel('Очередь актов поставщику');
   await queue.getByRole('button',{name:'Мои черновики к отмене'}).click();
   await queue.getByRole('button',{name:'Выбрать акт '+doc}).click();
-  await page.getByRole('textbox',{name:'Обоснование решения'}).fill('Ошибочный черновик');
+  await page.getByRole('textbox',{name:'Обоснование решения'}).fill('Ошибка RMA-123');
+  await expect(page.getByRole('button',{name:'Отменить свой черновик'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Отклонить акт'})).toBeEnabled();
   await page.getByRole('button',{name:'Отменить свой черновик'}).click();
   await expect(page.getByRole('alert')).toContainText('Неизвестный результат');
   await expect(page.getByRole('button',{name:'Отклонить акт'})).toBeDisabled();

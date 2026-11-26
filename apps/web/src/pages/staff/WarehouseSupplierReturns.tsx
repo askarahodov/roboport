@@ -38,7 +38,8 @@ export function WarehouseSupplierReturns(){
     reason.length>=3&&reason.length<=240&&reference.trim()===reference&&
     reference.length>=3&&reference.length<=160;
   const canApprove=validScope&&uuid.test(document.trim());
-  const canDecide=canApprove&&note===note.trim()&&note.length>=3&&note.length<=240&&!/[\u0000-\u001f]/.test(note);
+  const canDecide=canApprove&&note===note.trim()&&note.length>=3&&note.length<=240&&
+    !Array.from(note).some(character=>character.charCodeAt(0)<32);
   React.useEffect(()=>{
     reviewSequence.current+=1;
     setReview(emptyReview());
