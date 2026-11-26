@@ -61,3 +61,12 @@ def test_canceled_return_cannot_have_financial_posting():
     assert not valid("ReconciliationReturn",{**row,"attribution":{"currency":"RUB","netMinor":"1","vatMinor":"0"}})
     assert not valid("ReconciliationReturn",{**row,"dispositionId":ident})
     assert not valid("ReconciliationReturn",{**row,"status":"DRAFT"})
+
+
+def test_serial_return_selection_contract():
+    ident="11111111-1111-4111-8111-111111111111"
+    payload={"locationId":ident,"sourceReceiptId":ident,"quantity":1,"reason":"Брак","supplierReference":"RMA"}
+    assert valid("Draft",{**payload,"serialIds":[ident]})
+    assert not valid("Draft",{**payload,"serialIds":[ident,ident]})
+    assert not valid("Draft",{**payload,"serialIds":["bad"]})
+    assert not valid("Draft",{**payload,"serialIds":None})

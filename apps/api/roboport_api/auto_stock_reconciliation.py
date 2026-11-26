@@ -178,7 +178,7 @@ def stock_detail(db,token,org,loc,sku,kind="lots",cursor=None):
               SELECT d.id,d.created_at,d.source_receipt_id,d.lot_id,d.quantity,d.supplier_reference,
                      d.reason,a.id,a.created_at,a.disposition_id,v.currency,
                      a.purchase_net_attributed_minor,a.purchase_vat_attributed_minor,
-                     t.action,t.id,t.note,t.created_at
+                     t.action,t.id,t.note,t.created_at,d.serial_ids
               FROM auto_stock_supplier_return_document d
               JOIN auto_stock_receipt_document rd ON rd.id=d.source_receipt_id
                 AND rd.organization_id=d.organization_id AND rd.location_id=d.location_id
@@ -191,11 +191,12 @@ def stock_detail(db,token,org,loc,sku,kind="lots",cursor=None):
               ORDER BY d.created_at DESC,d.id DESC LIMIT 51
             """,(org,loc,sku,*pos)).fetchall()
             items=[]
-            for i,t,receipt,lot,qty,reference,reason,accepted,accepted_at,disposition,currency,net,vat,action,decision,note,decided in rows[:50]:
+            for i,t,receipt,lot,qty,reference,reason,accepted,accepted_at,disposition,currency,net,vat,action,decision,note,decided,serials in rows[:50]:
                 if (accepted is not None)!=(action=="APPROVE"):
                     raise AutoStockDenied("INVALID_INPUT")
                 item={"documentId":str(i),"createdAt":t.isoformat(),"sourceReceiptId":str(receipt),
                     "lotId":str(lot),"quantity":str(qty),"supplierReference":reference,"reason":reason,
+                    "serialIds":[str(i) for i in serials],
                     "status":{None:"DRAFT","APPROVE":"ACCEPTED","CANCEL":"CANCELED","REJECT":"REJECTED"}[action],
                     "acceptanceId":str(accepted) if accepted else None,
                     "acceptedAt":accepted_at.isoformat() if accepted_at else None,
