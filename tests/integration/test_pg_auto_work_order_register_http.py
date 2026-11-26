@@ -165,6 +165,13 @@ def test_workflow_register_separate_dimensions_period_and_scope(monkeypatch):
     response=http.get(url,params=params)
     assert response.status_code==200,response.text
     data=response.json()
+    import json
+    from pathlib import Path
+    from jsonschema import Draft202012Validator,FormatChecker
+    spec=json.loads((Path(__file__).resolve().parents[2]/
+                     'contracts/auto-work-order-register-dev-openapi.json').read_text(encoding='utf-8'))
+    Draft202012Validator({**spec,'$ref':'#/components/schemas/WorkflowPage'},
+                         format_checker=FormatChecker()).validate(data)
     assert len(data["items"])==25 and data["nextCursor"]
     assert all((i["repairStage"],i["documentStage"],i["bookingStatus"],i["localDay"])==
                ("DRAFT","RESTRICTED","SCHEDULED","2035-02-01") for i in data["items"])
@@ -180,7 +187,10 @@ def test_workflow_register_separate_dimensions_period_and_scope(monkeypatch):
                   "view=workflow&fromDay=2035-02-02&toDay=2035-02-01",
                   "view=workflow&documentStage=ALL&documentStage=POSTED"):
         assert http.get(url+"?"+query).status_code==422
-    legacy=http.get(url).json()["items"][0]
+    old=http.get(url).json()
+    Draft202012Validator({**spec,'$ref':'#/components/schemas/LegacyPage'},
+                         format_checker=FormatChecker()).validate(old)
+    legacy=old['items'][0]
     assert "documentStage" not in legacy and "repairStage" not in legacy
     wrong=url.replace(str(org),str(foreign)).replace(str(loc),str(other_loc))
     assert http.get(wrong,params=params).status_code==403

@@ -94,7 +94,8 @@ test('register refresh removes previously visible handover stage and filtered ro
     const filter=url.searchParams.get('stage');
     return route.fulfill({status:200,contentType:'application/json',
       body:JSON.stringify({syntheticOnly:true,releaseAllowed:false,
-        items:filter==='ALL'||filter===state?[{...row(order),stage:state}]:[],
+        items:filter==='ALL'||filter===state?[{...row(order),stage:state,repairStage:'READY',
+          documentStage:visible?'CLOSED_TECHNICAL':'RESTRICTED'}]:[],
         nextCursor:null})});
   });
   await page.setViewportSize({width:390,height:844});
@@ -125,7 +126,7 @@ test('workflow register separates repair and document states and keeps branch on
       const q=url.searchParams;
       expect(q.get('view')).toBe('workflow');
       const visible=(q.get('documentStage')==='ALL'||q.get('documentStage')==='RESTRICTED')&&
-        (!q.get('fromDay')||q.get('fromDay')!>'2026-11-19');
+        (!q.get('fromDay')||(q.get('fromDay')??'')<='2026-11-19');
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
         syntheticOnly:true,releaseAllowed:false,items:visible?[row(order)]:[],nextCursor:null})});
     }

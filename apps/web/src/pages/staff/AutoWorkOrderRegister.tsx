@@ -85,6 +85,7 @@ export function AutoWorkOrderRegister(){
   const [exportMessage,setExportMessage]=React.useState('');
   const exportController=React.useRef<AbortController|null>(null);
   const currentScope=React.useRef('');
+  const requestEpoch=React.useRef(0);
   const listController=React.useRef<AbortController|null>(null);
   const validPeriod=validDay(fromDay)&&validDay(toDay)&&(!fromDay||!toDay||fromDay<=toDay);
   const valid=uuid.test(org.trim())&&uuid.test(loc.trim())&&validPeriod;
@@ -94,7 +95,7 @@ export function AutoWorkOrderRegister(){
   const previousScope=React.useRef(scope);
   const effectiveCursor=previousScope.current===scope?cursor:null;
   const queryKey=scope+':'+effectiveCursor+':'+revision;
-  currentScope.current=queryKey;
+  if(currentScope.current!==queryKey){requestEpoch.current++;currentScope.current=queryKey;}
   function filters(){
     const params=new URLSearchParams({view:'workflow',stage,repairStage:repair,documentStage:document,bookingStatus:booking});
     if(applied)params.set('orderId',applied);
@@ -116,7 +117,8 @@ export function AutoWorkOrderRegister(){
     if(!valid|| (applied!==''&&!uuid.test(applied))){setStatus('idle');return;}
     const controller=new AbortController();
     listController.current=controller;
-    const current=()=>!controller.signal.aborted&&currentScope.current===queryKey;
+    const epoch=requestEpoch.current;
+    const current=()=>!controller.signal.aborted&&epoch===requestEpoch.current&&currentScope.current===queryKey;
     setStatus('loading');
     const params=filters();
     if(effectiveCursor)params.set('cursor',effectiveCursor);
@@ -142,14 +144,15 @@ export function AutoWorkOrderRegister(){
     exportController.current?.abort();
     const controller=new AbortController();
     exportController.current=controller;
-    const requested=queryKey;
+    const requested=queryKey,epoch=requestEpoch.current;
+    const current=()=>!controller.signal.aborted&&epoch===requestEpoch.current&&currentScope.current===requested;
     setExportBusy(true);setExportMessage('');
     const params=filters();
     try{
       const response=await fetch(base+'/export?'+params,{
         credentials:'include',cache:'no-store',signal:controller.signal,
       });
-      if(controller.signal.aborted||currentScope.current!==requested)return;
+      if(!current())return;
       if([401,403,404].includes(response.status)){
         listController.current?.abort();setPage(null);setSelected(null);setLoadedKey('');setStatus('denied');
         setExportMessage('Сеанс или доступ к филиалу отозван.');return;
@@ -161,7 +164,7 @@ export function AutoWorkOrderRegister(){
       if(!response.ok||!response.headers.get('content-type')?.startsWith('text/csv'))
         throw Error('bad download');
       const blob=await response.blob();
-      if(controller.signal.aborted||currentScope.current!==requested)return;
+      if(!current())return;
       if(blob.size>1048576)throw Error('unexpected size');
       const href=URL.createObjectURL(blob);
       try{
@@ -171,12 +174,12 @@ export function AutoWorkOrderRegister(){
         setExportMessage('CSV реестра сформирован для текущего фильтра (только dev).');
       }finally{window.setTimeout(()=>URL.revokeObjectURL(href),1000);}
     }catch{
-      if(!controller.signal.aborted&&currentScope.current===requested)
+      if(current())
         setExportMessage('Экспорт не выполнен. Проверьте соединение и обновите реестр.');
     }finally{
       if(exportController.current===controller){
         exportController.current=null;
-        if(currentScope.current===requested)setExportBusy(false);
+        if(current())setExportBusy(false);
       }
     }
   }

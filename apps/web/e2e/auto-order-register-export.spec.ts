@@ -10,9 +10,9 @@ const item={workOrderId:order,appointmentId:appointment,bayId:bay,
   createdAt:'2026-11-18T10:00:00+00:00',
   startsAt:'2026-11-19T10:00:00+00:00',
   endsAt:'2026-11-19T11:00:00+00:00',stage:'DRAFT',repairStage:'DRAFT',documentStage:'RESTRICTED',bookingStatus:'SCHEDULED',localDay:'2026-11-19'};
-const csv='\ufeffЗаказ-наряд;Запись;Пост;Создан;Начало записи;Окончание записи;Технический статус\r\n'+
+const csv='\ufeffЗаказ-наряд;Запись;Пост;Создан;Начало записи;Окончание записи;Технический статус;Этап ремонта;Состояние документа;Состояние записи;Локальный день\r\n'+
   order+';'+appointment+';'+bay+';2026-11-18T10:00:00+00:00;'+
-  '2026-11-19T10:00:00+00:00;2026-11-19T11:00:00+00:00;DRAFT\r\n';
+  '2026-11-19T10:00:00+00:00;2026-11-19T11:00:00+00:00;DRAFT;DRAFT;RESTRICTED;SCHEDULED;2026-11-19\r\n';
 
 async function scope(page:import('@playwright/test').Page){
   await page.goto('/staff/auto-order-register');

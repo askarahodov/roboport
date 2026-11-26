@@ -263,6 +263,11 @@ def export_work_orders_csv(conn: psycopg.Connection, token: str, org: UUID,
                        for key in ("workOrderId", "appointmentId", "bayId",
                                    "createdAt", "startsAt", "endsAt"))):
             raise RegisterInvalid("EXPORT_INVALID")
+        if view=="workflow" and (row["repairStage"] not in REPAIR_STAGES-{"ALL"}
+                or row["documentStage"] not in DOCUMENT_STAGES-{"ALL"}
+                or row["bookingStatus"] not in BOOKING_STATES-{"ALL"}
+                or _day(row["localDay"]) is None):
+            raise RegisterInvalid("EXPORT_INVALID")
         writer.writerow((row["workOrderId"], row["appointmentId"], row["bayId"],
                          row["createdAt"], row["startsAt"], row["endsAt"],
                          row["stage"])+
