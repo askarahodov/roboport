@@ -245,8 +245,10 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
     assert http.get(search,params={"stageCode":"BOOKED"}).json()["items"]==[]
     import csv,io
     from hashlib import sha256
-    day=datetime.now(timezone.utc).date().isoformat()
-    filters={"ownerId":str(d["intake"]),"fromDay":day,"toDay":day,"sourceCode":"WALK_IN"}
+    # Derive the local date from actual immutable rows, avoiding midnight CI races.
+    first_day=min(x["createdAt"][:10] for x in fp["items"]+rest.json()["items"])
+    day=max(x["createdAt"][:10] for x in fp["items"]+rest.json()["items"])
+    filters={"ownerId":str(d["intake"]),"fromDay":first_day,"toDay":day,"sourceCode":"WALK_IN"}
     period=http.get(search,params=filters)
     assert period.status_code==200,period.text
     assert period.json()["ownerId"]==str(d["intake"]) and period.json()["timeZone"]=="UTC"
@@ -262,6 +264,12 @@ def test_complete_lead_journal_keyset_28_items_acl_revoke_and_bad_cursor(monkeyp
     exported=list(csv.DictReader(io.StringIO(report.content.decode("utf-8-sig"))))
     assert {row["leadId"] for row in exported}=={x["leadId"] for x in fp["items"]+rest.json()["items"]}
     assert len(exported)==27 and set(exported[0])=={"leadId","customerLinkId","ownerId","sourceCode","status","createdAt","visitNumber"}
+    # Same real PostgreSQL selection, artificially lower cap to exercise refusal.
+    with monkeypatch.context() as cap:
+        cap.setattr("roboport_api.auto_crm_leads.LEAD_EXPORT_LIMIT",25)
+        overflow=http.get(export,params=filters)
+        assert overflow.status_code==409 and "x-crm-sha256" not in overflow.headers
+        assert "text/csv" not in overflow.headers.get("content-type","")
     assert http.get(export,params={**filters,"cursor":fp["nextCursor"]}).status_code==422
     assert http.get(export,params={"fromDay":day}).status_code==422
     assert http.get(export,params={"fromDay":"2020-01-01","toDay":"2020-03-01"}).status_code==422

@@ -44,7 +44,7 @@ export function CrmLeadSearch({org,loc,disabled,onOpen,onDenied}:{org:string;loc
   const active=React.useRef<AbortController|null>(null);
   React.useEffect(()=>()=>active.current?.abort(),[]);
   function reset(){active.current?.abort();setData(null);setPosition(null);setStatus('idle');setExportStatus('');}
-  const validFilters=(!link||uuid.test(link))&&(!owner||uuid.test(owner))&&((!from&&!to)||!!from&&!!to&&from<=to);
+  const validFilters=(!link||uuid.test(link))&&(!owner||uuid.test(owner))&&((!from&&!to)||!!from&&!!to&&from<=to&&Date.parse(to)-Date.parse(from)<=30*86400000);
   function filters(){const p=new URLSearchParams({sourceCode:source,stageCode:stage});if(link)p.set('customerLinkId',link);if(owner)p.set('ownerId',owner);if(from&&to){p.set('fromDay',from);p.set('toDay',to);}return p;}
   const root='/api/v1/dev/auto/organizations/'+encodeURIComponent(org)+'/locations/'+encodeURIComponent(loc)+'/crm/lead-search';
   async function search(cursor:string|null=null){
@@ -57,7 +57,7 @@ export function CrmLeadSearch({org,loc,disabled,onOpen,onDenied}:{org:string;loc
       const r=await fetch(root+'?'+params,
         {credentials:'include',cache:'no-store',signal:control.signal});
       if(control.signal.aborted)return;
-      if([401,403,404].includes(r.status)){onDenied();return;}
+      if([401,403,404].includes(r.status)){reset();onDenied();return;}
       if(!r.ok)throw Error('http');
       const parsed=parse(await r.json(),org,loc,link,source,stage,owner,from,to);
       if(control.signal.aborted)return;
