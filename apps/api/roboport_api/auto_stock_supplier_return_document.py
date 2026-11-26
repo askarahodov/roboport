@@ -2,7 +2,7 @@
 
 Internal synthetic-only: purchase cost/VAT attribution is not a legal credit note.
 """
-from uuid import UUID
+from uuid import UUID, uuid4
 import psycopg
 from .auto_org_authority import organization_role_allows
 from .session_lookup import session_subject
@@ -90,35 +90,89 @@ def approve_supplier_return(conn:psycopg.Connection,token:str,
     with conn.transaction():
         if not organization_role_allows(conn,token,org,"MANAGER",loc,for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
-        row=conn.execute("""SELECT d.id,least(d.created_at,r.created_at),r.id
+        row=conn.execute("""SELECT d.id,least(d.created_at,r.created_at),r.id,d.sku_id
             FROM auto_stock_supplier_return_document d
             JOIN auto_stock_receipt_document r ON r.id=d.source_receipt_id
               AND r.organization_id=d.organization_id AND r.location_id=d.location_id
             WHERE d.id=%s AND d.organization_id=%s AND d.location_id=%s FOR SHARE OF d,r""",
             (document_id,org,loc)).fetchone()
         if row is None: raise AutoStockDenied("FORBIDDEN")
+        history=min(row[1],receipt_history_date(conn,org,loc,row[2]))
+        require_purchase_document(conn,token,org,loc,"CLOSE",created_at=history)
+        conn.execute("SELECT id FROM auto_stock_sku WHERE id=%s FOR UPDATE",(row[3],))
+        if conn.execute("""SELECT 1 FROM auto_stock_supplier_return_terminal
+                           WHERE document_id=%s AND action<>'APPROVE'""",(document_id,)).fetchone():
+            raise AutoStockConflict("CONFLICT")
         return _run(conn,token,org,loc,"MANAGER",
             "SELECT accept_auto_stock_supplier_return_document(%s,%s)",
             (document_id,request_id),cap="CLOSE",
-            created_at=min(row[1],receipt_history_date(conn,org,loc,row[2])))
+            created_at=history)
+
+
+def decide_supplier_return(conn:psycopg.Connection,token:str,
+    org:UUID,loc:UUID,document_id:UUID,request_id:UUID,action:str,note:str)->UUID:
+    """Автор отменяет черновик, независимый MANAGER отклоняет; проводок нет."""
+    _validate(token,org,loc,document_id,request_id)
+    if (action not in ("CANCEL","REJECT") or type(note) is not str
+        or not 3<=len(note)<=240 or note!=note.strip()
+        or any(ord(c)<32 for c in note)):
+        raise AutoStockDenied("INVALID_INPUT")
+    role="WAREHOUSE" if action=="CANCEL" else "MANAGER"
+    with conn.transaction():
+        if not organization_role_allows(conn,token,org,role,loc,for_mutation=True):
+            raise AutoStockDenied("FORBIDDEN")
+        row=conn.execute("""SELECT d.created_by,d.sku_id,least(d.created_at,r.created_at),r.id
+            FROM auto_stock_supplier_return_document d
+            JOIN auto_stock_receipt_document r ON r.id=d.source_receipt_id
+              AND r.organization_id=d.organization_id AND r.location_id=d.location_id
+            WHERE d.id=%s AND d.organization_id=%s AND d.location_id=%s FOR SHARE OF d,r""",
+            (document_id,org,loc)).fetchone()
+        if row is None:
+            raise AutoStockDenied("FORBIDDEN")
+        history=min(row[2],receipt_history_date(conn,org,loc,row[3]))
+        require_purchase_document(conn,token,org,loc,"CLOSE",created_at=history)
+        actor=session_subject(conn,token,for_mutation=True)
+        if actor is None or (action=="CANCEL")!=(actor==row[0]):
+            raise AutoStockDenied("FORBIDDEN")
+        conn.execute("SELECT id FROM auto_stock_sku WHERE id=%s FOR UPDATE",(row[1],))
+        prior=conn.execute("""SELECT id,document_id,action,note,actor_id
+            FROM auto_stock_supplier_return_terminal WHERE request_id=%s""",(request_id,)).fetchone()
+        if prior:
+            if prior[1:]!=(document_id,action,note,actor):
+                raise AutoStockConflict("CONFLICT")
+            return prior[0]
+        if conn.execute("""SELECT 1 FROM auto_stock_supplier_return_terminal
+                           WHERE document_id=%s""",(document_id,)).fetchone():
+            raise AutoStockConflict("CONFLICT")
+        ident=uuid4()
+        try:
+            with conn.transaction():
+                conn.execute("SELECT set_config('roboport.supplier_return_actor',%s,true)",(str(actor),))
+                conn.execute("""INSERT INTO auto_stock_supplier_return_terminal
+                    (id,request_id,document_id,action,note,actor_id)
+                    VALUES(%s,%s,%s,%s,%s,%s)""",(ident,request_id,document_id,action,note,actor))
+        except SQL_FAILURES:
+            raise AutoStockConflict("CONFLICT") from None
+        finally:
+            conn.execute("SELECT set_config('roboport.supplier_return_actor','',true)")
+        return ident
 
 
 
 def pending_supplier_returns(conn:psycopg.Connection,token:str,org:UUID,loc:UUID,
-                             limit:int=20,after_document_id:UUID|None=None):
-    """Manager-only active branch queue, excluding self-drafted or accepted returns.
+                             limit:int=20,after_document_id:UUID|None=None,*,own:bool=False):
+    """Открытые акты филиала: чужие для MANAGER, собственные для WAREHOUSE.
 
-    Advisory read; the approval POST repeats independent actor, receipt
-    valuation, physical stock and idempotency checks under DB locks.
+    Терминальные акты не попадают в очередь. Мутация повторяет все права.
     """
     if type(token) is not str or not token:
         raise AutoStockDenied("FORBIDDEN")
     if (type(org) is not UUID or type(loc) is not UUID or
-        type(limit) is not int or not 1<=limit<=50 or
+        type(limit) is not int or not 1<=limit<=50 or type(own) is not bool or
         (after_document_id is not None and type(after_document_id) is not UUID)):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        if not organization_role_allows(conn,token,org,"MANAGER",loc,
+        if not organization_role_allows(conn,token,org,"WAREHOUSE" if own else "MANAGER",loc,
                                         for_mutation=True):
             raise AutoStockDenied("FORBIDDEN")
         if require_purchase_document(conn,token,org,loc) is not None:
@@ -151,14 +205,14 @@ def pending_supplier_returns(conn:psycopg.Connection,token:str,org:UUID,loc:UUID
             JOIN auto_stock_receipt_valuation value
               ON value.document_id=receipt.id
             WHERE d.organization_id=%s AND d.location_id=%s
-              AND d.created_by<>%s
+              AND ((%s AND d.created_by=%s) OR (NOT %s AND d.created_by<>%s))
               AND NOT EXISTS (
-                SELECT 1 FROM auto_stock_supplier_return_acceptance approval
-                WHERE approval.document_id=d.id
+                SELECT 1 FROM auto_stock_supplier_return_terminal terminal
+                WHERE terminal.document_id=d.id
               )
               AND (%s::uuid IS NULL OR d.id>%s::uuid)
             ORDER BY d.id LIMIT %s
-        """,(org,loc,actor,after_document_id,after_document_id,limit+1)).fetchall()
+        """,(org,loc,own,actor,own,actor,after_document_id,after_document_id,limit+1)).fetchall()
         next_id=rows[limit-1][0] if len(rows)>limit else None
         return ([{
             "documentId":str(document_id),"sourceReceiptId":str(receipt_id),

@@ -235,3 +235,144 @@ def test_competing_return_documents_cannot_spend_another_receipt_quantity_or_vat
                              WHERE source_receipt_id=%s""",(receipt,)).fetchone()==(3,)
         assert db.execute("""SELECT count(*) FROM auto_stock_lot_disposition
                              WHERE lot_id=%s AND action='SUPPLIER_RETURN'""",(lot,)).fetchone()==(3,)
+
+
+def test_supplier_return_terminal_decisions_preserve_audit_and_no_postings(monkeypatch):
+    from test_pg_auto_stock_service import grant
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,sku,lot,receipt=setup_receipt(db,d,3)
+        value(db,d,org,loc,receipt,vat=601)
+        grant(db,d["manager"],org,loc,"WAREHOUSE")
+    endpoint=f"/api/v1/dev/auto/organizations/{org}/warehouse/supplier-returns"
+    params={"locationId":str(loc)}
+    payload={**params,"sourceReceiptId":str(receipt),"quantity":2,
+             "reason":"Синтетический возврат","supplierReference":"RMA-TERMINAL"}
+    with TestClient(app,base_url="https://127.0.0.1") as client:
+        created=post(client,d,d["intake"],endpoint,payload)
+        assert created.status_code==201,created.text
+        doc=created.json()["documentId"]
+        body={**params,"documentId":doc,"action":"CANCEL","note":"Ошибочный черновик"}
+        client.cookies.set("rp_session",d["tokens"][d["intake"]])
+        own=client.get(endpoint+"/pending",params={**params,"view":"own"})
+        assert own.status_code==200 and [x["documentId"] for x in own.json()["items"]]==[doc]
+        assert post(client,d,d["manager"],endpoint+"/decisions",body).status_code==403
+        assert post(client,d,d["intake"],endpoint+"/decisions",body,csrf=False).status_code==403
+        assert post(client,d,d["intake"],endpoint+"/decisions",{**body,"note":" "}).status_code==422
+        assert post(client,d,d["intake"],endpoint+"/decisions",
+                    {**body,"locationId":str(uuid4())}).status_code==403
+        key=uuid4()
+        canceled=post(client,d,d["intake"],endpoint+"/decisions",body,key)
+        assert canceled.status_code==201,canceled.text
+        assert canceled.headers["cache-control"]=="no-store"
+        assert post(client,d,d["intake"],endpoint+"/decisions",body,key).json()==canceled.json()
+        assert post(client,d,d["intake"],endpoint+"/decisions",{**body,"note":"Другая причина"},key).status_code==409
+        assert post(client,d,d["intake"],endpoint+"/decisions",body).status_code==409
+        assert client.get(endpoint+"/pending",params={**params,"view":"own"}).json()["items"]==[]
+        assert post(client,d,d["manager"],endpoint+"/approvals",{**params,"documentId":doc}).status_code==409
+        assert client.get(endpoint+"/pending",params=params).json()["items"]==[]
+        second=post(client,d,d["intake"],endpoint,payload).json()["documentId"]
+        rejection={**params,"documentId":second,"action":"REJECT","note":"Отказ в утверждении"}
+        assert post(client,d,d["intake"],endpoint+"/decisions",rejection).status_code==403
+        rejected=post(client,d,d["manager"],endpoint+"/decisions",rejection)
+        assert rejected.status_code==201,rejected.text
+        assert post(client,d,d["manager"],endpoint+"/approvals",{**params,"documentId":second}).status_code==409
+        detail=f"/api/v1/dev/auto/organizations/{org}/warehouse/reconciliation/{sku}"
+        report=client.get(detail,params={**params,"kind":"supplier-returns"})
+        assert report.status_code==200,report.text
+        rows={x["documentId"]:x for x in report.json()["items"]}
+        import json
+        from pathlib import Path
+        from jsonschema import Draft202012Validator, FormatChecker
+        spec=json.loads((Path(__file__).resolve().parents[2]/"contracts/auto-supplier-return-dev-openapi.json").read_text(encoding="utf-8"))
+        for schema, payload in [("ReconciliationReturn",item) for item in rows.values()]+[
+                ("DecisionReceipt",canceled.json()),("PendingPage",own.json())]:
+            Draft202012Validator({**spec,"$ref":"#/components/schemas/"+schema},
+                                 format_checker=FormatChecker()).validate(payload)
+        assert rows[doc]["status"]=="CANCELED" and rows[second]["status"]=="REJECTED"
+        for ident,decision in [(doc,canceled),(second,rejected)]:
+            assert rows[ident]["decision"]["id"]==decision.json()["decisionId"]
+            assert rows[ident]["attribution"] is None and rows[ident]["dispositionId"] is None
+        receipts=client.get(detail,params={**params,"kind":"receipts"}).json()["items"]
+        assert next(x for x in receipts if x["documentId"]==str(receipt))["pendingReturnCount"]==0
+        with psycopg.connect(DSN) as db:
+            assert balance(db,sku)==(4,0) and allocated(db,lot)==3
+            assert db.execute("SELECT count(*) FROM auto_stock_supplier_return_acceptance WHERE document_id IN (%s,%s)",(doc,second)).fetchone()==(0,)
+            assert db.execute("SELECT count(*) FROM auto_stock_lot_disposition WHERE lot_id=%s",(lot,)).fetchone()==(0,)
+            grant_id=db.execute("""SELECT id FROM auto_organization_role_grant
+                WHERE user_id=%s AND organization_id=%s AND location_id=%s
+                AND role_code='WAREHOUSE' AND revoked_at IS NULL""",(d["intake"],org,loc)).fetchone()[0]
+            db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(grant_id,))
+        assert post(client,d,d["intake"],endpoint+"/decisions",body,key).status_code==403
+
+
+def test_supplier_return_approval_and_cancel_are_mutually_exclusive(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","1")
+    monkeypatch.setenv("ROBOport_SYNTHETIC_AUTH_API","1")
+    monkeypatch.setenv("ROBOport_DATABASE_URL",DSN)
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,sku,lot,receipt=setup_receipt(db,d,2)
+        value(db,d,org,loc,receipt,vat=301)
+    base=f"/api/v1/dev/auto/organizations/{org}/warehouse/supplier-returns"
+    with TestClient(app,base_url="https://127.0.0.1") as client:
+        created=post(client,d,d["intake"],base,{"locationId":str(loc),"sourceReceiptId":str(receipt),
+            "quantity":2,"reason":"Синтетическая гонка","supplierReference":"RMA-RACE"})
+        assert created.status_code==201,created.text
+    doc=created.json()["documentId"]
+    payload={"locationId":str(loc),"documentId":doc}
+    gate=Barrier(2)
+    def compete(cancel):
+        with TestClient(app,base_url="https://127.0.0.1") as client:
+            gate.wait(timeout=10)
+            if cancel:
+                return post(client,d,d["intake"],base+"/decisions",
+                            {**payload,"action":"CANCEL","note":"Отмена при конкуренции"})
+            return post(client,d,d["manager"],base+"/approvals",payload)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        approved,canceled=list(pool.map(compete,[False,True]))
+    assert sorted([approved.status_code,canceled.status_code])==[201,409],[approved.text,canceled.text]
+    with psycopg.connect(DSN) as db:
+        terminal=db.execute("""SELECT action,approval_id FROM auto_stock_supplier_return_terminal
+                              WHERE document_id=%s""",(doc,)).fetchall()
+        assert len(terminal)==1
+        if approved.status_code==201:
+            assert terminal[0][0]=="APPROVE" and str(terminal[0][1])==approved.json()["approvalId"]
+            assert balance(db,sku)==(1,0) and allocated(db,lot)==0
+        else:
+            assert terminal==[("CANCEL",None)]
+            assert balance(db,sku)==(3,0) and allocated(db,lot)==2
+        assert db.execute("SELECT count(*) FROM auto_stock_supplier_return_acceptance WHERE document_id=%s",
+                          (doc,)).fetchone()==(int(approved.status_code==201),)
+
+
+def test_supplier_return_terminal_sql_guard_rolls_back_physical_approval():
+    """Даже прежняя SQL-процедура не может утвердить отменённый документ."""
+    import pytest
+    from roboport_api.auto_stock_supplier_return_document import (
+        draft_supplier_return,decide_supplier_return,
+    )
+    d=_scenario()
+    with psycopg.connect(DSN) as db:
+        org,loc,sku,lot,receipt=setup_receipt(db,d,2)
+        value(db,d,org,loc,receipt,vat=301)
+        document=draft_supplier_return(db,d["tokens"][d["intake"]],org,loc,
+            receipt,uuid4(),2,"Синтетический акт","RMA-SQL-TERMINAL")
+        decision=decide_supplier_return(db,d["tokens"][d["intake"]],org,loc,
+            document,uuid4(),"CANCEL","Ошибочный акт")
+        with pytest.raises((psycopg.errors.RaiseException,psycopg.errors.UniqueViolation)):
+            with db.transaction():
+                db.execute("SELECT set_config('roboport.supplier_return_actor',%s,true)",(str(d["manager"]),))
+                db.execute("SELECT accept_auto_stock_supplier_return_document(%s,%s)",(document,uuid4()))
+        assert balance(db,sku)==(3,0) and allocated(db,lot)==2
+        assert db.execute("SELECT count(*) FROM auto_stock_supplier_return_acceptance WHERE document_id=%s",(document,)).fetchone()==(0,)
+        assert db.execute("SELECT count(*) FROM auto_stock_lot_disposition WHERE lot_id=%s",(lot,)).fetchone()==(0,)
+        assert db.execute("SELECT id,action FROM auto_stock_supplier_return_terminal WHERE document_id=%s",(document,)).fetchone()==(decision,"CANCEL")
+        with pytest.raises(psycopg.errors.RaiseException):
+            with db.transaction():
+                db.execute("DELETE FROM auto_stock_supplier_return_terminal WHERE id=%s",(decision,))

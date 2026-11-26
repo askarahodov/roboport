@@ -16,7 +16,7 @@ type Lot={lotId:string;createdAt:string;batchCode:string;binCode:string;allocate
 type Event={eventId:string;createdAt:string;action:string;quantity:string};
 type Valuation={id:string;currency:string;unitNetMinor:string;netMinor:string;vatMinor:string;grossMinor:string;sourceRevision:string;quotedAt:string;returnedQuantity:string;returnedNetMinor:string;returnedVatMinor:string};
 type Receipt={documentId:string;createdAt:string;lotId:string;sourceReference:string;quantity:string;status:'DRAFT'|'ACCEPTED'|'VALUED';acceptanceId:string|null;acceptedAt:string|null;valuation:Valuation|null;pendingReturnCount:number};
-type SupplierReturn={documentId:string;createdAt:string;sourceReceiptId:string;lotId:string;quantity:string;supplierReference:string;reason:string;status:'DRAFT'|'ACCEPTED';acceptanceId:string|null;acceptedAt:string|null;dispositionId:string|null;attribution:{currency:string;netMinor:string;vatMinor:string}|null};
+type SupplierReturn={documentId:string;createdAt:string;sourceReceiptId:string;lotId:string;quantity:string;supplierReference:string;reason:string;status:'DRAFT'|'ACCEPTED'|'CANCELED'|'REJECTED';acceptanceId:string|null;acceptedAt:string|null;dispositionId:string|null;attribution:{currency:string;netMinor:string;vatMinor:string}|null;decision?:{id:string;note:string;createdAt:string}};
 type Detail={syntheticOnly:true;organizationId:string;locationId:string;skuId:string;kind:Kind;items:(Lot|Event|Receipt|SupplierReturn)[];nextCursor:string|null};
 const stamp=(v:unknown)=>typeof v==='string'&&Number.isFinite(Date.parse(v));
 function scoped(raw:unknown,org:string,loc:string){
@@ -53,8 +53,11 @@ function validReceipt(x:Receipt){
 function validReturn(x:SupplierReturn){
   if(!ident(x.documentId)||!ident(x.sourceReceiptId)||!ident(x.lotId)||!nonnegative(x.quantity)||BigInt(x.quantity)<=0n||
     typeof x.supplierReference!=='string'||typeof x.reason!=='string')return false;
-  if(x.status==='DRAFT')return x.acceptanceId===null&&x.acceptedAt===null&&x.dispositionId===null&&x.attribution===null;
-  return x.status==='ACCEPTED'&&ident(x.acceptanceId)&&stamp(x.acceptedAt)&&ident(x.dispositionId)&&!!x.attribution&&
+  const noPosting=x.acceptanceId===null&&x.acceptedAt===null&&x.dispositionId===null&&x.attribution===null;
+  if(x.status==='DRAFT')return noPosting&&x.decision===undefined;
+  if(x.status==='CANCELED'||x.status==='REJECTED')return noPosting&&!!x.decision&&ident(x.decision.id)&&
+    typeof x.decision.note==='string'&&x.decision.note.length>=3&&x.decision.note.length<=240&&stamp(x.decision.createdAt);
+  return x.status==='ACCEPTED'&&x.decision===undefined&&ident(x.acceptanceId)&&stamp(x.acceptedAt)&&ident(x.dispositionId)&&!!x.attribution&&
     currency(x.attribution.currency)&&nonnegative(x.attribution.netMinor)&&nonnegative(x.attribution.vatMinor);
 }
 function parseDetail(raw:unknown,org:string,loc:string,sku:string,kind:Kind):Detail{
@@ -166,8 +169,9 @@ export function WarehouseReconciliation(){
             <p>Цена за единицу {number(x.valuation.unitNetMinor)} · оценка {x.valuation.id} · источник {x.valuation.sourceRevision} · {new Date(x.valuation.quotedAt).toLocaleString('ru-RU')}</p>
             <p>Подтверждённые возвраты: {number(x.valuation.returnedQuantity)} ед. · стоимость {number(x.valuation.returnedNetMinor)} · НДС {number(x.valuation.returnedVatMinor)} ({x.valuation.currency})</p></>}
           <p>Ожидают подтверждения: {x.pendingReturnCount}</p></li>:
-        'sourceReceiptId' in x?<li key={x.documentId}><strong>{x.supplierReference} · {number(x.quantity)} ед. · {x.status==='ACCEPTED'?'Подтверждён':'Черновик'}</strong>
+        'sourceReceiptId' in x?<li key={x.documentId}><strong>{x.supplierReference} · {number(x.quantity)} ед. · {({ACCEPTED:'Подтверждён',DRAFT:'Черновик',CANCELED:'Отменён',REJECTED:'Отклонён'}[x.status])}</strong>
           <p>Возврат {x.documentId} · исходный приход {x.sourceReceiptId} · партия {x.lotId}</p><p>{x.reason}</p>
+          {x.decision&&<p>Решение {x.decision.id} · {x.decision.note} · {new Date(x.decision.createdAt).toLocaleString('ru-RU')}</p>}
           {x.attribution&&<p>Атрибутировано: стоимость {number(x.attribution.netMinor)} · НДС {number(x.attribution.vatMinor)} ({x.attribution.currency}) · списание {x.dispositionId}</p>}</li>:
         'batchCode' in x?<li key={x.lotId}>{x.batchCode} · {x.binCode} · размещено {number(x.allocated)}<p>Партия {x.lotId}</p></li>:
         <li key={x.eventId}>{actions[x.action]} · {number(x.quantity)} · {new Date(x.createdAt).toLocaleString('ru-RU')}<p>Событие {x.eventId}</p></li>)}</ul>}

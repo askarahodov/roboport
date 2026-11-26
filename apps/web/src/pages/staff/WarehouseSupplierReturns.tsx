@@ -1,15 +1,16 @@
 import React from 'react';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-type Action='draft'|'approve';
+type Action='draft'|'approve'|'cancel'|'reject';
+type View='review'|'own';
 type Pending={action:Action;org:string;loc:string;key:string;body:string;url:string};
 type ReviewItem={documentId:string;sourceReceiptId:string;lotId:string;
   article:string;batchCode:string;binCode:string;quantity:number;
   reason:string;supplierReference:string};
 type ReviewState={status:'idle'|'loading'|'ready'|'denied'|'error';
-  items:ReviewItem[];nextDocumentId:string|null;cursor:string|null};
+  items:ReviewItem[];nextDocumentId:string|null;cursor:string|null;view:View};
 const emptyReview=():ReviewState=>({
-  status:'idle',items:[],nextDocumentId:null,cursor:null,
+  status:'idle',items:[],nextDocumentId:null,cursor:null,view:'review',
 });
 
 export function WarehouseSupplierReturns(){
@@ -21,6 +22,8 @@ export function WarehouseSupplierReturns(){
   const [reference,setReference]=React.useState('');
   const [document,setDocument]=React.useState('');
   const [approval,setApproval]=React.useState('');
+  const [decision,setDecision]=React.useState('');
+  const [note,setNote]=React.useState('');
   const [pending,setPending]=React.useState<Pending|null>(null);
   const [busy,setBusy]=React.useState(false);
   const [message,setMessage]=React.useState('');
@@ -35,18 +38,20 @@ export function WarehouseSupplierReturns(){
     reason.length>=3&&reason.length<=240&&reference.trim()===reference&&
     reference.length>=3&&reference.length<=160;
   const canApprove=validScope&&uuid.test(document.trim());
+  const canDecide=canApprove&&note===note.trim()&&note.length>=3&&note.length<=240&&!/[\u0000-\u001f]/.test(note);
   React.useEffect(()=>{
     reviewSequence.current+=1;
     setReview(emptyReview());
-    setDocument('');setApproval('');
+    setDocument('');setApproval('');setDecision('');setNote('');
   },[org,loc]);
-  async function loadReview(after:string|null=null,force=false){
-    if(!validScope||(!force&&(busy||review.status==='loading')))return;
+  async function loadReview(after:string|null=null,force=false,view:View=review.view){
+    if(!validScope||(!force&&(busy||!!pending||review.status==='loading')))return;
     const seq=++reviewSequence.current;
     const requested={...scope.current};
-    setReview({...emptyReview(),status:'loading'});
-    setDocument('');
+    setReview({...emptyReview(),status:'loading',view});
+    setDocument('');setNote('');
     const params=new URLSearchParams({locationId:requested.loc,limit:'20'});
+    if(view==='own')params.set('view','own');
     if(after)params.set('afterDocumentId',after);
     try{
       const path='/api/v1/dev/auto/organizations/'+encodeURIComponent(requested.org)+
@@ -55,8 +60,8 @@ export function WarehouseSupplierReturns(){
       if(seq!==reviewSequence.current||
         scope.current.org!==requested.org||scope.current.loc!==requested.loc)return;
       if([401,403,404].includes(response.status)){
-        setReview({...emptyReview(),status:'denied'});
-        setDocument('');setApproval('');setMessage('');
+        setReview({...emptyReview(),status:'denied',view});
+        setDocument('');setApproval('');setDecision('');setNote('');setMessage('');
         return;
       }
       if(!response.ok)throw Error('unavailable');
@@ -79,24 +84,25 @@ export function WarehouseSupplierReturns(){
           (typeof data.nextDocumentId==='string'&&uuid.test(data.nextDocumentId))))
         throw Error('invalid');
       setReview({status:'ready',items:data.items as ReviewItem[],
-        cursor:after,nextDocumentId:data.nextDocumentId as string|null});
+        cursor:after,nextDocumentId:data.nextDocumentId as string|null,view});
     }catch{
       if(seq===reviewSequence.current&&scope.current.org===requested.org&&
         scope.current.loc===requested.loc)
-        setReview({...emptyReview(),status:'error'});
+        setReview({...emptyReview(),status:'error',view});
     }
   }
 
   async function send(action:Action,replay?:Pending){
-    if(busy||(!replay&&(pending||(action==='draft'?!canDraft:!canApprove))))return;
+    if(busy||(!replay&&(pending||(action==='draft'?!canDraft:action==='approve'?!canApprove:!canDecide))))return;
     const snap:Pending=replay??{
       action,org:org.trim(),loc:loc.trim(),key:crypto.randomUUID(),
       url:'/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
-        '/warehouse/supplier-returns'+(action==='approve'?'/approvals':''),
+        '/warehouse/supplier-returns'+(action==='approve'?'/approvals':action==='draft'?'':'/decisions'),
       body:JSON.stringify(action==='draft'?{
         locationId:loc.trim(),sourceReceiptId:receipt.trim(),
         quantity:Number(qty),reason,supplierReference:reference
-      }:{locationId:loc.trim(),documentId:document.trim()})
+      }:{locationId:loc.trim(),documentId:document.trim(),
+        ...(action==='cancel'||action==='reject'?{action:action.toUpperCase(),note}:{})})
     };
     if(snap.org!==scope.current.org||snap.loc!==scope.current.loc)return;
     setPending(snap);setBusy(true);setMessage('');
@@ -118,32 +124,43 @@ export function WarehouseSupplierReturns(){
             snap.loc===scope.current.loc){
           reviewSequence.current+=1;
           setReview({...emptyReview(),status:'denied'});
-          setDocument('');setApproval('');
+          setDocument('');setApproval('');setDecision('');setNote('');
         }
+        if(result.status===409&&snap.action!=='draft'&&snap.org===scope.current.org&&snap.loc===scope.current.loc){
+          reviewSequence.current+=1;
+          setReview(emptyReview());
+          void loadReview(null,true,snap.action==='cancel'?'own':'review');
+        }
+        if(snap.org!==scope.current.org||snap.loc!==scope.current.loc)return;
         setMessage(result.status===409?
-          'Конфликт: остаток, регистрация серии, оценка прихода или повтор запроса.':
+          'Конфликт: состояние акта, остаток, оценка прихода или повтор запроса. Обновите очередь.':
           result.status===403?'Нет действующих полномочий на филиал.':
           'Операция отклонена ('+result.status+').');
         return;
       }
       const data:unknown=await result.json();
-      const key=action==='draft'?'documentId':'approvalId';
+      const key=snap.action==='draft'?'documentId':snap.action==='approve'?'approvalId':'decisionId';
       if(!data||typeof data!=='object'||!(key in data)||
         typeof (data as Record<string,unknown>)[key]!=='string'||
         !uuid.test((data as Record<string,string>)[key]))throw new Error('response');
       if(snap.org===scope.current.org&&snap.loc===scope.current.loc){
-        if(snap.action==='draft')setDocument((data as Record<string,string>)[key]);
-        else setApproval((data as Record<string,string>)[key]);
+        if(snap.action==='draft'){setDocument((data as Record<string,string>)[key]);setApproval('');setDecision('');}
+        else if(snap.action==='approve'){setApproval((data as Record<string,string>)[key]);setDecision('');}
+        else {setDecision((data as Record<string,string>)[key]);setApproval('');setNote('');}
       }
       setPending(null);
-      if(snap.action==='approve'){
-        reviewSequence.current+=1;
-        setReview(emptyReview());
-        void loadReview(null,true);
+      if(snap.org===scope.current.org&&snap.loc===scope.current.loc){
+        if(snap.action!=='draft'){
+          reviewSequence.current+=1;
+          setReview(emptyReview());
+          void loadReview(null,true,snap.action==='cancel'?'own':'review');
+        }
+        setMessage(snap.action==='draft'?
+          'Акт возврата поставщику создан, остаток ещё не изменён. Проверьте текущий статус в очереди.':
+          snap.action==='approve'?'Возврат поставщику утверждён: физический остаток и закупочная оценка связаны.':
+          snap.action==='cancel'?'Черновик отменён. Остаток и закупочная оценка не изменены.':
+          'Акт отклонён. Остаток и закупочная оценка не изменены.');
       }
-      setMessage(snap.action==='draft'?
-        'Акт возврата поставщику создан, остаток ещё не изменён.':
-        'Возврат поставщику утверждён: физический остаток и закупочная оценка связаны.');
     }catch{
       setPending(snap);
       setMessage('Результат неизвестен. Верните прежние организацию и филиал и повторите с тем же ключом.');
@@ -179,12 +196,14 @@ export function WarehouseSupplierReturns(){
     <section aria-label="Утверждение возврата">
       <h2>2. Независимое утверждение</h2>
       <section aria-label="Очередь актов поставщику">
-        <h3>Ожидающие утверждения акты возврата</h3>
-        <p>Только MANAGER филиала. Проверьте артикул, партию,
-          количество, причину и номер обращения поставщику.
-          Собственные черновики не включаются: нужен другой сотрудник.</p>
-        <button type="button" disabled={!validScope||busy||review.status==='loading'}
-          onClick={()=>void loadReview()}>Обновить акты к утверждению</button>
+        <h3>{review.view==='own'?'Мои незавершённые акты возврата':'Ожидающие утверждения акты возврата'}</h3>
+        <p>{review.view==='own'?'WAREHOUSE видит собственные открытые черновики.':
+          'MANAGER видит открытые акты других сотрудников филиала. Проверьте артикул, партию, количество, причину и номер обращения поставщику.'}</p>
+        <button type="button" disabled={!validScope||busy||!!pending||review.status==='loading'}
+          onClick={()=>void loadReview(null,false,'review')}>Обновить акты к утверждению</button>
+        <button type="button" disabled={!validScope||busy||!!pending||review.status==='loading'}
+          onClick={()=>void loadReview(null,false,'own')}>Мои черновики к отмене</button>
+        {review.view==='own'&&<p>Собственные незавершённые акты WAREHOUSE.</p>}
         {review.status==='loading'&&<p role="status">Загрузка актов возврата…</p>}
         {review.status==='denied'&&<p role="alert">Нет доступа к актам возврата филиала.</p>}
         {review.status==='error'&&<p role="alert">Не удалось загрузить акты возврата.</p>}
@@ -194,22 +213,30 @@ export function WarehouseSupplierReturns(){
             ячейка {item.binCode} · {item.quantity} шт.
             <p>Причина: {item.reason}; обращение: {item.supplierReference}</p>
             <button type="button" disabled={busy||!!pending}
-              onClick={()=>setDocument(item.documentId)}>
+              onClick={()=>{setDocument(item.documentId);setNote('');setApproval('');setDecision('');}}>
               Выбрать акт {item.documentId}</button>
-          </li>)}</ul>:<p>Актов к утверждению нет.</p>)}
+          </li>)}</ul>:<p>{review.view==='own'?'Собственных открытых актов нет.':'Актов к утверждению нет.'}</p>)}
         {review.status==='ready'&&review.nextDocumentId&&
           <button type="button" disabled={busy||!!pending}
             onClick={()=>void loadReview(review.nextDocumentId)}>
             Следующая страница актов</button>}
         {review.status==='ready'&&review.cursor&&
           <button type="button" disabled={busy||!!pending}
-            onClick={()=>void loadReview()}>Первая страница актов</button>}
+            onClick={()=>void loadReview(null,false,review.view)}>Первая страница актов</button>}
       </section>
       <label>UUID акта <input aria-label="UUID акта"
         value={document} disabled={busy||!!pending}
-        onChange={e=>setDocument(e.target.value)}/></label>
+        onChange={e=>{setDocument(e.target.value);setNote('');setApproval('');setDecision('');}}/></label>
       <button type="button" disabled={!canApprove||busy||!!pending}
         onClick={()=>void send('approve')}>Утвердить возврат</button>
+      <h3>Отмена или отказ без проводок</h3>
+      <p>Автор WAREHOUSE может отменить свой черновик. Другой MANAGER может отклонить акт. Подтверждённые акты не отменяются этим действием.</p>
+      <label>Обоснование решения <input aria-label="Обоснование решения" value={note}
+        maxLength={240} disabled={busy||!!pending} onChange={e=>setNote(e.target.value)}/></label>
+      <button type="button" disabled={!canDecide||busy||!!pending}
+        onClick={()=>void send('cancel')}>Отменить свой черновик</button>
+      <button type="button" disabled={!canDecide||busy||!!pending}
+        onClick={()=>void send('reject')}>Отклонить акт</button>
     </section>
     {busy&&<p role="status">Выполняется…</p>}
     {pending&&<p role="alert">Неизвестный результат, новый ключ запрещён.</p>}
@@ -219,6 +246,7 @@ export function WarehouseSupplierReturns(){
       Повторить с прежним ключом</button>}
     {message&&<p role="status">{message}</p>}
     {approval&&<p>UUID утверждения: {approval}</p>}
+    {decision&&<p>UUID решения: {decision}</p>}
     <p>Закупочная стоимость и входной НДС учитываются раздельно как
       происхождение оценки, не как подтверждённое возмещение или налоговая корректировка.
       Требуется юридически действительный документ поставщика до production.</p>

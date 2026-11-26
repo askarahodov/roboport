@@ -174,3 +174,44 @@ test('denied supplier approval clears selected act and cached queue',async({page
   await expect(queue).not.toContainText('PRIVATE-RETURN');
   await expect(page.getByRole('textbox',{name:'UUID акта'})).toHaveValue('');
 });
+
+
+test('warehouse cancels own pending return, retries the same key and refreshes queue',async({page})=>{
+  let canceled=false;
+  const decision='99999999-9999-4999-8999-999999999999';
+  const keys:string[]=[];
+  await page.route('**/warehouse/supplier-returns**',route=>{
+    const req=route.request();
+    if(req.method()==='GET'){
+      expect(new URL(req.url()).searchParams.get('view')).toBe('own');
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,nextDocumentId:null,items:canceled?[]:[{
+          documentId:doc,sourceReceiptId:receipt,lotId:'66666666-6666-4666-8666-666666666666',
+          article:'SYN-CANCEL',batchCode:'LOT-A',binCode:'BIN-1',quantity:2,
+          reason:'Синтетический брак',supplierReference:'RMA-CANCEL'}]})});
+    }
+    expect(req.url().endsWith('/decisions')).toBe(true);
+    expect(req.postDataJSON()).toEqual({locationId:loc,documentId:doc,
+      action:'CANCEL',note:'Ошибочный черновик'});
+    keys.push(req.headers()['idempotency-key']);
+    if(keys.length===1)return route.fulfill({status:503,body:'unknown'});
+    canceled=true;
+    return route.fulfill({status:201,contentType:'application/json',
+      body:JSON.stringify({decisionId:decision})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await setup(page);
+  const queue=page.getByLabel('Очередь актов поставщику');
+  await queue.getByRole('button',{name:'Мои черновики к отмене'}).click();
+  await queue.getByRole('button',{name:'Выбрать акт '+doc}).click();
+  await page.getByRole('textbox',{name:'Обоснование решения'}).fill('Ошибочный черновик');
+  await page.getByRole('button',{name:'Отменить свой черновик'}).click();
+  await expect(page.getByRole('alert')).toContainText('Неизвестный результат');
+  await expect(page.getByRole('button',{name:'Отклонить акт'})).toBeDisabled();
+  await page.getByRole('button',{name:'Повторить с прежним ключом'}).click();
+  await expect(page.getByText('Черновик отменён. Остаток и закупочная оценка не изменены.')).toBeVisible();
+  await expect(queue).not.toContainText('SYN-CANCEL');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});

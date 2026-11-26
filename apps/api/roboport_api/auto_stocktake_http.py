@@ -1,5 +1,6 @@
 """Opt-in loopback-only warehouse stocktake HTTP; no production exposure."""
 from uuid import UUID
+from typing import Literal
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -510,8 +511,8 @@ async def serial_transfer_http(org_id: str,request: Request):
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns/pending")
 def pending_supplier_return_http(org_id:str,request:Request,locationId:str,
-                                 limit:int=20,afterDocumentId:str|None=None):
-    """Closed read-only manager worklist; no personal data or approval grant."""
+                                 limit:int=20,afterDocumentId:str|None=None,view:str="review"):
+    """Закрытые очереди чужих актов MANAGER и своих черновиков WAREHOUSE."""
     from .auto_stock_supplier_return_document import pending_supplier_returns
     dsn=_request_dsn(request)
     if isinstance(dsn,JSONResponse):
@@ -519,14 +520,14 @@ def pending_supplier_return_http(org_id:str,request:Request,locationId:str,
     try:
         org,loc=UUID(org_id),UUID(locationId)
         cursor=UUID(afterDocumentId) if afterDocumentId is not None else None
-        if not 1<=limit<=50:
-            raise ValueError("invalid page limit")
+        if not 1<=limit<=50 or view not in ("review","own") or len(request.query_params.getlist("view"))>1:
+            raise ValueError("invalid page limit or view")
     except (ValueError,TypeError):
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
             items,next_id=pending_supplier_returns(
-                db,request.cookies.get("rp_session",""),org,loc,limit,cursor)
+                db,request.cookies.get("rp_session",""),org,loc,limit,cursor,own=view=="own")
         except AutoStockDenied as exc:
             return _response(request,422 if str(exc)=="INVALID_INPUT" else 403,
                              "INVALID_INPUT" if str(exc)=="INVALID_INPUT" else "FORBIDDEN")
@@ -598,6 +599,39 @@ async def approve_supplier_return_http(org_id:str,request:Request):
         except AutoStockConflict:
             return _response(request,409,"CONFLICT")
     return JSONResponse(status_code=201,content={"approvalId":str(ident)},
+                        headers={"Cache-Control":"no-store"})
+
+
+class SupplierReturnDecisionBody(SupplierReturnAcceptBody):
+    action: Literal["CANCEL","REJECT"]
+    note: str = Field(min_length=3,max_length=240)
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-returns/decisions")
+async def decide_supplier_return_http(org_id:str,request:Request):
+    from .auto_stock_supplier_return_document import decide_supplier_return
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse): return dsn
+    try:
+        org=UUID(org_id)
+        data=SupplierReturnDecisionBody.model_validate(await request.json())
+        key=_key(request)
+        if (data.action not in ("CANCEL","REJECT") or data.note!=data.note.strip()
+            or any(ord(c)<32 for c in data.note)):
+            raise ValueError("invalid decision")
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        try:
+            ident=decide_supplier_return(db,request.cookies.get("rp_session",""),
+                org,data.locationId,data.documentId,key,data.action,data.note)
+        except AutoStockDenied:
+            return _response(request,403,"FORBIDDEN")
+        except AutoStockConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201,content={"decisionId":str(ident)},
                         headers={"Cache-Control":"no-store"})
 
 
