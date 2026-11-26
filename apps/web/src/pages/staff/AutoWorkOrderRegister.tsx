@@ -32,7 +32,7 @@ type Order={workOrderId:string;appointmentId:string;bayId:string;
 type Page={syntheticOnly:true;releaseAllowed:false;items:Order[];
   nextCursor:string|null};
 
-function parse(raw:unknown,stage:Stage,repair:RepairStage,document:DocumentStage,
+function parse(raw:unknown,stage:Stage,repair:RepairStage,docStage:DocumentStage,
                booking:BookingState,fromDay:string,toDay:string):Page{
   if(!raw||typeof raw!=='object')throw Error('invalid register');
   const data=raw as Page;
@@ -50,7 +50,7 @@ function parse(raw:unknown,stage:Stage,repair:RepairStage,document:DocumentStage
       (stage!=='ALL'&&row.stage!==stage)||
       !repairStages.slice(1).includes(row.repairStage)||!documentStages.slice(1).includes(row.documentStage)||
       !bookingStates.slice(1).includes(row.bookingStatus)||!row.localDay||!validDay(row.localDay)||
-      (repair!=='ALL'&&row.repairStage!==repair)||(document!=='ALL'&&row.documentStage!==document)||
+      (repair!=='ALL'&&row.repairStage!==repair)||(docStage!=='ALL'&&row.documentStage!==docStage)||
       (booking!=='ALL'&&row.bookingStatus!==booking)||(fromDay!==''&&row.localDay<fromDay)||
       (toDay!==''&&row.localDay>toDay)||
       row.stage!==(row.bookingStatus==='CANCELED'?'CANCELED':
@@ -69,7 +69,7 @@ export function AutoWorkOrderRegister(){
   const [loc,setLoc]=React.useState(()=>initial('loc'));
   const [stage,setStage]=React.useState<Stage>('ALL');
   const [repair,setRepair]=React.useState<RepairStage>('ALL');
-  const [document,setDocument]=React.useState<DocumentStage>('ALL');
+  const [docStage,setDocStage]=React.useState<DocumentStage>('ALL');
   const [booking,setBooking]=React.useState<BookingState>('ALL');
   const [fromDay,setFromDay]=React.useState(''),[toDay,setToDay]=React.useState('');
   const [search,setSearch]=React.useState('');
@@ -91,13 +91,13 @@ export function AutoWorkOrderRegister(){
   const valid=uuid.test(org.trim())&&uuid.test(loc.trim())&&validPeriod;
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
     '/locations/'+encodeURIComponent(loc.trim())+'/orders';
-  const scope=[org.trim(),loc.trim(),stage,applied,repair,document,booking,fromDay,toDay].join(':');
+  const scope=[org.trim(),loc.trim(),stage,applied,repair,docStage,booking,fromDay,toDay].join(':');
   const previousScope=React.useRef(scope);
   const effectiveCursor=previousScope.current===scope?cursor:null;
   const queryKey=scope+':'+effectiveCursor+':'+revision;
   if(currentScope.current!==queryKey){requestEpoch.current++;currentScope.current=queryKey;}
   function filters(){
-    const params=new URLSearchParams({view:'workflow',stage,repairStage:repair,documentStage:document,bookingStatus:booking});
+    const params=new URLSearchParams({view:'workflow',stage,repairStage:repair,documentStage:docStage,bookingStatus:booking});
     if(applied)params.set('orderId',applied);
     if(fromDay)params.set('fromDay',fromDay);
     if(toDay)params.set('toDay',toDay);
@@ -127,7 +127,7 @@ export function AutoWorkOrderRegister(){
       if(!current())return;
       if([401,403,404].includes(response.status)){setStatus('denied');return;}
       if(!response.ok)throw Error('HTTP '+response.status);
-      const data=parse(await response.json(),stage,repair,document,booking,fromDay,toDay);
+      const data=parse(await response.json(),stage,repair,docStage,booking,fromDay,toDay);
       if(current()){setPage(data);setLoadedKey(queryKey);setStatus('ready');}
     }).catch(()=>{if(current())setStatus('error');});
     return ()=>controller.abort();
@@ -205,18 +205,18 @@ export function AutoWorkOrderRegister(){
         onChange={e=>setStage(e.target.value as Stage)}>
         {stages.map(x=><option key={x} value={x}>{names[x]}</option>)}
       </select></label>
-      <label>Этап ремонта <select value={repair} onChange={e=>setRepair(e.target.value as RepairStage)}>
+      <label>Этап ремонта <select aria-label="Этап ремонта" value={repair} onChange={e=>setRepair(e.target.value as RepairStage)}>
         {repairStages.map(x=><option key={x} value={x}>{names[x]}</option>)}
       </select></label>
-      <label>Состояние документа <select value={document} onChange={e=>setDocument(e.target.value as DocumentStage)}>
+      <label>Состояние документа <select aria-label="Состояние документа" value={docStage} onChange={e=>setDocStage(e.target.value as DocumentStage)}>
         {documentStages.map(x=><option key={x} value={x}>{docNames[x]}</option>)}
       </select></label>
-      <label>Состояние записи <select value={booking} onChange={e=>setBooking(e.target.value as BookingState)}>
+      <label>Состояние записи <select aria-label="Состояние записи" value={booking} onChange={e=>setBooking(e.target.value as BookingState)}>
         {bookingStates.map(x=><option key={x} value={x}>{bookingNames[x]}</option>)}
       </select></label>
-      <label>Дата записи с <input type="date" value={fromDay} onChange={e=>setFromDay(e.target.value)}/></label>
-      <label>Дата записи по <input type="date" value={toDay} onChange={e=>setToDay(e.target.value)}/></label>
-      <button type="button" onClick={()=>{setStage('ALL');setRepair('ALL');setDocument('ALL');setBooking('ALL');
+      <label>Дата записи с <input aria-label="Дата записи с" type="date" value={fromDay} onChange={e=>setFromDay(e.target.value)}/></label>
+      <label>Дата записи по <input aria-label="Дата записи по" type="date" value={toDay} onChange={e=>setToDay(e.target.value)}/></label>
+      <button type="button" onClick={()=>{setStage('ALL');setRepair('ALL');setDocStage('ALL');setBooking('ALL');
         setFromDay('');setToDay('');setSearch('');setApplied('');setCursor(null);setHistory([]);setRevision(x=>x+1);}}>
         Сбросить все фильтры</button>
     </div>
