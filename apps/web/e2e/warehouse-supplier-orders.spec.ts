@@ -13,7 +13,7 @@ const urlPart='/api/v1/dev/auto/organizations/'+org+'/warehouse/supplier-orders'
 async function fillOrder(page: import('@playwright/test').Page){
   await page.getByLabel('UUID организации').fill(org);
   await page.getByLabel('UUID филиала').fill(loc);
-  await page.getByLabel('UUID заказ-наряда').fill(order);
+  await page.getByLabel('UUID заказ-наряда',{exact:true}).fill(order);
   await page.getByLabel('UUID партии').fill(lot);
   await page.getByLabel('Артикул SKU').fill('SYNTH-001');
   await page.getByLabel('Требуется для работы (шт.)').fill('5');

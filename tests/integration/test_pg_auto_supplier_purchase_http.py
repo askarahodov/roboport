@@ -241,3 +241,62 @@ def test_http_no_cross_scope_csrf_bad_quotes_and_gating(monkeypatch):
         monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","0")
         assert post(http,d,d["intake"],base,body).status_code==404
         assert http.get(base,params={"locationId":str(loc)}).status_code==404
+
+
+def test_detail_and_delivery_replay_deny_older_standalone_receipt(monkeypatch):
+    """Parent is newer than cutoff, child is older: deny every detail page."""
+    from roboport_api.auto_document_access import publish_policy
+    from test_pg_auto_document_access_http import admin
+    d,org,loc,item,lot,order,offers,grant_id,manager,base,body=fixture(monkeypatch)
+    root=f"/api/v1/dev/auto/organizations/{org}/warehouse/receipts"
+    key=uuid4()
+    draft_body={"locationId":str(loc),"lotId":str(lot),"quantity":1,
+                "sourceReference":"OFFLINE-HISTORY-RECEIPT"}
+    delivery_body={"locationId":str(loc),"quantity":1,
+                   "supplierReference":draft_body["sourceReference"]}
+    query={"locationId":str(loc)}
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        draft=post(http,d,d["intake"],root,draft_body,key)
+        assert draft.status_code==201,draft.text
+        old_id=draft.json()["documentId"]
+        purchase=post(http,d,d["intake"],base,body)
+        assert purchase.status_code==201,purchase.text
+        detail_url=base+"/"+purchase.json()["orderId"]
+        linked=post(http,d,d["intake"],detail_url+"/receipts",delivery_body,key)
+        assert linked.status_code==201,linked.text
+        assert linked.json()["documentId"]==old_id
+        visible=http.get(detail_url,params=query)
+        assert visible.status_code==200,visible.text
+        assert_contract(visible,"PurchaseDetail")
+        assert visible.json()["deliveries"][0]["documentId"]==old_id
+        with psycopg.connect(DSN) as db:
+            old=db.execute("SELECT created_at FROM auto_stock_receipt_document WHERE id=%s",
+                           (old_id,)).fetchone()[0]
+            new=db.execute("SELECT created_at FROM auto_supplier_purchase_order WHERE id=%s",
+                           (purchase.json()["orderId"],)).fetchone()[0]
+            assert old<new
+            admin(db,org,d["manager"])
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),
+                role="WAREHOUSE",loc=loc,user=None,document="SUPPLIER_ORDER",
+                cap="READ",allowed=True,not_before=new)
+        # Legacy aggregate admits parent; new detail must deny all pages.
+        assert len(http.get(base,params=query).json()["items"])==1
+        for params in (query,{**query,"limit":"1","afterDeliveryId":linked.json()["deliveryId"]}):
+            denied=http.get(detail_url,params=params)
+            assert denied.status_code==403,denied.text
+            assert_contract(denied,"Error")
+            assert old_id not in denied.text
+        replay=post(http,d,d["intake"],detail_url+"/receipts",delivery_body,key)
+        assert replay.status_code==403,replay.text
+        assert_contract(replay,"Error")
+        with psycopg.connect(DSN) as db:
+            assert balance(db,item)==(1,0)
+            assert db.execute("SELECT count(*) FROM auto_supplier_purchase_receipt WHERE purchase_id=%s",
+                              (purchase.json()["orderId"],)).fetchone()==(1,)
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),
+                role="WAREHOUSE",loc=loc,user=None,document="SUPPLIER_ORDER",
+                cap="READ",allowed=True,not_before=None)
+        assert http.get(detail_url,params=query).status_code==200
+        assert post(http,d,d["intake"],detail_url+"/receipts",delivery_body,key).json()==linked.json()

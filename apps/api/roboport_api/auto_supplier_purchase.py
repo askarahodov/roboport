@@ -15,7 +15,7 @@ from .auto_org_authority import organization_role_allows
 from .auto_parts_provider import CatalogError
 from .auto_supplier_offer import parse_supplier_offers
 from .auto_stock_receipt_document import create_receipt_document
-from .auto_purchase_document_policy import require_purchase_document
+from .auto_purchase_document_policy import require_purchase_document,receipt_history_date
 from .auto_stock_service import AutoStockDenied, AutoStockConflict
 from .session_lookup import session_subject
 from .auto_document_access import (
@@ -195,6 +195,8 @@ def record_supplier_delivery(conn: psycopg.Connection, token: str, org: UUID,
         if prior:
             if (prior[2:5]==(purchase,quantity,actor)
                 and prior[5]==supplier_reference):
+                require_purchase_document(conn,token,org,loc,
+                    created_at=receipt_history_date(conn,org,loc,prior[1]))
                 return prior[0],prior[1]
             raise AutoStockConflict("REPLAY_MISMATCH")
         canceled=conn.execute("""SELECT id FROM auto_supplier_purchase_cancel
@@ -326,19 +328,32 @@ def supplier_order_detail(conn,token,org,loc,order_id,*,limit=20,after_id=None):
         or not 1<=limit<=50 or (after_id is not None and type(after_id) is not UUID)):
         raise AutoStockDenied("INVALID_INPUT")
     with conn.transaction():
-        items,_=list_supplier_orders(conn,token,org,loc,1,order_id=order_id)
-        if not items:
-            raise AutoStockDenied("FORBIDDEN")
-        summary=items[0]
+        cutoff=require_purchase_document(conn,token,org,loc)
+        # Serialize with supplier delivery/cancel (FOR UPDATE of the same
+        # parent) before testing the full linked history. No new link can
+        # appear between the cutoff check and the paginated receipt query.
         row=conn.execute("""SELECT desired_quantity,available_at_order,created_at,
               quoted_at,expires_at,offers FROM auto_supplier_purchase_order
-              WHERE id=%s AND organization_id=%s AND location_id=%s""",
+              WHERE id=%s AND organization_id=%s AND location_id=%s FOR SHARE""",
               (order_id,org,loc)).fetchone()
         if row is None:
             raise AutoStockDenied("FORBIDDEN")
         desired,available,created,quoted,expires,offers=row
-        # Receipt history inherits the immutable parent date in receipt_history_date().
-        # All queries hold the document policy/session locks of the outer transaction.
+        if cutoff is not None and (created<cutoff or conn.execute("""
+              SELECT 1 FROM auto_supplier_purchase_receipt r
+              JOIN auto_stock_receipt_document d ON d.id=r.document_id
+              WHERE r.purchase_id=%s AND d.created_at<%s LIMIT 1
+              """,(order_id,cutoff)).fetchone() is not None):
+            # A standalone draft may have been created before this order
+            # and later linked by exact request-key replay. Do not return
+            # partial history or expose older UUIDs, quantities or stages.
+            raise AutoStockDenied("FORBIDDEN")
+        items,_=list_supplier_orders(conn,token,org,loc,1,order_id=order_id)
+        if not items:
+            raise AutoStockDenied("FORBIDDEN")
+        summary=items[0]
+        # Parent and child cutoff match receipt_history_date() semantics.
+        # The policy/session locks and parent lock span all subsequent reads.
         rows=conn.execute("""SELECT r.id,r.document_id,r.quantity,r.created_at,
                  a.id,v.id FROM auto_supplier_purchase_receipt r
               JOIN auto_stock_receipt_document d ON d.id=r.document_id
