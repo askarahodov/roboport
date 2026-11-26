@@ -373,3 +373,16 @@ Playwright очищает свой `outputDir` перед каждым запу�
 
 
 **Кандидат #172:** `/staff/auto-cutover` — synthetic only, 390/1280, проверка перед импортом, сводка, 403/409/422 и ZIP. Автоматизированный browser сценарий не является независимой визуальной приёмкой #92.
+
+
+### Проверка вычисленного accessible name (#92)
+
+Автоматический аудит `apps/web/e2e/visual-audit.spec.ts` использует штатный Playwright matcher `toHaveAccessibleName` для видимых button/link/input/select/textarea и ARIA button/link внутри main. Для полей с placeholder требуется также подпись (label/ARIA name или title), а не только подсказка. Непустой, но отсутствующий или пустой `aria-labelledby`, текст только внутри `aria-hidden` и placeholder без подписи не считаются доказательством доступного имени. Независимые synthetic fixtures проверяют эти отказы, три прежних unnamed controls и положительные примеры настоящих label/ARIA names; для каждого сохраняются PNG и статус manifest без самих имён. Ошибка по-прежнему блокирует аудит после сбора снимков.
+
+Адресный запуск из `apps/web`:
+
+```bash
+npx playwright test e2e/visual-audit.spec.ts --grep "accessibility evidence rejects unnamed controls and accepts real accessible names"
+```
+
+Это техническая регрессия имён, не полный WCAG AA audit, не утверждение golden PNG и не независимый design sign-off #92/#76. Откат — revert теста и документации, runtime и авторизация не изменяются.
