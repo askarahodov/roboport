@@ -148,7 +148,7 @@ export function AutoWorkOrderWorkspace(){
     <p>Все этапы одного тестового заказа на одной странице. Отдельные операции
       выполняются действующими ролями и <strong>повторно проверяются сервером</strong>.
       Это не бухгалтерский документ, не законная подпись и не выдача автомобиля.</p>
-    <Link to="/staff/auto-order-register">К реестру заказ-нарядов</Link>
+    <Link to={'/staff/auto-order-register?'+new URLSearchParams({org,loc}).toString()}>К реестру заказ-нарядов</Link>
     <form onSubmit={apply} style={{display:'flex',gap:'0.75rem',flexWrap:'wrap'}}>
       <label>UUID организации <input aria-label="UUID организации рабочего места"
         value={draftOrg} onChange={e=>setDraftOrg(e.target.value)}/></label>

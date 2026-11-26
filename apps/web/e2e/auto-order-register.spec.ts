@@ -9,7 +9,7 @@ const bay='66666666-6666-4666-8666-666666666666';
 const base='/api/v1/dev/auto/organizations/'+org+'/locations/'+loc;
 const row=(id:string)=>({workOrderId:id,appointmentId:booking,bayId:bay,
   createdAt:'2026-11-18T10:00:00+00:00',startsAt:'2026-11-19T10:00:00+00:00',
-  endsAt:'2026-11-19T11:00:00+00:00',stage:'DRAFT'});
+  endsAt:'2026-11-19T11:00:00+00:00',stage:'DRAFT',repairStage:'DRAFT',documentStage:'RESTRICTED',bookingStatus:'SCHEDULED',localDay:'2026-11-19'});
 
 test('order register: scoped lookup, page navigation and link to selected order',async({page})=>{
   const requests:URL[]=[];
@@ -114,4 +114,38 @@ test('register refresh removes previously visible handover stage and filtered ro
   await page.setViewportSize({width:1280,height:900});
   await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
   await expect(table).toHaveCount(0);
+});
+
+
+test('workflow register separates repair and document states and keeps branch on return',async({page})=>{
+  const calls:URL[]=[];
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const url=new URL(route.request().url());calls.push(url);
+    if(url.pathname===base+'/orders'){
+      const q=url.searchParams;
+      expect(q.get('view')).toBe('workflow');
+      const visible=(q.get('documentStage')==='ALL'||q.get('documentStage')==='RESTRICTED')&&
+        (!q.get('fromDay')||q.get('fromDay')!>'2026-11-19');
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,releaseAllowed:false,items:visible?[row(order)]:[],nextCursor:null})});
+    }
+    return route.fulfill({status:403,body:'{}'});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-order-register?org='+org+'&loc='+loc);
+  await expect(page.getByRole('table')).toContainText('Недоступно по правам');
+  await page.getByLabel('Состояние документа',{exact:true}).selectOption('POSTED');
+  await expect(page.getByText('Заказ-наряды по этому фильтру не найдены.')).toBeVisible();
+  await page.getByLabel('Состояние документа',{exact:true}).selectOption('RESTRICTED');
+  await expect(page.getByRole('table')).toContainText(order);
+  await page.getByLabel('Дата записи с',{exact:true}).fill('2026-11-20');
+  await expect(page.getByText('Заказ-наряды по этому фильтру не найдены.')).toBeVisible();
+  await page.getByRole('button',{name:'Сбросить все фильтры'}).click();
+  await expect(page.getByRole('table')).toContainText(order);
+  expect(calls.some(x=>x.searchParams.get('documentStage')==='POSTED')).toBe(true);
+  await page.getByRole('button',{name:'Сведения'}).click();
+  await page.getByRole('link',{name:'Открыть рабочее место наряда'}).click();
+  await page.getByRole('link',{name:'К реестру заказ-нарядов'}).click();
+  await expect(page.getByRole('textbox',{name:'UUID организации'})).toHaveValue(org);
+  await expect(page.getByRole('textbox',{name:'UUID филиала'})).toHaveValue(loc);
 });

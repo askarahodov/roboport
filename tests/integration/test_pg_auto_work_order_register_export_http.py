@@ -122,6 +122,19 @@ def test_export_and_register_hide_handover_status_before_filtering(monkeypatch):
         exported=rows(http.get(path,params={"orderId":str(order)}))
         assert len(exported)==2 and exported[1][0]==str(order)
         assert exported[1][6]==expected
+        workflow={"view":"workflow","repairStage":"READY","orderId":str(order)}
+        separate=http.get(url,params=workflow)
+        assert separate.status_code==200,separate.text
+        item=separate.json()["items"][0]
+        assert item["repairStage"]=="READY"
+        assert item["documentStage"]==("CLOSED_TECHNICAL" if expected=="CLOSED_TECHNICAL" else "RESTRICTED")
+        assert item["bookingStatus"]=="SCHEDULED"
+        expanded=rows(http.get(path,params=workflow))
+        assert len(expanded)==2 and len(expanded[1])==11
+        assert expanded[1][7:10]==[item["repairStage"],item["documentStage"],item["bookingStatus"]]
+        hidden=http.get(url,params={**workflow,"documentStage":"CLOSED_TECHNICAL"})
+        assert len(hidden.json()["items"])==(1 if expected=="CLOSED_TECHNICAL" else 0)
+        assert len(rows(http.get(path,params={**workflow,"documentStage":"CLOSED_TECHNICAL"})))==(2 if expected=="CLOSED_TECHNICAL" else 1)
         for stage in ("POSTED","CLIENT_ACKNOWLEDGED","CLIENT_DISPUTED","CLOSED_TECHNICAL","READY"):
             filtered=http.get(url,params={"stage":stage})
             assert filtered.status_code==200,filtered.text

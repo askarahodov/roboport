@@ -9,7 +9,7 @@ const base='/api/v1/dev/auto/organizations/'+org+'/locations/'+loc+'/orders';
 const item={workOrderId:order,appointmentId:appointment,bayId:bay,
   createdAt:'2026-11-18T10:00:00+00:00',
   startsAt:'2026-11-19T10:00:00+00:00',
-  endsAt:'2026-11-19T11:00:00+00:00',stage:'DRAFT'};
+  endsAt:'2026-11-19T11:00:00+00:00',stage:'DRAFT',repairStage:'DRAFT',documentStage:'RESTRICTED',bookingStatus:'SCHEDULED',localDay:'2026-11-19'};
 const csv='\ufeffЗаказ-наряд;Запись;Пост;Создан;Начало записи;Окончание записи;Технический статус\r\n'+
   order+';'+appointment+';'+bay+';2026-11-18T10:00:00+00:00;'+
   '2026-11-19T10:00:00+00:00;2026-11-19T11:00:00+00:00;DRAFT\r\n';
@@ -46,6 +46,8 @@ test('CSV export uses current filter, downloads complete file at 390 and 1280',a
   expect(result.suggestedFilename()).toBe('auto-work-order-register.csv');
   expect(exports).toHaveLength(1);
   expect(exports[0].searchParams.get('stage')).toBe('DRAFT');
+  expect(exports[0].searchParams.get('view')).toBe('workflow');
+  expect(exports[0].searchParams.get('documentStage')).toBe('ALL');
   expect(exports[0].searchParams.get('cursor')).toBeNull();
   await page.setViewportSize({width:1280,height:900});
   await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
