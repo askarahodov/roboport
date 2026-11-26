@@ -104,3 +104,23 @@ def test_linux_only_ci_preserves_all_quality_gates():
     assert "Verify pinned Chromium and operating system dependencies" in names
     assert "Browser E2E against synthetic FastAPI" in names
     assert "Browser navigation and search smoke for local Docsify portal" in names
+
+
+def test_local_stack_smoke_is_https_current_auto_and_not_duplicated():
+    root = Path(__file__).resolve().parents[2]
+    config = yaml.safe_load((root / ".github/workflows/local-stack.yml").read_text(encoding="utf-8"))
+    events = config.get("on", config.get(True))
+    assert events["push"]["branches"] == ["main"]
+    assert events["push"]["paths"] == events["pull_request"]["paths"]
+    assert "workflow_dispatch" in events
+    assert "scripts/check_local_stack_smoke.py" in events["push"]["paths"]
+    assert "apps/api/roboport_api/main.py" in events["push"]["paths"]
+    job = config["jobs"]["compose-smoke"]
+    smoke = next(s["run"] for s in job["steps"] if s.get("name") == "Live PostgreSQL and Keycloak health, API smoke")
+    assert "--ssl-keyfile infra/dev/tls/local.key" in smoke
+    assert "--ssl-certfile infra/dev/tls/local.crt" in smoke
+    assert "--no-proxy-headers" in smoke
+    assert "--cacert infra/dev/tls/local.crt" in smoke
+    assert "python -m scripts.check_local_stack_smoke" in smoke
+    assert "/api/v1/catalog/brands" not in smoke
+    assert "test \"$READY\" = 1" in smoke

@@ -45,6 +45,8 @@ PYTHONPATH=apps/api uvicorn roboport_api.main:app --host 127.0.0.1 --port 8000
 
 ## Тесты и безопасные операции
 
+Дополнительный Linux Compose smoke проверяет реальные PostgreSQL/Keycloak, прямой HTTPS и synthetic login → identity/vehicles → CSRF logout → denied access; retired catalog обязан возвращать 404. См. [LOCAL_STACK.md](../../infra/dev/LOCAL_STACK.md). Не заменяет полный CI.
+
 `apps/web/package-lock.json` присутствует, `npm ci` проверяется CI. Внешние OIDC, локальные сессии, PostgreSQL и MinIO **уже тестируются** на синтетике, но не означают production-readiness. Скрипты миграций нельзя применять к действующей базе без backup/rollback. `docker compose ... down -v` **удаляет данные dev volumes**. Не использовать реальные VIN, телефоны, клиентские обращения или секреты в Git и screenshots.
 
 Подробности: [модель безопасности](../security/LOCAL_AUTH_AND_MINIO.md), [документационный аудит](../auto/DOCUMENTATION_AUDIT.md).
