@@ -241,19 +241,15 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
-          mkdir -p /tmp/roboport-openapi-base
-          git show "${{ github.event.pull_request.base.sha }}:contracts/openapi.yaml" > /tmp/roboport-openapi-base/public.yaml
-          git show "${{ github.event.pull_request.base.sha }}:contracts/auto-dev-openapi.yaml" > /tmp/roboport-openapi-base/auto-dev.yaml
-          python scripts/check_openapi_compatibility.py --before /tmp/roboport-openapi-base/public.yaml --after contracts/openapi.yaml
-          python scripts/check_openapi_compatibility.py --before /tmp/roboport-openapi-base/auto-dev.yaml --after contracts/auto-dev-openapi.yaml
+          python -m scripts.check_openapi_inventory --base-sha "${{ github.event.pull_request.base.sha }}"
       - run: python scripts/check_contract.py
       - name: Validate Markdown local links and heading anchors
         run: python scripts/check_docs_links.py
       - name: Validate AutoDealer page coverage and GAP ownership
         run: python scripts/check_autodealer_audit.py
-      - run: python -m openapi_spec_validator contracts/openapi.yaml
-      - name: Validate isolated synthetic auto OpenAPI
-        run: python -m openapi_spec_validator contracts/auto-dev-openapi.yaml
+      - name: Validate all OpenAPI contracts and synthetic boundaries
+        if: github.event_name != 'pull_request'
+        run: python -m scripts.check_openapi_inventory
   web:
     needs: impact
     if: needs.impact.outputs.web == 'true'
