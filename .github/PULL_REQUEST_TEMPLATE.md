@@ -7,9 +7,12 @@
 - Влияние на API/DDL/ACL:
 
 ## Проверки
-- Проверенные команды и exit codes:
-- Unit / integration / E2E:
-- Ссылка на GitHub Actions run:
+- GitHub Actions run URL / точный HEAD SHA:
+- Jobs, unit / integration / E2E / build / docs: фактические результаты (команды и exit codes из доступных логов):
+- Skipped / PENDING / BLOCKED и причины:
+- Локальный запуск: не требуется (CI-first, решение заказчика 26.11.2026).
+- Независимое review / ручная приёмка (если требуется):
+- Post-merge main CI (после merge):
 - Что не проверено и почему:
 
 ## Документация (обязательно)
