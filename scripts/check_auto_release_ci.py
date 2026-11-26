@@ -13,7 +13,7 @@ import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-REQUIRED_JOBS = frozenset({"impact", "docs", "postgres", "api", "web", "browser-e2e", "windows-cmd"})
+REQUIRED_JOBS = frozenset({"impact", "docs", "postgres", "api", "web", "browser-e2e"})
 REPO = "askarahodov/roboport"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     if errors:
         print("BLOCKED: " + ", ".join(errors), file=sys.stderr)
         return 1
-    print("SHA CI и все семь jobs проверены. Независимое разрешение выпуска обязательно.")
+    print("SHA CI и все шесть Linux jobs проверены. Независимое разрешение выпуска обязательно.")
     return 0
 
 

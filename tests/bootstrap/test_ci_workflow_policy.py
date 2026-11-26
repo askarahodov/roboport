@@ -65,58 +65,42 @@ def test_browser_runs_pinned_playwright_image_and_checks_actual_launch():
     upload = next(step for step in steps if step.get("name") == "Publish browser acceptance screenshots and traces")
     assert upload["if"] == "always()"
 
-def test_windows_cmd_smoke_is_native_and_cannot_suppress_linux_quality_gates():
-    """Issue #135: run real Windows CMD, preserve all four Linux CI jobs."""
+def test_linux_only_ci_preserves_all_quality_gates():
+    """#119: Linux server/CI decision, not a reduction in Linux coverage."""
     root = Path(__file__).resolve().parents[2]
     config = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     jobs = config["jobs"]
-    assert {"api", "web", "postgres", "browser-e2e", "windows-cmd"} <= set(jobs)
-    windows = jobs["windows-cmd"]
-    assert windows["runs-on"] == "windows-latest"
-    assert windows["env"]["PYTHONIOENCODING"] == "utf-8"
-    assert str(windows["env"]["PYTHONUTF8"]) == "1"
-    assert windows["defaults"]["run"]["shell"] == "cmd"
-    assert "container" not in windows
-    steps = windows["steps"]
-    python = next(x for x in steps if x.get("uses", "").startswith("actions/setup-python@"))
-    node = next(x for x in steps if x.get("uses", "").startswith("actions/setup-node@"))
-    assert python["with"]["python-version"] == "3.13"
-    assert str(node["with"]["node-version"]) == "24"
-    assert node["with"]["cache"] == "npm"
-    assert node["with"]["cache-dependency-path"] == "apps/web/package-lock.json"
-    commands = [x["run"] for x in steps if "run" in x]
-    assert commands == [
-        "python scripts/check_docs_links.py",
-        "npm ci --no-audit --no-fund",
-        "npm run typecheck",
-        "npm run build",
-        "npx playwright install chromium",
-        "npm run test:docs:e2e",
-    ]
-    assert all("pwsh" not in command and ".ps1" not in command for command in commands)
-    assert all(x.get("continue-on-error") is not True for x in steps)
-    upload = next(x for x in steps if x.get("name") == "Upload Windows CMD Docsify traces and screenshots")
-    assert upload["if"] == "always()"
-    assert upload["with"]["name"] == "roboport-windows-cmd-evidence"
-    # PR may skip unaffected heavyweight work; main and manual runs must
-    # always emit all five jobs, with no path-based skip or missing release evidence.
     from scripts.ci_impact import FULL, impact
+    from scripts.check_auto_release_ci import REQUIRED_JOBS
 
-    assert {"impact", "docs"} <= set(jobs)
+    assert FULL == {"postgres", "api", "web", "browser-e2e"}
+    assert set(jobs) == REQUIRED_JOBS == FULL | {"impact", "docs"}
+    assert "windows" not in jobs["impact"]["outputs"]
+    for path in (root / ".github/workflows").glob("*.yml"):
+        config = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job in config["jobs"].values():
+            assert job["runs-on"] in {"ubuntu-latest", "ubuntu-24.04"}, path
+    for job in jobs.values():
+        assert "continue-on-error" not in job
+        assert all(step.get("continue-on-error") is not True for step in job.get("steps", []))
     for name, output in (("postgres", "postgres"), ("api", "api"),
-                         ("web", "web"), ("browser-e2e", "browser"),
-                         ("windows-cmd", "windows")):
+                         ("web", "web"), ("browser-e2e", "browser")):
         assert jobs[name]["needs"] == "impact"
         assert jobs[name]["if"] == f"needs.impact.outputs.{output} == 'true'"
     assert impact(["docs/auto/REPORTING.md"]) == (set(), False)
+    assert impact(["apps/web/package-lock.json"]) == ({"web", "browser-e2e"}, False)
     assert impact(["apps/api/alembic/versions/0140_test.py"]) == (set(FULL), True)
     assert impact(["docs/auto/REPORTING.md"], full=True) == (set(FULL), True)
     workflow_script = next(s["run"] for s in jobs["impact"]["steps"]
                            if s.get("id") == "classify")
     assert 'github.event_name' in workflow_script
     assert 'python scripts/ci_impact.py --full' in workflow_script
-    assert all("continue-on-error" not in jobs[name] for name in FULL)
-    linux_browser = jobs["browser-e2e"]
-    names = {s.get("name") for s in linux_browser["steps"]}
+    docs_commands = [s.get("run", "") for s in jobs["docs"]["steps"]]
+    assert "python scripts/check_docs_links.py" in docs_commands
+    web_commands = [s.get("run", "") for s in jobs["web"]["steps"]]
+    assert "npm run typecheck" in web_commands
+    assert "npm run build" in web_commands
+    names = {s.get("name") for s in jobs["browser-e2e"]["steps"]}
+    assert "Verify pinned Chromium and operating system dependencies" in names
     assert "Browser E2E against synthetic FastAPI" in names
     assert "Browser navigation and search smoke for local Docsify portal" in names

@@ -6,6 +6,7 @@
 
 - Продукт — автомобильная система «БоксРитм»: [PRODUCT](../auto/PRODUCT.md), [ADR-001](../auto/ADR-001.md), [дорожная карта](../auto/FEATURE_ROADMAP.md). Robot domain — только контролируемое legacy до #165.
 - Приоритеты и критерии задачи — **текущая GitHub Issue #N** и [ISSUE_STANDARD](ISSUE_STANDARD.md); правила реализации и язык — [AGENTS](../../AGENTS.md).
+- Серверная платформа и обязательный CI — Linux-only по решению заказчика 26.11.2026; клиентский браузер не ограничивается ОС. Полный gate main — шесть jobs, Windows CMD не требуется.
 - CI: [workflow](../../.github/workflows/ci.yml), консервативный [impact selector](../../scripts/ci_impact.py), [операционные указания](../operations/DEV_ENVIRONMENT.md). Пропуск job на PR по impact **не равен PASS**; release gate на `main` и #119 не отменяется.
 - `TECHNICAL_SPEC.md` описывает исторический robot domain и не задаёт требования для новой автомобильной функциональности.
 

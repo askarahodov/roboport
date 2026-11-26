@@ -155,6 +155,12 @@ class ImpactTests(unittest.TestCase):
                 run_integration([source], full_pg=False, mandatory_tests=mandatory)
                 self.assertEqual(call.call_args.args[0][-1], "tests/integration")
 
+    def test_linux_only_frontend_config_and_full_matrix(self):
+        self.assertEqual(set(FULL), {"postgres", "api", "web", "browser-e2e"})
+        for path in ("apps/web/package-lock.json", "apps/web/package.json",
+                     "apps/web/vite.config.ts", "apps/web/playwright.config.ts"):
+            self.assertEqual(impact([path]), ({"web", "browser-e2e"}, False))
+
     def test_main_and_manual_are_full_even_for_docs(self):
         self.assertEqual(impact(["docs/README.md"], full=True), (set(FULL), True))
 
