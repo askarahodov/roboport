@@ -75,7 +75,10 @@ def move_lot_serial(conn: psycopg.Connection, token: str,
         still=conn.execute("""SELECT lot_id,sku_id,location_id,state
           FROM auto_stock_serial_current WHERE serial_id=%s AND organization_id=%s""",
           (serial_id,organization_id)).fetchone()
-        if still is None or tuple(still)!=tuple(source) or still[3] not in ("IN_STOCK","ISSUED"):
+        # Исторический exact replay остаётся допустимым для ISSUE/RETURN
+        # после конкурентного изменения IN_STOCK ↔ ISSUED: SQL проверяет ключ.
+        # Терминальное выбытие не может породить новую операцию движения.
+        if still is None or tuple(still[:3])!=tuple(source[:3]) or still[3] not in ("IN_STOCK","ISSUED"):
             raise AutoStockConflict("CONFLICT")
         actor=session_subject(conn,token,for_mutation=True)
         if actor is None:

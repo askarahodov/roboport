@@ -123,7 +123,7 @@ export function WarehouseWriteoffs(){
     <p>Кладовщик готовит акт. Другой управляющий утверждает или отклоняет его. Только утверждение уменьшает физический остаток и размещение; резерв защищён.</p>
     <label>UUID организации <input value={org} disabled={locked} onChange={e=>{clear();setOrg(e.target.value);}}/></label>
     <label>UUID филиала <input value={loc} disabled={locked} onChange={e=>{clear();setLoc(e.target.value);}}/></label>
-    <label>Поиск партии или артикула <input value={query} maxLength={80} disabled={locked} onChange={e=>{setQuery(e.target.value);setData(null);setPages({});setLot('');setDecision(null);}}/></label>
+    <label>Поиск партии или артикула <input value={query} maxLength={80} disabled={locked} onChange={e=>{setQuery(e.target.value);setData(null);setPages({});setLot('');setSerialText('');setDecision(null);}}/></label>
     <label>Статус актов <select value={status} disabled={locked} onChange={e=>{setStatus(e.target.value);setData(null);setPages({});setDecision(null);}}>
       <option value="ALL">Все</option>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
     <button type="button" disabled={!validScope||locked} onClick={()=>void load()}>Загрузить партии и акты</button>

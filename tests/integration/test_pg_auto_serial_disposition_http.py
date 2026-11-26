@@ -53,6 +53,13 @@ def test_serial_disposition_full_lifecycle(monkeypatch):
         accepted=post(http,d,manager,sr+"/approvals",separate_payload,separate_key)
         assert accepted.status_code==201,accepted.text
         assert post(http,d,manager,sr+"/approvals",separate_payload,separate_key).json()==accepted.json()
+        movement={**scope,"serialId":s3,"workOrderId":str(uuid4())}
+        assert post(http,d,warehouse,root+"/serial-movements/issue",movement).status_code==409
+        http.cookies.set("rp_session",d["tokens"][manager])
+        report=http.get(root+"/reconciliation/"+str(sku),params={**scope,"kind":"supplier-returns"})
+        assert report.status_code==200,report.text
+        item=next(x for x in report.json()["items"] if x["documentId"]==separate_payload["documentId"])
+        assert item["serialIds"]==[s3] and item["status"]=="ACCEPTED"
         with psycopg.connect(DSN) as db:
             assert allocated(db,lot)==3 and balance(db,sku)==(4,0)
             assert db.execute("SELECT state FROM auto_stock_serial_current WHERE serial_id=%s",(serials[2],)).fetchone()==("SUPPLIER_RETURNED",)
