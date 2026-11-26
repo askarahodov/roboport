@@ -20,7 +20,7 @@ def test_private_customer_contract_matches_existing_routes():
     assert SPEC["x-synthetic-only"] is True
     pairs={(p,m.upper()) for p,ops in SPEC["paths"].items() for m in ops}
     registered={(r.path,m) for rt in (router,estimate_router) for r in rt.routes for m in r.methods}
-    assert len(pairs)==4 and pairs<=registered
+    assert len(pairs)==5 and pairs<=registered
     assert not any(p in app.openapi()["paths"] for p,m in pairs)
     ident="11111111-1111-4111-8111-111111111111"
     decision={"revisionId":ident,"requestKey":ident,"decision":"APPROVED"}
@@ -35,3 +35,17 @@ def test_private_customer_contract_matches_existing_routes():
     assert valid("Card",card)
     assert not valid("Card",{**card,"vehicle":{**card["vehicle"],"vin":"SYNTHETIC"}})
     assert not valid("Card",{**card,"vehicle":{**card["vehicle"],"vinLast4":"I123"}})
+
+
+def test_history_filters_and_export_are_private_and_bounded():
+    root="/api/v1/dev/auto/customer/orders"
+    listing=SPEC["paths"][root]["get"]
+    export=SPEC["paths"][root+"/export"]["get"]
+    names=lambda op:{p["name"] for p in op["parameters"]}
+    assert names(listing)=={"limit","cursor","search","status","fromDay","toDay"}
+    assert names(export)=={"search","status","fromDay","toDay"}
+    assert export["security"]==[{"localSession":[]}]
+    assert export["responses"]["200"]["headers"]["Cache-Control"]["schema"]["const"]=="no-store"
+    assert "text/csv" in export["responses"]["200"]["content"]
+    assert "409" in export["responses"]
+    assert valid("ExportLimit",{"code":"EXPORT_LIMIT","requestId":"11111111-1111-4111-8111-111111111111"})

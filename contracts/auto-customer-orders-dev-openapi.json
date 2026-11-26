@@ -44,6 +44,53 @@
               "pattern": "^[A-Za-z0-9_-]{1,256}$"
             },
             "required": false
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Буквальный поиск по марке и модели, без VIN/контактов. Регистр не учитывается.",
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "default": ""
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "SCHEDULED",
+                "CANCELED"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "fromDay",
+            "in": "query",
+            "required": false,
+            "description": "Включительная локальная дата текущей записи в IANA-зоне её филиала.",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "toDay",
+            "in": "query",
+            "required": false,
+            "description": "Включительная локальная дата текущей записи в IANA-зоне её филиала.",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
           }
         ],
         "responses": {
@@ -137,7 +184,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Только исходный подтверждённый заказчик; фильтры применяются на сервере до LIMIT. Курсор подписан для сессии и точного нормализованного набора фильтров; при смене фильтров начать с первой страницы."
       }
     },
     "/api/v1/dev/auto/customer/orders/{order_id}": {
@@ -566,6 +614,185 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректный запрос",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/customer/orders/export": {
+      "get": {
+        "operationId": "exportCustomerOrdersDev",
+        "summary": "Скачать CSV собственных заказов по текущим фильтрам",
+        "description": "Повторная авторизация и проверка связи на сервере. До 500 строк, только текущие доступные synthetic orders; без полного VIN, контактов и документов. Текстовые поля экранированы против формул.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Буквальный поиск по марке и модели, без VIN/контактов. Регистр не учитывается.",
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "default": ""
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "SCHEDULED",
+                "CANCELED"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "fromDay",
+            "in": "query",
+            "required": false,
+            "description": "Включительная локальная дата текущей записи в IANA-зоне её филиала.",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "toDay",
+            "in": "query",
+            "required": false,
+            "description": "Включительная локальная дата текущей записи в IANA-зоне её филиала.",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Полный CSV выбранного набора, в том числе заголовок при пустом наборе",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "const": "nosniff"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Нет сессии",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Доступ запрещён",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Недоступный ресурс или выключенный dev API",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Более 500 совпадений: сузить фильтры; частичный CSV не возвращается",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportLimit"
                 }
               }
             }
@@ -1556,6 +1783,23 @@
           "requestId"
         ],
         "additionalProperties": false
+      },
+      "ExportLimit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "requestId"
+        ],
+        "properties": {
+          "code": {
+            "const": "EXPORT_LIMIT"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       }
     }
   }

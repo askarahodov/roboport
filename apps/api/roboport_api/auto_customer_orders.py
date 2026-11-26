@@ -5,7 +5,11 @@ endpoints. Unlike vehicle-level history, access is bound to the *exact* original
 verified vehicle/customer link on the appointment. A new owner of the same car
 cannot inherit the previous customer's order or documents.
 """
+import csv
 import hashlib
+import io
+import json
+from datetime import date
 from uuid import UUID
 import psycopg
 from .session_lookup import session_subject
@@ -20,6 +24,10 @@ class CustomerOrderDenied(ValueError):
 
 
 class CustomerOrderInvalid(ValueError):
+    pass
+
+
+class CustomerOrderLimit(ValueError):
     pass
 
 
@@ -92,34 +100,114 @@ _SELECT = """
 """
 
 
-def list_customer_orders(conn,token,*,limit=20,cursor=None):
+def _filters(search, status, from_day, to_day):
+    if (type(search) is not str or len(search)>64
+        or any(ord(c)<32 or ord(c)==127 for c in search)
+        or status not in ("ALL","SCHEDULED","CANCELED")):
+        raise CustomerOrderInvalid("INVALID_INPUT")
+    def day(value):
+        if value is None:
+            return None
+        if type(value) is not str or len(value)!=10:
+            raise CustomerOrderInvalid("INVALID_INPUT")
+        try:
+            parsed=date.fromisoformat(value)
+        except ValueError:
+            raise CustomerOrderInvalid("INVALID_INPUT") from None
+        if parsed.isoformat()!=value:
+            raise CustomerOrderInvalid("INVALID_INPUT")
+        return parsed
+    first,last=day(from_day),day(to_day)
+    if first is not None and last is not None and first>last:
+        raise CustomerOrderInvalid("INVALID_INPUT")
+    return search.strip(),status,first,last
+
+
+def _filtered_rows(conn,actor,filters,*,limit,position=None):
+    search,status,first,last=filters
+    predicates=[]
+    params=[actor]
+    if search:
+        # Literal substring of the catalog make/model, never VIN or customer ID.
+        predicates.append("strpos(lower(v.make || ' ' || v.model),lower(%s))>0")
+        params.append(search)
+    if status!="ALL":
+        predicates.append("b.canceled_at IS NULL" if status=="SCHEDULED" else
+                          "b.canceled_at IS NOT NULL")
+    if first is not None:
+        predicates.append("(b.starts_at AT TIME ZONE loc.timezone_name)::date >= %s")
+        params.append(first)
+    if last is not None:
+        predicates.append("(b.starts_at AT TIME ZONE loc.timezone_name)::date <= %s")
+        params.append(last)
+    if position:
+        predicates.append("(w.created_at,w.id)<(%s,%s)")
+        params.extend(position)
+    suffix="".join(" AND "+p for p in predicates)
+    params.append(limit)
+    return conn.execute(_SELECT+_BASE+suffix+
+                        " ORDER BY w.created_at DESC,w.id DESC LIMIT %s",
+                        tuple(params)).fetchall()
+
+
+def list_customer_orders(conn,token,*,limit=20,cursor=None,search="",status="ALL",
+                         from_day=None,to_day=None):
     if type(limit) is not int or not 1<=limit<=30:
         raise CustomerOrderInvalid("INVALID_INPUT")
-    if cursor is not None and (type(cursor) is not str or len(cursor)>256):
+    if cursor is not None and (type(cursor) is not str or not 1<=len(cursor)<=256):
         raise CustomerOrderInvalid("INVALID_INPUT")
+    filters=_filters(search,status,from_day,to_day)
     with conn.transaction():
         actor=_actor(conn,token)
-        scope=hashlib.sha256(("customer-orders:v1:"+str(actor)).encode()).hexdigest()[:32]
+        scope_key="customer-orders:v1:"+str(actor)
+        if filters!=("", "ALL", None, None):
+            scope_key+=":"+json.dumps(filters,default=str,ensure_ascii=False,separators=(",",":"))
+        scope=hashlib.sha256(scope_key.encode()).hexdigest()[:32]
         position=None
         if cursor:
             try:
                 position=decode_cursor(cursor,scope,token)
             except ValueError:
                 raise CustomerOrderInvalid("INVALID_CURSOR") from None
-        predicate=" AND (w.created_at,w.id)<(%s,%s)" if position else ""
-        params=[actor]
-        if position:
-            params.extend(position)
-        params.append(limit+1)
-        rows=conn.execute(
-            _SELECT+_BASE+predicate+" ORDER BY w.created_at DESC,w.id DESC LIMIT %s",
-            tuple(params)
-        ).fetchall()
+        rows=_filtered_rows(conn,actor,filters,limit=limit+1,position=position)
         page=rows[:limit]
         next_cursor=(encode_cursor(page[-1][3],page[-1][0],scope,token)
                      if len(rows)>limit else None)
         return {"items":[_card(row) for row in page],"nextCursor":next_cursor,
                 "syntheticOnly":True,"releaseAllowed":False}
+
+
+EXPORT_LIMIT=500
+CSV_HEADER=("orderId","organizationId","locationId","createdAt","make","model",
+            "modelYear","vinLast4","startsAt","endsAt","appointmentStatus")
+
+
+def _csv_text(value):
+    # No executable spreadsheet cells; escape even leading whitespace/control.
+    value="".join(" " if ord(c)<32 or ord(c)==127 else c for c in str(value))
+    return "'"+value if value.lstrip().startswith(("=","+","-","@")) else value
+
+
+def export_customer_orders(conn,token,*,search="",status="ALL",from_day=None,to_day=None):
+    filters=_filters(search,status,from_day,to_day)
+    with conn.transaction():
+        actor=_actor(conn,token)
+        rows=_filtered_rows(conn,actor,filters,limit=EXPORT_LIMIT+1)
+        if len(rows)>EXPORT_LIMIT:
+            raise CustomerOrderLimit("EXPORT_LIMIT")
+        stream=io.StringIO(newline="")
+        writer=csv.writer(stream,lineterminator="\r\n",quoting=csv.QUOTE_ALL)
+        writer.writerow(CSV_HEADER)
+        for row in rows:
+            card=_card(row)
+            vehicle,appointment=card["vehicle"],card["appointment"]
+            writer.writerow([card["id"],card["organizationId"],card["locationId"],
+                             card["createdAt"],_csv_text(vehicle["make"]),
+                             _csv_text(vehicle["model"]),
+                             vehicle["modelYear"] if vehicle["modelYear"] is not None else "",
+                             vehicle["vinLast4"] or "",appointment["startsAt"],
+                             appointment["endsAt"],appointment["status"]])
+        return stream.getvalue()
 
 
 def customer_order_details(conn,token,order):
