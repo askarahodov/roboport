@@ -212,7 +212,7 @@ def _issue_link(number: int) -> str:
 
 def _row(*cells: str) -> str:
     # Не позволяем скрывать дополнительные строки или ячейки в проекции.
-    if any(not isinstance(cell, str) or any(c in cell for c in ("|", "\\n", "\\r"))
+    if any(not isinstance(cell, str) or any(c in cell for c in ("|", "\n", "\r"))
            for cell in cells):
         raise ValueError("unsupported Markdown table cell")
     return "| " + " | ".join(cells) + " |"
@@ -250,7 +250,7 @@ def validate_readable_tables(inventory: dict, requirements: dict,
     ):
         # Сравниваем мультимножества: порядок допустим, дубли — нет.
         actual = [line for line in content.splitlines()
-                  if re.match(r"^\\|\\s*" + prefix + r"-", line)]
+                  if re.match(r"^\|\s*" + prefix + r"-", line)]
         if Counter(actual) != Counter(expected):
             missing = Counter(expected) - Counter(actual)
             extra = Counter(actual) - Counter(expected)
