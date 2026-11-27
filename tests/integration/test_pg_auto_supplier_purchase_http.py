@@ -70,6 +70,14 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         assert_contract(listed, "OrderPage")
         assert listed.json()["items"][0]["orderId"]==ident
         assert listed.json()["items"][0]["outstandingQuantity"]==4
+        detail_url=base+"/"+ident
+        query={"locationId":str(loc)}
+        detail=http.get(detail_url,params=query)
+        assert detail.status_code==200,detail.text
+        assert_contract(detail,"PurchaseDetail")
+        assert detail.json()["offers"]==offers and detail.json()["deliveries"]==[]
+        assert detail.json()["availableAtOrder"]==1 and detail.json()["desiredQuantity"]==5
+        assert http.get(detail_url,params={"locationId":str(uuid4())}).status_code==403
         receipt_url=base+"/"+ident+"/receipts"
         one_data={"locationId":str(loc),"quantity":2,"supplierReference":"SUPPLIER-DELIVERY-001"}
         delivery_key=uuid4()
@@ -132,13 +140,53 @@ def test_http_order_partial_receipts_auth_and_lifecycle(monkeypatch):
         assert (line["orderedQuantity"],line["documentedQuantity"],
                 line["acceptedQuantity"],line["valuedQuantity"],
                 line["canceledQuantity"],line["outstandingQuantity"])==(4,3,2,2,1,0)
+        detail=http.get(detail_url,params={**query,"limit":"1"})
+        assert detail.status_code==200,detail.text
+        assert_contract(detail,"PurchaseDetail")
+        first=detail.json()
+        assert len(first["deliveries"])==1 and first["nextDeliveryId"]
+        second_page=http.get(detail_url,params={**query,"limit":"1","afterDeliveryId":first["nextDeliveryId"]})
+        assert second_page.status_code==200,second_page.text
+        assert_contract(second_page,"PurchaseDetail")
+        assert {x["stage"] for x in first["deliveries"]+second_page.json()["deliveries"]}=={"DRAFT","VALUED"}
+        assert second_page.json()["nextDeliveryId"] is None
+        for state,expected in (("CANCELED",1),("AWAITING_ACCEPTANCE",1),("OUTSTANDING",0),("COMPLETE",0)):
+            filtered=http.get(base,params={**query,"state":state,"workOrderId":str(order)})
+            assert filtered.status_code==200,filtered.text
+            assert len(filtered.json()["items"])==expected
+        assert http.get(base,params={**query,"state":"INVALID"}).status_code==422
+        assert http.get(base,params={**query,"workOrderId":str(uuid4())}).json()["items"]==[]
+        assert http.get(detail_url,params={**query,"afterDeliveryId":"bad"}).status_code==422
+        from roboport_api.auto_document_access import publish_policy
+        from test_pg_auto_document_access_http import admin
         with psycopg.connect(DSN) as db:
+            admin(db,org,d["manager"])
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
+                document="SUPPLIER_ORDER",cap="PRICE_PURCHASE",allowed=False,not_before=None)
+        hidden=http.get(detail_url,params=query)
+        assert hidden.status_code==200,hidden.text
+        assert_contract(hidden,"PurchaseDetail")
+        assert hidden.json()["offers"] is None and hidden.json()["order"]["purchaseUnitMinor"] is None
+        assert hidden.json()["order"]["purchasePriceHidden"] is True
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
+                document="SUPPLIER_ORDER",cap="PRICE_PURCHASE",allowed=True,not_before=None)
+        from datetime import datetime,timedelta,timezone
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
+                document="SUPPLIER_ORDER",cap="READ",allowed=True,not_before=datetime.now(timezone.utc)+timedelta(days=1))
+        assert http.get(detail_url,params=query).status_code==403
+        assert http.get(base,params={**query,"state":"CANCELED"}).json()["items"]==[]
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),role="WAREHOUSE",loc=loc,user=None,
+                document="SUPPLIER_ORDER",cap="READ",allowed=True,not_before=None)
             assert balance(db,item)==(3,0) and allocated(db,lot)==2
             db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",
                        (grant_id,))
         assert post(http,d,d["intake"],receipt_url,one_data).status_code==403
         http.cookies.set("rp_session",d["tokens"][d["intake"]])
         assert http.get(base,params={"locationId":str(loc)}).status_code==403
+        assert http.get(detail_url,params=query).status_code==403
         http.cookies.set("rp_session",d["tokens"][d["manager"]])
         assert http.get(base,params={"locationId":str(loc)}).status_code==200
 
@@ -193,3 +241,62 @@ def test_http_no_cross_scope_csrf_bad_quotes_and_gating(monkeypatch):
         monkeypatch.setenv("ROBOport_SYNTHETIC_AUTO_API","0")
         assert post(http,d,d["intake"],base,body).status_code==404
         assert http.get(base,params={"locationId":str(loc)}).status_code==404
+
+
+def test_detail_and_delivery_replay_deny_older_standalone_receipt(monkeypatch):
+    """Parent is newer than cutoff, child is older: deny every detail page."""
+    from roboport_api.auto_document_access import publish_policy
+    from test_pg_auto_document_access_http import admin
+    d,org,loc,item,lot,order,offers,grant_id,manager,base,body=fixture(monkeypatch)
+    root=f"/api/v1/dev/auto/organizations/{org}/warehouse/receipts"
+    key=uuid4()
+    draft_body={"locationId":str(loc),"lotId":str(lot),"quantity":1,
+                "sourceReference":"OFFLINE-HISTORY-RECEIPT"}
+    delivery_body={"locationId":str(loc),"quantity":1,
+                   "supplierReference":draft_body["sourceReference"]}
+    query={"locationId":str(loc)}
+    with TestClient(app,base_url="https://127.0.0.1") as http:
+        draft=post(http,d,d["intake"],root,draft_body,key)
+        assert draft.status_code==201,draft.text
+        old_id=draft.json()["documentId"]
+        purchase=post(http,d,d["intake"],base,body)
+        assert purchase.status_code==201,purchase.text
+        detail_url=base+"/"+purchase.json()["orderId"]
+        linked=post(http,d,d["intake"],detail_url+"/receipts",delivery_body,key)
+        assert linked.status_code==201,linked.text
+        assert linked.json()["documentId"]==old_id
+        visible=http.get(detail_url,params=query)
+        assert visible.status_code==200,visible.text
+        assert_contract(visible,"PurchaseDetail")
+        assert visible.json()["deliveries"][0]["documentId"]==old_id
+        with psycopg.connect(DSN) as db:
+            old=db.execute("SELECT created_at FROM auto_stock_receipt_document WHERE id=%s",
+                           (old_id,)).fetchone()[0]
+            new=db.execute("SELECT created_at FROM auto_supplier_purchase_order WHERE id=%s",
+                           (purchase.json()["orderId"],)).fetchone()[0]
+            assert old<new
+            admin(db,org,d["manager"])
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),
+                role="WAREHOUSE",loc=loc,user=None,document="SUPPLIER_ORDER",
+                cap="READ",allowed=True,not_before=new)
+        # Legacy aggregate admits parent; new detail must deny all pages.
+        assert len(http.get(base,params=query).json()["items"])==1
+        for params in (query,{**query,"limit":"1","afterDeliveryId":linked.json()["deliveryId"]}):
+            denied=http.get(detail_url,params=params)
+            assert denied.status_code==403,denied.text
+            assert_contract(denied,"Error")
+            assert old_id not in denied.text
+        replay=post(http,d,d["intake"],detail_url+"/receipts",delivery_body,key)
+        assert replay.status_code==403,replay.text
+        assert_contract(replay,"Error")
+        with psycopg.connect(DSN) as db:
+            assert balance(db,item)==(1,0)
+            assert db.execute("SELECT count(*) FROM auto_supplier_purchase_receipt WHERE purchase_id=%s",
+                              (purchase.json()["orderId"],)).fetchone()==(1,)
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["manager"]],org,request_key=uuid4(),
+                role="WAREHOUSE",loc=loc,user=None,document="SUPPLIER_ORDER",
+                cap="READ",allowed=True,not_before=None)
+        assert http.get(detail_url,params=query).status_code==200
+        assert post(http,d,d["intake"],detail_url+"/receipts",delivery_body,key).json()==linked.json()

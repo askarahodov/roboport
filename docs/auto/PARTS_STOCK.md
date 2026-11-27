@@ -386,3 +386,6 @@ PG17/HTTPS: `tests/integration/test_pg_auto_stock_supplier_return_http.py`; Play
 Частные OpenAPI: [списание](../../contracts/auto-writeoff-dev-openapi.json), [возврат поставщику](../../contracts/auto-supplier-return-dev-openapi.json). Проверяются реальные DTO журнала/коммерческой сверки и схемы; поле serialIds не передаётся при утверждении, чтобы проверяющий не мог подменить состав акта.
 
 Частный контракт создания/списка закупочных заявок, частичного прихода и отмены остатка: [supplier orders OpenAPI](../../contracts/auto-supplier-order-dev-openapi.json), [процесс закупки](SUPPLIER_PURCHASES.md). Новые сравнения только в RUB; точный исторический replay неизменяем. API/PG17 contract tests не заменяют внешние supplier/legal/security gates.
+
+
+**#115/#168:** карточка supplier order объединяет исходный дефицит, сравнение и документы прихода с раздельным статусом приёмки/оценки; переход к существующему maker/checker экрану, цена не передаётся URL. [Порядок работы](SUPPLIER_PURCHASES.md). Производственный и юридический scope остаётся blocked.

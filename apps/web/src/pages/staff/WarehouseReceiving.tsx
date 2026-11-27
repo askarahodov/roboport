@@ -1,4 +1,5 @@
 import React from 'react';
+import {useSearchParams} from 'react-router-dom';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Kind='draft'|'accept'|'valuation';
@@ -14,12 +15,16 @@ type Review={items:ReviewItem[];nextDocumentId:string|null;cursor:string|null;
 const emptyReview=():Review=>({items:[],nextDocumentId:null,cursor:null,status:'idle'});
 
 export function WarehouseReceiving(){
-  const [org,setOrg]=React.useState('');
-  const [location,setLocation]=React.useState('');
+  const [query]=useSearchParams();
+  const initial=(name:string)=>{const x=query.get(name)??'';return uuid.test(x)?x.toLowerCase():'';};
+  const initialScope=React.useRef({org:initial('org'),loc:initial('loc'),document:initial('documentId')});
+  const [org,setOrg]=React.useState(initialScope.current.org);
+  const [location,setLocation]=React.useState(initialScope.current.loc);
   const [lot,setLot]=React.useState('');
   const [quantity,setQuantity]=React.useState('1');
   const [reference,setReference]=React.useState('');
-  const [documentId,setDocumentId]=React.useState('');
+  const [documentId,setDocumentId]=React.useState(initialScope.current.org&&initialScope.current.loc?initialScope.current.document:'');
+  const initialLink=React.useRef(true);
   const [acceptanceId,setAcceptanceId]=React.useState('');
   const [valuationId,setValuationId]=React.useState('');
   const [currency,setCurrency]=React.useState('RUB');
@@ -43,7 +48,9 @@ export function WarehouseReceiving(){
     readSequence.current.accept+=1;readSequence.current.value+=1;
     setReviews({accept:emptyReview(),value:emptyReview()});
     setPending(null);setMessage('');setLots([]);
-    setListState('idle');setDocumentId('');setAcceptanceId('');setValuationId('');
+    setListState('idle');
+    if(org!==initialScope.current.org||location!==initialScope.current.loc)initialLink.current=false;
+    setDocumentId(initialLink.current&&org&&location?initialScope.current.document:'');setAcceptanceId('');setValuationId('');
     setBoundPurchase('');setPriceRevision('');setUnitCost('0');setQuotedAt(new Date().toISOString());
   },[org,location]);
   const validScope=uuid.test(org.trim())&&uuid.test(location.trim());

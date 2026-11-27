@@ -1,4 +1,5 @@
 import React from 'react';
+import {Link} from 'react-router-dom';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Quote={supplier:string;offerId:string;unit:string;available:string;days:string;revision:string};
@@ -8,6 +9,11 @@ type Order={orderId:string;workOrderId:string;lotId:string;article:string;
   currency:string;documentedQuantity:number;
   acceptedQuantity:number;valuedQuantity:number;canceledQuantity:number;
   outstandingQuantity:number};
+type Delivery={deliveryId:string;documentId:string;quantity:number;createdAt:string;stage:'DRAFT'|'ACCEPTED'|'VALUED'};
+type PurchaseDetail={order:Order;desiredQuantity:number;availableAtOrder:number;createdAt:string;quotedAt:string;expiresAt:string;
+  offers:Array<{supplier_id:string;offer_id:string;source_revision:string;currency:string;unit_purchase_minor:number;available_quantity:number;delivery_days?:number}>|null;
+  deliveries:Delivery[];nextDeliveryId:string|null;syntheticOnly:true};
+const states={ALL:'Все закупки',OUTSTANDING:'Ожидают поставки',AWAITING_ACCEPTANCE:'Ожидают приёмки',AWAITING_VALUATION:'Ожидают оценки',COMPLETE:'Полностью оценены',CANCELED:'Отменён остаток'};
 type Pending={kind:'order'|'delivery'|'cancel';path:string;body:string;
   key:string;org:string;loc:string};
 const initialQuote=(n:number):Quote=>({
@@ -30,6 +36,13 @@ export function WarehouseSupplierOrders(){
   const [quotes,setQuotes]=React.useState<[Quote,Quote]>([initialQuote(0),initialQuote(1)]);
   const [chosen,setChosen]=React.useState(0);
   const [selectedOrder,setSelectedOrder]=React.useState('');
+  const [filter,setFilter]=React.useState<keyof typeof states>('ALL');
+  const [filterWork,setFilterWork]=React.useState('');
+  const [detail,setDetail]=React.useState<PurchaseDetail|null>(null);
+  const [detailStatus,setDetailStatus]=React.useState<'idle'|'loading'|'ready'|'error'>('idle');
+  const detailSeq=React.useRef(0);
+  const mutationSeq=React.useRef(0);
+  const detailAbort=React.useRef<AbortController|null>(null);
   const [receiptQty,setReceiptQty]=React.useState('1');
   const [reference,setReference]=React.useState('SYNTH-DELIVERY-1');
   const [cancelConfirmed,setCancelConfirmed]=React.useState(false);
@@ -43,9 +56,11 @@ export function WarehouseSupplierOrders(){
   context.current={org:org.trim(),loc:loc.trim()};
   const requestSeq=React.useRef(0);
   React.useEffect(()=>{
-    requestSeq.current+=1;setRows([]);setNext(null);setSelectedOrder('');
+    requestSeq.current+=1;detailSeq.current++;mutationSeq.current++;detailAbort.current?.abort();setDetail(null);setDetailStatus('idle');setBusy(false);setRows([]);setNext(null);setSelectedOrder('');
     setListStatus('idle');setPending(null);setMessage('');setCancelConfirmed(false);
   },[org,loc]);
+  React.useEffect(()=>()=>{requestSeq.current++;detailSeq.current++;mutationSeq.current++;detailAbort.current?.abort();},[]);
+  React.useEffect(()=>{requestSeq.current++;detailSeq.current++;detailAbort.current?.abort();setRows([]);setNext(null);setSelectedOrder('');setDetail(null);setDetailStatus('idle');setListStatus('idle');},[filter,filterWork]);
   const scopeOk=uuid.test(org.trim())&&uuid.test(loc.trim());
   const quoteOk=quotes.every(q=>q.supplier.trim().length>0&&
     q.supplier.length<=160&&q.offerId.trim().length>0&&q.offerId.length<=160&&
@@ -60,13 +75,15 @@ export function WarehouseSupplierOrders(){
     '/warehouse/supplier-orders';
   const chosenRow=rows.find(x=>x.orderId===selectedOrder);
   async function load(after:string|null=null){
-    if(!scopeOk||busy||listStatus==='loading')return;
+    if(!scopeOk||busy||listStatus==='loading'||(filterWork.trim()&&!uuid.test(filterWork.trim())))return;
     const seq=++requestSeq.current;
-    const scope={...context.current};setRows([]);setNext(null);
+    const scope={...context.current};detailSeq.current++;detailAbort.current?.abort();setDetail(null);setDetailStatus('idle');setRows([]);setNext(null);
     setListStatus('loading');setSelectedOrder('');setMessage('');
     try{
       const query=new URLSearchParams({locationId:scope.loc,limit:'20'});
       if(after)query.set('afterOrderId',after);
+      if(filter!=='ALL')query.set('state',filter);
+      if(filterWork.trim())query.set('workOrderId',filterWork.trim());
       const response=await fetch(root()+'?'+query.toString(),{
         credentials:'include',cache:'no-store',
       });
@@ -93,6 +110,7 @@ export function WarehouseSupplierOrders(){
                row.purchaseUnitMinor===null&&row.purchasePriceHidden===true)&&
              row.currency==='RUB';
          }))throw Error('invalid list');
+      if(seq!==requestSeq.current||scope.org!==context.current.org||scope.loc!==context.current.loc)return;
       setRows(data.items as Order[]);
       setNext(data.nextOrderId as string|null);
       setListStatus('ready');
@@ -100,6 +118,45 @@ export function WarehouseSupplierOrders(){
       if(seq===requestSeq.current&&scope.org===context.current.org&&scope.loc===context.current.loc)
         setListStatus('error');
     }
+  }
+  async function loadDetail(id:string,after:string|null=null){
+    if(!scopeOk||busy||pending||!uuid.test(id))return;
+    detailAbort.current?.abort();
+    const controller=new AbortController();detailAbort.current=controller;
+    const seq=++detailSeq.current,scope={...context.current};
+    const current=()=>!controller.signal.aborted&&seq===detailSeq.current&&
+      scope.org===context.current.org&&scope.loc===context.current.loc;
+    setDetail(null);setDetailStatus('loading');
+    try{
+      const query=new URLSearchParams({locationId:scope.loc,limit:'20'});
+      if(after)query.set('afterDeliveryId',after);
+      const response=await fetch(root()+'/'+id+'?'+query,{credentials:'include',cache:'no-store',signal:controller.signal});
+      if(!current())return;
+      if([401,403,404].includes(response.status)){
+        requestSeq.current++;setRows([]);setNext(null);setSelectedOrder('');
+        setListStatus('denied');setDetailStatus('idle');return;
+      }
+      if(!response.ok)throw Error('detail');
+      const d=await response.json() as PurchaseDetail;
+      if(!current())return;
+      const count=(x:unknown)=>typeof x==='number'&&Number.isSafeInteger(x)&&x>=0&&x<=1000000000;
+      if(d.syntheticOnly!==true||d.order?.orderId!==id||!count(d.desiredQuantity)||!count(d.availableAtOrder)||
+         ![d.createdAt,d.quotedAt,d.expiresAt].every(x=>typeof x==='string'&&Number.isFinite(Date.parse(x)))||
+         typeof d.order.purchasePriceHidden!=='boolean'||
+         (d.order.purchasePriceHidden?(d.offers!==null||d.order.purchaseUnitMinor!==null):
+          (!Number.isSafeInteger(d.order.purchaseUnitMinor)||Number(d.order.purchaseUnitMinor)<0||
+           !Array.isArray(d.offers)||d.offers.length<2||d.offers.length>5||
+           !d.offers.every(o=>o&&[o.supplier_id,o.offer_id,o.source_revision,o.currency].every(x=>typeof x==='string')&&
+            Number.isSafeInteger(o.unit_purchase_minor)&&o.unit_purchase_minor>=0&&count(o.available_quantity))))||
+         !Array.isArray(d.deliveries)||d.deliveries.length>20||
+         !d.deliveries.every(x=>x&&uuid.test(x.deliveryId)&&uuid.test(x.documentId)&&count(x.quantity)&&x.quantity>0&&
+          ['DRAFT','ACCEPTED','VALUED'].includes(x.stage)&&Number.isFinite(Date.parse(x.createdAt)))||
+         !(d.nextDeliveryId===null||uuid.test(d.nextDeliveryId)))throw Error('invalid detail');
+      // Re-read current price visibility; don't retain a previously visible list price.
+      setRows(prev=>prev.map(row=>d.order.purchasePriceHidden?{...row,purchaseUnitMinor:null,purchasePriceHidden:true}:
+        row.orderId===id?{...row,purchaseUnitMinor:d.order.purchaseUnitMinor,purchasePriceHidden:false}:row));
+      setDetail(d);setDetailStatus('ready');
+    }catch{if(current())setDetailStatus('error');}
   }
   const updateQuote=(index:0|1,field:keyof Quote,value:string)=>{
     setQuotes(prev=>prev.map((q,i)=>i===index?{...q,[field]:value}:q) as [Quote,Quote]);
@@ -119,7 +176,7 @@ export function WarehouseSupplierOrders(){
       selectedSupplierId:offers[chosen].supplier_id,selectedOfferId:offers[chosen].offer_id};
   }
   async function submit(kind:Pending['kind'],retry?:Pending){
-    if(busy||(!retry&&pending))return;
+    if(busy||listStatus==='loading'||(!retry&&pending))return;
     if(!retry&&(
       kind==='order'?!orderOk:
       kind==='delivery'?!(scopeOk&&uuid.test(selectedOrder)&&validQty(receiptQty)&&
@@ -138,7 +195,9 @@ export function WarehouseSupplierOrders(){
       }:{locationId:loc.trim()}),
     };
     if(snap.org!==context.current.org||snap.loc!==context.current.loc)return;
-    setBusy(true);setMessage('');
+    const seq=++mutationSeq.current;
+    const current=()=>seq===mutationSeq.current&&snap.org===context.current.org&&snap.loc===context.current.loc;
+    requestSeq.current++;setBusy(true);setMessage('');detailSeq.current++;detailAbort.current?.abort();setDetail(null);setDetailStatus('idle');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{
         method:'POST',credentials:'include',cache:'no-store',
@@ -147,22 +206,25 @@ export function WarehouseSupplierOrders(){
       const c:unknown=await csrf.json();
       if(!c||typeof c!=='object'||!('csrfToken' in c)||
          typeof c.csrfToken!=='string')throw Error('csrf');
+      if(!current())return;
       const response=await fetch(snap.path,{
         method:'POST',credentials:'include',cache:'no-store',
         headers:{'Content-Type':'application/json','X-CSRF-Token':c.csrfToken,
           'Idempotency-Key':snap.key},
         body:snap.body,
       });
-      if(snap.org!==context.current.org||snap.loc!==context.current.loc)return;
+      if(!current())return;
       if(response.status>=500)throw Error('unknown');
       if(!response.ok){
         setPending(null);
+        if([401,403,404].includes(response.status)){requestSeq.current++;setRows([]);setNext(null);setSelectedOrder('');setListStatus('denied');}
         setMessage(response.status===409?'409 — конфликт количества, цены или состояния заказа. Перечитайте список.':
           [401,403,404].includes(response.status)?'Нет права WAREHOUSE, истёк доступ или объект скрыт.':
           '422 — проверьте поля и предложение поставщика.');
         return;
       }
       const data:unknown=await response.json();
+      if(!current())return;
       if(!data||typeof data!=='object'||!("syntheticOnly" in data)||
          (data as {syntheticOnly:unknown}).syntheticOnly!==true)
         throw Error('invalid response');
@@ -179,11 +241,11 @@ export function WarehouseSupplierOrders(){
       // Existing list may now be stale; clear it until a deliberate fresh fetch.
       requestSeq.current+=1;setRows([]);setNext(null);setListStatus('idle');
     }catch{
-      if(snap.org===context.current.org&&snap.loc===context.current.loc){
+      if(current()){
         setPending(snap);
         setMessage('Неизвестный результат запроса. Повторите с прежним ключом, чтобы не дублировать поставку.');
       }
-    }finally{setBusy(false);}
+    }finally{if(current())setBusy(false);}
   }
   return <section className="ui-page">
     <h1>Заказы поставщикам (dev)</h1>
@@ -223,19 +285,32 @@ export function WarehouseSupplierOrders(){
     </section>
     <section aria-label="Список заказов поставщикам">
       <h2>3. Частичная поставка и отмена остатка</h2>
-      <button disabled={!scopeOk||busy||!!pending||listStatus==='loading'} onClick={()=>void load()}>Обновить заказы</button>
+      <label>Состояние закупки <select aria-label="Состояние закупки" value={filter} disabled={busy||!!pending} onChange={e=>setFilter(e.target.value as keyof typeof states)}>{Object.entries(states).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+      <label>Фильтр по UUID заказ-наряда <input aria-label="Фильтр по UUID заказ-наряда" value={filterWork} disabled={busy||!!pending} onChange={e=>setFilterWork(e.target.value)}/></label>
+      <button disabled={!scopeOk||busy||!!pending||listStatus==='loading'||(!!filterWork.trim()&&!uuid.test(filterWork.trim()))} onClick={()=>void load()}>Обновить заказы</button>
       {listStatus==='loading'&&<p role="status">Загрузка заказов…</p>}
       {listStatus==='denied'&&<p role="alert">403/404 — заказ поставщика другого филиала недоступен.</p>}
       {listStatus==='error'&&<p role="alert">Список недоступен. Повторите запрос после проверки сети.</p>}
       {listStatus==='ready'&&rows.length===0&&<p>Нет заказов в выбранном филиале.</p>}
       {rows.length>0&&<ul>{rows.map(row=><li key={row.orderId}>
-        <button aria-pressed={selectedOrder===row.orderId} onClick={()=>{setSelectedOrder(row.orderId);setCancelConfirmed(false);}}>
+        <button aria-pressed={selectedOrder===row.orderId} onClick={()=>{detailSeq.current++;detailAbort.current?.abort();setDetail(null);setDetailStatus('idle');setSelectedOrder(row.orderId);setCancelConfirmed(false);}}>
           Выбрать заказ {row.orderId}</button>
         <p>{row.article}: {row.supplierId}, предложение {row.offerId}, закупочная цена {row.purchaseUnitMinor===null?'скрыта настройкой доступа':
           row.purchaseUnitMinor+' коп./шт. (RUB)'}.</p>
         <p>Заказано {row.orderedQuantity}; документы {row.documentedQuantity}; принято {row.acceptedQuantity};
           оценено {row.valuedQuantity}; отменено {row.canceledQuantity}; к поставке {row.outstandingQuantity}.</p>
       </li>)}</ul>}
+      {chosenRow&&<button disabled={busy||!!pending||detailStatus==='loading'} onClick={()=>void loadDetail(chosenRow.orderId)}>Открыть карточку закупки</button>}
+      {detailStatus==='loading'&&<p role="status">Загрузка карточки закупки…</p>}
+      {detailStatus==='error'&&<p role="alert">Карточка недоступна. Повторите чтение.</p>}
+      {detail&&chosenRow&&detail.order.orderId===selectedOrder&&<section aria-label="Карточка закупки">
+        <h3>История закупки</h3><p>Требовалось {detail.desiredQuantity}; свободно на момент заказа {detail.availableAtOrder}. Котировка {detail.quotedAt}; действовала до {detail.expiresAt}.</p>
+        <Link to={'/staff/auto-order-workspace?'+new URLSearchParams({org:org.trim(),loc:loc.trim(),order:chosenRow.workOrderId})}>Открыть заказ-наряд закупки</Link>
+        <h4>Сохранённые предложения</h4>{detail.offers===null?<p>Закупочные цены и сравнение скрыты по правам.</p>:<ul>{detail.offers.map((o,i)=><li key={i}>{o.supplier_id} · {o.offer_id} · {o.unit_purchase_minor} minor ({o.currency}) · доступно {o.available_quantity} · срок {o.delivery_days??0} дн. · {o.source_revision}</li>)}</ul>}
+        <h4>Документы поставки</h4>{detail.deliveries.length===0?<p>Поставок пока нет.</p>:<ul>{detail.deliveries.map(d=><li key={d.deliveryId}>{d.quantity} шт. · {d.stage==='DRAFT'?'Черновик':d.stage==='ACCEPTED'?'Принят, ожидает оценки':'Оценён'} · <code>{d.documentId}</code> {d.stage!=='VALUED'&&<Link to={'/staff/warehouse-receiving?'+new URLSearchParams({org:org.trim(),loc:loc.trim(),documentId:d.documentId})}>К приёмке и оценке</Link>}</li>)}</ul>}
+        {detail.nextDeliveryId&&<button disabled={busy||!!pending} onClick={()=>void loadDetail(detail.order.orderId,detail.nextDeliveryId)}>Следующие поставки</button>}
+        <button disabled={busy||!!pending} onClick={()=>void loadDetail(detail.order.orderId)}>Обновить карточку</button>
+      </section>}
       {next&&<button disabled={busy||!!pending} onClick={()=>void load(next)}>Следующая страница заказов</button>}
       <p>После создания приходного документа перейдите в <a href="/staff/warehouse-receiving">«Приход запчастей (dev)»</a>:
         другой MANAGER подтверждает документ и фиксирует закупочную оценку; до этого фактический остаток не меняется.</p>

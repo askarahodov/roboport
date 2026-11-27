@@ -10,7 +10,7 @@ from .auto_vehicle_http import _page_int
 from .auto_stock_service import AutoStockDenied,AutoStockConflict
 from .auto_supplier_purchase import (
     place_supplier_order,record_supplier_delivery,cancel_supplier_remainder,
-    list_supplier_orders,
+    list_supplier_orders,supplier_order_detail,
 )
 
 router=APIRouter(include_in_schema=False)
@@ -73,27 +73,54 @@ async def create_supplier_order(org_id:str,request:Request):
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-orders")
 def get_supplier_orders(org_id:str,request:Request,locationId:str|None=None,
-                        limit:str="20",afterOrderId:str|None=None):
+                        limit:str="20",afterOrderId:str|None=None,
+                        workOrderId:str|None=None,state:str="ALL"):
     dsn=_request_dsn(request)
     if isinstance(dsn,JSONResponse):return dsn
     try:
         org=UUID(org_id);loc=UUID(locationId) if locationId is not None else None
         after=UUID(afterOrderId) if afterOrderId is not None else None
+        work=UUID(workOrderId) if workOrderId is not None else None
         page_limit=_page_int(limit,minimum=1,maximum=50)
         if (loc is None or page_limit is None or any(
                 len(request.query_params.getlist(key))>1
-                for key in ("locationId","limit","afterOrderId"))):
+                for key in ("locationId","limit","afterOrderId","workOrderId","state"))):
             raise ValueError("invalid pagination")
     except (ValueError,TypeError):
         return _response(request,422,"INVALID_INPUT")
     with psycopg.connect(dsn) as db:
         try:
             items,nxt=list_supplier_orders(db,request.cookies.get("rp_session",""),
-                                           org,loc,page_limit,after)
-        except AutoStockDenied:
-            return _response(request,403,"FORBIDDEN")
+                                           org,loc,page_limit,after,work_order=work,state=state)
+        except AutoStockDenied as exc:
+            return _error(request,exc)
     return JSONResponse(content={"syntheticOnly":True,"items":items,
         "nextOrderId":str(nxt) if nxt else None},headers={"Cache-Control":"no-store"})
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-orders/{order_id}")
+def get_supplier_order_detail(org_id:str,order_id:str,request:Request,
+                              locationId:str|None=None,limit:str="20",
+                              afterDeliveryId:str|None=None):
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):return dsn
+    try:
+        org,loc,order=UUID(org_id),UUID(locationId or ""),UUID(order_id)
+        after=UUID(afterDeliveryId) if afterDeliveryId is not None else None
+        size=_page_int(limit,minimum=1,maximum=50)
+        allowed=("locationId","limit","afterDeliveryId")
+        if size is None or any(k not in allowed for k in request.query_params) or any(
+                len(request.query_params.getlist(k))>1 for k in allowed):
+            raise ValueError("invalid pagination")
+    except (ValueError,TypeError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(dsn) as db:
+        try:
+            result=supplier_order_detail(db,request.cookies.get("rp_session",""),
+                                         org,loc,order,limit=size,after_id=after)
+        except AutoStockDenied as exc:
+            return _error(request,exc)
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})
 
 
 @router.post("/api/v1/dev/auto/organizations/{org_id}/warehouse/supplier-orders/{order_id}/receipts")

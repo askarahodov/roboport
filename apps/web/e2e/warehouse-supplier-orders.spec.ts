@@ -13,7 +13,7 @@ const urlPart='/api/v1/dev/auto/organizations/'+org+'/warehouse/supplier-orders'
 async function fillOrder(page: import('@playwright/test').Page){
   await page.getByLabel('UUID организации').fill(org);
   await page.getByLabel('UUID филиала').fill(loc);
-  await page.getByLabel('UUID заказ-наряда').fill(order);
+  await page.getByLabel('UUID заказ-наряда',{exact:true}).fill(order);
   await page.getByLabel('UUID партии').fill(lot);
   await page.getByLabel('Артикул SKU').fill('SYNTH-001');
   await page.getByLabel('Требуется для работы (шт.)').fill('5');
@@ -154,4 +154,86 @@ test('staff role navigation exposes supplier orders only for stock or manager',a
   await expect(nav.getByRole('link',{name:'Заказы поставщикам (dev)'})).toHaveCount(0);
   roles=['MANAGER'];await page.reload();
   await expect(nav.getByRole('link',{name:'Заказы поставщикам (dev)'})).toBeVisible();
+});
+
+
+test('purchase lifecycle card, filtered register, hidden comparison and receipt handoff',async({page})=>{
+  let hidden=false,denied=false;
+  const calls:URL[]=[];
+  await page.route('**/warehouse/supplier-orders**',route=>{
+    const url=new URL(route.request().url());calls.push(url);
+    const row={...item(2),purchasePriceHidden:hidden,purchaseUnitMinor:hidden?null:1350};
+    if(url.pathname===urlPart)return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,items:[row],nextOrderId:null})});
+    expect(url.pathname).toBe(urlPart+'/'+purchase);
+    if(denied)return route.fulfill({status:403,body:'{}'});
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      syntheticOnly:true,order:row,desiredQuantity:5,availableAtOrder:1,
+      createdAt:'2030-01-01T00:00:00Z',quotedAt:'2030-01-01T00:00:00Z',expiresAt:'2030-01-08T00:00:00Z',
+      offers:hidden?null:[{supplier_id:'A',offer_id:'A1',source_revision:'R1',currency:'RUB',unit_purchase_minor:1200,available_quantity:4,delivery_days:2},
+        {supplier_id:'B',offer_id:'B1',source_revision:'R2',currency:'RUB',unit_purchase_minor:1350,available_quantity:4,delivery_days:1}],
+      deliveries:[{deliveryId,documentId,quantity:2,createdAt:'2030-01-02T00:00:00Z',stage:'DRAFT'}],nextDeliveryId:null})});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/warehouse-supplier-orders');
+  await fillOrder(page);
+  await page.getByLabel('Состояние закупки').selectOption('AWAITING_ACCEPTANCE');
+  await page.getByLabel('Фильтр по UUID заказ-наряда').fill(order);
+  await page.getByRole('button',{name:'Обновить заказы'}).click();
+  await page.getByRole('button',{name:'Выбрать заказ '+purchase}).click();
+  expect(calls[0].searchParams.get('state')).toBe('AWAITING_ACCEPTANCE');
+  expect(calls[0].searchParams.get('workOrderId')).toBe(order);
+  await page.getByRole('button',{name:'Открыть карточку закупки'}).click();
+  const card=page.getByRole('region',{name:'Карточка закупки'});
+  await expect(card).toContainText('1200 minor');
+  await expect(card).toContainText(documentId);
+  hidden=true;
+  await page.getByRole('button',{name:'Обновить карточку'}).click();
+  await expect(card).toContainText('Закупочные цены и сравнение скрыты');
+  await expect(page.getByText('1350 коп./шт.',{exact:false})).toHaveCount(0);
+  await expect(card.getByRole('link',{name:'К приёмке и оценке'})).toHaveAttribute('href',
+    '/staff/warehouse-receiving?org='+org+'&loc='+loc+'&documentId='+documentId);
+  denied=true;
+  await page.getByRole('button',{name:'Обновить карточку'}).click();
+  await expect(page.getByRole('alert')).toContainText('403/404');
+  await expect(card).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Выбрать заказ '+purchase})).toHaveCount(0);
+});
+
+test('receipt handoff carries only identifiers and never submits on navigation',async({page})=>{
+  let writes=0;
+  await page.route('**/warehouse/receipts**',route=>{
+    if(route.request().method()==='POST')writes++;
+    return route.fulfill({status:403,body:'{}'});
+  });
+  await page.goto('/staff/warehouse-receiving?org='+org+'&loc='+loc+'&documentId='+documentId);
+  await expect(page.getByLabel('UUID приходного документа')).toHaveValue(documentId);
+  expect(writes).toBe(0);
+});
+
+
+test('branch change during CSRF never dispatches old procurement mutation',async({page})=>{
+  let started=false,posts=0;
+  let release!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  await page.route('**/api/v1/auth/csrf',async route=>{
+    started=true;await held;
+    await route.fulfill({status:200,contentType:'application/json',body:'{"csrfToken":"synthetic-csrf"}'}).catch(()=>{});
+  });
+  await page.route('**/warehouse/supplier-orders**',route=>{
+    if(route.request().method()==='POST')posts++;
+    return route.fulfill({status:403,body:'{}'});
+  });
+  await page.goto('/staff/warehouse-supplier-orders');
+  await fillOrder(page);
+  await page.getByRole('button',{name:'Создать заказ поставщику'}).click();
+  await expect.poll(()=>started).toBe(true);
+  try{
+    await page.getByLabel('UUID филиала').fill('99999999-9999-4999-8999-999999999999');
+    await page.getByLabel('UUID филиала').fill(loc);
+    await expect(page.getByRole('button',{name:'Создать заказ поставщику'})).toBeEnabled();
+  }finally{release();}
+  await page.getByRole('button',{name:'Обновить заказы'}).click();
+  await expect(page.getByRole('alert')).toContainText('403/404');
+  expect(posts).toBe(0);
 });
