@@ -4,6 +4,8 @@ additional consent, authorized labor, material handoff and independent QC.
 from datetime import datetime,timedelta,timezone
 from io import BytesIO
 from zipfile import ZipFile
+import csv
+from io import StringIO
 import json
 from uuid import uuid4
 import psycopg
@@ -26,6 +28,88 @@ from test_pg_auto_intake_act_review_http import review as review_act
 from test_pg_auto_diagnostic_estimate_http import finding
 from test_pg_auto_document_lifecycle_http import event as document_event
 from scripts.verify_auto_technical_dossier import verify_dossier_bytes
+
+
+def assert_staff_projection(http, root, order, *, repair, document, execution,
+                            quality, estimate, intake):
+    """Одни и те же первичные события, без моков или прямой правки статуса."""
+    register=root+"/orders"
+    params={"view":"workflow","orderId":str(order),"repairStage":repair,
+            "documentStage":document,"bookingStatus":"SCHEDULED"}
+    response=http.get(register,params=params)
+    assert response.status_code==200,response.text
+    assert response.headers["cache-control"]=="no-store"
+    value=response.json()
+    assert value["syntheticOnly"] is True and value["releaseAllowed"] is False
+    assert value["nextCursor"] is None
+    assert len(value["items"])==1
+    row=value["items"][0]
+    assert (row["workOrderId"],row["repairStage"],row["documentStage"],
+            row["bookingStatus"])==(str(order),repair,document,"SCHEDULED")
+    opposite="DRAFT" if repair!="DRAFT" else "READY"
+    denied_filter=http.get(register,params={**params,"repairStage":opposite})
+    assert denied_filter.status_code==200,denied_filter.text
+    assert denied_filter.json()["items"]==[]
+    workspace=http.get(register+"/"+str(order)+"/workspace")
+    assert workspace.status_code==200,workspace.text
+    assert workspace.headers["cache-control"]=="no-store"
+    result=workspace.json()
+    assert result["workOrderId"]==str(order)
+    assert result["syntheticOnly"] is True and result["realMoney"] is False
+    assert result["releaseAllowed"] is False and result["bookingCanceled"] is False
+    assert result["steps"]=={
+        "services":"SELECTED","inspection":"RECORDED","intakeAct":intake,
+        "estimate":estimate,"execution":execution,"quality":quality,
+        "technicalDocuments":document,
+    }
+    if document=="CLOSED_TECHNICAL":
+        exported=http.get(register+"/export",params=params)
+        assert exported.status_code==200,exported.text
+        assert exported.headers["cache-control"]=="no-store"
+        lines=list(csv.DictReader(StringIO(exported.text.lstrip("\ufeff")),delimiter=";"))
+        assert len(lines)==1
+        assert lines[0]["Заказ-наряд"]==str(order)
+        assert lines[0]["Этап ремонта"]==repair
+        assert lines[0]["Состояние документа"]==document
+        assert lines[0]["Состояние записи"]=="SCHEDULED"
+
+
+def assert_closed_timeline(http, root, order, extra_decision):
+    """Проверяем полную пагинацию, а не только последние события."""
+    path=root+"/orders/"+str(order)+"/timeline"
+    cursor=None
+    rows=[]
+    for _ in range(10):
+        params={"limit":5}
+        if cursor:
+            params["cursor"]=cursor
+        response=http.get(path,params=params)
+        assert response.status_code==200,response.text
+        assert response.headers["cache-control"]=="no-store"
+        body=response.json()
+        assert body["workOrderId"]==str(order)
+        assert body["syntheticOnly"] is True and body["realMoney"] is False
+        assert body["releaseAllowed"] is False
+        rows.extend(body["items"])
+        cursor=body["nextCursor"]
+        if cursor is None:
+            break
+    assert cursor is None
+    ids=[row["evidenceId"] for row in rows]
+    assert len(ids)==len(set(ids))
+    actions=[row["action"] for row in rows]
+    assert actions[0]=="DOCUMENT_CLOSED_TECHNICAL"
+    assert actions.count("ORDER_CREATED")==1
+    assert actions.count("INTAKE_ACT_CREATED")==2
+    for action in ("INSPECTION_RECORDED","INTAKE_DISPUTED","INTAKE_ACKNOWLEDGED",
+                   "ESTIMATE_PUBLISHED","ESTIMATE_APPROVED","EXECUTION_STARTED",
+                   "EXECUTION_FINISHED","QC_FAIL","QC_PASS","PREVIEW_SEALED",
+                   "DOCUMENT_POSTED","DOCUMENT_CLIENT_ACK","DOCUMENT_CLOSED_TECHNICAL"):
+        assert actions.count(action)==1,actions
+    assert actions.count("LABOR_RECORDED")==(
+        3 if extra_decision=="APPROVED" else 2)
+    for row in rows:
+        assert set(row)=={"evidenceId","createdAt","action"}
 
 
 @pytest.mark.parametrize("extra_decision",["APPROVED","DECLINED"])
@@ -60,6 +144,9 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     root=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}"
     catalog,selected=paths(org,loc,order)
     manager=token(http,d,d["intake"])
+
+    assert_staff_projection(http,root,order,repair="DRAFT",document="DRAFT",
+        execution="NOT_STARTED",quality="NOT_CHECKED",estimate="MISSING",intake="MISSING")
 
     # Один и тот же заказ: две неизменяемые версии акта с фото,
     # спор клиента и техническое подтверждение только актуальной версии.
@@ -165,6 +252,9 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
         "requestKey":str(uuid4()),"expectedVersion":1,
         "workRates":[priced(base_service),priced(complex_service)]}).status_code==409
 
+    assert_staff_projection(http,root,order,repair="DRAFT",document="DRAFT",
+        execution="NOT_STARTED",quality="NOT_CHECKED",estimate="APPROVED",intake="ACKNOWLEDGED")
+
     # The assigned executor needs an active shift and must accept personally.
     manager=token(http,d,d["intake"])
     assignment=http.post(root+f"/orders/{order}/assignments",headers=manager,
@@ -178,6 +268,8 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     execution=execution_path(org,loc,order)
     manager=token(http,d,d["intake"])
     assert post(http,execution+"/start",manager).status_code==201
+    assert_staff_projection(http,root,order,repair="IN_WORK",document="DRAFT",
+        execution="IN_PROGRESS",quality="NOT_CHECKED",estimate="APPROVED",intake="ACKNOWLEDGED")
     mechanic=token(http,d,d["manager"])
     for service in (base_service,complex_service):
         labor=post(http,execution+"/labor",mechanic,
@@ -271,6 +363,8 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     close=root+f"/orders/{order}/demo-close"
     manager=token(http,d,d["intake"])
     total=snapshot["totalMinor"]+(extra["totalMinor"] if extra_decision=="APPROVED" else 0)
+    assert_staff_projection(http,root,order,repair="READY",document="DRAFT",
+        execution="FINISHED",quality="FAIL",estimate="APPROVED",intake="ACKNOWLEDGED")
     assert post(http,close+"/simulated-cash",manager,kind="SIM_PAYMENT",
                 amountMinor=total).status_code==409
     assert post(http,close+"/seal-preview",manager).status_code==409
@@ -299,14 +393,23 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
     preview=sealed.json()["preview"]
     assert preview["snapshot"]["approvedTotalMinor"]==total
     assert preview["snapshot"]["releaseAllowed"] is False
+    assert_staff_projection(http,root,order,repair="READY",document="PREVIEW_SEALED",
+        execution="FINISHED",quality="PASS",estimate="APPROVED",intake="ACKNOWLEDGED")
     assert document_event(http,close,manager,act,preview,"POSTED").status_code==201
+    assert_staff_projection(http,root,order,repair="READY",document="POSTED",
+        execution="FINISHED",quality="PASS",estimate="APPROVED",intake="ACKNOWLEDGED")
     customer=token(http,d,d["client_a"])
     assert document_event(http,close,customer,act,preview,"CLIENT_ACK").status_code==201
     manager=token(http,d,d["intake"])
+    assert_staff_projection(http,root,order,repair="READY",document="CLIENT_ACKNOWLEDGED",
+        execution="FINISHED",quality="PASS",estimate="APPROVED",intake="ACKNOWLEDGED")
     closed=document_event(http,close,manager,act,preview,"CLOSED_TECHNICAL")
     assert closed.status_code==201,closed.text
     assert closed.json()["status"]=="CLOSED_TECHNICAL"
     assert closed.json()["releaseAllowed"] is False
+    assert_staff_projection(http,root,order,repair="READY",document="CLOSED_TECHNICAL",
+        execution="FINISHED",quality="PASS",estimate="APPROVED",intake="ACKNOWLEDGED")
+    assert_closed_timeline(http,root,order,extra_decision)
     dossier=close+"/technical-dossier.zip"
     archive=http.get(dossier)
     assert archive.status_code==200,archive.text[:200] if archive.status_code!=200 else ""
@@ -329,8 +432,30 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
         assert settlement["unreceivedMaterialCount"]==0
     customer=token(http,d,d["client_a"])
     assert http.get(dossier).content==archive.content
+    customer_orders="/api/v1/dev/auto/customer/orders"
+    customer_detail=customer_orders+"/"+str(order)
+    listed=http.get(customer_orders,params={"vehicleId":str(d["vehicle"])})
+    assert listed.status_code==200,listed.text
+    assert [item["id"] for item in listed.json()["items"]]==[str(order)]
+    final=http.get(customer_detail)
+    assert final.status_code==200,final.text
+    Draft202012Validator({**spec,"$ref":"#/components/schemas/Detail"},
+        format_checker=FormatChecker()).validate(final.json())
+    detail=final.json()
+    assert detail["id"]==str(order) and detail["workStatus"]=="QC_ACCEPTED"
+    assert detail["qcStatus"]=="QC_PASSED" and detail["canDecide"] is False
+    assert detail["releaseAllowed"] is False and detail["legalGatePassed"] is False
+    assert detail["document"]["id"]==preview["id"]
+    assert detail["document"]["sha256"]==preview["digest"]
+    assert detail["estimates"][-1]["decision"]=="APPROVED"
+    assert detail["estimates"][-1]["totalMinor"]==snapshot["totalMinor"]
+    assert {line["serviceId"] for line in detail["labor"]}==(
+        {str(base_service),str(complex_service),str(extra_service)} if extra_decision=="APPROVED"
+        else {str(base_service),str(complex_service)})
     token(http,d,d["client_b"])
     assert http.get(dossier).status_code==403
+    assert http.get(customer_detail).status_code==404
+    assert http.get(customer_orders,params={"vehicleId":str(d["vehicle"])}).json()["items"]==[]
     with psycopg.connect(DSN) as db:
         assert balance(db,part)==(0,0)
         assert balance(db,consumable)==(2,0)
@@ -353,8 +478,15 @@ def test_real_full_synthetic_complex_to_extra_consent_to_independent_qc(monkeypa
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
     token(http,d,d["client_a"])
     assert http.get(dossier).status_code==403
+    assert http.get(customer_detail).status_code==404
+    assert http.get(customer_orders,params={"vehicleId":str(d["vehicle"])}).json()["items"]==[]
     token(http,d,d["intake"])
     assert http.get(dossier).status_code==403
+    assert http.get(root+"/orders/"+str(order)+"/workspace").status_code==403
+    assert http.get(root+"/orders/"+str(order)+"/timeline").status_code==403
+    filtered=http.get(root+"/orders",params={"view":"workflow","orderId":str(order)})
+    assert filtered.status_code==200,filtered.text
+    assert filtered.json()["items"]==[]
 
 
 def _verify_tenant_staff_lifecycle(monkeypatch,http,d,org,loc,order,archive):
