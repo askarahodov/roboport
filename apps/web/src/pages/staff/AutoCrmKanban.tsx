@@ -1,6 +1,7 @@
 import React from 'react';
 import {CrmDealCard} from './CrmDealCard';
 import {CrmInteractions} from './CrmInteractions';
+import {CrmTimeline} from './CrmTimeline';
 
 type StageCode='NEW'|'QUALIFIED'|'BOOKED'|'LOST';
 type LossReason='PRICE'|'TIMING'|'NO_RESPONSE'|'OTHER';
@@ -220,6 +221,7 @@ export function AutoCrmKanban(){
             {openDeal===item.leadId&&<React.Fragment key={base+':'+item.leadId}>
               <CrmDealCard base={base+'/leads'} leadId={item.leadId}/>
               <CrmInteractions base={base+'/leads'} leadId={item.leadId}/>
+              <CrmTimeline base={base+'/leads'} leadId={item.leadId}/>
             </React.Fragment>}
             {item.visitNumber!==undefined&&<p>Цикл обращения №{item.visitNumber}</p>}
             {['BOOKED','LOST'].includes(item.stageCode)&&<button type="button"

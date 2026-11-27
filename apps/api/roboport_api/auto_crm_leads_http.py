@@ -262,3 +262,24 @@ def crm_lead_search(org_id:str,loc_id:str,request:Request):
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/lead-search/export")
 def crm_lead_search_export(org_id:str,loc_id:str,request:Request):
     return _search_response(org_id,loc_id,request,export=True)
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/leads/{lead_id}/timeline")
+def crm_timeline(org_id:str,loc_id:str,lead_id:str,request:Request):
+    from .auto_crm_timeline import read_timeline
+    scoped=_context(request,org_id,loc_id,lead_id)
+    if isinstance(scoped,JSONResponse):
+        return scoped
+    dsn,(org,loc,lead)=scoped
+    try:
+        with psycopg.connect(dsn) as db:
+            query=request.query_params
+            cursor=query.get("cursor")
+            if set(query)-{"cursor"} or len(query.getlist("cursor"))>1:
+                cursor=""
+            result=read_timeline(db,request.cookies.get("rp_session",""),org,loc,lead,cursor)
+    except (LeadDenied,LeadConflict) as exc:
+        return _error(request,exc)
+    except (psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
+        return _response(request,409,"CONFLICT")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})

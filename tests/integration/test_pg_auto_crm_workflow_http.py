@@ -585,3 +585,76 @@ def test_deal_waits_for_reassignment_and_denies_former_intake(monkeypatch):
     result=http.get(crm(org,loc)+"/leads/"+str(lead_id)+"/deal")
     assert result.status_code==200,result.text
     assert result.json()["leadId"]==str(lead_id)
+
+
+def test_unified_timeline_full_contact_cycle_and_live_access(monkeypatch):
+    d,org,loc,bay,foreign,foreign_loc,http=_fixture(monkeypatch)
+    base=crm(org,loc)+"/leads"
+    intake=session(http,d,d["intake"])
+    created=http.post(base,headers=intake,json=lead_payload(d))
+    assert created.status_code==201,created.text
+    lead_id=created.json()["leadId"];detail=base+"/"+lead_id
+    timeline=detail+"/timeline"
+    due=datetime.now(timezone.utc)+timedelta(days=2)
+    payload={"requestKey":str(uuid4()),"channelCode":"CALL","outcomeCode":"CALLBACK_REQUIRED",
+             "callbackDueAt":due.isoformat(),"expectedActorId":str(d["intake"])}
+    contact=http.post(detail+"/interactions",headers=intake,json=payload)
+    assert contact.status_code==201,contact.text
+    item=contact.json()["item"]
+    assert http.post(detail+"/interactions",headers=intake,json=payload).json()["replayed"]
+    qualified=http.post(detail+"/stages",headers=intake,json={"stageCode":"QUALIFIED","requestKey":str(uuid4())})
+    assert qualified.status_code==201,qualified.text
+    client=session(http,d,d["client_a"])
+    consent="/api/v1/dev/account/crm-contact-consent"
+    opted=http.post(consent,headers=client,json={"channelCode":"CALL","enabled":True,
+        "expectedRevision":0,"requestKey":str(uuid4())})
+    assert opted.status_code==201,opted.text
+    assert http.get(timeline).status_code==403
+    manager=session(http,d,d["manager"])
+    mock_payload={"channelCode":"CALL","templateCode":"BOOKING_REMINDER","requestKey":str(uuid4())}
+    mock=http.post(detail+"/mock-messages",headers=manager,json=mock_payload)
+    assert mock.status_code==201,mock.text
+    assert http.post(detail+"/mock-messages",headers=manager,json=mock_payload).json()["replayed"]
+    assigned=http.post(detail+"/assignment",headers=manager,json={"assigneeId":str(d["manager"]),"requestKey":str(uuid4())})
+    assert assigned.status_code==201,assigned.text
+    with psycopg.connect(DSN) as db:
+        from roboport_api.auto_crm_followups import resolve_followup
+        resolve_followup(db,d["tokens"][d["manager"]],org,loc,UUID(lead_id),
+                         UUID(item["callbackTaskId"]),uuid4(),"DONE")
+    first=http.get(timeline)
+    assert first.status_code==200,first.text
+    assert first.headers["cache-control"]=="no-store"
+    body=first.json()
+    assert body["sendAllowed"] is False and body["legalConsentVerified"] is False
+    by_kind={row["kind"]:row for row in body["items"]}
+    assert set(by_kind)=={"CREATED","STAGE","ASSIGNED","INBOUND","TASK_CREATED","TASK_RESOLVED","MOCK"}
+    assert len(body["items"])==7 and body["nextCursor"] is None
+    assert by_kind["INBOUND"]["relatedId"]==by_kind["TASK_CREATED"]["eventId"]==by_kind["TASK_RESOLVED"]["relatedId"]
+    assert by_kind["MOCK"]["status"]=="MOCK_ONLY"
+    assert by_kind["ASSIGNED"]["relatedId"]==str(d["manager"])
+    assert str(d["ca"]) not in first.text and "consentEventIds" not in first.text
+    client=session(http,d,d["client_a"])
+    assert http.post(consent,headers=client,json={"channelCode":"CALL","enabled":False,
+        "expectedRevision":1,"requestKey":str(uuid4())}).status_code==201
+    session(http,d,d["manager"])
+    assert next(x for x in http.get(timeline).json()["items"] if x["kind"]=="MOCK")["status"]=="SUPPRESSED"
+    # Same timestamp across several source tables is not a pagination collision.
+    with psycopg.connect(DSN) as db:
+        from roboport_api.auto_crm_interactions import record_interaction
+        for _ in range(24):
+            record_interaction(db,d["tokens"][d["manager"]],org,loc,UUID(lead_id),uuid4(),"EMAIL","INFORMATION_REQUESTED")
+    page=http.get(timeline).json()
+    assert len(page["items"])==25 and page["nextCursor"]
+    later=http.get(timeline,params={"cursor":page["nextCursor"]})
+    assert later.status_code==200,later.text
+    rows=page["items"]+later.json()["items"]
+    assert len(rows)==31 and len({(row["kind"],row["eventId"]) for row in rows})==31
+    assert later.json()["nextCursor"] is None
+    assert http.get(timeline,params={"cursor":"0."+page["nextCursor"].split(".",1)[1]}).status_code==422
+    assert http.get(timeline.replace(str(loc),str(foreign_loc))).status_code==403
+    session(http,d,d["intake"])
+    assert http.get(timeline).status_code==403
+    session(http,d,d["manager"])
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+    assert http.get(timeline,params={"cursor":page["nextCursor"]}).status_code==403

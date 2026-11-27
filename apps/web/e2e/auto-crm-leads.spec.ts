@@ -697,3 +697,30 @@ test('CRM owner and period export validates digest and revocation',async({page})
   await expect(panel).toHaveCount(0);
   expect(exportReads).toBe(3);
 });
+
+
+test('unified timeline displays contact and live suppression, rejects stale data',async({page})=>{
+  let denied=false,suppressed=false;
+  await page.route(path,r=>{
+    const pathname=new URL(r.request().url()).pathname;
+    if(pathname.endsWith('/timeline'))return r.fulfill({status:denied?403:200,json:{
+      syntheticOnly:true,sendAllowed:false,legalConsentVerified:false,leadId:lead,nextCursor:null,
+      items:[{kind:'MOCK',eventId:lead,actorId:owner,code:'BOOKING_REMINDER',relatedId:null,
+        channelCode:'CALL',status:suppressed?'SUPPRESSED':'MOCK_ONLY',createdAt:'2030-01-01T10:01:00Z'},
+        {kind:'INBOUND',eventId:link,actorId:owner,code:'CALLBACK_REQUIRED',relatedId:appointment,
+          channelCode:'CALL',status:null,createdAt:'2030-01-01T10:00:00Z'}]}});
+    return r.fulfill({json:{syntheticOnly:true,items:pathname.endsWith('/crm/leads')?[item('NEW')]:[],nextCursor:null}});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  const panel=page.getByRole('region',{name:'Единая хронология сделки'});
+  await panel.getByRole('button',{name:'Загрузить хронологию'}).click();
+  await expect(panel).toContainText('Нужен обратный контакт');
+  await expect(panel).toContainText('Только макет');
+  suppressed=true;await panel.getByRole('button',{name:'Обновить хронологию'}).click();
+  await expect(panel).toContainText('Подавлено');
+  await expect(panel).not.toContainText('Только макет');
+  denied=true;await panel.getByRole('button',{name:'Обновить хронологию'}).click();
+  await expect(panel).toHaveCount(0);
+});

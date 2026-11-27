@@ -334,6 +334,114 @@
           }
         }
       }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/crm/leads/{lead_id}/timeline": {
+      "get": {
+        "operationId": "readCrmTimelineDev",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "loc_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lead_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 256,
+              "pattern": "^[0-6]\\.[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Единая синтетическая история, 25 событий",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelinePage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Доступ запрещён",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Функция выключена",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Изменение этапа или конфликт",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Неверный фильтр или курсор",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -506,6 +614,139 @@
           },
           "message": {
             "type": "string"
+          }
+        }
+      },
+      "TimelineRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "eventId",
+          "actorId",
+          "createdAt",
+          "code",
+          "relatedId",
+          "channelCode",
+          "status"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "CREATED",
+              "STAGE",
+              "ASSIGNED",
+              "INBOUND",
+              "TASK_CREATED",
+              "TASK_RESOLVED",
+              "MOCK"
+            ]
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "code": {
+            "enum": [
+              "WEB",
+              "PHONE",
+              "WALK_IN",
+              "QUALIFIED",
+              "BOOKED",
+              "LOST",
+              "ASSIGNED",
+              "REQUEST_RECEIVED",
+              "CALLBACK_REQUIRED",
+              "INFORMATION_REQUESTED",
+              "DECLINED",
+              "CALL_BACK",
+              "CHECK_BOOKING",
+              "SERVICE_REVIEW",
+              "DONE",
+              "CANCELED",
+              "BOOKING_REMINDER",
+              "SERVICE_UPDATE",
+              "POST_SERVICE_REVIEW"
+            ]
+          },
+          "relatedId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "channelCode": {
+            "enum": [
+              null,
+              "CALL",
+              "EMAIL",
+              "SMS",
+              "MESSENGER",
+              "WALK_IN"
+            ]
+          },
+          "status": {
+            "enum": [
+              null,
+              "MOCK_ONLY",
+              "SUPPRESSED"
+            ]
+          }
+        }
+      },
+      "TimelinePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "syntheticOnly",
+          "sendAllowed",
+          "legalConsentVerified",
+          "leadId",
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "syntheticOnly": {
+            "const": true
+          },
+          "sendAllowed": {
+            "const": false
+          },
+          "legalConsentVerified": {
+            "const": false
+          },
+          "leadId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/TimelineRow"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 256,
+                "pattern": "^[0-6]\\.[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       }
