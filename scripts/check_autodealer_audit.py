@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / "docs" / "auto" / "AUTODEALER_ONLINE_PAGES.json"
 MATRIX = ROOT / "docs" / "auto" / "FUNCTIONAL_MATRIX.md"
 REQUIREMENTS = ROOT / "docs" / "auto" / "AUTODEALER_FUNCTION_REQUIREMENTS.json"
+AUDIT_TEXT = ROOT / "docs" / "auto" / "AUTODEALER_PAGE_AUDIT.md"
+ACCEPTANCE_TEXT = ROOT / "docs" / "auto" / "AUTODEALER_PARITY_ACCEPTANCE.md"
 EXPECTED_FIELDS = {
     "id", "url", "title", "section", "matrixId", "priority", "issue",
     "status", "scenario", "gap", "evidence", "checkedOn",
@@ -203,11 +205,72 @@ def validate_requirements(document: object, inventory: object) -> list[str]:
     return problems
 
 
+
+def _issue_link(number: int) -> str:
+    return f"[#{number}](https://github.com/askarahodov/roboport/issues/{number})"
+
+
+def _row(*cells: str) -> str:
+    # Не позволяем скрывать дополнительные строки или ячейки в проекции.
+    if any(not isinstance(cell, str) or any(c in cell for c in ("|", "\\n", "\\r"))
+           for cell in cells):
+        raise ValueError("unsupported Markdown table cell")
+    return "| " + " | ".join(cells) + " |"
+
+
+def validate_readable_tables(inventory: dict, requirements: dict,
+                             audit_text: str, acceptance_text: str) -> list[str]:
+    """Сверить все читаемые строки с каноническим JSON после schema checks."""
+    from collections import Counter
+
+    pages = {page["id"]: page for page in inventory["records"]}
+    try:
+        expected_pages = [
+            _row(page["id"], page["section"],
+                 f'[{page["title"]}]({page["url"]})', page["matrixId"],
+                 page["priority"], page["status"], _issue_link(page["issue"]),
+                 f'{page["evidence"]} / {page["checkedOn"]}',
+                 page["scenario"], page["gap"])
+            for page in inventory["records"]
+        ]
+        expected_requirements = [
+            _row(item["id"], item["capability"], item["acceptance"],
+                 f'[{item["pageId"]}]({pages[item["pageId"]]["url"]})',
+                 f'{item["matrixId"]} / {_issue_link(item["ownerIssue"])}',
+                 item["sourceEvidence"], item["status"],
+                 ", ".join(f"`{path}`" for path in item["evidencePaths"]) or "—")
+            for item in requirements["requirements"]
+        ]
+    except (KeyError, TypeError, ValueError):
+        return ["cannot construct canonical readable audit tables"]
+    problems = []
+    for name, prefix, expected, content in (
+        ("page audit", "ADP", expected_pages, audit_text),
+        ("acceptance", "ADF", expected_requirements, acceptance_text),
+    ):
+        # Сравниваем мультимножества: порядок допустим, дубли — нет.
+        actual = [line for line in content.splitlines()
+                  if re.match(r"^\\|\\s*" + prefix + r"-", line)]
+        if Counter(actual) != Counter(expected):
+            missing = Counter(expected) - Counter(actual)
+            extra = Counter(actual) - Counter(expected)
+            problems.append(
+                f"{name}: readable table drift (missing/changed={sum(missing.values())}, "
+                f"extra/changed={sum(extra.values())})"
+            )
+    return problems
+
+
 def main() -> int:
     document = json.loads(FILE.read_text(encoding="utf-8"))
     issues = validate(document, MATRIX.read_text(encoding="utf-8"))
     requirements = json.loads(REQUIREMENTS.read_text(encoding="utf-8"))
     issues.extend(validate_requirements(requirements, document))
+    if not issues:
+        issues.extend(validate_readable_tables(
+            document, requirements, AUDIT_TEXT.read_text(encoding="utf-8"),
+            ACCEPTANCE_TEXT.read_text(encoding="utf-8"),
+        ))
     if issues:
         print("FAIL: AutoDealer page-by-page inventory contract:")
         for issue in issues:
