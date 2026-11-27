@@ -43,9 +43,76 @@ def test_whole_private_cutover_preview_commit_recovery_export_and_revocation(tmp
     assert http.post(root+"preview",json={**initial,"syntheticOnly":False},headers=headers).status_code==422
     assert http.post(root+"preview",json=body({**raw,"vehicles.csv":raw["vehicles.csv"].replace(
         b"SYNTHETIC",b"NOT-SYNTHETIC")}),headers=headers).status_code==422
+    # Подготовка смешанного формата использует тот же ACL и не пишет staging.
+    import csv
+    from xml.sax.saxutils import escape
+    workbook = io.BytesIO()
+    rows = list(csv.reader(io.StringIO(raw["vehicles.csv"].decode())))
+    aliases = ["F" + str(i) for i in range(len(rows[0]))]
+    grid = [aliases[::-1], *[row[::-1] for row in rows[1:]]]
+    ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    with ZipFile(workbook, "w") as book:
+        book.writestr("[Content_Types].xml", "<Types/>")
+        book.writestr("xl/workbook.xml", f'<workbook xmlns="{ns}"><sheets><sheet name="Import" sheetId="1"/></sheets></workbook>')
+        cells = []
+        for number, row in enumerate(grid, 1):
+            values = "".join(f'<c r="{chr(65+i)}{number}" t="inlineStr"><is><t>{escape(value)}</t></is></c>'
+                             for i, value in enumerate(row))
+            cells.append(f'<row r="{number}">{values}</row>')
+        book.writestr("xl/worksheets/sheet1.xml", f'<worksheet xmlns="{ns}"><sheetData>{"".join(cells)}</sheetData></worksheet>')
+    prepare = {"syntheticOnly": True, "files": {name: {**entry, "format": "CSV", "mapping": None}
+                for name, entry in initial["files"].items()}}
+    content = workbook.getvalue()
+    prepare["files"]["vehicles.csv"] = {"base64": base64.b64encode(content).decode(),
+        "sha256": sha256(content).hexdigest(), "format": "XLSX", "mapping": dict(zip(aliases, rows[0]))}
+    assert http.post(root+"prepare", json=prepare).status_code == 403
+    prepared = http.post(root+"prepare", json=prepare, headers=headers)
+    assert prepared.status_code == 200, prepared.text
+    proof = prepared.json()
+    assert proof["writes"] == 0 and proof["productionApproved"] is False
+    assert prepared.headers["cache-control"] == "no-store"
+    initial = {"syntheticOnly": True, "files": proof["files"]}
+    raw = {name: base64.b64decode(entry["base64"]) for name, entry in initial["files"].items()}
+    # Сверка всего семидоменного комплекта с тем же canonical catalog digest.
+    from scripts.auto_migration_graph_preflight import ALL_HEADERS, inspect_graph
+    graph_dir = tmp_path / "graph"
+    graph_dir.mkdir()
+    graph = {"schema": 1, "synthetic_only": True, "organization_id": str(org),
+             "location_id": str(loc), "sources": {}}
+    common = ("DEMO", "SYN-1", str(org), str(loc), "SYN-LEGAL", "SYN-PROOF")
+    history = ("REPAIR_HISTORY", *common, "DEMO", "SYN-1",
+               "DEMO", rows[1][1], "DEMO", "LABOR-1", "", "")
+    relations = {
+        "customers.csv": ("CUSTOMER", *common),
+        "counterparties.csv": ("COUNTERPARTY", *common),
+        "history.csv": history,
+        "documents.csv": ("DOCUMENT", *common, "DEMO", "SYN-1", "a"*64),
+    }
+    for name, columns in ALL_HEADERS.items():
+        if name in raw:
+            data = raw[name]
+        else:
+            stream = io.StringIO(newline="")
+            csv.writer(stream).writerows([columns, relations[name]])
+            data = stream.getvalue().encode()
+        filename = name.upper()
+        (graph_dir / filename).write_bytes(data)
+        graph["sources"][name] = {
+            "file": filename, "format": "CSV", "mapping": None, "sha256": sha256(data).hexdigest(),
+            "bytes": len(data), "records": len(list(csv.DictReader(io.StringIO(data.decode())))),
+        }
+    graph_file = graph_dir / "manifest.json"
+    graph_file.write_text(json.dumps(graph), encoding="utf-8")
+    graph_proof = inspect_graph(graph_file, expected_manifest_sha256=sha256(graph_file.read_bytes()).hexdigest())
+    assert graph_proof["ok"] and graph_proof["writes"] == 0
+    assert graph_proof["catalogBundleSha256"] == proof["bundleSha256"]
+    assert graph_proof["release_allowed"] is False
     preview=http.post(root+"preview",json=initial,headers=headers)
     assert preview.status_code==200,preview.text
     verified=preview.json()
+    assert proof["bundleSha256"] == verified["bundleSha256"]
+    assert proof["batchIds"] == verified["batchIds"]
+    assert proof["counts"] == verified["counts"]
     assert verified["writes"]==0 and verified["productionApproved"] is False
     assert verified["counts"]=={"vehicles":1,"services":2,"stockRows":5,"skus":2,"receipts":2}
     assert preview.headers["cache-control"]=="no-store"
@@ -90,6 +157,7 @@ def test_whole_private_cutover_preview_commit_recovery_export_and_revocation(tmp
     with psycopg.connect(DSN) as db:
         assert staged(db)==(1,1,1)
         db.execute("UPDATE auto_organization_role_grant SET revoked_at=now() WHERE id=%s",(warehouse,))
+    assert http.post(root+"prepare",json=prepare,headers=headers).status_code==403
     for action in ("preview","commit","reconcile","export"):
         response=http.post(root+action,json=initial if action=="preview" else confirmed,headers=headers)
         assert response.status_code==403

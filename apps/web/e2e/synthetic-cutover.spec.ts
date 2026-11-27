@@ -70,3 +70,57 @@ test('репетиция импорта: подтверждение, повто�
   await expect(page.getByText('Доступ запрещён или тестовый импорт отключён.',{exact:false})).toBeVisible();
   await expect(page.getByRole('heading',{name:'Проверенный комплект'})).toHaveCount(0);
 });
+
+
+
+test('подготовка XLSX и mapping: канонические файлы до preview и commit',async({page})=>{
+  const canonical:Record<string,string>={
+    'vehicles.csv':'record_type,source_id,organization_id,location_id,vin,make,model,source_system\nVEHICLE,SYN-1,'+org+','+loc+',ABCDEF12345678901,SYNTHETIC,TEST CAR,DEMO\n',
+    'services.csv':'record_type,source_system,source_id,code,title,duration_minutes\nSERVICE,DEMO,SYN-1,SYN-WORK,SYNTHETIC WORK,60\n',
+    'inventory.csv':'record_type,source_id,organization_id,location_id,article,quantity\nSKU,SYN-1,'+org+','+loc+',SYN-PART,0\nSTOCK,SYN-2,'+org+','+loc+',SYN-PART,3\n',
+  };
+  const files=Object.fromEntries(Object.entries(canonical).map(([name,value])=>[name,{
+    base64:Buffer.from(value).toString('base64'),sha256:createHash('sha256').update(value).digest('hex'),
+  }]));
+  let prepared=false;let corrupt=true;
+  await page.route('**/api/v1/auth/csrf',r=>r.fulfill({json:{csrfToken:'test'}}));
+  await page.route('**/cutover/*',r=>{
+    const operation=r.request().url().split('/').pop();
+    const body=r.request().postDataJSON();
+    if(operation==='prepare'){
+      expect(body.files['vehicles.csv'].format).toBe('XLSX');
+      expect(body.files['vehicles.csv'].mapping.F0).toBe('record_type');
+      prepared=true;
+      return r.fulfill({json:{ok:true,syntheticOnly:true,productionApproved:false,
+        bundleSha256:hash,counts,batchIds,mode:'PREPARE',writes:0,
+        files:corrupt?{...files,'vehicles.csv':{...files['vehicles.csv'],sha256:'0'.repeat(64)}}:files}});
+    }
+    expect(operation).toBe('preview');expect(prepared).toBe(true);
+    expect(body.files).toEqual(files);
+    return r.fulfill({json:{ok:true,syntheticOnly:true,productionApproved:false,
+      bundleSha256:hash,counts,batchIds,mode:'PREVIEW',writes:0}});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-cutover');
+  await page.getByLabel('UUID организации').fill(org);
+  await page.getByLabel('UUID филиала').fill(loc);
+  await page.locator('input[type=file]').nth(0).setInputFiles({name:'vehicle.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from('workbook fixture')});
+  for(const [i,n] of ['services.csv','inventory.csv'].entries()){
+    await page.locator('input[type=file]').nth(i+1).setInputFiles({name:n,mimeType:'text/csv',buffer:Buffer.from(canonical[n])});
+  }
+  await page.getByLabel('Колонки источника для vehicles.csv').fill('F0,F1,F2,F3,F4,F5,F6,F7');
+  await page.getByLabel('Подтверждаю, что все файлы искусственные, без реальных данных').check();
+  const preview=page.getByRole('button',{name:'Предварительная проверка'});
+  await expect(preview).toBeDisabled();
+  await page.getByRole('button',{name:'Подготовить CSV/XLSX'}).click();
+  await expect(page.getByText('Не удалось подтвердить результат.',{exact:false})).toBeVisible();
+  await expect(preview).toBeDisabled();
+  corrupt=false;
+  await page.getByRole('button',{name:'Подготовить CSV/XLSX'}).click();
+  await expect(page.getByText('Комплект подготовлен.',{exact:false})).toBeVisible();
+  await expect(preview).toBeEnabled();
+  await preview.click();
+  await expect(page.getByRole('heading',{name:'Проверенный комплект'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Импортировать комплект'})).toBeDisabled();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});

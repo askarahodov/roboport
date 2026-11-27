@@ -145,7 +145,7 @@ async def cutover(org_id: str, loc_id: str, operation: str, request: Request):
         return dsn
     if os.getenv("ROBOport_SYNTHETIC_CUTOVER_UI") != "1":
         return _response(request, 404, "NOT_FOUND")
-    if operation not in ("preview", "commit", "reconcile", "export"):
+    if operation not in ("prepare", "preview", "commit", "reconcile", "export"):
         return _response(request, 404, "NOT_FOUND")
     try:
         org, loc = UUID(org_id), UUID(loc_id)
@@ -163,6 +163,19 @@ async def cutover(org_id: str, loc_id: str, operation: str, request: Request):
                 return _response(request, 403, "FORBIDDEN")
             with db.transaction():
                 _authority(db, token, org, loc)
+                if operation == "prepare":
+                    from .auto_cutover_prepare import normalize_sources, PrepareDenied
+                    try:
+                        canonical = normalize_sources(body)
+                        _, _, counts, digest, batches = prepare_bundle(canonical, org, loc, "preview")
+                    except PrepareDenied:
+                        raise CutoverInput("INVALID_SOURCE") from None
+                    return JSONResponse(content={
+                        "ok": True, "syntheticOnly": True, "productionApproved": False,
+                        "mode": "PREPARE", "writes": 0, "files": canonical["files"],
+                        "counts": counts, "bundleSha256": digest,
+                        "batchIds": {name: str(value) for name, value in batches.items()},
+                    }, headers={"Cache-Control": "no-store"})
                 raws, hashes, counts, digest, batches = prepare_bundle(body, org, loc, operation)
                 common = {"ok":True, "syntheticOnly":True, "productionApproved":False,
                           "bundleSha256":digest,"counts":counts,
