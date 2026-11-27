@@ -104,8 +104,14 @@ def assert_closed_timeline(http, root, order, extra_decision):
     for action in ("INSPECTION_RECORDED","INTAKE_DISPUTED","INTAKE_ACKNOWLEDGED",
                    "ESTIMATE_PUBLISHED","ESTIMATE_APPROVED","EXECUTION_STARTED",
                    "EXECUTION_FINISHED","QC_FAIL","QC_PASS","PREVIEW_SEALED",
-                   "DOCUMENT_POSTED","DOCUMENT_CLIENT_ACK","DOCUMENT_CLOSED_TECHNICAL"):
+                   "DOCUMENT_POSTED","DOCUMENT_CLIENT_ACK","DOCUMENT_CLOSED_TECHNICAL",
+                   "DIAGNOSTIC_RECORDED","QC_REWORK_RECORDED","COMPLEX_SELECTED",
+                   "EXTRA_PUBLISHED","EXTRA_"+extra_decision,"ASSIGNMENT_OFFERED",
+                   "ASSIGNMENT_ACCEPTED","RECOMMENDATION_CREATED"):
         assert actions.count(action)==1,actions
+    assert ("EXTRA_DECLINED" if extra_decision=="APPROVED" else "EXTRA_APPROVED") not in actions
+    assert actions.index("QC_PASS")<actions.index("QC_REWORK_RECORDED")<actions.index("QC_FAIL")
+    assert actions.index("ASSIGNMENT_ACCEPTED")<actions.index("ASSIGNMENT_OFFERED")
     assert actions.count("LABOR_RECORDED")==(
         3 if extra_decision=="APPROVED" else 2)
     for row in rows:
@@ -512,6 +518,49 @@ def _verify_tenant_staff_lifecycle(monkeypatch,http,d,org,loc,order,archive):
     order_root=root+f"/orders/{order}"
     other_root=f"/api/v1/dev/auto/organizations/{other_org}/locations/{other_loc}"
     report=root+"/reports/closed-orders"
+    # На реальных событиях проверяем PRICE_SALES и совмещение ролей.
+    from roboport_api.auto_document_access import publish_policy
+    from datetime import datetime,timezone
+    with psycopg.connect(DSN) as db:
+        grant(db,d["intake"],org,loc,"MECHANIC")
+
+    def history():
+        token(http,d,d["intake"])
+        items=[]
+        cursor=None
+        for _ in range(10):
+            response=http.get(order_root+"/timeline",params={"limit":5,**(
+                {"cursor":cursor} if cursor else {})})
+            assert response.status_code==200,response.text
+            items.extend(response.json()["items"])
+            cursor=response.json()["nextCursor"]
+            if cursor is None:
+                return items
+        raise AssertionError("history did not end")
+
+    baseline=history()
+    def policy(role,document,cap,allowed,cutoff=None):
+        with psycopg.connect(DSN) as db:
+            publish_policy(db,d["tokens"][d["other"]],org,request_key=uuid4(),
+                role=role,loc=loc,user=None,document=document,cap=cap,
+                allowed=allowed,not_before=cutoff)
+    priced={"COMPLEX_SELECTED","EXTRA_PUBLISHED","EXTRA_APPROVED","EXTRA_DECLINED"}
+    clinical={"DIAGNOSTIC_RECORDED","QC_REWORK_RECORDED","RECOMMENDATION_CREATED",
+              "RECOMMENDATION_WITHDRAWN","RECOMMENDATION_VISIT_BOOKED"}
+    assert priced.intersection(x["action"] for x in baseline)
+    assert clinical.intersection(x["action"] for x in baseline)
+    policy("MANAGER","ESTIMATE","PRICE_SALES",False)
+    assert history()==[x for x in baseline if x["action"] not in priced]
+    policy("MANAGER","ESTIMATE","PRICE_SALES",True,datetime(2099,1,1,tzinfo=timezone.utc))
+    assert history()==[x for x in baseline if x["action"] not in priced]
+    policy("MANAGER","ESTIMATE","PRICE_SALES",True)
+    assert history()==baseline
+    policy("MECHANIC","INTAKE_ACT","READ",False)
+    denied=history()
+    assert not (priced|clinical).intersection(x["action"] for x in denied)
+    assert "ORDER_CREATED" in {x["action"] for x in denied}
+    policy("MECHANIC","INTAKE_ACT","READ",True)
+    assert history()==baseline
     query={"fromDay":day,"toDay":day}
     routes=[order_root+suffix for suffix in (
         "/customer","/overview","/stock","/estimates","/intake-acts",
