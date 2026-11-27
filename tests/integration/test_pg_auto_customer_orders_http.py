@@ -1,6 +1,8 @@
 """PG17 contract: customer sees original customer-linked WorkOrders, not new owner's history."""
 from datetime import datetime,timedelta,timezone
 from uuid import uuid4
+import csv
+import io
 import json
 from pathlib import Path
 from jsonschema import Draft202012Validator,FormatChecker
@@ -82,7 +84,17 @@ def test_exact_customer_link_prevents_new_owner_from_inheriting_old_work_order(m
     assert [v["id"] for v in own["items"]]==[str(d["vehicle"])]
     assert http.get(PREFIX).json()["items"]==[]
     assert http.get(PREFIX+"/"+str(order)).status_code==404
+    # Новому владельцу UUID машины не открывает старые заказы и CSV.
+    vehicle_filter={"vehicleId":str(d["vehicle"])}
+    assert contract(http.get(PREFIX,params=vehicle_filter),"Page",200)["items"]==[]
+    exported=http.get(PREFIX+"/export",params=vehicle_filter)
+    assert exported.status_code==200
+    assert list(csv.DictReader(io.StringIO(exported.text)))==[]
     login(http,d,d["client_a"])
+    assert [x["id"] for x in contract(http.get(PREFIX,params=vehicle_filter),"Page",200)["items"]]==[str(order)]
+    exported=http.get(PREFIX+"/export",params=vehicle_filter)
+    assert exported.status_code==200
+    assert [x["orderId"] for x in csv.DictReader(io.StringIO(exported.text))]==[str(order)]
     assert http.get(PREFIX+"/"+str(order)).status_code==200
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",
@@ -205,3 +217,65 @@ def test_keyset_cursor_bound_to_session_and_revalidates_current_acl(monkeypatch)
     monkeypatch.delenv("ROBOport_SYNTHETIC_AUTO_API")
     assert http.get(PREFIX).status_code==404
     assert http.get(PREFIX+"/"+str(order)).status_code==404
+
+
+def test_filtered_history_and_csv_recheck_scope_and_cursor(monkeypatch):
+    d,org,loc,bay,order,appt,start,service,foreign,_=order_scenario()
+    with psycopg.connect(DSN) as db:
+        for i in range(1,4):
+            create_appointment(db,d["tokens"][d["intake"]],org,loc,bay,d["link"],
+                start+timedelta(days=i),start+timedelta(days=i,hours=1))
+        cancel_appointment(db,d["tokens"][d["intake"]],org,appt)
+    http=client(monkeypatch)
+    login(http,d,d["client_a"])
+    all_items=contract(http.get(PREFIX),"Page",200)["items"]
+    assert len(all_items)==4
+    name=all_items[0]["vehicle"]["make"]
+    params={"search":name.lower(),"status":"SCHEDULED","limit":"1"}
+    first=contract(http.get(PREFIX,params=params),"Page",200)
+    assert len(first["items"])==1 and first["nextCursor"]
+    cursor=first["nextCursor"]
+    second=contract(http.get(PREFIX,params={**params,"cursor":cursor}),"Page",200)
+    assert second["items"][0]["id"]!=first["items"][0]["id"]
+    contract(http.get(PREFIX,params={**params,"status":"CANCELED","cursor":cursor}),"Error",422)
+    contract(http.get(PREFIX,params={**params,"search":name+"x","cursor":cursor}),"Error",422)
+    contract(http.get(PREFIX,params={**params,"vehicleId":str(d["vehicle"]),"cursor":cursor}),"Error",422)
+    assert contract(http.get(PREFIX,params={"vehicleId":str(uuid4())}),"Page",200)["items"]==[]
+    contract(http.get(PREFIX,params={"vehicleId":"invalid"}),"Error",422)
+    contract(http.get(PREFIX+"/export?vehicleId=invalid"),"Error",422)
+    canceled=contract(http.get(PREFIX,params={"status":"CANCELED"}),"Page",200)
+    assert [x["id"] for x in canceled["items"]]==[str(order)]
+    assert contract(http.get(PREFIX,params={"search":"%_"}),"Page",200)["items"]==[]
+    with psycopg.connect(DSN) as db:
+        local=db.execute("""SELECT (b.starts_at AT TIME ZONE l.timezone_name)::date
+          FROM auto_appointment a JOIN auto_bay_booking b ON b.id=a.booking_id
+          JOIN auto_service_location l ON l.id=a.location_id WHERE a.id=%s""",(appt,)).fetchone()[0]
+    same_day=contract(http.get(PREFIX,params={"fromDay":local.isoformat(),"toDay":local.isoformat()}),"Page",200)
+    assert [x["id"] for x in same_day["items"]]==[str(order)]
+    for invalid in ("status=UNKNOWN","fromDay=2030-02-30","fromDay=2030-01-02&toDay=2030-01-01",
+                    "search=A&search=B","fromDay=&toDay=2030-01-01"):
+        contract(http.get(PREFIX+"?"+invalid),"Error",422)
+    exported=http.get(PREFIX+"/export",params={"status":"CANCELED"})
+    assert exported.status_code==200 and exported.headers["cache-control"]=="no-store"
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert exported.headers["content-disposition"]=='attachment; filename="auto-customer-orders-dev.csv"'
+    rows=list(csv.DictReader(io.StringIO(exported.text)))
+    assert len(rows)==1 and rows[0]["orderId"]==str(order)
+    assert rows[0]["appointmentStatus"]=="CANCELED"
+    assert "vin" not in rows[0] and "customerId" not in rows[0]
+    from roboport_api.auto_customer_orders import _csv_text
+    assert _csv_text("  =1+1").startswith("'")
+    assert _csv_text("\t@SUM(1,2)").startswith("'")
+    import roboport_api.auto_customer_orders as service_module
+    monkeypatch.setattr(service_module,"EXPORT_LIMIT",1)
+    contract(http.get(PREFIX+"/export"),"ExportLimit",409)
+    login(http,d,d["client_b"])
+    assert list(csv.DictReader(io.StringIO(http.get(PREFIX+"/export").text)))==[]
+    assert contract(http.get(PREFIX,params={"search":name}),"Page",200)["items"]==[]
+    login(http,d,d["client_a"])
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+    assert contract(http.get(PREFIX,params=params),"Page",200)["items"]==[]
+    assert list(csv.DictReader(io.StringIO(http.get(PREFIX+"/export").text)))==[]
+    login(http,d,d["manager"])
+    contract(http.get(PREFIX+"/export"),"Error",403)

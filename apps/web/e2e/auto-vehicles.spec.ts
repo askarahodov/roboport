@@ -401,3 +401,36 @@ test('сбой курсора после частичного отзыва ос�
   await expect(page.getByText('Показано автомобилей: 21')).toBeVisible();
   expect(calls.slice(-2)).toEqual(['first','fresh-cursor']);
 });
+
+
+test('from verified car to exact own service history and reset without broadening the vehicle scope',async({page})=>{
+  await authorized(page);
+  const id='11111111-1111-4111-8111-111111111111';
+  const car={id,make:'SyntheticMake',model:'TestCar',variant:null,modelYear:2026,vinLast4:'1234'};
+  const calls:string[]=[];
+  await page.route(vehiclesUrl,route=>route.fulfill({status:200,contentType:'application/json',
+    body:JSON.stringify({nextCursor:null,items:[car]})}));
+  await page.route('**/api/v1/dev/auto/vehicles/'+id,route=>route.fulfill({status:200,
+    contentType:'application/json',body:JSON.stringify(car)}));
+  await page.route('**/api/v1/dev/auto/customer/orders?*',route=>{
+    calls.push(new URL(route.request().url()).searchParams.get('vehicleId')??'all');
+    return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({items:[],nextCursor:null,syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.goto('/account/vehicles');
+  await page.getByRole('button',{name:'Подробнее об автомобиле SyntheticMake TestCar'}).click();
+  await page.getByRole('link',{name:'История обслуживания этого автомобиля'}).click();
+  await expect(page).toHaveURL(/vehicleId=/);
+  await expect(page.getByText('По выбранным фильтрам заказов нет.')).toBeVisible();
+  expect(calls.at(-1)).toBe(id);
+  await page.getByRole('button',{name:'Сбросить фильтры'}).click();
+  await expect(page.getByText('По выбранным фильтрам заказов нет.')).toBeVisible();
+  expect(calls.at(-1)).toBe(id);
+  await page.getByRole('link',{name:'Все мои автомобили и заказ-наряды'}).click();
+  await expect(page.getByText('Заказ-нарядов с подтверждённой связью пока нет.')).toBeVisible();
+  expect(calls.at(-1)).toBe('all');
+  const before=calls.length;
+  await page.goto('/account/auto-orders?vehicleId=invalid');
+  await expect(page.getByText('Некорректный выбор автомобиля.')).toBeVisible();
+  expect(calls.length).toBe(before);
+});

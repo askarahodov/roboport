@@ -391,3 +391,49 @@ test('аномальный DTO не предлагает согласовани�
   await expect(page.getByText('SYNTHETIC-PRIVATE')).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Согласовать последнюю версию'})).toHaveCount(0);
 });
+
+
+test('history filters, pagination and reauthorized CSV are one customer workflow',async({page})=>{
+  await auth(page);
+  const calls:URLSearchParams[]=[];
+  let denied=false;
+  const canceled={...card,appointment:{...card.appointment,status:'CANCELED'}};
+  await page.route('**/api/v1/dev/auto/customer/orders?*',route=>{
+    const query=new URL(route.request().url()).searchParams;calls.push(query);
+    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+      items:query.get('status')==='CANCELED'?[canceled]:[card],nextCursor:null,
+      syntheticOnly:true,releaseAllowed:false})});
+  });
+  await page.route('**/api/v1/dev/auto/customer/orders/'+order,r=>r.fulfill({
+    status:200,contentType:'application/json',body:JSON.stringify(detail())}));
+  await page.route('**/api/v1/dev/auto/customer/orders/export?*',route=>{
+    const q=new URL(route.request().url()).searchParams;
+    expect(q.get('status')).toBe('CANCELED');
+    expect(q.get('search')).toBe('Synthetic');
+    expect(q.get('fromDay')).toBe('2030-01-01');
+    expect(q.get('toDay')).toBe('2030-01-31');
+    return route.fulfill(denied?{status:403,body:'{}'}:{status:200,contentType:'text/csv',
+      body:'"orderId","appointmentStatus"\r\n"'+order+'","CANCELED"\r\n'});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/account/auto-orders');
+  await page.getByRole('button',{name:'Подробнее о заказе '+order}).click();
+  await expect(page.getByText('Версия 1: 12500 коп. (RUB)')).toBeVisible();
+  await page.getByLabel('Марка или модель').fill('Synthetic');
+  await page.getByLabel('Состояние записи').selectOption('CANCELED');
+  await page.getByLabel('Дата записи с',{exact:true}).fill('2030-01-01');
+  await page.getByLabel('Дата записи по',{exact:true}).fill('2030-01-31');
+  await page.getByRole('button',{name:'Применить фильтры'}).click();
+  await expect(page.getByText('Запись отменена',{exact:false})).toBeVisible();
+  await expect(page.getByText('Версия 1: 12500 коп. (RUB)')).toHaveCount(0);
+  expect(calls.at(-1)?.get('status')).toBe('CANCELED');
+  expect(calls.at(-1)?.get('search')).toBe('Synthetic');
+  expect(calls.at(-1)?.has('cursor')).toBe(false);
+  const downloaded=page.waitForEvent('download');
+  await page.getByRole('button',{name:'Скачать историю (CSV)'}).click();
+  expect((await downloaded).suggestedFilename()).toBe('auto-customer-orders-dev.csv');
+  denied=true;
+  await page.getByRole('button',{name:'Скачать историю (CSV)'}).click();
+  await expect(page.getByText('Доступ к заказ-нарядам запрещён',{exact:false})).toBeVisible();
+  await expect(page.getByText('Synthetic Sedan',{exact:true})).toHaveCount(0);
+});

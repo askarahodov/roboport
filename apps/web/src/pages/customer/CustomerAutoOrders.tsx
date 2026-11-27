@@ -1,9 +1,10 @@
 import React from 'react';
+import {Link,useLocation} from 'react-router-dom';
 import {ServiceSurvey} from '../shared/ServiceSurvey';
 import {AutoServiceRecommendations} from '../shared/AutoServiceRecommendations';
 
-import {parseCustomerOrderPage,parseCustomerOrderDetail,parseCustomerQuoteReceipt} from '../../shared/api/autoCustomerOrdersDevClient';
-import type {Card,Detail,Reason} from '../../shared/api/autoCustomerOrdersDevClient';
+import {parseCustomerOrderPage,parseCustomerOrderDetail,parseCustomerQuoteReceipt,emptyOrderFilters,orderFilterParams,validOrderFilters} from '../../shared/api/autoCustomerOrdersDevClient';
+import type {Card,Detail,Reason,OrderFilters} from '../../shared/api/autoCustomerOrdersDevClient';
 
 type Pending={path:string;body:string};
 type Status='loading'|'ready'|'denied'|'error';
@@ -18,10 +19,28 @@ function date(t:string){
 }
 
 export function CustomerAutoOrders(){
+  const location=useLocation();
+  const selected=new URLSearchParams(location.search).getAll('vehicleId');
+  if(selected.length>1||(selected.length===1&&(!selected[0]||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selected[0])))){
+    return <section aria-label="Мои автомобильные заказ-наряды"><p role="alert">Некорректный выбор автомобиля.</p>
+      <Link to="/account/auto-orders">Открыть все свои заказ-наряды</Link></section>;
+  }
+  const vehicleId=selected[0]?.toLowerCase()??'';
+  return <CustomerAutoOrdersView key={vehicleId} vehicleId={vehicleId}/>;
+}
+
+function CustomerAutoOrdersView({vehicleId}:{vehicleId:string}){
   const [items,setItems]=React.useState<Card[]>([]);
   const [status,setStatus]=React.useState<Status>('loading');
   const [pages,setPages]=React.useState(1),[refresh,setRefresh]=React.useState(0);
   const [more,setMore]=React.useState(false);
+  const [draft,setDraft]=React.useState<OrderFilters>(()=>({...emptyOrderFilters,vehicleId}));
+  const [filters,setFilters]=React.useState<OrderFilters>(()=>({...emptyOrderFilters,vehicleId}));
+  const [filterError,setFilterError]=React.useState('');
+  const [exporting,setExporting]=React.useState(false);
+  const [exportError,setExportError]=React.useState('');
+  const exportAbort=React.useRef<AbortController|null>(null);
   const [selected,setSelected]=React.useState<string|null>(null);
   const [detail,setDetail]=React.useState<Detail|null>(null);
   const [detailStatus,setDetailStatus]=React.useState<Status>('loading');
@@ -31,16 +50,17 @@ export function CustomerAutoOrders(){
   const generation=React.useRef(0);
   const listAbort=React.useRef<AbortController|null>(null);
   const detailAbort=React.useRef<AbortController|null>(null);
-  function invalidate(){generation.current++;listAbort.current?.abort();detailAbort.current?.abort();}
+  function invalidate(){generation.current++;listAbort.current?.abort();detailAbort.current?.abort();exportAbort.current?.abort();exportAbort.current=null;}
   function deny(){
     invalidate();setItems([]);setMore(false);setSelected(null);setDetail(null);
-    setPending(null);setMessage('');setBusy(false);setStatus('denied');setDetailStatus('denied');
+    setPending(null);setMessage('');setBusy(false);setExporting(false);setExportError('');setStatus('denied');setDetailStatus('denied');
   }
   React.useEffect(()=>()=>{invalidate();},[]);
   React.useEffect(()=>{
     const controller=new AbortController();
     listAbort.current=controller;const epoch=++generation.current;
     detailAbort.current?.abort();setDetail(null);
+    setExporting(false);setExportError('');
     setStatus('loading');setItems([]);setMore(false);setPending(null);
     void (async()=>{
       try{
@@ -49,15 +69,17 @@ export function CustomerAutoOrders(){
         let hasNext=false;
         const cursors=new Set<string>();
         for(let i=0;i<pages;i++){
-          const url='/api/v1/dev/auto/customer/orders?limit='+SIZE+
-            (cursor?'&cursor='+encodeURIComponent(cursor):'');
+          const query=orderFilterParams(filters);
+          query.set('limit',String(SIZE));
+          if(cursor)query.set('cursor',cursor);
+          const url='/api/v1/dev/auto/customer/orders?'+query.toString();
           const res=await fetch(url,{credentials:'include',cache:'no-store',
             signal:controller.signal});
           if(controller.signal.aborted||epoch!==generation.current)return;
           if([401,403,404].includes(res.status)){deny();return;}
           if(!res.ok)throw Error('http');
           const data=parseCustomerOrderPage(await res.json(),SIZE);
-          if(controller.signal.aborted)return;
+          if(controller.signal.aborted||epoch!==generation.current)return;
           for(const item of data.items){
             if(!result.some(x=>x.id===item.id))result.push(item);
           }
@@ -66,7 +88,7 @@ export function CustomerAutoOrders(){
           if(cursors.has(cursor)||data.items.length===0)throw Error('cursor');
           cursors.add(cursor);
         }
-        if(controller.signal.aborted)return;
+        if(controller.signal.aborted||epoch!==generation.current)return;
         setItems(result);setMore(hasNext);setStatus('ready');
         setSelected(previous=>previous&&!result.some(x=>x.id===previous)?null:previous);
       }catch{
@@ -74,7 +96,7 @@ export function CustomerAutoOrders(){
       }
     })();
     return ()=>controller.abort();
-  },[pages,refresh]);
+  },[pages,refresh,filters]);
 
   React.useEffect(()=>{
     setDetail(null);setPending(null);
@@ -167,16 +189,72 @@ export function CustomerAutoOrders(){
   function update(){
     invalidate();setStatus('loading');setMessage('');setPages(1);setRefresh(n=>n+1);
   }
+  function applyFilters(value:OrderFilters){
+    if(busy||pending)return;
+    if(!validOrderFilters(value)){setFilterError('Проверьте период и строку поиска.');return;}
+    setFilterError('');setSelected(null);setDetail(null);setItems([]);setMore(false);
+    setFilters({...value,search:value.search.trim()});update();
+  }
+  async function exportHistory(){
+    if(status!=='ready'||busy||pending||exportAbort.current)return;
+    const controller=new AbortController(),epoch=generation.current;
+    exportAbort.current=controller;setExporting(true);setExportError('');
+    const current=()=>!controller.signal.aborted&&epoch===generation.current&&exportAbort.current===controller;
+    try{
+      const query=orderFilterParams(filters);
+      const response=await fetch('/api/v1/dev/auto/customer/orders/export?'+query.toString(),{
+        credentials:'include',cache:'no-store',signal:controller.signal,
+      });
+      if(!current())return;
+      if([401,403,404].includes(response.status)){deny();return;}
+      if(response.status===409){setExportError('Более 500 заказов. Уточните фильтры для выгрузки.');return;}
+      if(!response.ok||!response.headers.get('content-type')?.toLowerCase().startsWith('text/csv'))
+        throw Error('export');
+      const blob=await response.blob();
+      if(!current())return;
+      if(blob.size===0||blob.size>2_000_000)throw Error('size');
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');link.href=url;link.download='auto-customer-orders-dev.csv';
+      document.body.appendChild(link);
+      try{link.click();}finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),0);}
+    }catch{
+      if(current())setExportError('Не удалось скачать историю. Проверьте доступ и повторите.');
+    }finally{
+      if(exportAbort.current===controller){exportAbort.current=null;setExporting(false);}
+    }
+  }
   return <section aria-label="Мои автомобильные заказ-наряды">
     <h3>История автомобильного обслуживания</h3>
     <p>Только синтетический стенд. История привязана к заказчику конкретного
       наряда, а не ко всем владельцам автомобиля. Реальной оплаты и выдачи нет.</p>
     <p><a href="/docs/#/guides/client.md">Инструкция по заказ-нарядам и сметам</a></p>
+    {vehicleId&&<p>История выбранного автомобиля. <Link to="/account/auto-orders">Все мои автомобили и заказ-наряды</Link></p>}
+    <form aria-label="Фильтры истории заказов" onSubmit={event=>{event.preventDefault();applyFilters(draft);}}>
+      <fieldset disabled={busy||!!pending||status==='denied'}>
+        <legend>Найти свои заказ-наряды</legend>
+        <label>Марка или модель <input value={draft.search} maxLength={64}
+          onChange={e=>setDraft({...draft,search:e.target.value})}/></label>
+        <label>Состояние записи <select value={draft.status}
+          onChange={e=>setDraft({...draft,status:e.target.value as OrderFilters['status']})}>
+          <option value="ALL">Все</option><option value="SCHEDULED">Действующие</option>
+          <option value="CANCELED">Отменённые</option>
+        </select></label>
+        <label>Дата записи с <input type="date" value={draft.fromDay}
+          onChange={e=>setDraft({...draft,fromDay:e.target.value})}/></label>
+        <label>Дата записи по <input type="date" value={draft.toDay}
+          onChange={e=>setDraft({...draft,toDay:e.target.value})}/></label>
+        <p>Даты включительно, по местному времени каждого филиала. Не вводите VIN или персональные данные.</p>
+        <button type="submit">Применить фильтры</button>
+        <button type="button" onClick={()=>{const reset={...emptyOrderFilters,vehicleId};setDraft(reset);applyFilters(reset);}}>Сбросить фильтры</button>
+      </fieldset>
+    </form>
+    {filterError&&<p role="alert">{filterError}</p>}
     {status==='loading'&&<p role="status">Загрузка собственных заказ-нарядов…</p>}
     {status==='denied'&&<p role="alert">Доступ к заказ-нарядам запрещён или сессия завершена. <span>Карточка недоступна: доступ мог быть отозван.</span></p>}
     {status==='error'&&<p role="alert">Не удалось загрузить заказы. Попробуйте ещё раз.</p>}
     {status==='ready'&&<>
-      {items.length===0?<p>Заказ-нарядов с подтверждённой связью пока нет.</p>:
+      <p role="status">Найдено на загруженных страницах: {items.length}</p>
+      {items.length===0?<p>{orderFilterParams(filters).size?'По выбранным фильтрам заказов нет.':'Заказ-нарядов с подтверждённой связью пока нет.'}</p>:
         <ul className="account-records">{items.map(item=><li key={item.id} className="account-record">
           <strong>{item.vehicle.make} {item.vehicle.model}</strong>
           <span>{date(item.appointment.startsAt)} ·
@@ -188,6 +266,9 @@ export function CustomerAutoOrders(){
               setSelected(selected===item.id?null:item.id);
             }}>{selected===item.id?'Скрыть заказ':'Подробнее о заказе'}</button>
         </li>)}</ul>}
+      <button type="button" disabled={exporting||busy||!!pending} onClick={()=>void exportHistory()}>
+        {exporting?'Подготовка CSV…':'Скачать историю (CSV)'}</button>
+      {exportError&&<p role="alert">{exportError}</p>}
       {more&&<button type="button" disabled={busy||!!pending} onClick={()=>{invalidate();setStatus('loading');setPages(p=>p+1);}}>
         Показать ещё заказ-наряды</button>}
     </>}
@@ -263,7 +344,9 @@ export function CustomerAutoOrders(){
         <h4>Документы</h4>
         {detail.document?<p>Технический пакет: {detail.document.id}.
           SHA-256: <code>{detail.document.sha256}</code>.
-          Не является актом выдачи или фискальным чеком.</p>:
+          Не является актом выдачи или фискальным чеком. <a href={'/account/auto-demo-close?'+new URLSearchParams({
+            org:detail.organizationId,loc:detail.locationId,order:detail.id}).toString()}>
+            Открыть технические документы заказа (dev)</a></p>:
           <p>Технический пакет пока не подготовлен.</p>}
         <p>Выдача автомобиля и реальные платежи недоступны. Юридическая
           и security-приёмка не завершены.</p>
