@@ -7,7 +7,7 @@ from uuid import UUID
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError, Field
+from pydantic import BaseModel, ConfigDict, ValidationError, Field, StrictInt
 
 from .auth_http import _mutation_ok
 from .auto_create_idempotency import validated_key, AutoIdempotencyConflict
@@ -227,3 +227,85 @@ def revoke(link_id: str, request: Request):
         except VehicleClaimRejected:
             return _response(request, 403, "FORBIDDEN")
     return JSONResponse(content={"status": status}, headers={"Cache-Control": "no-store"})
+
+
+# Закрытая регистрация: новый VIN или отсутствие VIN, никогда поиск по чужому VIN.
+class RegistrationFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    locationId: UUID
+    make: str = Field(min_length=1,max_length=100)
+    model: str = Field(min_length=1,max_length=120)
+    variant: str | None = Field(default=None,min_length=1,max_length=160)
+    modelYear: StrictInt | None = Field(default=None,ge=1886,le=2100)
+
+
+class RegistrationCreate(RegistrationFields):
+    customerId: UUID
+    vin: str | None = Field(default=None,pattern=r"^[A-HJ-NPR-Z0-9]{17}$")
+
+
+class RegistrationEdit(RegistrationFields):
+    expectedRevision: StrictInt = Field(ge=1,lt=1000000)
+
+
+async def _registration_mutation(org_id,request,vehicle_id=None):
+    from .auto_vehicle_registration import register_vehicle,edit_vehicle,RegistrationDenied,RegistrationConflict
+    config=_request_dsn(request)
+    if isinstance(config,JSONResponse):
+        return config
+    try:
+        org=UUID(org_id)
+        vehicle=UUID(vehicle_id) if vehicle_id is not None else None
+        data=(RegistrationCreate if vehicle is None else RegistrationEdit).model_validate(await request.json())
+        key=UUID(request.headers["Idempotency-Key"])
+    except (ValueError,ValidationError,TypeError,UnicodeDecodeError,KeyError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(config) as db:
+        if not _mutation_ok(request,db):
+            return _response(request,403,"FORBIDDEN")
+        token=request.cookies.get("rp_session","")
+        fields=dict(make=data.make,model=data.model,variant=data.variant,year=data.modelYear)
+        try:
+            if vehicle is None:
+                result=register_vehicle(db,token,org,data.locationId,data.customerId,key,vin=data.vin,**fields)
+            else:
+                result=edit_vehicle(db,token,org,data.locationId,vehicle,key,
+                                    expected_revision=data.expectedRevision,**fields)
+        except ValueError:
+            return _response(request,422,"INVALID_INPUT")
+        except RegistrationDenied:
+            return _response(request,403,"FORBIDDEN")
+        except RegistrationConflict:
+            return _response(request,409,"CONFLICT")
+    return JSONResponse(status_code=201 if vehicle is None else 200,content=result,
+                        headers={"Cache-Control":"no-store"})
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/vehicle-registrations")
+async def create_vehicle_registration(org_id:str,request:Request):
+    return await _registration_mutation(org_id,request)
+
+
+@router.post("/api/v1/dev/auto/organizations/{org_id}/vehicle-registrations/{vehicle_id}/revisions")
+async def revise_vehicle_registration(org_id:str,vehicle_id:str,request:Request):
+    return await _registration_mutation(org_id,request,vehicle_id)
+
+
+@router.get("/api/v1/dev/auto/organizations/{org_id}/vehicle-registrations/{vehicle_id}")
+def read_vehicle_registration(org_id:str,vehicle_id:str,request:Request):
+    from .auto_vehicle_registration import registration_details,RegistrationDenied
+    config=_request_dsn(request)
+    if isinstance(config,JSONResponse):
+        return config
+    try:
+        if set(request.query_params.keys())!={"locationId"} or len(request.query_params.getlist("locationId"))!=1:
+            raise ValueError("invalid scope")
+        org,vehicle,loc=UUID(org_id),UUID(vehicle_id),UUID(request.query_params["locationId"])
+    except (ValueError,TypeError,KeyError):
+        return _response(request,422,"INVALID_INPUT")
+    with psycopg.connect(config) as db:
+        try:
+            result=registration_details(db,request.cookies.get("rp_session",""),org,loc,vehicle)
+        except RegistrationDenied:
+            return _response(request,403,"FORBIDDEN")
+    return JSONResponse(content=result,headers={"Cache-Control":"no-store"})

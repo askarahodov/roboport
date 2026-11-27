@@ -1000,3 +1000,46 @@ test('приёмщик находит ресурсы и комплекс, соз
     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   }
 });
+
+
+test('opening hours abandons stale CSRF before mutation after branch change',async({page})=>{
+  const otherLoc='77777777-7777-4777-8777-777777777777';
+  let csrfStarted=false;
+  let release!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  const posts:string[]=[];
+  await page.route('**/api/v1/auth/csrf',async route=>{
+    csrfStarted=true;
+    await held;
+    await route.fulfill({status:200,contentType:'application/json',
+      body:'{"csrfToken":"synthetic-csrf"}'}).catch(()=>{});
+  });
+  await page.route(base,route=>{
+    const req=route.request(),url=new URL(req.url());
+    if(url.pathname.endsWith('/opening-hours')){
+      if(req.method()==='POST')posts.push(url.pathname);
+      return route.fulfill({status:200,contentType:'application/json',
+        body:JSON.stringify({configured:true,version:url.pathname.includes(otherLoc)?2:1,
+          timeZone:'Europe/Berlin',windows:[],closedDates:[],syntheticOnly:true})});
+    }
+    return route.fulfill({status:200,contentType:'application/json',body:'{"items":[],"hasMore":false}'});
+  });
+  await page.goto('/staff/auto-calendar');
+  await page.getByLabel('UUID организации').fill(org);
+  await page.getByLabel('UUID филиала').fill(loc);
+  const editor=page.getByRole('group',{name:'График работы филиала (dev)'});
+  await expect(editor.getByText(/Версия 1;/)).toBeVisible();
+  await editor.getByRole('button',{name:'Сохранить график филиала'}).click();
+  await expect.poll(()=>csrfStarted).toBe(true);
+  try{
+    await page.getByLabel('UUID филиала').fill(otherLoc);
+    await expect(editor.getByText(/Версия 2;/)).toBeVisible();
+    await expect(editor.getByRole('button',{name:'Сохранить график филиала'})).toBeEnabled();
+    await page.getByLabel('UUID филиала').fill(loc);
+    await expect(editor.getByText(/Версия 1;/)).toBeVisible();
+  }finally{release();}
+  // Следующий reload и обработка сети не должны применить старый ответ к A→B→A.
+  await editor.getByRole('button',{name:'Перезагрузить график'}).click();
+  await expect(editor.getByText(/Версия 1;/)).toBeVisible();
+  expect(posts).toEqual([]);
+});

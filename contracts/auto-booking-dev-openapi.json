@@ -2299,6 +2299,244 @@
           }
         }
       }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/opening-hours": {
+      "get": {
+        "operationId": "readBranchOpeningHours",
+        "summary": "Чтение графика филиала",
+        "description": "INTAKE или MANAGER с действующим филиальным scope. configured=false не означает production 24/7.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "loc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Текущая версия и IANA зона",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningState"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Недействующая сессия, роль или чужой филиал",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Выключенный синтетический API",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректные параметры",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateBranchOpeningHours",
+        "summary": "Сохранить график с ожидаемой версией",
+        "description": "Только MANAGER, CSRF и live scope. Сервер проверяет непересечение окон, opensMinute < closesMinute, действительные даты и отсутствие конфликта с будущими бронями. Повтор старой версии не является идемпотентным успехом.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "loc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpeningUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Новая версия и канонический график; зона читается отдельным GET",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningSaved"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Недействующая сессия, роль или чужой филиал",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Выключенный синтетический API",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "OPENING_POLICY_CONFLICT: устаревшая версия или активная бронь",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Некорректные параметры",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3328,6 +3566,189 @@
             }
           }
         }
+      },
+      "OpeningWindow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weekday": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          },
+          "opensMinute": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1439
+          },
+          "closesMinute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          }
+        },
+        "required": [
+          "weekday",
+          "opensMinute",
+          "closesMinute"
+        ]
+      },
+      "OpeningUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpeningWindow"
+            },
+            "maxItems": 28,
+            "uniqueItems": true
+          },
+          "closedDates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "maxItems": 120,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "windows"
+        ]
+      },
+      "OpeningState": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpeningWindow"
+            },
+            "maxItems": 28,
+            "uniqueItems": true
+          },
+          "closedDates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "maxItems": 120,
+            "uniqueItems": true
+          },
+          "syntheticOnly": {
+            "type": "boolean",
+            "const": true
+          },
+          "timeZone": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "configured",
+          "version",
+          "windows",
+          "closedDates",
+          "syntheticOnly",
+          "timeZone"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "configured": {
+                  "const": false
+                }
+              },
+              "required": [
+                "configured"
+              ]
+            },
+            "then": {
+              "properties": {
+                "version": {
+                  "const": 0
+                },
+                "windows": {
+                  "maxItems": 0
+                },
+                "closedDates": {
+                  "maxItems": 0
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "version": {
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "OpeningSaved": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "const": true
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpeningWindow"
+            },
+            "maxItems": 28,
+            "uniqueItems": true
+          },
+          "closedDates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "maxItems": 120,
+            "uniqueItems": true
+          },
+          "syntheticOnly": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "configured",
+          "version",
+          "windows",
+          "closedDates",
+          "syntheticOnly"
+        ]
       }
     }
   }

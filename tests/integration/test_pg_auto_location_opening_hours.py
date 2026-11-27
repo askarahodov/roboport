@@ -1,17 +1,32 @@
 """PG17/HTTP: scoped opening hours, DST, closed dates and atomic booking guards."""
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from datetime import datetime, timedelta, timezone, date, time
+import json
+from pathlib import Path
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
 
-from roboport_api.auto_opening_hours import set_opening
+from roboport_api.auto_opening_hours import set_opening, OpeningConflict
 from test_pg_auto_customer_booking_http import _setup, _auth, ROOT
 from test_pg_auto_stock_service import grant
 from test_pg_baseline import DSN
 
 ZONE=ZoneInfo("Europe/Berlin")
+
+
+def _contract(response, name, status):
+    from jsonschema import Draft202012Validator, FormatChecker
+    spec=json.loads((Path(__file__).resolve().parents[2] /
+                     "contracts/auto-booking-dev-openapi.json").read_text(encoding="utf-8"))
+    assert response.status_code==status,response.text
+    assert response.headers["cache-control"]=="no-store"
+    Draft202012Validator({**spec,"$ref":"#/components/schemas/"+name},
+                         format_checker=FormatChecker()).validate(response.json())
+
 
 
 def _ready(monkeypatch):
@@ -43,7 +58,7 @@ def test_manager_configures_branch_and_both_slot_flows_enforce_it(monkeypatch):
     assert http.get(path).status_code==403
     staff=_auth(http,d,d["intake"])
     unconfigured=http.get(path)
-    assert unconfigured.status_code==200,unconfigured.text
+    _contract(unconfigured,"OpeningState",200)
     assert unconfigured.json()["configured"] is False
     assert unconfigured.json()["version"]==0
     assert unconfigured.json()["timeZone"]=="Europe/Berlin"
@@ -55,9 +70,10 @@ def test_manager_configures_branch_and_both_slot_flows_enforce_it(monkeypatch):
     response=http.post(path,json={
         "expectedVersion":0,"windows":_weekly(),"closedDates":[],
     },headers=manager)
-    assert response.status_code==200,response.text
+    _contract(response,"OpeningSaved",200)
     assert response.json()["version"]==1
     assert response.json()["configured"] is True
+    _contract(http.get(path),"OpeningState",200)
     assert response.headers["cache-control"]=="no-store"
     with psycopg.connect(DSN) as db:
         assert db.execute(
@@ -191,7 +207,7 @@ def test_policy_update_is_optimistic_audited_and_cannot_strand_future_bookings(m
     lost=http.post(path,json={
         "expectedVersion":0,"windows":_weekly(),"closedDates":[],
     },headers=manager)
-    assert lost.status_code==409,lost.text
+    _contract(lost,"Error",409)
     assert lost.json()["code"]=="OPENING_POLICY_CONFLICT"
     conflicting=http.post(path,json={
         "expectedVersion":1,"windows":_weekly(),"closedDates":[day.isoformat()],
@@ -238,7 +254,7 @@ def test_invalid_windows_dates_and_cross_tenant_scope(monkeypatch):
     ]
     for body in samples:
         denied=http.post(path,json=body,headers=manager)
-        assert denied.status_code==422,(body,denied.text)
+        _contract(denied,"Error",422)
     assert http.get(path).json()["configured"] is False
     assert http.post(path.replace(str(loc),str(uuid4())),
                      json=good,headers=manager).status_code==403
@@ -302,3 +318,25 @@ def test_dst_fall_back_does_not_allow_hidden_out_of_hours_middle():
         assert allows(120,135,autumn_start,autumn_end) is False
         assert allows(60,240,autumn_start,autumn_end) is True
         assert allows(60,240,spring_start,spring_end) is True
+
+
+def test_concurrent_opening_writers_one_version_and_no_deadlock(monkeypatch):
+    d,org,loc,bay,foreign,http,path=_ready(monkeypatch)
+    barrier=Barrier(2)
+    def attempt(start):
+        barrier.wait(timeout=15)
+        try:
+            with psycopg.connect(DSN) as db:
+                set_opening(db,d["tokens"][d["manager"]],org,loc,0,
+                            _weekly(start=start),[])
+            return "SAVED"
+        except OpeningConflict:
+            return "CONFLICT"
+    # DeadlockDetected не перехватываем: конфликт обязан быть версионным.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(attempt,[540,600]))==["CONFLICT","SAVED"]
+    with psycopg.connect(DSN) as db:
+        assert db.execute("SELECT version FROM auto_location_opening_policy WHERE location_id=%s",
+                          (loc,)).fetchone()==(1,)
+        assert db.execute("SELECT count(*) FROM auto_location_opening_history WHERE location_id=%s",
+                          (loc,)).fetchone()==(1,)

@@ -1,0 +1,493 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "БоксРитм — регистрация автомобиля в филиале (dev)",
+    "version": "0.1.0-dev",
+    "description": "Только синтетический HTTPS loopback. Не публичный API. Реальные VIN/ПДн и production запрещены до #119."
+  },
+  "x-synthetic-only": true,
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ],
+  "paths": {
+    "/api/v1/dev/auto/organizations/{org_id}/vehicle-registrations": {
+      "post": {
+        "operationId": "registerVehicleDev",
+        "summary": "Создать автомобиль и ожидающую связь",
+        "description": "Действующий INTAKE в филиале. Активный клиент, новая карточка, неизменяемый филиал и pending-связь; VIN не используется как право доступа. Trim и запрет C0. Generic conflict без сведений о старой карточке.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Create"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Только актуальный авторизованный результат",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующей сессии, роли, scope, клиента или CSRF"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "409": {
+            "description": "Конфликт VIN, версии, запроса или состояния связи"
+          },
+          "422": {
+            "description": "Неверные параметры"
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/vehicle-registrations/{vehicle_id}": {
+      "get": {
+        "operationId": "readVehicleRegistrationDev",
+        "summary": "Прочитать зарегистрированную карточку",
+        "description": "Только действующий INTAKE указанного филиала. Не возвращает полный VIN, клиентские данные или доказательство.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "vehicle_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Версия и допустимость редактирования",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Details"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующей сессии, роли, scope, клиента или CSRF"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "422": {
+            "description": "Неверные параметры"
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/vehicle-registrations/{vehicle_id}/revisions": {
+      "post": {
+        "operationId": "reviseVehicleRegistrationDev",
+        "summary": "Записать новую версию описания",
+        "description": "До выдачи proof, единственная активная pending-связь, актуальная expectedRevision. Не меняет VIN, филиал или клиента.",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "vehicle_id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Edit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Только актуальный авторизованный результат",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Нет действующей сессии, роли, scope, клиента или CSRF"
+          },
+          "404": {
+            "description": "Dev API выключен"
+          },
+          "409": {
+            "description": "Конфликт VIN, версии, запроса или состояния связи"
+          },
+          "422": {
+            "description": "Неверные параметры"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    },
+    "schemas": {
+      "Create": {
+        "type": "object",
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "make": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "modelYear": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1886,
+                "maximum": 2100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-HJ-NPR-Z0-9]{17}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "locationId",
+          "make",
+          "model",
+          "customerId"
+        ],
+        "additionalProperties": false
+      },
+      "Edit": {
+        "type": "object",
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "make": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "modelYear": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1886,
+                "maximum": 2100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 999999
+          }
+        },
+        "required": [
+          "locationId",
+          "make",
+          "model",
+          "expectedRevision"
+        ],
+        "additionalProperties": false
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "vehicleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "linkId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "status": {
+            "const": "PENDING"
+          }
+        },
+        "required": [
+          "vehicleId",
+          "linkId",
+          "revision",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Details": {
+        "type": "object",
+        "properties": {
+          "vehicleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "make": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "modelYear": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1886,
+                "maximum": 2100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vinLast4": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-HJ-NPR-Z0-9]{4}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "editable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "vehicleId",
+          "revision",
+          "make",
+          "model",
+          "variant",
+          "modelYear",
+          "vinLast4",
+          "editable"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
