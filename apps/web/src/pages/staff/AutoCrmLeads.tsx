@@ -4,6 +4,7 @@ import {ServiceSurvey} from '../shared/ServiceSurvey';
 import { StaffCrmMockMessages } from './StaffCrmMockMessages';
 import {CrmDealCard} from './CrmDealCard';
 import {CrmInteractions} from './CrmInteractions';
+import {CrmTimeline} from './CrmTimeline';
 import {CrmLeadSearch} from './CrmLeadSearch';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -480,6 +481,8 @@ export function AutoCrmLeads(){
           Создать повторное обращение</button>}
         <CrmDealCard key={'deal:'+scope+':'+selected} base={base} leadId={selected}/>
         <CrmInteractions key={'interactions:'+scope+':'+selected} base={base} leadId={selected}/>
+        <CrmTimeline key={'timeline:'+scope+':'+selected} base={base} leadId={selected}
+          onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);setStatus('denied');}}/>
         <StaffCrmContactPreferences key={scope+':'+selected} base={base} leadId={selected}
           onDenied={()=>{setRows([]);setSelected('');setInbox([]);setTasks([]);
             setStatus('denied');}}/>

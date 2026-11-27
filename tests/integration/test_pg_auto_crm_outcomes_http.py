@@ -254,7 +254,15 @@ def test_deal_card_links_real_visit_and_two_independent_ledgers_with_live_acl(mo
         payment_id=paid["eventId"]
     endpoint=leads_url(org,loc)+"/"+str(ident)+"/deal"
     assert http.get(endpoint).status_code==403
-    session(http,d,d["intake"])
+    manager_headers=session(http,d,d["intake"])
+    lead_url=endpoint.removesuffix("/deal")
+    contact_payload={"requestKey":str(uuid4()),"channelCode":"CALL","outcomeCode":"CALLBACK_REQUIRED",
+                     "callbackDueAt":(datetime.now(timezone.utc)+timedelta(days=2)).isoformat(),
+                     "expectedActorId":str(d["intake"])}
+    contact=http.post(lead_url+"/interactions",headers=manager_headers,json=contact_payload)
+    assert contact.status_code==201,contact.text
+    interaction=contact.json()["item"]
+    assert http.post(lead_url+"/interactions",headers=manager_headers,json=contact_payload).json()["replayed"]
     initial=http.get(endpoint)
     assert initial.status_code==200,initial.text
     assert initial.json()["lineage"]=="NOT_BOOKED" and initial.json()["finance"] is None
@@ -280,6 +288,43 @@ def test_deal_card_links_real_visit_and_two_independent_ledgers_with_live_acl(mo
     assert f["treasury"]["settledMinor"]=="1700" and f["treasury"]["dueMinor"]=="800"
     assert f["treasury"]["events"][0]["id"]==payment_id
     assert "Синтетический расчёт" not in response.text and "accountId" not in response.text
+    # Продолжение одной сделки: закрытый наряд, опрос, новый цикл и прежний аудит.
+    from roboport_api.auto_crm_followups import resolve_followup
+    with psycopg.connect(DSN) as db:
+        resolve_followup(db,d["tokens"][d["intake"]],org,loc,ident,
+                         UUID(interaction["callbackTaskId"]),uuid4(),"DONE")
+    invited=http.post(lead_url+"/survey",headers=manager_headers,
+                      json={"requestKey":str(uuid4()),"action":"INVITE"})
+    assert invited.status_code==201,invited.text
+    client_headers=session(http,d,d["client_a"])
+    customer=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/orders/{order}/survey/customer"
+    answer={"requestKey":str(uuid4()),"rating":4,"reasonCode":"TIMING"}
+    answered=http.post(customer,headers=client_headers,json=answer)
+    assert answered.status_code==201,answered.text
+    assert http.post(customer,headers=client_headers,json=answer).json()["replayed"] is True
+    manager_headers=session(http,d,d["intake"])
+    assert http.get(lead_url+"/survey").json()["survey"]["status"]=="ANSWERED"
+    history=http.get(lead_url+"/timeline")
+    assert history.status_code==200,history.text
+    events=history.json()["items"]
+    assert len(events)==6
+    assert {e["code"] for e in events}=={"WEB","QUALIFIED","BOOKED","CALLBACK_REQUIRED","CALL_BACK","DONE"}
+    repeat_payload={"customerLinkId":str(d["link"]),"sourceCode":"WEB","requestKey":str(uuid4())}
+    repeated=http.post(leads_url(org,loc),headers=manager_headers,json=repeat_payload)
+    assert repeated.status_code==201,repeated.text
+    repeat=repeated.json()
+    assert repeat["visitNumber"]==2 and repeat["status"]=="NEW"
+    assert http.post(leads_url(org,loc),headers=manager_headers,json=repeat_payload).json()["leadId"]==repeat["leadId"]
+    fresh=http.get(leads_url(org,loc)+"/"+repeat["leadId"]+"/timeline").json()
+    assert len(fresh["items"])==1 and fresh["items"][0]["kind"]=="CREATED"
+    assert http.get(lead_url+"/timeline").json()==history.json()
+    assert http.get(endpoint).json()==original
+    register=leads_url(org,loc).replace("/leads","/lead-search")+"/export"
+    exported=http.get(register,params={"customerLinkId":str(d["link"])})
+    assert exported.status_code==200,exported.text
+    assert exported.headers["x-crm-row-count"]=="2"
+    assert {row["leadId"]:row["status"] for row in csv.DictReader(StringIO(exported.content.decode("utf-8-sig")))}=={
+        str(ident):"BOOKED",repeat["leadId"]:"NEW"}
     assert str(d["ca"]) not in response.text and str(d["client_a"]) not in response.text
     def policy(document,cap,allowed,cutoff=None):
         owner=session(http,d,d["other"])
@@ -319,3 +364,5 @@ def test_deal_card_links_real_visit_and_two_independent_ledgers_with_live_acl(mo
     with psycopg.connect(DSN) as db:
         db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
     assert http.get(endpoint).status_code==403
+    assert http.get(lead_url+"/timeline").status_code==403
+    assert http.get(register,params={"customerLinkId":str(d["link"])}).headers["x-crm-row-count"]=="0"

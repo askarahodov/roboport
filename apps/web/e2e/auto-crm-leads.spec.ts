@@ -656,3 +656,71 @@ test('search finds a lead outside the current journal page and rechecks detail',
   await expect(panel).toHaveCount(0);
   expect(detailReads).toBe(2);
 });
+
+
+test('CRM owner and period export validates digest and revocation',async({page})=>{
+  const {createHash}=await import('node:crypto');
+  const bytes=Buffer.from('\ufeffleadId,customerLinkId,ownerId,sourceCode,status,createdAt,visitNumber\r\n'+
+    [lead,link,owner,'WEB','NEW','2030-01-01T10:00:00Z','1'].join(',')+'\r\n');
+  let denied=false,corrupt=true,exportReads=0;
+  // A single-star glob cannot cross the /export path separator.
+  await page.route(/\/crm\/lead-search(?:\/export)?\?/,r=>{
+    const u=new URL(r.request().url());
+    expect(u.searchParams.get('ownerId')).toBe(owner);
+    expect(u.searchParams.get('fromDay')).toBe('2030-01-01');
+    expect(u.searchParams.get('toDay')).toBe('2030-01-02');
+    if(u.pathname.endsWith('/export')){exportReads++;return r.fulfill({status:denied?403:200,body:bytes,
+      headers:{'Content-Type':'text/csv','X-CRM-SHA256':corrupt?'0'.repeat(64):createHash('sha256').update(bytes).digest('hex'),
+        'X-CRM-Row-Count':'1'}});}
+    return r.fulfill({json:{syntheticOnly:true,organizationId:org,locationId:loc,customerLinkId:null,
+      sourceCode:'ALL',stageCode:'ALL',ownerId:owner,fromDay:'2030-01-01',toDay:'2030-01-02',timeZone:'Europe/Berlin',
+      items:[{leadId:lead,customerLinkId:link,ownerId:owner,sourceCode:'WEB',status:'NEW',visitNumber:1,createdAt:'2030-01-01T10:00:00Z'}],nextCursor:null}});
+  });
+  await page.route(path,r=>r.fulfill({json:{syntheticOnly:true,items:new URL(r.request().url()).pathname.endsWith('/crm/leads')?[item('NEW')]:[],nextCursor:null}}));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');await scope(page);
+  const panel=page.getByRole('region',{name:'Поиск обращений CRM'});
+  await panel.getByLabel('UUID ответственного').fill(owner);
+  await panel.getByLabel('Создано с',{exact:true}).fill('2030-01-01');
+  await expect(panel.getByRole('button',{name:'Найти обращения'})).toBeDisabled();
+  await panel.getByLabel('Создано по',{exact:true}).fill('2030-01-02');
+  await panel.getByRole('button',{name:'Найти обращения'}).click();
+  await expect(panel).toContainText('Europe/Berlin');
+  const button=panel.getByRole('button',{name:'Скачать все найденные обращения (CSV)'});
+  await button.click();await expect(panel).toContainText('Выгрузка не подтверждена');
+  expect(exportReads).toBe(1);
+  corrupt=false;
+  const download=page.waitForEvent('download');await button.click();
+  expect((await download).suggestedFilename()).toBe('synthetic-crm-leads.csv');
+  await expect(panel).toContainText('Выгружено обращений: 1');
+  denied=true;await button.click();
+  await expect(panel).toHaveCount(0);
+  expect(exportReads).toBe(3);
+});
+
+
+test('unified timeline displays contact and live suppression, rejects stale data',async({page})=>{
+  let denied=false,suppressed=false;
+  await page.route(path,r=>{
+    const pathname=new URL(r.request().url()).pathname;
+    if(pathname.endsWith('/timeline'))return r.fulfill({status:denied?403:200,json:{
+      syntheticOnly:true,sendAllowed:false,legalConsentVerified:false,leadId:lead,nextCursor:null,
+      items:[{kind:'MOCK',eventId:lead,actorId:owner,code:'BOOKING_REMINDER',relatedId:null,
+        channelCode:'CALL',status:suppressed?'SUPPRESSED':'MOCK_ONLY',createdAt:'2030-01-01T10:01:00Z'},
+        {kind:'INBOUND',eventId:link,actorId:owner,code:'CALLBACK_REQUIRED',relatedId:appointment,
+          channelCode:'CALL',status:null,createdAt:'2030-01-01T10:00:00Z'}]}});
+    return r.fulfill({json:{syntheticOnly:true,items:pathname.endsWith('/crm/leads')?[item('NEW')]:[],nextCursor:null}});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-crm-leads');await scope(page);
+  await page.getByLabel('Обращение',{exact:true}).selectOption(lead);
+  const panel=page.getByRole('region',{name:'Единая хронология сделки'});
+  await panel.getByRole('button',{name:'Загрузить хронологию'}).click();
+  await expect(panel).toContainText('Нужен обратный контакт');
+  await expect(panel).toContainText('Только макет');
+  suppressed=true;await panel.getByRole('button',{name:'Обновить хронологию'}).click();
+  await expect(panel).toContainText('Подавлено');
+  await expect(panel).not.toContainText('Только макет');
+  denied=true;await panel.getByRole('button',{name:'Обновить хронологию'}).click();
+  await expect(panel).toHaveCount(0);
+});

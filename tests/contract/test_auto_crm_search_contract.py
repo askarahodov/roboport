@@ -22,3 +22,28 @@ def test_search_contract_private_and_bounded():
     assert not check.is_valid({**page,"items":[row]*26})
     assert not check.is_valid({**page,"items":[{**row,"phone":"private"}]})
     assert not check.is_valid({**page,"nextCursor":"a"*257})
+
+
+def test_extended_search_export_contract():
+    export=PATH+"/export"
+    assert export not in app.openapi()["paths"]
+    assert [(r.path,m) for r in router.routes for m in r.methods if r.path==export]==[(export,"GET")]
+    op=SPEC["paths"][export]["get"]
+    assert {p["name"] for p in op["parameters"]}=={"org_id","loc_id","customerLinkId","sourceCode","stageCode","ownerId","fromDay","toDay"}
+    assert "text/csv" in op["responses"]["200"]["content"]
+
+
+def test_timeline_contract_is_private_and_has_no_payloads():
+    path=PATH.replace("/lead-search","/leads/{lead_id}/timeline")
+    assert path not in app.openapi()["paths"]
+    assert [(r.path,m) for r in router.routes for m in r.methods if r.path==path]==[(path,"GET")]
+    check=Draft202012Validator({**SPEC,"$ref":"#/components/schemas/TimelinePage"},format_checker=FormatChecker())
+    ident="11111111-1111-4111-8111-111111111111"
+    row={"kind":"MOCK","eventId":ident,"actorId":ident,"code":"BOOKING_REMINDER",
+         "relatedId":None,"createdAt":"2030-01-01T10:00:00Z","channelCode":"CALL","status":"SUPPRESSED"}
+    value={"syntheticOnly":True,"sendAllowed":False,"legalConsentVerified":False,
+           "leadId":ident,"items":[row],"nextCursor":None}
+    assert check.is_valid(value)
+    assert not check.is_valid({**value,"sendAllowed":True})
+    assert not check.is_valid({**value,"items":[{**row,"recipient":"private"}]})
+    assert not check.is_valid({**value,"items":[row]*26})
