@@ -38,3 +38,16 @@ test('main CI requires exact SHA, repository and six successful jobs; skip is no
   assert.equal(gateGreen({...run,event:'pull_request'},jobs,sha,fullName),false);
   assert.equal(gateGreen(run,jobs,merge,fullName),false);
 });
+
+
+test('one-time reviewed ancestor permits only exact repository and SHA, still honors protected/open refs',()=>{
+  const reviewed={name:'feature/issue-130-safe-vehicle-location-transfer',
+    commit:{sha:'e2f13430d91326723fe468a1224c92dbec063b96'},protected:false};
+  const opts={...options,fullName:'askarahodov/roboport',closed:[],ancestor:x=>x===reviewed.commit.sha};
+  assert.deepEqual(disposition(reviewed,opts),{reason:'DELETE_CANDIDATE',pr:null,sha:reviewed.commit.sha});
+  for(const changed of [{fullName:'fork/repo'},{ancestor:()=>false},{active:new Set([reviewed.name])}])
+    assert.notEqual(disposition(reviewed,{...opts,...changed}).reason,'DELETE_CANDIDATE');
+  assert.notEqual(disposition({...reviewed,protected:true},opts).reason,'DELETE_CANDIDATE');
+  assert.notEqual(disposition({...reviewed,commit:{sha}},opts).reason,'DELETE_CANDIDATE');
+  assert.notEqual(disposition({...reviewed,name:'feature/unreviewed'},opts).reason,'DELETE_CANDIDATE');
+});

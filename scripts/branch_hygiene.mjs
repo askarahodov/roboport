@@ -5,6 +5,17 @@ const reserved = new Set(['main','master','develop','development','staging','pro
 const shaPattern = /^[0-9a-f]{40}$/;
 const temporary = /^(feature|fix|chore|tmp)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
+// Разовое решение по инвентаризации 27.11.2026: точные refs уже в main.
+const reviewedAncestors = new Map(Object.entries({
+  "feature/issue-130-safe-vehicle-location-transfer": "e2f13430d91326723fe468a1224c92dbec063b96",
+  "feature/issue-444-crm-kanban-consent-outbox": "00010094c0ba47d3b04d239f1f32c5b75654ffae",
+  "feature/issue-448-technical-workshop-report": "87d8bcb319fc41960b32a8fd570c58d4402b22ac",
+  "feature/issue-undefined-dossier-png-validation": "dbd1250e25f12f1f096590bf898aa5c600d7f2c5",
+  "feature/issue-undefined-mechanic-offer-withdrawal": "59da77b6ad8347d88b837af7b5d3b6bf5cbd38fc",
+  "fix/issue-168-receiving-status-e2e": "6bf8f1f3c4e225f7d92814ef15bc3ae23c7ac5f1",
+  "tmp/168-serial-clean-273": "3e28386da295786b4660dd8794cb44af3185110d"
+}));
+
 export function activeRefs(open, fullName) {
   const refs = new Set();
   for (const pr of open) {
@@ -36,7 +47,13 @@ export function disposition(branch, {fullName, defaultBranch, active, closed, an
   const merged = related.find(pr => pr.merged_at && pr.base?.repo?.full_name === fullName &&
     pr.base.ref === 'main' && pr.head.sha === sha &&
     shaPattern.test(pr.merge_commit_sha ?? '') && ancestor(pr.merge_commit_sha));
-  if (!merged) return {reason:related.length ? 'NO_EXACT_MERGED_MAIN_PROOF' : 'ORPHAN_REVIEW_REQUIRED'};
+  if (!merged) {
+    // Не общий допуск orphan refs: только перечисленные SHA, которые
+    // повторно подтверждены предками актуального main при каждом запуске.
+    if (fullName === 'askarahodov/roboport' && reviewedAncestors.get(name) === sha &&
+        ancestor(sha)) return {reason:'DELETE_CANDIDATE',pr:null,sha};
+    return {reason:related.length ? 'NO_EXACT_MERGED_MAIN_PROOF' : 'ORPHAN_REVIEW_REQUIRED'};
+  }
   // A newer unmerged PR with this exact ref is evidence the branch is in reuse.
   if (related.some(pr => !pr.merged_at && pr.head.sha === sha &&
       String(pr.closed_at ?? '') >= String(merged.merged_at))) return {reason:'CLOSED_UNMERGED_REVIEW_REQUIRED'};
@@ -83,7 +100,8 @@ export async function runHygiene({github,context,core,dryRun}) {
       lines.push(name+' '+branch.commit.sha+' '+result.reason); continue;
     }
     candidates++;
-    if (auditOnly) { lines.push(name+' '+result.sha+' DRY_RUN PR #'+result.pr); continue; }
+    const evidence=result.pr===null?'REVIEWED_MAIN_ANCESTOR':'PR #'+result.pr;
+    if (auditOnly) { lines.push(name+' '+result.sha+' DRY_RUN '+evidence); continue; }
     try {
       // Recheck branch/head/base and current main immediately before the leased push.
       if (await readMain()!==main || activeRefs(await readOpen(),fullName).has(name)) {
@@ -96,7 +114,7 @@ export async function runHygiene({github,context,core,dryRun}) {
       const ref='refs/heads/'+name;
       git(['check-ref-format',ref]);
       git(['push','--force-with-lease='+ref+':'+result.sha,'origin',':'+ref]);
-      deleted++; lines.push(name+' '+result.sha+' DELETED PR #'+result.pr);
+      deleted++; lines.push(name+' '+result.sha+' DELETED '+evidence);
     } catch (error) {
       failed++; lines.push(name+' '+result.sha+' PRESERVED_DELETE_FAILED');
       core.warning('Branch deletion not confirmed (permission, lease or protection): '+name);
