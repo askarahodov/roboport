@@ -14,6 +14,22 @@ const workspace=()=>({workOrderId:order,syntheticOnly:true,realMoney:false,
 const make=(id:string,action:string)=>({evidenceId:id,
   action,createdAt:'2026-11-18T10:00:00+00:00'});
 const url='/staff/auto-order-workspace?'+new URLSearchParams({org,loc,order});
+const extendedActions={
+  "DIAGNOSTIC_RECORDED": "Записан результат диагностики",
+  "QC_REWORK_RECORDED": "Зафиксирована доработка после QC",
+  "COMPLEX_SELECTED": "Выбран комплекс работ",
+  "EXTRA_PUBLISHED": "Опубликована дополнительная смета",
+  "EXTRA_APPROVED": "Клиент согласовал дополнительные работы",
+  "EXTRA_DECLINED": "Клиент отклонил дополнительные работы",
+  "ASSIGNMENT_OFFERED": "Предложено назначение исполнителя",
+  "ASSIGNMENT_ACCEPTED": "Исполнитель принял назначение",
+  "ASSIGNMENT_DECLINED": "Исполнитель отклонил назначение",
+  "ASSIGNMENT_WITHDRAWN": "Предложение назначения отозвано",
+  "ASSIGNMENT_RELEASED": "Принятое назначение снято",
+  "RECOMMENDATION_CREATED": "Создана рекомендация по обслуживанию",
+  "RECOMMENDATION_WITHDRAWN": "Рекомендация отозвана",
+  "RECOMMENDATION_VISIT_BOOKED": "Создана запись по рекомендации"
+};
 
 test('scoped technical chronology: 390 and 1280, page navigation and dark mode',
   async({page})=>{
@@ -33,7 +49,9 @@ test('scoped technical chronology: 390 and 1280, page navigation and dark mode',
         return route.fulfill({status:200,contentType:'application/json',
           body:JSON.stringify({workOrderId:order,syntheticOnly:true,realMoney:false,
             releaseAllowed:false,items:after?[
-              make(evidence2,'ORDER_CREATED')]:[make(evidence,'QC_FAIL')],
+              make(evidence2,'ORDER_CREATED')]:[make(evidence,'QC_FAIL'),
+                ...Object.keys(extendedActions).map((action,index)=>make(
+                  '66666666-6666-4666-8666-'+String(index+1).padStart(12,'0'),action))],
             nextCursor:after?null:'signed-next'})});
       }
       throw Error('unexpected API '+path.pathname);
@@ -47,6 +65,7 @@ test('scoped technical chronology: 390 and 1280, page navigation and dark mode',
     await expect(panel.getByRole('heading',{name:'История действий по заказ-наряду'}))
       .toBeVisible();
     await expect(panel.getByText('Контроль качества не пройден')).toBeVisible();
+    for(const label of Object.values(extendedActions))await expect(panel.getByText(label,{exact:true})).toBeVisible();
     await page.getByRole('button',{name:'Следующая страница истории'}).click();
     await expect(panel.getByText('Создан заказ-наряд')).toBeVisible();
     await page.getByRole('button',{name:'Предыдущая страница истории'}).click();
