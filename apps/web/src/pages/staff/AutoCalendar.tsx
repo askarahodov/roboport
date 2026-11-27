@@ -111,6 +111,7 @@ export function AutoCalendar() {
   const [openingWindows,setOpeningWindows]=React.useState<OpeningDraft[]>([]);
   const [closedText,setClosedText]=React.useState('');
   const [openingBusy,setOpeningBusy]=React.useState(false);
+  const openingSaveRequest=React.useRef<AbortController|null>(null);
   const [openingRevision,setOpeningRevision]=React.useState(0);
   const [busy,setBusy]=React.useState(false);
   const [slots,setSlots]=React.useState<Array<{startsAt:string;endsAt:string}>>([]);
@@ -248,6 +249,12 @@ export function AutoCalendar() {
     return ()=>controller.abort();
   },[org,location,revision]);
   React.useEffect(()=>{
+    openingSaveRequest.current?.abort();
+    openingSaveRequest.current=null;
+    setOpeningBusy(false);
+    return ()=>openingSaveRequest.current?.abort();
+  },[org,location]);
+  React.useEffect(()=>{
     const controller=new AbortController();
     setOpening(null);setOpeningWindows([]);setClosedText('');
     if(!uuid.test(org.trim())||!uuid.test(location.trim())){
@@ -289,7 +296,7 @@ export function AutoCalendar() {
   function denyBooking(){scopeEpoch.current++;setBusy(false);setMessage('');setItems([]);setHistoryLookup('');setTarget(null);setForm(empty);setComplex(null);setHistoryId(null);
     setSelectedServices([]);setMaterials([]);setServices([]);setStock([]);setPending(null);resetSlots();setStatus('denied');}
   async function saveOpening(){
-    if(!opening||openingBusy||busy||!valid)return;
+    if(!opening||openingBusy||openingSaveRequest.current||busy||!valid)return;
     const windows=openingWindows.map(x=>({
       weekday:x.weekday,opensMinute:fromClock(x.open),closesMinute:fromClock(x.close),
     }));
@@ -303,23 +310,30 @@ export function AutoCalendar() {
       return;
     }
     const scopedOrg=org.trim(),scopedLoc=location.trim();
+    const epoch=scopeEpoch.current;
+    const controller=new AbortController();
+    openingSaveRequest.current=controller;
+    const current=()=>!controller.signal.aborted&&epoch===scopeEpoch.current&&
+      openingSaveRequest.current===controller;
     setOpeningBusy(true);setOpeningState('Сохранение графика…');
     try{
       const csrf=await fetch('/api/v1/auth/csrf',{
-        method:'POST',credentials:'include',cache:'no-store',
+        method:'POST',credentials:'include',cache:'no-store',signal:controller.signal,
       });
+      if(!current())return;
       if(!csrf.ok)throw Error('csrf');
       const token:unknown=await csrf.json();
       if(!token||typeof token!=='object'||!('csrfToken' in token)||
         typeof token.csrfToken!=='string')throw Error('csrf');
+      if(!current())return;
       const url='/api/v1/dev/auto/organizations/'+encodeURIComponent(scopedOrg)+
         '/locations/'+encodeURIComponent(scopedLoc)+'/opening-hours';
       const response=await fetch(url,{
-        method:'POST',credentials:'include',cache:'no-store',
+        method:'POST',credentials:'include',cache:'no-store',signal:controller.signal,
         headers:{'Content-Type':'application/json','X-CSRF-Token':token.csrfToken},
         body:JSON.stringify({expectedVersion:opening.version,windows,closedDates:dates}),
       });
-      if(requestScope.current.org!==scopedOrg||requestScope.current.location!==scopedLoc)return;
+      if(!current())return;
       if(response.status===409){
         setOpeningState('График изменён другим сотрудником или нарушает существующую бронь. Обновите страницу.');return;
       }
@@ -328,9 +342,13 @@ export function AutoCalendar() {
       setOpeningState('График сохранён.');setOpeningRevision(n=>n+1);
       resetPage();setRevision(n=>n+1);
     }catch{
-      if(requestScope.current.org===scopedOrg&&requestScope.current.location===scopedLoc)
+      if(current())
         setOpeningState('Результат неизвестен. Повторно загрузите график перед изменением.');
-    }finally{setOpeningBusy(false);}
+    }finally{
+      if(openingSaveRequest.current===controller){
+        openingSaveRequest.current=null;setOpeningBusy(false);
+      }
+    }
   }
   React.useEffect(()=>{setBusy(false);setPending(null);setComplex(null);setHistoryId(null);setHistoryLookup('');setForm(empty);resetSlots();},[org,location]);
   async function findSlots(){

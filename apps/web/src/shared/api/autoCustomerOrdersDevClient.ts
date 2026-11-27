@@ -115,3 +115,25 @@ export function parseCustomerQuoteReceipt(raw:unknown,body:string):Receipt{
        last.clarificationId===null||last.clarificationReason!==request.reasonCode))throw Error('mismatched quote receipt');
   return r;
 }
+
+
+export type OrderFilters={search:string;status:'ALL'|'SCHEDULED'|'CANCELED';fromDay:string;toDay:string;vehicleId:string};
+export const emptyOrderFilters:OrderFilters={search:'',status:'ALL',fromDay:'',toDay:'',vehicleId:''};
+export function orderFilterParams(filters:OrderFilters):URLSearchParams{
+  const params=new URLSearchParams();
+  if(filters.search.trim())params.set('search',filters.search.trim());
+  if(filters.status!=='ALL')params.set('status',filters.status);
+  if(filters.fromDay)params.set('fromDay',filters.fromDay);
+  if(filters.toDay)params.set('toDay',filters.toDay);
+  if(filters.vehicleId)params.set('vehicleId',filters.vehicleId);
+  return params;
+}
+export function validOrderFilters(filters:OrderFilters):boolean{
+  const day=(s:string)=>!s||(/^\d{4}-\d{2}-\d{2}$/.test(s)&&
+    Number.isFinite(Date.parse(s+'T00:00:00Z'))&&
+    new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s&&s.slice(0,4)!=='0000');
+  return (!filters.vehicleId||/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filters.vehicleId))&&
+    filters.search.length<=64&&!/[\x00-\x1f\x7f]/.test(filters.search)&&
+    ['ALL','SCHEDULED','CANCELED'].includes(filters.status)&&day(filters.fromDay)&&day(filters.toDay)&&
+    (!filters.fromDay||!filters.toDay||filters.fromDay<=filters.toDay);
+}

@@ -82,13 +82,17 @@ def set_opening(conn: psycopg.Connection, token: str,
     validate_opening(windows,closed_dates)
     from psycopg.types.json import Jsonb
     with conn.transaction():
-        if not organization_role_allows(
-            conn,token,org,"MANAGER",loc,for_mutation=True
-        ):
+        # Предварительный отказ без блокировок для чужого филиала.
+        # Сначала общая блокировка организации, затем эксклюзивная филиала,
+        # и только потом повторная проверка живых полномочий. Не повышаем
+        # SHARE до UPDATE одновременно с другим редактором графика.
+        if not organization_role_allows(conn,token,org,"MANAGER",loc):
             raise OpeningDenied("manager required")
-        actor=session_subject(conn,token,for_mutation=True)
-        if actor is None:
-            raise OpeningDenied("session unavailable")
+        if conn.execute(
+            "SELECT id FROM auto_organization WHERE id=%s AND disabled_at IS NULL FOR SHARE",
+            (org,),
+        ).fetchone() is None:
+            raise OpeningDenied("organization unavailable")
         scoped=conn.execute(
             """SELECT id FROM auto_service_location
                WHERE id=%s AND organization_id=%s AND disabled_at IS NULL
@@ -97,6 +101,13 @@ def set_opening(conn: psycopg.Connection, token: str,
         ).fetchone()
         if scoped is None:
             raise OpeningDenied("location unavailable")
+        if not organization_role_allows(
+            conn,token,org,"MANAGER",loc,for_mutation=True
+        ):
+            raise OpeningDenied("manager required")
+        actor=session_subject(conn,token,for_mutation=True)
+        if actor is None:
+            raise OpeningDenied("session unavailable")
         existing=conn.execute(
             """SELECT version FROM auto_location_opening_policy
                WHERE location_id=%s AND organization_id=%s FOR UPDATE""",

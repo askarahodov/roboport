@@ -221,6 +221,8 @@ export function CustomerVehicles() {
           {selected.modelYear !== null && <p>Год выпуска: {selected.modelYear}</p>}
           <p>{selected.vinLast4 === null ? 'VIN не указан' : 'VIN ••••' + selected.vinLast4}</p>
           <p>Только подтверждённая действующая связь. История прежних владельцев недоступна.</p>
+          <Link to={'/account/auto-orders?'+new URLSearchParams({vehicleId:selected.id}).toString()}>
+            История обслуживания этого автомобиля</Link>
           <button type="button" onClick={clearDetails}>Закрыть карточку автомобиля</button>
         </section>}
         {pageLoading && <p role="status">Загружается следующая страница…</p>}
