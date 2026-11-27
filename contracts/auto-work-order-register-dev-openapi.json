@@ -1,0 +1,769 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "БоксРитм — рабочий реестр заказ-нарядов",
+    "version": "1.0.0-dev",
+    "description": "Закрытый synthetic-only INTAKE/MANAGER + INTAKE_ACT READ. HANDOVER READ и cutoff независимо ограничивают состояние документа до фильтрации. Legacy DTO и CSV сохранены; view=workflow добавляет три независимых измерения и локальный день. Не является бухгалтерским проведением, кассовым или production API."
+  },
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ],
+  "x-synthetic-only": true,
+  "paths": {
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders": {
+      "get": {
+        "operationId": "listStaffWorkOrderRegister",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "loc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "DRAFT",
+                "IN_WORK",
+                "READY",
+                "POSTED",
+                "CLIENT_ACKNOWLEDGED",
+                "CLIENT_DISPUTED",
+                "CLOSED_TECHNICAL",
+                "CANCELED"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "orderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "legacy",
+                "workflow"
+              ],
+              "default": "legacy"
+            }
+          },
+          {
+            "name": "repairStage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "DRAFT",
+                "IN_WORK",
+                "READY"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "documentStage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "RESTRICTED",
+                "DRAFT",
+                "PREVIEW_SEALED",
+                "POSTED",
+                "CLIENT_ACKNOWLEDGED",
+                "CLIENT_DISPUTED",
+                "CLOSED_TECHNICAL"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "bookingStatus",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "SCHEDULED",
+                "CANCELED"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "fromDay",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Включительная локальная дата текущей записи"
+          },
+          {
+            "name": "toDay",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Включительная локальная дата текущей записи"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "До 25 записей. Legacy либо workflow DTO.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LegacyPage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WorkflowPage"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Недействующая сессия или INTAKE_ACT READ",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dev API отключён",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Конфликт чтения или лимит выгрузки",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Неверный фильтр, UUID или курсор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/export": {
+      "get": {
+        "operationId": "exportStaffWorkOrderRegister",
+        "security": [
+          {
+            "localSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "loc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "DRAFT",
+                "IN_WORK",
+                "READY",
+                "POSTED",
+                "CLIENT_ACKNOWLEDGED",
+                "CLIENT_DISPUTED",
+                "CLOSED_TECHNICAL",
+                "CANCELED"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "orderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "legacy",
+                "workflow"
+              ],
+              "default": "legacy"
+            }
+          },
+          {
+            "name": "repairStage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "DRAFT",
+                "IN_WORK",
+                "READY"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "documentStage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "RESTRICTED",
+                "DRAFT",
+                "PREVIEW_SEALED",
+                "POSTED",
+                "CLIENT_ACKNOWLEDGED",
+                "CLIENT_DISPUTED",
+                "CLOSED_TECHNICAL"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "bookingStatus",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "SCHEDULED",
+                "CANCELED"
+              ],
+              "default": "ALL"
+            }
+          },
+          {
+            "name": "fromDay",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Включительная локальная дата текущей записи"
+          },
+          {
+            "name": "toDay",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Включительная локальная дата текущей записи"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Полный CSV до 1000 строк; UTF-8 BOM, ; delimiter. Legacy 7 колонок, workflow 11 колонок.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "const": "nosniff"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Недействующая сессия или INTAKE_ACT READ",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dev API отключён",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Конфликт чтения или лимит выгрузки",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Неверный фильтр, UUID или курсор",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    },
+    "schemas": {
+      "LegacyRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workOrderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "appointmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bayId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "IN_WORK",
+              "READY",
+              "POSTED",
+              "CLIENT_ACKNOWLEDGED",
+              "CLIENT_DISPUTED",
+              "CLOSED_TECHNICAL",
+              "CANCELED"
+            ]
+          }
+        },
+        "required": [
+          "workOrderId",
+          "appointmentId",
+          "bayId",
+          "createdAt",
+          "startsAt",
+          "endsAt",
+          "stage"
+        ]
+      },
+      "WorkflowRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workOrderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "appointmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bayId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "IN_WORK",
+              "READY",
+              "POSTED",
+              "CLIENT_ACKNOWLEDGED",
+              "CLIENT_DISPUTED",
+              "CLOSED_TECHNICAL",
+              "CANCELED"
+            ]
+          },
+          "repairStage": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "IN_WORK",
+              "READY"
+            ]
+          },
+          "documentStage": {
+            "type": "string",
+            "enum": [
+              "RESTRICTED",
+              "DRAFT",
+              "PREVIEW_SEALED",
+              "POSTED",
+              "CLIENT_ACKNOWLEDGED",
+              "CLIENT_DISPUTED",
+              "CLOSED_TECHNICAL"
+            ]
+          },
+          "bookingStatus": {
+            "type": "string",
+            "enum": [
+              "SCHEDULED",
+              "CANCELED"
+            ]
+          },
+          "localDay": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "required": [
+          "workOrderId",
+          "appointmentId",
+          "bayId",
+          "createdAt",
+          "startsAt",
+          "endsAt",
+          "stage",
+          "repairStage",
+          "documentStage",
+          "bookingStatus",
+          "localDay"
+        ]
+      },
+      "LegacyPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "syntheticOnly": {
+            "const": true,
+            "type": "boolean"
+          },
+          "releaseAllowed": {
+            "const": false,
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/LegacyRow"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "syntheticOnly",
+          "releaseAllowed",
+          "items",
+          "nextCursor"
+        ]
+      },
+      "WorkflowPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "syntheticOnly": {
+            "const": true,
+            "type": "boolean"
+          },
+          "releaseAllowed": {
+            "const": false,
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/WorkflowRow"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "syntheticOnly",
+          "releaseAllowed",
+          "items",
+          "nextCursor"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "FORBIDDEN",
+              "INVALID_INPUT",
+              "REGISTER_CONFLICT",
+              "REGISTER_LIMIT"
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "code",
+          "requestId"
+        ]
+      },
+      "NotFound": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "const": "NOT_FOUND"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "requestId"
+        ]
+      }
+    }
+  }
+}

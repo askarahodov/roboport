@@ -155,3 +155,45 @@ def test_register_applies_history_cutoff_before_pagination(monkeypatch):
     assert response.json().get("nextCursor") is None
     # The exact-order locator is subject to the same cutoff as the list.
     assert http.get(url,params={"orderId":str(orders[0])}).json()["items"]==[]
+
+
+def test_workflow_register_separate_dimensions_period_and_scope(monkeypatch):
+    d,org,loc,foreign,other_loc,orders,http,url=setup(monkeypatch)
+    http.cookies.set("rp_session",d["tokens"][d["intake"]])
+    params={"view":"workflow","repairStage":"DRAFT","documentStage":"RESTRICTED",
+            "bookingStatus":"SCHEDULED","fromDay":"2035-02-01","toDay":"2035-02-01"}
+    response=http.get(url,params=params)
+    assert response.status_code==200,response.text
+    data=response.json()
+    import json
+    from pathlib import Path
+    from jsonschema import Draft202012Validator,FormatChecker
+    spec=json.loads((Path(__file__).resolve().parents[2]/
+                     'contracts/auto-work-order-register-dev-openapi.json').read_text(encoding='utf-8'))
+    Draft202012Validator({**spec,'$ref':'#/components/schemas/WorkflowPage'},
+                         format_checker=FormatChecker()).validate(data)
+    assert len(data["items"])==25 and data["nextCursor"]
+    assert all((i["repairStage"],i["documentStage"],i["bookingStatus"],i["localDay"])==
+               ("DRAFT","RESTRICTED","SCHEDULED","2035-02-01") for i in data["items"])
+    cursor=data["nextCursor"]
+    second=http.get(url,params={**params,"cursor":cursor})
+    assert second.status_code==200 and len(second.json()["items"])==1
+    for change in ({"repairStage":"READY"},{"documentStage":"POSTED"},
+                   {"bookingStatus":"CANCELED"},{"fromDay":"2035-01-31"}):
+        assert http.get(url,params={**params,**change,"cursor":cursor}).status_code==422
+    assert http.get(url,params={"view":"workflow","documentStage":"POSTED"}).json()["items"]==[]
+    assert http.get(url,params={"view":"workflow","fromDay":"2035-02-02"}).json()["items"]==[]
+    for query in ("view=bad","repairStage=READY","view=workflow&fromDay=2035-02-30",
+                  "view=workflow&fromDay=2035-02-02&toDay=2035-02-01",
+                  "view=workflow&documentStage=ALL&documentStage=POSTED"):
+        assert http.get(url+"?"+query).status_code==422
+    old=http.get(url).json()
+    Draft202012Validator({**spec,'$ref':'#/components/schemas/LegacyPage'},
+                         format_checker=FormatChecker()).validate(old)
+    legacy=old['items'][0]
+    assert "documentStage" not in legacy and "repairStage" not in legacy
+    wrong=url.replace(str(org),str(foreign)).replace(str(loc),str(other_loc))
+    assert http.get(wrong,params=params).status_code==403
+    with psycopg.connect(DSN) as db:
+        db.execute("UPDATE auto_vehicle_customer_link SET revoked_at=now() WHERE id=%s",(d["link"],))
+    assert http.get(url,params=params).json()["items"]==[]

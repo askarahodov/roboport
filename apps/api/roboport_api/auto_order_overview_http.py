@@ -35,7 +35,9 @@ def read_order_overview(org_id: str, loc_id: str, order_id: str,
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders")
 def staff_work_order_register(org_id: str,loc_id: str,request: Request,
                               stage: str="ALL",orderId: str|None=None,
-                              cursor: str|None=None):
+                              cursor: str|None=None,view:str="legacy",
+                              repairStage:str="ALL",documentStage:str="ALL",bookingStatus:str="ALL",
+                              fromDay:str|None=None,toDay:str|None=None):
     """Live INTAKE/MANAGER document register: no customer PII or payments."""
     from .auto_work_order_register import (
         list_work_orders,RegisterDenied,RegisterInvalid,
@@ -44,7 +46,8 @@ def staff_work_order_register(org_id: str,loc_id: str,request: Request,
     if isinstance(dsn,JSONResponse):
         return dsn
     if (any(len(request.query_params.getlist(name))>1
-            for name in ("stage","orderId","cursor"))
+            for name in ("stage","orderId","cursor","view","repairStage","documentStage",
+                         "bookingStatus","fromDay","toDay"))
         or (cursor is not None and (not cursor or len(cursor)>256))):
         return _response(request,422,"INVALID_INPUT")
     try:
@@ -56,7 +59,8 @@ def staff_work_order_register(org_id: str,loc_id: str,request: Request,
         try:
             data=list_work_orders(
                 db,request.cookies.get("rp_session",""),org,loc,
-                stage=stage,order_id=lookup,cursor=cursor,
+                stage=stage,order_id=lookup,cursor=cursor,view=view,repair_stage=repairStage,
+                document_stage=documentStage,booking_status=bookingStatus,from_day=fromDay,to_day=toDay,
             )
         except RegisterDenied:
             return _response(request,403,"FORBIDDEN")
@@ -70,7 +74,9 @@ def staff_work_order_register(org_id: str,loc_id: str,request: Request,
 
 @router.get("/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/orders/export")
 def export_staff_work_order_register(org_id: str,loc_id: str,request: Request,
-                                     stage: str="ALL",orderId: str|None=None):
+                                     stage: str="ALL",orderId: str|None=None,view:str="legacy",
+                                     repairStage:str="ALL",documentStage:str="ALL",bookingStatus:str="ALL",
+                                     fromDay:str|None=None,toDay:str|None=None):
     """Complete filtered register CSV; fail closed rather than truncate."""
     from .auto_work_order_register import (
         export_work_orders_csv,RegisterDenied,RegisterInvalid,
@@ -78,9 +84,9 @@ def export_staff_work_order_register(org_id: str,loc_id: str,request: Request,
     dsn=_request_dsn(request)
     if isinstance(dsn,JSONResponse):
         return dsn
-    if (any(len(request.query_params.getlist(name))>1
-            for name in ("stage","orderId"))
-        or any(key not in ("stage","orderId") for key in request.query_params)):
+    allowed=("stage","orderId","view","repairStage","documentStage","bookingStatus","fromDay","toDay")
+    if (any(len(request.query_params.getlist(name))>1 for name in allowed)
+        or any(key not in allowed for key in request.query_params)):
         return _response(request,422,"INVALID_INPUT")
     try:
         org,loc=UUID(org_id),UUID(loc_id)
@@ -91,7 +97,8 @@ def export_staff_work_order_register(org_id: str,loc_id: str,request: Request,
         try:
             result=export_work_orders_csv(
                 db,request.cookies.get("rp_session",""),org,loc,
-                stage=stage,order_id=lookup,
+                stage=stage,order_id=lookup,view=view,repair_stage=repairStage,
+                document_stage=documentStage,booking_status=bookingStatus,from_day=fromDay,to_day=toDay,
             )
         except RegisterDenied:
             return _response(request,403,"FORBIDDEN")

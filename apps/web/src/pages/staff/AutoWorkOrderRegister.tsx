@@ -1,5 +1,5 @@
 import React from 'react';
-import {Link} from 'react-router-dom';
+import {Link,useSearchParams} from 'react-router-dom';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const stages=['ALL','DRAFT','IN_WORK','READY','POSTED',
@@ -13,12 +13,27 @@ const names:Record<Stage,string>={
   CLIENT_DISPUTED:'Оспорен клиентом',CLOSED_TECHNICAL:'Технически закрыт',
   CANCELED:'Запись отменена',
 };
+const repairStages=['ALL','DRAFT','IN_WORK','READY'] as const;
+const documentStages=['ALL','RESTRICTED','DRAFT','PREVIEW_SEALED','POSTED','CLIENT_ACKNOWLEDGED','CLIENT_DISPUTED','CLOSED_TECHNICAL'] as const;
+const bookingStates=['ALL','SCHEDULED','CANCELED'] as const;
+type RepairStage=typeof repairStages[number];
+type DocumentStage=typeof documentStages[number];
+type BookingState=typeof bookingStates[number];
+const docNames:Record<DocumentStage,string>={ALL:'Все документы',RESTRICTED:'Недоступно по правам',
+  DRAFT:'Не проведён',PREVIEW_SEALED:'Пакет сформирован',POSTED:'Технически проведён',
+  CLIENT_ACKNOWLEDGED:'Подтверждён клиентом',CLIENT_DISPUTED:'Оспорен клиентом',CLOSED_TECHNICAL:'Технически закрыт'};
+const bookingNames:Record<BookingState,string>={ALL:'Все записи',SCHEDULED:'Действующая',CANCELED:'Отменена'};
+const validDay=(s:string)=>!s||(/^\d{4}-\d{2}-\d{2}$/.test(s)&&
+  Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s&&s.slice(0,4)!=='0000');
 type Order={workOrderId:string;appointmentId:string;bayId:string;
-  createdAt:string;startsAt:string;endsAt:string;stage:Exclude<Stage,'ALL'>};
+  createdAt:string;startsAt:string;endsAt:string;stage:Exclude<Stage,'ALL'>;
+  repairStage:Exclude<RepairStage,'ALL'>;documentStage:Exclude<DocumentStage,'ALL'>;
+  bookingStatus:Exclude<BookingState,'ALL'>;localDay:string};
 type Page={syntheticOnly:true;releaseAllowed:false;items:Order[];
   nextCursor:string|null};
 
-function parse(raw:unknown,stage:Stage):Page{
+function parse(raw:unknown,stage:Stage,repair:RepairStage,docStage:DocumentStage,
+               booking:BookingState,fromDay:string,toDay:string):Page{
   if(!raw||typeof raw!=='object')throw Error('invalid register');
   const data=raw as Page;
   if(data.syntheticOnly!==true||data.releaseAllowed!==false||
@@ -33,6 +48,14 @@ function parse(raw:unknown,stage:Stage):Page{
          v=>typeof v==='string'&&!Number.isNaN(Date.parse(v)))||
       Date.parse(row.startsAt)>=Date.parse(row.endsAt)||!validResultStage(row.stage)||
       (stage!=='ALL'&&row.stage!==stage)||
+      !repairStages.slice(1).includes(row.repairStage)||!documentStages.slice(1).includes(row.documentStage)||
+      !bookingStates.slice(1).includes(row.bookingStatus)||!row.localDay||!validDay(row.localDay)||
+      (repair!=='ALL'&&row.repairStage!==repair)||(docStage!=='ALL'&&row.documentStage!==docStage)||
+      (booking!=='ALL'&&row.bookingStatus!==booking)||(fromDay!==''&&row.localDay<fromDay)||
+      (toDay!==''&&row.localDay>toDay)||
+      row.stage!==(row.bookingStatus==='CANCELED'?'CANCELED':
+        ['POSTED','CLIENT_ACKNOWLEDGED','CLIENT_DISPUTED','CLOSED_TECHNICAL'].includes(row.documentStage)?
+          row.documentStage:row.repairStage)||
       ids.has(row.workOrderId))throw Error('invalid row');
     ids.add(row.workOrderId);
   }
@@ -40,9 +63,15 @@ function parse(raw:unknown,stage:Stage):Page{
 }
 
 export function AutoWorkOrderRegister(){
-  const [org,setOrg]=React.useState('');
-  const [loc,setLoc]=React.useState('');
+  const [query]=useSearchParams();
+  const initial=(key:string)=>{const value=query.get(key)??'';return uuid.test(value)?value.toLowerCase():'';};
+  const [org,setOrg]=React.useState(()=>initial('org'));
+  const [loc,setLoc]=React.useState(()=>initial('loc'));
   const [stage,setStage]=React.useState<Stage>('ALL');
+  const [repair,setRepair]=React.useState<RepairStage>('ALL');
+  const [docStage,setDocStage]=React.useState<DocumentStage>('ALL');
+  const [booking,setBooking]=React.useState<BookingState>('ALL');
+  const [fromDay,setFromDay]=React.useState(''),[toDay,setToDay]=React.useState('');
   const [search,setSearch]=React.useState('');
   const [applied,setApplied]=React.useState('');
   const [cursor,setCursor]=React.useState<string|null>(null);
@@ -56,38 +85,53 @@ export function AutoWorkOrderRegister(){
   const [exportMessage,setExportMessage]=React.useState('');
   const exportController=React.useRef<AbortController|null>(null);
   const currentScope=React.useRef('');
-  const valid=uuid.test(org.trim())&&uuid.test(loc.trim());
+  const requestEpoch=React.useRef(0);
+  const listController=React.useRef<AbortController|null>(null);
+  const validPeriod=validDay(fromDay)&&validDay(toDay)&&(!fromDay||!toDay||fromDay<=toDay);
+  const valid=uuid.test(org.trim())&&uuid.test(loc.trim())&&validPeriod;
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
     '/locations/'+encodeURIComponent(loc.trim())+'/orders';
-  const scope=org.trim()+':'+loc.trim()+':'+stage+':'+applied;
-  const queryKey=scope+':'+cursor+':'+revision;
-  currentScope.current=scope;
+  const scope=[org.trim(),loc.trim(),stage,applied,repair,docStage,booking,fromDay,toDay].join(':');
+  const previousScope=React.useRef(scope);
+  const effectiveCursor=previousScope.current===scope?cursor:null;
+  const queryKey=scope+':'+effectiveCursor+':'+revision;
+  if(currentScope.current!==queryKey){requestEpoch.current++;currentScope.current=queryKey;}
+  function filters(){
+    const params=new URLSearchParams({view:'workflow',stage,repairStage:repair,documentStage:docStage,bookingStatus:booking});
+    if(applied)params.set('orderId',applied);
+    if(fromDay)params.set('fromDay',fromDay);
+    if(toDay)params.set('toDay',toDay);
+    return params;
+  }
   React.useEffect(()=>{
     exportController.current?.abort();
     setExportBusy(false);setExportMessage('');
     return ()=>exportController.current?.abort();
-  },[scope]);
+  },[queryKey]);
   React.useEffect(()=>{
+    previousScope.current=scope;
     setCursor(null);setHistory([]);setPage(null);setSelected(null);setLoadedKey('');
   },[scope]);
   React.useEffect(()=>{
     setPage(null);setSelected(null);setLoadedKey('');
     if(!valid|| (applied!==''&&!uuid.test(applied))){setStatus('idle');return;}
     const controller=new AbortController();
+    listController.current=controller;
+    const epoch=requestEpoch.current;
+    const current=()=>!controller.signal.aborted&&epoch===requestEpoch.current&&currentScope.current===queryKey;
     setStatus('loading');
-    const params=new URLSearchParams({stage});
-    if(applied)params.set('orderId',applied);
-    if(cursor)params.set('cursor',cursor);
+    const params=filters();
+    if(effectiveCursor)params.set('cursor',effectiveCursor);
     void fetch(base+'?'+params,{credentials:'include',cache:'no-store',
       signal:controller.signal}).then(async response=>{
-      if(controller.signal.aborted)return;
+      if(!current())return;
       if([401,403,404].includes(response.status)){setStatus('denied');return;}
       if(!response.ok)throw Error('HTTP '+response.status);
-      const data=parse(await response.json(),stage);
-      if(!controller.signal.aborted){setPage(data);setLoadedKey(queryKey);setStatus('ready');}
-    }).catch(()=>{if(!controller.signal.aborted)setStatus('error');});
+      const data=parse(await response.json(),stage,repair,docStage,booking,fromDay,toDay);
+      if(current()){setPage(data);setLoadedKey(queryKey);setStatus('ready');}
+    }).catch(()=>{if(current())setStatus('error');});
     return ()=>controller.abort();
-  },[scope,cursor,revision,valid]);
+  },[queryKey,valid]);
 
   function applySearch(event:React.FormEvent){
     event.preventDefault();
@@ -100,17 +144,17 @@ export function AutoWorkOrderRegister(){
     exportController.current?.abort();
     const controller=new AbortController();
     exportController.current=controller;
-    const requested=scope;
+    const requested=queryKey,epoch=requestEpoch.current;
+    const current=()=>!controller.signal.aborted&&epoch===requestEpoch.current&&currentScope.current===requested;
     setExportBusy(true);setExportMessage('');
-    const params=new URLSearchParams({stage});
-    if(applied)params.set('orderId',applied);
+    const params=filters();
     try{
       const response=await fetch(base+'/export?'+params,{
         credentials:'include',cache:'no-store',signal:controller.signal,
       });
-      if(controller.signal.aborted||currentScope.current!==requested)return;
+      if(!current())return;
       if([401,403,404].includes(response.status)){
-        setPage(null);setLoadedKey('');setStatus('denied');
+        listController.current?.abort();setPage(null);setSelected(null);setLoadedKey('');setStatus('denied');
         setExportMessage('Сеанс или доступ к филиалу отозван.');return;
       }
       if(response.status===409){
@@ -120,7 +164,7 @@ export function AutoWorkOrderRegister(){
       if(!response.ok||!response.headers.get('content-type')?.startsWith('text/csv'))
         throw Error('bad download');
       const blob=await response.blob();
-      if(controller.signal.aborted||currentScope.current!==requested)return;
+      if(!current())return;
       if(blob.size>1048576)throw Error('unexpected size');
       const href=URL.createObjectURL(blob);
       try{
@@ -130,12 +174,12 @@ export function AutoWorkOrderRegister(){
         setExportMessage('CSV реестра сформирован для текущего фильтра (только dev).');
       }finally{window.setTimeout(()=>URL.revokeObjectURL(href),1000);}
     }catch{
-      if(!controller.signal.aborted&&currentScope.current===requested)
+      if(current())
         setExportMessage('Экспорт не выполнен. Проверьте соединение и обновите реестр.');
     }finally{
       if(exportController.current===controller){
         exportController.current=null;
-        if(currentScope.current===requested)setExportBusy(false);
+        if(current())setExportBusy(false);
       }
     }
   }
@@ -157,11 +201,27 @@ export function AutoWorkOrderRegister(){
         onChange={e=>setOrg(e.target.value)}/></label>
       <label>UUID филиала <input aria-label="UUID филиала" value={loc}
         onChange={e=>setLoc(e.target.value)}/></label>
-      <label>Состояние <select aria-label="Состояние заказ-наряда" value={stage}
+      <label>Общий статус (совместимость) <select aria-label="Состояние заказ-наряда" value={stage}
         onChange={e=>setStage(e.target.value as Stage)}>
         {stages.map(x=><option key={x} value={x}>{names[x]}</option>)}
       </select></label>
+      <label>Этап ремонта <select aria-label="Этап ремонта" value={repair} onChange={e=>setRepair(e.target.value as RepairStage)}>
+        {repairStages.map(x=><option key={x} value={x}>{names[x]}</option>)}
+      </select></label>
+      <label>Состояние документа <select aria-label="Состояние документа" value={docStage} onChange={e=>setDocStage(e.target.value as DocumentStage)}>
+        {documentStages.map(x=><option key={x} value={x}>{docNames[x]}</option>)}
+      </select></label>
+      <label>Состояние записи <select aria-label="Состояние записи" value={booking} onChange={e=>setBooking(e.target.value as BookingState)}>
+        {bookingStates.map(x=><option key={x} value={x}>{bookingNames[x]}</option>)}
+      </select></label>
+      <label>Дата записи с <input aria-label="Дата записи с" type="date" value={fromDay} onChange={e=>setFromDay(e.target.value)}/></label>
+      <label>Дата записи по <input aria-label="Дата записи по" type="date" value={toDay} onChange={e=>setToDay(e.target.value)}/></label>
+      <button type="button" onClick={()=>{setStage('ALL');setRepair('ALL');setDocStage('ALL');setBooking('ALL');
+        setFromDay('');setToDay('');setSearch('');setApplied('');setCursor(null);setHistory([]);setRevision(x=>x+1);}}>
+        Сбросить все фильтры</button>
     </div>
+    {!validPeriod&&<p role="alert">Проверьте диапазон дат записи.</p>}
+    <p>Период по местной дате филиала, включительно. Этап ремонта, технический документ и запись независимы.</p>
     <form onSubmit={applySearch}>
       <label>Точный UUID заказ-наряда <input aria-label="Поиск заказ-наряда"
         placeholder="Оставьте пустым для всего филиала"
@@ -190,14 +250,14 @@ export function AutoWorkOrderRegister(){
       {!page.items.length?<p>Заказ-наряды по этому фильтру не найдены.</p>:
       <div style={{overflowX:'auto'}}><table>
         <caption>Заказ-наряды своего филиала, новые сверху. Без ПДн и цен.</caption>
-        <thead><tr><th scope="col">Заказ-наряд</th><th scope="col">Состояние</th>
-          <th scope="col">Создан</th><th scope="col">Начало записи</th>
+        <thead><tr><th scope="col">Заказ-наряд</th><th scope="col">Этап ремонта</th><th scope="col">Документ</th>
+          <th scope="col">Запись</th><th scope="col">Создан</th><th scope="col">Локальный день</th>
           <th scope="col">Подробнее</th></tr></thead>
         <tbody>{page.items.map(row=><tr key={row.workOrderId}>
           <th scope="row"><code>{row.workOrderId}</code></th>
-          <td>{names[row.stage]}</td>
-          <td>{new Date(row.createdAt).toLocaleString('ru-RU')}</td>
-          <td>{new Date(row.startsAt).toLocaleString('ru-RU')}</td>
+          <td>{names[row.repairStage]}</td><td>{docNames[row.documentStage]}</td>
+          <td>{bookingNames[row.bookingStatus]}</td>
+          <td>{new Date(row.createdAt).toLocaleString('ru-RU')}</td><td>{row.localDay}</td>
           <td><button type="button" onClick={()=>setSelected(
             prev=>prev===row.workOrderId?null:row.workOrderId)}>
             {selected===row.workOrderId?'Скрыть':'Сведения'}</button></td>
@@ -207,7 +267,8 @@ export function AutoWorkOrderRegister(){
         const row=page.items.find(x=>x.workOrderId===selected)!;
         return <section aria-label="Сведения о выбранном заказ-наряде">
           <h2>Сведения о заказ-наряде</h2>
-          <p>Заказ: <code>{row.workOrderId}</code>. Состояние: {names[row.stage]}.</p>
+          <p>Заказ: <code>{row.workOrderId}</code>. Этап ремонта: {names[row.repairStage]}.
+            Документ: {docNames[row.documentStage]}. Запись: {bookingNames[row.bookingStatus]}.</p>
           <p>Запись: <code>{row.appointmentId}</code>. Пост: <code>{row.bayId}</code>.</p>
           <p>Интервал: {new Date(row.startsAt).toLocaleString('ru-RU')} —
             {' '}{new Date(row.endsAt).toLocaleString('ru-RU')}.</p>
