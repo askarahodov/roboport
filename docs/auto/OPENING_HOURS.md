@@ -16,7 +16,9 @@
 
 **Ненастроенный филиал** (ещё нет строки `auto_location_opening_policy`) сохраняет **старое synthetic поведение без ограничения часами работы** для совместимости с историческими тестами и API. GET возвращает `configured:false,version:0`; ответы поиска содержат `openingHoursConfigured:false`, UI явно предупреждает. Это **не означает 24-часовой бизнес-график** и запрещает считать такой филиал production-ready. Менеджер обязан отдельно подтвердить рабочее расписание; если филиал закрыт по всем дням, он сохраняет `windows:[]`, а не оставляет конфигурацию отсутствующей.
 
-## API (скрытый dev-only, не OpenAPI)
+## API (скрытый dev-only, частный OpenAPI)
+
+Контракт GET/POST входит в [`auto-booking-dev-openapi.json`](../../contracts/auto-booking-dev-openapi.json); публичная схема по-прежнему не содержит этих маршрутов.
 
 `GET /api/v1/dev/auto/organizations/{org}/locations/{loc}/opening-hours` доступен scoped `INTAKE` или `MANAGER`; возвращает `{"configured":false,"version":0,"windows":[],"closedDates":[],"timeZone":"Europe/Berlin","syntheticOnly":true}` без данных клиентов. Для настроенного филиала `configured:true`, версия от 1, полный набор `windows`, даты закрытия. `Cache-Control:no-store`, `403` чужой филиал/нет прав, `422` неверные UUID.
 
@@ -45,3 +47,5 @@
 Сервис `auto_opening_hours.py` нормализует payload и выполняет scoped MANAGER optimistic compare-and-swap; `auto_slot_candidates.py` отсекает закрытые окна SQL; `auto_appointment_service.py` отдельно преобразует конфликт с графиком в `AppointmentHoursClosed`, HTTP = `409 LOCATION_CLOSED`. Схема расширена без изменения старых dev контрактов.
 
 Реальный PG17 + HTTP: `tests/integration/test_pg_auto_location_opening_hours.py` (roles, клиенты/приёмщики, закрытые даты, отрицательная бронь SQL, 409 и отсутствие phantom, смена графика при активной записи, optimistic version, весна/осень IANA). Playwright: `apps/web/e2e/auto-calendar.spec.ts` (390/1280, editor, CSRF, отказ без MANAGER). Для production остаются: реальные графики/праздники каждого филиала, смены/роли, согласия, уведомления, расчёт стоимости, мониторинг и release gate #119.
+
+При одновременном сохранении двух редакторов с одной ожидаемой версией побеждает одна транзакция, другая получает конфликт версии. Организация блокируется до эксклюзивной блокировки филиала, затем повторно проверяются живые полномочия; история не дублируется. Ответ POST не содержит `timeZone`, для неё используется GET. При переключении филиала во время ожидания CSRF интерфейс отменяет старую попытку; поздний ответ не применяется к новому контексту. Уже принятый сервером запрос нельзя отменить сетевым AbortController: перед повторной правкой перечитайте актуальный график. PG17 и Playwright покрывают конкурентное сохранение и смену филиала; проверка формата не заменяет серверный запрет пересечений и конфликтов с бронями.
