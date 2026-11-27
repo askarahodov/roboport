@@ -551,9 +551,13 @@ def _verify_tenant_staff_lifecycle(monkeypatch,http,d,org,loc,order,archive):
     assert clinical.intersection(x["action"] for x in baseline)
     policy("MANAGER","ESTIMATE","PRICE_SALES",False)
     assert history()==[x for x in baseline if x["action"] not in priced]
-    policy("MANAGER","ESTIMATE","PRICE_SALES",True,datetime(2099,1,1,tzinfo=timezone.utc))
-    assert history()==[x for x in baseline if x["action"] not in priced]
     policy("MANAGER","ESTIMATE","PRICE_SALES",True)
+    assert history()==baseline
+    # Исторический cutoff допустим только для разрешающего READ.
+    estimate_events=priced|{"ESTIMATE_PUBLISHED","ESTIMATE_APPROVED","ESTIMATE_DECLINED"}
+    policy("MANAGER","ESTIMATE","READ",True,datetime(2099,1,1,tzinfo=timezone.utc))
+    assert history()==[x for x in baseline if x["action"] not in estimate_events]
+    policy("MANAGER","ESTIMATE","READ",True)
     assert history()==baseline
     policy("MECHANIC","INTAKE_ACT","READ",False)
     denied=history()
