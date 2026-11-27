@@ -238,4 +238,16 @@ test('invalid link filters do not broaden the register and untrusted return cont
   await back.click();
   await expect(page.getByRole('table')).toContainText(order);
   expect(new URL(page.url()).searchParams.has('cursor')).toBe(false);
+
+  // Даже контекст своего филиала не может переносить произвольные параметры.
+  const local=new URLSearchParams({org,loc,stage:'DRAFT',cursor:'secret-cursor',
+    session:'secret-session',return:'https://example.org'});
+  await page.goto('/staff/auto-order-workspace?'+new URLSearchParams({
+    org,loc,order,register:local.toString()}));
+  await expect(page.getByRole('link',{name:'К реестру заказ-нарядов'}))
+    .toHaveAttribute('href','/staff/auto-order-register?'+new URLSearchParams({org,loc,stage:'DRAFT'}));
+  await page.getByRole('link',{name:'К реестру заказ-нарядов'}).click();
+  await expect(page.getByRole('table')).toContainText(order);
+  expect(new URL(page.url()).searchParams.has('cursor')).toBe(false);
+  expect(new URL(page.url()).searchParams.has('session')).toBe(false);
 });

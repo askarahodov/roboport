@@ -10,7 +10,7 @@ import {AutoEstimateConsole} from '../shared/AutoEstimateConsole';
 import {AutoDemoClose} from '../shared/AutoDemoClose';
 import {AutoOrderTimeline} from './AutoOrderTimeline';
 import {AutoServiceRecommendations} from '../shared/AutoServiceRecommendations';
-import {returnRegisterParams,workspaceParams} from './autoOrderNavigation';
+import {returnRegisterParams,workspaceParams,scopeValue} from './autoOrderNavigation';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Steps={
@@ -100,9 +100,10 @@ function ActivePanel({tab,lockedScope}:{tab:Tab;lockedScope:{org:string;loc:stri
 
 export function AutoWorkOrderWorkspace(){
   const [query,setQuery]=useSearchParams();
-  const org=query.get('org')??'',loc=query.get('loc')??'',order=query.get('order')??'';
+  const org=scopeValue(query,'org'),loc=scopeValue(query,'loc'),order=scopeValue(query,'order');
   const scope=[org,loc,order].join(':');
-  const active=tabs.find(t=>t.id===query.get('tab'))?.id??'services';
+  const tabValues=query.getAll('tab');
+  const active=(tabValues.length===1?tabs.find(t=>t.id===tabValues[0])?.id:undefined)??'services';
   const returnParams=returnRegisterParams(query,org,loc);
   const valid=[org,loc,order].every(x=>uuid.test(x));
   const [draftOrg,setDraftOrg]=React.useState(org);

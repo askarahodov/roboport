@@ -84,6 +84,13 @@ export function AutoWorkOrderRegister(){
       return;
     }
     draftSetter(null);
+    // Валидные параметры записываются только через белый список.
+    // Неверный фильтр не сбрасываем молча при изменении филиала.
+    if(parsedFilters){
+      setQuery(registerParams(key==='org'?normalized:savedOrg,
+        key==='loc'?normalized:savedLoc,parsedFilters),{replace:true});
+      return;
+    }
     const next=new URLSearchParams(query);
     if(normalized)next.set(key,normalized.toLowerCase());else next.delete(key);
     setQuery(next,{replace:true});
