@@ -10,6 +10,7 @@ import {AutoEstimateConsole} from '../shared/AutoEstimateConsole';
 import {AutoDemoClose} from '../shared/AutoDemoClose';
 import {AutoOrderTimeline} from './AutoOrderTimeline';
 import {AutoServiceRecommendations} from '../shared/AutoServiceRecommendations';
+import {returnRegisterParams,workspaceParams,scopeValue} from './autoOrderNavigation';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Steps={
@@ -99,14 +100,15 @@ function ActivePanel({tab,lockedScope}:{tab:Tab;lockedScope:{org:string;loc:stri
 
 export function AutoWorkOrderWorkspace(){
   const [query,setQuery]=useSearchParams();
-  const org=query.get('org')??'',loc=query.get('loc')??'',order=query.get('order')??'';
+  const org=scopeValue(query,'org'),loc=scopeValue(query,'loc'),order=scopeValue(query,'order');
   const scope=[org,loc,order].join(':');
-  const initialTab=tabs.find(t=>t.id===query.get('tab'))?.id??'services';
+  const tabValues=query.getAll('tab');
+  const active=(tabValues.length===1?tabs.find(t=>t.id===tabValues[0])?.id:undefined)??'services';
+  const returnParams=returnRegisterParams(query,org,loc);
   const valid=[org,loc,order].every(x=>uuid.test(x));
   const [draftOrg,setDraftOrg]=React.useState(org);
   const [draftLoc,setDraftLoc]=React.useState(loc);
   const [draftOrder,setDraftOrder]=React.useState(order);
-  const [active,setActive]=React.useState<Tab>('services');
   const [revision,setRevision]=React.useState(0);
   const [status,setStatus]=React.useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
   const [data,setData]=React.useState<Snapshot|null>(null);
@@ -114,8 +116,7 @@ export function AutoWorkOrderWorkspace(){
   const requestKey=scope+':'+revision;
   React.useEffect(()=>{
     setDraftOrg(org);setDraftLoc(loc);setDraftOrder(order);
-    setActive(initialTab);
-  },[scope,initialTab]);
+  },[scope]);
   React.useEffect(()=>{
     setData(null);setLoaded('');
     if(!valid){setStatus('idle');return;}
@@ -137,8 +138,14 @@ export function AutoWorkOrderWorkspace(){
   function apply(event:React.FormEvent){
     event.preventDefault();
     if(![draftOrg,draftLoc,draftOrder].every(x=>uuid.test(x.trim())))return;
-    setQuery({org:draftOrg.trim().toLowerCase(),loc:draftLoc.trim().toLowerCase(),
-      order:draftOrder.trim().toLowerCase()});
+    const nextOrg=draftOrg.trim().toLowerCase(),nextLoc=draftLoc.trim().toLowerCase();
+    const nextOrder=draftOrder.trim().toLowerCase();
+    if([nextOrg,nextLoc,nextOrder].join(':')===scope){
+      setQuery(workspaceParams(org,loc,order,active,returnParams),{replace:true});
+    }else{
+      // Новый заказ: не переносим фильтры или состояние прежней карточки.
+      setQuery({org:nextOrg,loc:nextLoc,order:nextOrder});
+    }
     setRevision(x=>x+1);
   }
   const visible=status==='ready'&&loaded===requestKey&&data!==null;
@@ -148,7 +155,7 @@ export function AutoWorkOrderWorkspace(){
     <p>Все этапы одного тестового заказа на одной странице. Отдельные операции
       выполняются действующими ролями и <strong>повторно проверяются сервером</strong>.
       Это не бухгалтерский документ, не законная подпись и не выдача автомобиля.</p>
-    <Link to={'/staff/auto-order-register?'+new URLSearchParams({org,loc}).toString()}>К реестру заказ-нарядов</Link>
+    <Link to={'/staff/auto-order-register?'+returnParams.toString()}>К реестру заказ-нарядов</Link>
     <form onSubmit={apply} style={{display:'flex',gap:'0.75rem',flexWrap:'wrap'}}>
       <label>UUID организации <input aria-label="UUID организации рабочего места"
         value={draftOrg} onChange={e=>setDraftOrg(e.target.value)}/></label>
@@ -191,7 +198,7 @@ export function AutoWorkOrderWorkspace(){
         {tabs.map(t=><button key={t.id} type="button"
           aria-current={active===t.id?'page':undefined}
           aria-pressed={active===t.id}
-          onClick={()=>setActive(t.id)}>
+          onClick={()=>{if(active!==t.id)setQuery(workspaceParams(org,loc,order,t.id,returnParams));}}>
           {t.label} · {stateNames[data.steps[t.stage]]}
         </button>)}
       </nav>
