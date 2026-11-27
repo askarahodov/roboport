@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
+from hashlib import sha256
+from datetime import date, timedelta
 from io import StringIO
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -32,7 +35,7 @@ class Conflict(ValueError):
     pass
 
 
-def report(conn, token, org, loc, from_day, to_day):
+def report(conn, token, org, loc, from_day, to_day, *, cohort=False):
     with conn.transaction():
         if not organization_role_allows(conn, token, org, "MANAGER", loc,
                                         for_mutation=True):
@@ -59,7 +62,7 @@ def report(conn, token, org, loc, from_day, to_day):
         rows = conn.execute("""
           WITH scoped AS MATERIALIZED (
             SELECT w.id AS order_id, c.id AS close_id, c.created_at AS closed_at,
-                   p.id AS preview_id, p.revision_id, p.snapshot,
+                   p.id AS preview_id, p.revision_id, p.snapshot, proof.customer_id,
                    c.preview_digest, p.fingerprint,
                    posted.id AS post_id, ack.id AS ack_id
             FROM auto_order_demo_document_event c
@@ -93,7 +96,7 @@ def report(conn, token, org, loc, from_day, to_day):
                  s.snapshot,s.preview_digest,s.post_id,s.ack_id,
                  (btrim(s.fingerprint)=s.preview_digest AND
                   encode(sha256(convert_to(s.snapshot::text,'UTF8')),'hex')=s.preview_digest),
-                 cash.events
+                 cash.events,s.customer_id
           FROM scoped s
           CROSS JOIN LATERAL (
             SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -111,7 +114,12 @@ def report(conn, token, org, loc, from_day, to_day):
             raise Conflict()
         items=[]
         total_cash=0
-        for order,close,closed,preview,revision,snapshot,preview_digest,posted,ack,valid,cash in rows:
+        customers=Counter()
+        seen_orders=set()
+        for order,close,closed,preview,revision,snapshot,preview_digest,posted,ack,valid,cash,customer in rows:
+            if order in seen_orders or customer is None:
+                raise Conflict()
+            seen_orders.add(order)
             if not valid or snapshot.get("kind")!="SYNTHETIC_PRE_HANDOVER_PREVIEW":
                 raise Conflict()
             keys=("approvedBaseMinor","approvedExtraMinor","approvedTotalMinor",
@@ -134,6 +142,7 @@ def report(conn, token, org, loc, from_day, to_day):
                 or snapshot.get("releaseAllowed") is not False
                 or snapshot.get("legalGatePassed") is not False):
                 raise Conflict()
+            customers[customer]+=1
             items.append({
                 "workOrderId":str(order),"closedDay":closed.astimezone(zone).date().isoformat(),
                 "previewId":str(preview),"previewDigest":preview_digest,
@@ -148,11 +157,14 @@ def report(conn, token, org, loc, from_day, to_day):
             "simulatedPaidMinor","simulatedRefundedMinor")}
         if any(n>MAX_SAFE for n in summary.values()):
             raise Conflict()
-        return {"syntheticOnly":True,"realMoney":False,"releaseAllowed":False,
+        result={"syntheticOnly":True,"realMoney":False,"releaseAllowed":False,
                 "marginAvailable":False,"payrollAvailable":False,"currency":"RUB",
                 "basis":BASIS,"timeZone":branch[0],"fromDay":from_day,"toDay":to_day,
                 "summary":{"orderCount":len(items),"cashEventCount":total_cash,**summary},
                 "items":items}
+        if cohort:
+            result["cohort"]=_cohort(customers)
+        return result
 
 
 def _csv(result):
@@ -206,3 +218,104 @@ def export_closed_orders(org_id:str,loc_id:str,request:Request,fromDay:str,toDay
         content=_csv(result),media_type="text/csv; charset=utf-8",
         headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
                  "Content-Disposition":'attachment; filename="auto-closed-order-report.csv"'})
+
+
+
+def _cohort(customers):
+    """Counts only; never serialize customer keys or infer retention across periods."""
+    unique=len(customers)
+    repeat=sum(n>1 for n in customers.values())
+    return {"uniqueCustomers":unique,"singleOrderCustomers":unique-repeat,
+            "multipleOrderCustomers":repeat,
+            "additionalClosedOrders":sum(customers.values())-unique,
+            "multipleOrderBasisPoints":repeat*10000//unique if unique else None}
+
+
+COMPARE_FIELDS=("orderCount","uniqueCustomers","singleOrderCustomers",
+                "multipleOrderCustomers","additionalClosedOrders","approvedTotalMinor",
+                "simulatedPaidMinor","simulatedRefundedMinor")
+
+
+def _comparison_period(result):
+    daily=Counter(row["closedDay"] for row in result["items"])
+    start=date.fromisoformat(result["fromDay"])
+    end=date.fromisoformat(result["toDay"])
+    return {"fromDay":result["fromDay"],"toDay":result["toDay"],
+            **{key:result["summary"][key] for key in
+               ("orderCount","approvedTotalMinor","simulatedPaidMinor","simulatedRefundedMinor")},
+            **result["cohort"],
+            "days":[{"day":(start+timedelta(days=i)).isoformat(),
+                     "closedOrders":daily[(start+timedelta(days=i)).isoformat()]}
+                    for i in range((end-start).days+1)]}
+
+
+def compare(conn,token,org,loc,from_day,to_day):
+    with conn.transaction():
+        # Both periods use one MVCC snapshot. A changed locked proof or policy
+        # epoch rejects the whole comparison rather than mixing two snapshots.
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        current=report(conn,token,org,loc,from_day,to_day,cohort=True)
+        first,last=date.fromisoformat(from_day),date.fromisoformat(to_day)
+        length=(last-first).days+1
+        prior_end=first-timedelta(days=1)
+        prior_start=first-timedelta(days=length)
+        previous=report(conn,token,org,loc,prior_start.isoformat(),prior_end.isoformat(),cohort=True)
+        now,before=_comparison_period(current),_comparison_period(previous)
+        delta={key:now[key]-before[key] for key in COMPARE_FIELDS}
+        return {"syntheticOnly":True,"realMoney":False,"releaseAllowed":False,
+                "retentionAvailable":False,"actualVisitsAvailable":False,
+                "basis":"RECONCILED_CLOSED_ORDER_PERIOD_COMPARISON","currency":"RUB",
+                "timeZone":current["timeZone"],"current":now,"previous":before,"delta":delta}
+
+
+def _comparison_csv(result):
+    out=StringIO(newline="")
+    writer=csv.writer(out,delimiter=";",lineterminator="\r\n")
+    writer.writerow(("Тип","Начало","Конец","День",*COMPARE_FIELDS,"multipleOrderBasisPoints"))
+    for key,label in (("current","CURRENT"),("previous","PREVIOUS")):
+        row=result[key]
+        writer.writerow((label,row["fromDay"],row["toDay"],"",
+                         *(row[k] for k in COMPARE_FIELDS),row["multipleOrderBasisPoints"]))
+        for day in row["days"]:
+            writer.writerow((label+"_DAY","","",day["day"],day["closedOrders"],
+                             *("" for _ in COMPARE_FIELDS[1:]),""))
+    writer.writerow(("DELTA","","","",*(result["delta"][k] for k in COMPARE_FIELDS),""))
+    return "\ufeff"+out.getvalue()
+
+
+def _compare_run(request,org_id,loc_id,from_day,to_day):
+    dsn=_request_dsn(request)
+    if isinstance(dsn,JSONResponse):
+        return dsn
+    try:
+        if set(request.query_params)!={"fromDay","toDay"} or any(
+            len(request.query_params.getlist(k))!=1 for k in ("fromDay","toDay")):
+            raise ValueError()
+        org,loc=UUID(org_id),UUID(loc_id)
+        with psycopg.connect(dsn) as conn:
+            return compare(conn,request.cookies.get("rp_session",""),org,loc,from_day,to_day)
+    except Denied:
+        return _response(request,403,"FORBIDDEN")
+    except (Conflict,psycopg.errors.SerializationFailure,psycopg.errors.DeadlockDetected):
+        return _response(request,409,"REPORT_CONFLICT")
+    except (ValueError,OverflowError,MaterialAuditInvalid):
+        return _response(request,422,"INVALID_INPUT")
+
+
+@router.get(PREFIX+"/comparison")
+def get_comparison(org_id:str,loc_id:str,request:Request,fromDay:str,toDay:str):
+    result=_compare_run(request,org_id,loc_id,fromDay,toDay)
+    return result if isinstance(result,JSONResponse) else JSONResponse(
+        content=result,headers={"Cache-Control":"no-store"})
+
+
+@router.get(PREFIX+"/comparison/export")
+def export_comparison(org_id:str,loc_id:str,request:Request,fromDay:str,toDay:str):
+    result=_compare_run(request,org_id,loc_id,fromDay,toDay)
+    if isinstance(result,JSONResponse):
+        return result
+    data=_comparison_csv(result).encode("utf-8")
+    return Response(content=data,media_type="text/csv; charset=utf-8",
+        headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+                 "Content-Disposition":'attachment; filename="auto-closed-order-comparison.csv"',
+                 "X-Report-SHA256":sha256(data).hexdigest()})

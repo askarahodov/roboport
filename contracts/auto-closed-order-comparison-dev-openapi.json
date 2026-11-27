@@ -1,0 +1,390 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Закрытый отчёт сравнения периодов",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/reports/closed-orders/comparison": {
+      "get": {
+        "operationId": "compareClosedOrdersDev",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "loc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fromDay",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "toDay",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Синтетические агрегаты двух периодов",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comparison"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Отказ без частичного отчёта"
+          },
+          "409": {
+            "description": "Отказ без частичного отчёта"
+          },
+          "422": {
+            "description": "Отказ без частичного отчёта"
+          }
+        },
+        "security": [
+          {
+            "localSession": []
+          }
+        ]
+      }
+    },
+    "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/reports/closed-orders/comparison/export": {
+      "get": {
+        "operationId": "exportClosedOrderComparisonDev",
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "loc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fromDay",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "toDay",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV, UTF-8 BOM",
+            "headers": {
+              "X-Report-SHA256": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Отказ без частичного отчёта"
+          },
+          "409": {
+            "description": "Отказ без частичного отчёта"
+          },
+          "422": {
+            "description": "Отказ без частичного отчёта"
+          }
+        },
+        "security": [
+          {
+            "localSession": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Period": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fromDay",
+          "toDay",
+          "orderCount",
+          "uniqueCustomers",
+          "singleOrderCustomers",
+          "multipleOrderCustomers",
+          "additionalClosedOrders",
+          "approvedTotalMinor",
+          "simulatedPaidMinor",
+          "simulatedRefundedMinor",
+          "multipleOrderBasisPoints",
+          "days"
+        ],
+        "properties": {
+          "fromDay": {
+            "type": "string",
+            "format": "date"
+          },
+          "toDay": {
+            "type": "string",
+            "format": "date"
+          },
+          "orderCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "uniqueCustomers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "singleOrderCustomers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "multipleOrderCustomers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "additionalClosedOrders": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "approvedTotalMinor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "simulatedPaidMinor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "simulatedRefundedMinor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "multipleOrderBasisPoints": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "days": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 31,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "day",
+                "closedOrders"
+              ],
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "closedOrders": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 200
+                }
+              }
+            }
+          }
+        }
+      },
+      "Comparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "syntheticOnly",
+          "realMoney",
+          "releaseAllowed",
+          "retentionAvailable",
+          "actualVisitsAvailable",
+          "basis",
+          "currency",
+          "timeZone",
+          "current",
+          "previous",
+          "delta"
+        ],
+        "properties": {
+          "syntheticOnly": {
+            "const": true
+          },
+          "realMoney": {
+            "const": false
+          },
+          "releaseAllowed": {
+            "const": false
+          },
+          "retentionAvailable": {
+            "const": false
+          },
+          "actualVisitsAvailable": {
+            "const": false
+          },
+          "basis": {
+            "const": "RECONCILED_CLOSED_ORDER_PERIOD_COMPARISON"
+          },
+          "currency": {
+            "const": "RUB"
+          },
+          "timeZone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "current": {
+            "$ref": "#/components/schemas/Period"
+          },
+          "previous": {
+            "$ref": "#/components/schemas/Period"
+          },
+          "delta": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "orderCount",
+              "uniqueCustomers",
+              "singleOrderCustomers",
+              "multipleOrderCustomers",
+              "additionalClosedOrders",
+              "approvedTotalMinor",
+              "simulatedPaidMinor",
+              "simulatedRefundedMinor"
+            ],
+            "properties": {
+              "orderCount": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "uniqueCustomers": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "singleOrderCustomers": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "multipleOrderCustomers": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "additionalClosedOrders": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "approvedTotalMinor": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "simulatedPaidMinor": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "simulatedRefundedMinor": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
+    }
+  },
+  "x-synthetic-only": true,
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ]
+}
