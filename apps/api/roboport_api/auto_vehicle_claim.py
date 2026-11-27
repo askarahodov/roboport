@@ -99,6 +99,8 @@ def issue_auto_proof(
         (claim_id, link_id, issuer, hashlib.sha256(proof.encode()).hexdigest()),
     )
     _audit(conn, link=link_id, claim=claim_id, actor=issuer, action="ISSUED")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit DEFERRED")
     return claim_id, proof
 
 
@@ -221,6 +223,8 @@ def redeem_auto_proof(
     status = "PENDING_REVIEW" if valid else "REJECTED"
     _audit(conn, link=row[0], claim=claim_id, actor=actor,
            action="PROOF_ACCEPTED" if valid else "PROOF_REJECTED")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit DEFERRED")
     retry_remember(conn, actor, claim_id, "redeem", idempotency_key, payload, status)
     return status
 
@@ -243,6 +247,13 @@ def review_auto_claim(
         raise VehicleClaimRejected("unavailable")
     reviewer = _role_scoped(conn, manager_token, "MANAGER", row[5])
     if reviewer in (row[1], row[2]) or row[2] is None or row[3] is None:
+        raise VehicleClaimRejected("independent reviewer required")
+    # Участник регистрации или правки карточки не может подтвердить владение,
+    # даже если другой приёмщик выдал код и участник имеет роль MANAGER.
+    if conn.execute("""
+        SELECT 1 FROM auto_vehicle_registration_event
+        WHERE vehicle_id=%s AND actor_id=%s LIMIT 1
+    """,(row[5],reviewer)).fetchone():
         raise VehicleClaimRejected("independent reviewer required")
     # Проверяем живое полномочие claimant даже после финального решения.
     # Независимое review удерживает клиентские полномочия до commit;
@@ -285,6 +296,8 @@ def review_auto_claim(
             (reviewer, row[0]),
         )
     _audit(conn, link=row[0], claim=claim_id, actor=reviewer, action=outcome)
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit IMMEDIATE")
+    conn.execute("SET CONSTRAINTS auto_registered_claim_audit DEFERRED")
     retry_remember(
         conn, reviewer, claim_id, "review", idempotency_key,
         {"approve": approve}, outcome,
