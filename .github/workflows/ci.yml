@@ -26,6 +26,8 @@ jobs:
           fetch-depth: 0
       - name: Verify conservative impact rules
         run: python -m unittest discover -s tests/bootstrap -p test_ci_impact.py
+      - name: Verify fail-closed merge gate rules
+        run: python -m unittest discover -s tests/bootstrap -p test_ci_merge_gate.py
       - id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -38,10 +40,17 @@ jobs:
             python scripts/ci_impact.py --full
           fi
   docs:
-    needs: impact
+    # Стабильное имя существующего check: итоговый fail-closed gate плюс docs.
+    # always() не позволяет ошибочному skip/failure dependency скрыть этот gate.
+    needs: [impact, postgres, api, web, browser-e2e]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify required CI results against impact
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python scripts/ci_merge_gate.py
       - run: python scripts/check_docs_links.py
       - run: python scripts/check_autodealer_audit.py
       - run: python scripts/inventory_legacy_routes.py --check
