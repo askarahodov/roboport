@@ -16,6 +16,20 @@ const actionNames:Record<string,string>={
   EXECUTION_FINISHED:'Завершены работы',
   QC_PASS:'Контроль качества пройден',
   QC_FAIL:'Контроль качества не пройден',
+  DIAGNOSTIC_RECORDED:'Записан результат диагностики',
+  QC_REWORK_RECORDED:'Зафиксирована доработка после QC',
+  COMPLEX_SELECTED:'Выбран комплекс работ',
+  EXTRA_PUBLISHED:'Опубликована дополнительная смета',
+  EXTRA_APPROVED:'Клиент согласовал дополнительные работы',
+  EXTRA_DECLINED:'Клиент отклонил дополнительные работы',
+  ASSIGNMENT_OFFERED:'Предложено назначение исполнителя',
+  ASSIGNMENT_ACCEPTED:'Исполнитель принял назначение',
+  ASSIGNMENT_DECLINED:'Исполнитель отклонил назначение',
+  ASSIGNMENT_WITHDRAWN:'Предложение назначения отозвано',
+  ASSIGNMENT_RELEASED:'Принятое назначение снято',
+  RECOMMENDATION_CREATED:'Создана рекомендация по обслуживанию',
+  RECOMMENDATION_WITHDRAWN:'Рекомендация отозвана',
+  RECOMMENDATION_VISIT_BOOKED:'Создана запись по рекомендации',
   PREVIEW_SEALED:'Сформирован технический пакет',
   DOCUMENT_POSTED:'Техническое проведение',
   DOCUMENT_CLIENT_ACK:'Клиент подтвердил технический пакет',
@@ -36,7 +50,7 @@ function parse(raw:unknown,order:string):Page{
   const seen=new Set<string>();
   for(const item of p.items){
     if(!item||typeof item.evidenceId!=='string'||!uuid.test(item.evidenceId)||
-      typeof item.action!=='string'||!(item.action in actionNames)||
+      typeof item.action!=='string'||!Object.prototype.hasOwnProperty.call(actionNames,item.action)||
       typeof item.createdAt!=='string'||Number.isNaN(Date.parse(item.createdAt))||
       seen.has(item.evidenceId))throw Error('invalid event');
     seen.add(item.evidenceId);

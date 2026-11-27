@@ -110,6 +110,11 @@ def test_timeline_document_policy_deny_and_cutoff_exclude_sources(monkeypatch):
     # An INTAKE actor ordinarily can read their intake-act documents, but
     # cannot read ESTIMATE/HANDOVER history without a MANAGER grant.
     initial=sourced_sql()
+    assert "FROM auto_work_order_diagnostic item" in initial
+    assert "FROM auto_work_order_qc_rework item" in initial
+    assert "FROM auto_service_recommendation item" in initial
+    assert "FROM auto_work_order_assignment_event item" not in initial
+    assert "FROM auto_work_order_extra_revision item" not in initial
     assert "FROM auto_work_order_intake_act item" in initial
     assert "FROM auto_work_order_estimate_revision item" not in initial
     assert "FROM auto_order_demo_document_event item" not in initial
@@ -122,6 +127,10 @@ def test_timeline_document_policy_deny_and_cutoff_exclude_sources(monkeypatch):
                 cap="READ",allowed=allowed,not_before=not_before)
         rule(allowed=False)
     denied=sourced_sql()
+    for table in ("auto_work_order_diagnostic","auto_work_order_qc_rework",
+                  "auto_service_recommendation","auto_service_recommendation_withdrawal",
+                  "auto_recommendation_visit"):
+        assert f"FROM {table} item" not in denied
     assert "FROM auto_work_order_intake_act item" not in denied
     assert "FROM auto_work_order_intake_act_review item" not in denied
     assert "FROM auto_work_order_inspection item" not in denied
@@ -137,6 +146,9 @@ def test_timeline_document_policy_deny_and_cutoff_exclude_sources(monkeypatch):
             allowed=True,not_before=__import__("datetime").datetime(
                 2099,1,1,tzinfo=__import__("datetime").timezone.utc))
     cutoff=sourced_sql()
+    assert "FROM auto_work_order_diagnostic item" not in cutoff
+    assert "FROM auto_work_order_qc_rework item" not in cutoff
+    assert "FROM auto_service_recommendation item" not in cutoff
     assert "FROM auto_work_order_intake_act item" not in cutoff
     assert "FROM auto_work_order_inspection item" not in cutoff
     assert "FROM auto_work_order_qc_event item" not in cutoff
