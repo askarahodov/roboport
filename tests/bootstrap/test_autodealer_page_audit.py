@@ -58,7 +58,7 @@ def test_november_20_sources_have_atomic_owned_acceptance_criteria():
         "ADP-055": ("C02", 115, "page"),
         "ADP-056": ("D07", 170, "search_excerpt"),
         "ADP-057": ("D12", 169, "page"),
-        "ADP-058": ("B03", 167, "page"),
+        "ADP-058": ("B03", 114, "page"),
         "ADP-059": ("D07", 170, "page"),
         "ADP-060": ("C02", 115, "page"),
         "ADP-061": ("C02", 115, "search_excerpt"),
@@ -66,8 +66,8 @@ def test_november_20_sources_have_atomic_owned_acceptance_criteria():
         "ADP-063": ("E10", 107, "search_excerpt"),
         "ADP-064": ("C04", 168, "page"),
         "ADP-065": ("D09", 171, "page"),
-        "ADP-066": ("A05", 446, "search_excerpt"),
-        "ADP-069": ("A05", 446, "page"),
+        "ADP-066": ("A05", 107, "search_excerpt"),
+        "ADP-069": ("A05", 119, "page"),
         "ADP-070": ("C08", 168, "page"),
         "ADP-071": ("C06", 168, "page"),
         "ADP-072": ("C04", 168, "page"),
@@ -75,7 +75,7 @@ def test_november_20_sources_have_atomic_owned_acceptance_criteria():
         "ADP-078": ("B10", 441, "page"),
         "ADP-081": ("B01", 441, "search_excerpt"),
         "ADP-082": ("B02", 439, "search_excerpt"),
-        "ADP-083": ("A05", 446, "page"),
+        "ADP-083": ("A05", 448, "page"),
     }
     nav_link_ids = {"ADP-067", "ADP-068", "ADP-074", "ADP-075", "ADP-076", "ADP-077", "ADP-085", "ADP-086", "ADP-087", "ADP-088"}
     assert len(inventory["records"]) >= 85
@@ -145,3 +145,35 @@ def test_added_requirements_cover_inventory_and_staff_boundaries():
         assert row["pageId"] == page_id
         assert row["status"] == "NOT_PROVEN_COMPLETE"
         assert row["evidencePaths"] == []
+
+
+
+def test_residual_ownership_after_technical_closure():
+    # Исторические технические задачи закрыты только в synthetic-границе.
+    # Остаток на 27.11.2026 привязан к существующим открытым задачам.
+    # Offline fixture фиксирует решение, но не запрашивает live GitHub.
+    expected = {
+        "ADP-004": 114,
+        "ADP-008": 107,
+        "ADP-012": 114,
+        "ADP-016": 119,
+        "ADP-034": 107,
+        "ADP-035": 119,
+        "ADP-058": 114,
+        "ADP-066": 107,
+        "ADP-067": 107,
+        "ADP-069": 119,
+        "ADP-083": 448,
+        "ADP-086": 114,
+    }
+    pages = {page["id"]: page for page in _data()["records"]}
+    requirements = json.loads(REQUIREMENTS.read_text(encoding="utf-8"))["requirements"]
+    assert all(page["issue"] not in {113, 167, 446} for page in pages.values())
+    for page_id, owner_issue in expected.items():
+        assert pages[page_id]["issue"] == owner_issue
+        rows = [row for row in requirements if row["pageId"] == page_id]
+        assert bool(rows) == (pages[page_id]["evidence"] != "nav_link")
+        for row in rows:
+            assert row["ownerIssue"] == owner_issue
+            assert row["status"] == "NOT_PROVEN_COMPLETE"
+            assert row["evidencePaths"] == []
