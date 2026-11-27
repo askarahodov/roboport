@@ -81,3 +81,33 @@ def test_requirements_must_not_claim_exhaustive_help_navigation():
     checks = _requirements()
     checks["completeness"] = "COMPLETE_ALL_FEATURES"
     assert validate_requirements(checks, _pages())
+
+
+def test_readable_tables_are_complete_and_preserve_every_acceptance_condition():
+    from scripts.check_autodealer_audit import (
+        AUDIT_TEXT, ACCEPTANCE_TEXT, validate_readable_tables,
+    )
+    audit = AUDIT_TEXT.read_text(encoding="utf-8")
+    acceptance = ACCEPTANCE_TEXT.read_text(encoding="utf-8")
+    pages, requirements = _pages(), _requirements()
+    assert not validate_readable_tables(pages, requirements, audit, acceptance)
+
+    # Не пропустить потерю условия, смену владельца, статус или качество источника.
+    page_line = next(line for line in audit.splitlines() if line.startswith("| ADP-001 |"))
+    req_line = next(line for line in acceptance.splitlines() if line.startswith("| ADF-001 |"))
+    for changed_audit, changed_acceptance in (
+        (audit.replace(page_line, ""), acceptance),
+        (audit + "\n" + page_line, acceptance),
+        (audit.replace(page_line, page_line.replace("D_PARTIAL", "PLANNED")), acceptance),
+        (audit.replace(page_line, page_line.replace("page / 2026-11-06", "page / 2026-11-20")), acceptance),
+        (audit, acceptance.replace(req_line, "")),
+        (audit, acceptance + "\n" + req_line),
+        (audit, acceptance.replace(req_line, req_line.replace("NOT_PROVEN_COMPLETE", "DEV_VERIFIED"))),
+        (audit, acceptance.replace(req_line, req_line.replace("[#107]", "[#119]"))),
+        (audit, acceptance.replace(req_line, req_line.replace(requirements["requirements"][0]["acceptance"], "Сокращённое условие"))),
+    ):
+        assert validate_readable_tables(pages, requirements, changed_audit, changed_acceptance)
+
+    altered = copy.deepcopy(requirements)
+    altered["requirements"][0]["acceptance"] += " | скрытая ячейка"
+    assert validate_readable_tables(pages, altered, audit, acceptance)
