@@ -10,6 +10,8 @@ SPEC=json.loads((Path(__file__).resolve().parents[2]/"contracts/auto-closed-orde
 
 def test_comparison_private_contract():
     validate_spec(SPEC)
+    from scripts.check_openapi_inventory import private_boundary
+    assert private_boundary(SPEC) == []
     for path in (PREFIX+"/comparison",PREFIX+"/comparison/export"):
         assert path not in app.openapi()["paths"]
         assert [(r.path,m) for r in router.routes for m in r.methods if r.path==path]==[(path,"GET")]

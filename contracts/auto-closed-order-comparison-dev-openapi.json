@@ -55,6 +55,13 @@
                   "$ref": "#/components/schemas/Comparison"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
+              }
             }
           },
           "403": {
@@ -66,7 +73,12 @@
           "422": {
             "description": "Отказ без частичного отчёта"
           }
-        }
+        },
+        "security": [
+          {
+            "localSession": []
+          }
+        ]
       }
     },
     "/api/v1/dev/auto/organizations/{org_id}/locations/{loc_id}/reports/closed-orders/comparison/export": {
@@ -119,6 +131,11 @@
                   "type": "string",
                   "pattern": "^[0-9a-f]{64}$"
                 }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                }
               }
             },
             "content": {
@@ -138,7 +155,12 @@
           "422": {
             "description": "Отказ без частичного отчёта"
           }
-        }
+        },
+        "security": [
+          {
+            "localSession": []
+          }
+        ]
       }
     }
   },
@@ -350,6 +372,19 @@
           }
         }
       }
+    },
+    "securitySchemes": {
+      "localSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "rp_session"
+      }
     }
-  }
+  },
+  "x-synthetic-only": true,
+  "servers": [
+    {
+      "url": "https://127.0.0.1"
+    }
+  ]
 }
