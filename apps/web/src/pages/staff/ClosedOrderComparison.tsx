@@ -57,9 +57,13 @@ export function ClosedOrderComparison({org,loc,from,to,allowed}:{org:string;loc:
       if(!response.ok)throw Error('http');
       if(exportFile){
         if(!response.headers.get('content-type')?.startsWith('text/csv'))throw Error('csv');
-        const blob=await response.blob();if(c.signal.aborted)return;
-        if(blob.size>131072)throw Error('limit');
-        const href=URL.createObjectURL(blob),a=document.createElement('a');a.href=href;a.download='auto-closed-order-comparison.csv';
+        const digest=response.headers.get('X-Report-SHA256');
+        if(!digest||!(/^[0-9a-f]{64}$/).test(digest))throw Error('digest');
+        const bytes=await response.arrayBuffer();if(c.signal.aborted)return;
+        if(bytes.byteLength>131072)throw Error('limit');
+        const actual=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+        if(actual!==digest)throw Error('digest');if(c.signal.aborted)return;
+        const href=URL.createObjectURL(new Blob([bytes],{type:'text/csv'})),a=document.createElement('a');a.href=href;a.download='auto-closed-order-comparison.csv';
         document.body.appendChild(a);a.click();a.remove();window.setTimeout(()=>URL.revokeObjectURL(href),1000);
       }else{
         const parsed=parse(await response.json(),from,to);if(c.signal.aborted)return;setData(parsed);

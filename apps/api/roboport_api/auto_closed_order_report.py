@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 from collections import Counter
+from hashlib import sha256
 from datetime import date, timedelta
 from io import StringIO
 from uuid import UUID
@@ -114,7 +115,11 @@ def report(conn, token, org, loc, from_day, to_day, *, cohort=False):
         items=[]
         total_cash=0
         customers=Counter()
+        seen_orders=set()
         for order,close,closed,preview,revision,snapshot,preview_digest,posted,ack,valid,cash,customer in rows:
+            if order in seen_orders or customer is None:
+                raise Conflict()
+            seen_orders.add(order)
             if not valid or snapshot.get("kind")!="SYNTHETIC_PRE_HANDOVER_PREVIEW":
                 raise Conflict()
             keys=("approvedBaseMinor","approvedExtraMinor","approvedTotalMinor",
@@ -307,7 +312,10 @@ def get_comparison(org_id:str,loc_id:str,request:Request,fromDay:str,toDay:str):
 @router.get(PREFIX+"/comparison/export")
 def export_comparison(org_id:str,loc_id:str,request:Request,fromDay:str,toDay:str):
     result=_compare_run(request,org_id,loc_id,fromDay,toDay)
-    return result if isinstance(result,JSONResponse) else Response(
-        content=_comparison_csv(result),media_type="text/csv; charset=utf-8",
+    if isinstance(result,JSONResponse):
+        return result
+    data=_comparison_csv(result).encode("utf-8")
+    return Response(content=data,media_type="text/csv; charset=utf-8",
         headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
-                 "Content-Disposition":'attachment; filename="auto-closed-order-comparison.csv"'})
+                 "Content-Disposition":'attachment; filename="auto-closed-order-comparison.csv"',
+                 "X-Report-SHA256":sha256(data).hexdigest()})

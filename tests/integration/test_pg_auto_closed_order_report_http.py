@@ -154,7 +154,7 @@ def test_composite_branch_reports_do_not_bypass_source_document_denials(monkeypa
     day=stamp.astimezone(ZoneInfo(zone)).date().isoformat()
     query={"fromDay":day,"toDay":day}
     base=f"/api/v1/dev/auto/organizations/{org}/locations/{loc}/reports/closed-orders"
-    priced=(base,base+"/export",finance_path(org,loc))
+    priced=(base,base+"/export",base+"/comparison",base+"/comparison/export",finance_path(org,loc))
     labor=report_path(org,loc)
     unpriced=(labor,labor+"/export",labor+"/shift-comparison",labor+"/shift-comparison/export")
     token(http,d,d["intake"])
@@ -251,6 +251,8 @@ def test_closed_order_period_comparison_and_reauthorized_export(monkeypatch):
     assert str(order) not in result.text
     report=http.get(path+"/export",params=query)
     assert report.status_code==200 and report.headers["cache-control"]=="no-store"
+    from hashlib import sha256
+    assert report.headers["x-report-sha256"]==sha256(report.content).hexdigest()
     rows=list(csv.reader(StringIO(report.text.lstrip("\ufeff")),delimiter=";"))
     assert [row[0] for row in rows[1:]]==["CURRENT","CURRENT_DAY","PREVIOUS","PREVIOUS_DAY","DELTA"]
     assert all(len(row)==len(rows[0]) for row in rows)
@@ -266,6 +268,12 @@ def test_closed_order_period_comparison_and_reauthorized_export(monkeypatch):
     empty=http.get(path,params=query).json()
     assert empty["current"]["orderCount"]==empty["current"]["uniqueCustomers"]==0
     assert empty["current"]["multipleOrderBasisPoints"] is None
+    with psycopg.connect(DSN) as db:
+        db.execute("""UPDATE auto_organization_role_grant SET revoked_at=now()
+          WHERE organization_id=%s AND user_id=%s AND role_code='MANAGER'
+          AND revoked_at IS NULL""",(org,d["intake"]))
+    assert http.get(path,params=query).status_code==403
+    assert http.get(path+"/export",params=query).status_code==403
 
 
 def test_comparison_cohort_deduplicates_without_disclosing_keys():

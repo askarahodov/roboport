@@ -505,7 +505,9 @@ test('closed-order CSV denial clears previously loaded source evidence and resto
 
 
 
-test('closed-order comparison reconciles both periods and clears on malformed data or revoke',async({page})=>{
+test('closed-order comparison reconciles both periods and clears on malformed data or revoke',async({page},testInfo)=>{
+  const {createHash}=await import('node:crypto');
+  const csv='\ufeffCURRENT;3\r\n';
   const day='2030-10-27',prior='2030-10-26';
   const previous={fromDay:prior,toDay:prior,orderCount:0,uniqueCustomers:0,singleOrderCustomers:0,
     multipleOrderCustomers:0,additionalClosedOrders:0,approvedTotalMinor:0,simulatedPaidMinor:0,
@@ -518,10 +520,11 @@ test('closed-order comparison reconciles both periods and clears on malformed da
   const value={syntheticOnly:true,realMoney:false,releaseAllowed:false,retentionAvailable:false,
     actualVisitsAvailable:false,basis:'RECONCILED_CLOSED_ORDER_PERIOD_COMPARISON',currency:'RUB',
     timeZone:'Europe/Berlin',current,previous,delta};
-  let denied=false,malformed=false;
+  let denied=false,malformed=false,badDigest=false;
   await page.route(/\/reports\/closed-orders\/comparison(?:\/export)?\?/,route=>{
     if(new URL(route.request().url()).pathname.endsWith('/export'))
-      return route.fulfill({status:denied?403:200,contentType:'text/csv',body:'CURRENT;3'});
+      return route.fulfill({status:denied?403:200,contentType:'text/csv',body:csv,
+        headers:{'X-Report-SHA256':badDigest?'0'.repeat(64):createHash('sha256').update(csv).digest('hex')}});
     return route.fulfill({status:denied?403:200,json:malformed?{...value,delta:{...delta,orderCount:4}}:value});
   });
   await page.setViewportSize({width:390,height:844});
@@ -530,9 +533,20 @@ test('closed-order comparison reconciles both periods and clears on malformed da
   const build=panel.getByRole('button',{name:'Сравнить периоды'});
   await build.click();await expect(panel.getByRole('table',{name:'Сравнение показателей'})).toBeVisible();
   await expect(panel).toContainText('50%');
+  await page.screenshot({path:testInfo.outputPath('comparison-mobile-light.png'),fullPage:true,animations:'disabled'});
+  await page.setViewportSize({width:1280,height:800});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+  await page.screenshot({path:testInfo.outputPath('comparison-desktop-light.png'),fullPage:true,animations:'disabled'});
+  await page.getByLabel('Тема оформления').selectOption('dark');
+  await expect(page.locator('main.app.dark')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('comparison-desktop-dark.png'),fullPage:true,animations:'disabled'});
   const download=page.waitForEvent('download');
   await panel.getByRole('button',{name:'Скачать сравнение CSV'}).click();
   expect((await download).suggestedFilename()).toBe('auto-closed-order-comparison.csv');
+  badDigest=true;await panel.getByRole('button',{name:'Скачать сравнение CSV'}).click();
+  await expect(panel.getByRole('alert')).toContainText('Не удалось');
+  await expect(panel.getByRole('table')).toHaveCount(0);
+  badDigest=false;
   malformed=true;await build.click();await expect(panel.getByRole('alert')).toContainText('Не удалось');
   await expect(panel.getByRole('table')).toHaveCount(0);
   malformed=false;await build.click();await expect(panel.getByRole('table')).toHaveCount(2);
