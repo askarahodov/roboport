@@ -150,3 +150,92 @@ test('workflow register separates repair and document states and keeps branch on
   await expect(page.getByRole('textbox',{name:'UUID организации'})).toHaveValue(org);
   await expect(page.getByRole('textbox',{name:'UUID филиала'})).toHaveValue(loc);
 });
+
+
+test('register filters and workspace tab survive navigation and refresh without reusing a cursor',async({page})=>{
+  const calls:URL[]=[];
+  let revoked=false;
+  const orderRoot=base+'/orders/'+order;
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const url=new URL(route.request().url());calls.push(url);
+    if(url.pathname===base+'/orders'){
+      if(revoked)return route.fulfill({status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({
+        syntheticOnly:true,releaseAllowed:false,items:[row(order)],nextCursor:null})});
+    }
+    if(url.pathname===orderRoot+'/workspace')return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({workOrderId:order,syntheticOnly:true,realMoney:false,releaseAllowed:false,
+        bookingCanceled:false,steps:{services:'EMPTY',inspection:'MISSING',intakeAct:'MISSING',
+          estimate:'MISSING',execution:'NOT_STARTED',quality:'NOT_CHECKED',technicalDocuments:'DRAFT'}})});
+    if(url.pathname===base+'/service-catalog'||url.pathname===orderRoot+'/services')
+      return route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'});
+    if(url.pathname===orderRoot+'/diagnostics')return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,releaseAllowed:false,inspectionRecorded:false,
+        estimatePublished:false,services:[],items:[]})});
+    throw Error('unexpected route '+url.pathname);
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-order-register?org='+org+'&loc='+loc);
+  await expect(page.getByRole('table')).toContainText(order);
+  await page.getByLabel('Состояние заказ-наряда',{exact:true}).selectOption('DRAFT');
+  await page.getByLabel('Этап ремонта',{exact:true}).selectOption('DRAFT');
+  await page.getByLabel('Состояние документа',{exact:true}).selectOption('RESTRICTED');
+  await page.getByLabel('Состояние записи',{exact:true}).selectOption('SCHEDULED');
+  await page.getByLabel('Дата записи с',{exact:true}).fill('2026-11-19');
+  await page.getByLabel('Дата записи по',{exact:true}).fill('2026-11-19');
+  await page.getByLabel('Поиск заказ-наряда',{exact:true}).fill(order);
+  await page.getByRole('button',{name:'Найти в реестре'}).click();
+  await expect.poll(()=>new URL(page.url()).searchParams.get('orderId')).toBe(order);
+  await expect(page.getByRole('table')).toContainText(order);
+  const saved=new URL(page.url()).searchParams.toString();
+  await page.reload();
+  await expect(page.getByLabel('Состояние документа',{exact:true})).toHaveValue('RESTRICTED');
+  await expect(page.getByLabel('Поиск заказ-наряда',{exact:true})).toHaveValue(order);
+  await expect(page.getByRole('table')).toContainText(order);
+  await page.getByRole('button',{name:'Сведения'}).click();
+  await page.getByRole('link',{name:'Открыть рабочее место наряда'}).click();
+  await page.getByRole('button',{name:/^Диагностика ·/}).click();
+  await expect.poll(()=>new URL(page.url()).searchParams.get('tab')).toBe('diagnostics');
+  await page.reload();
+  await expect(page.getByRole('heading',{name:'Диагностика по услугам заказ-наряда (dev)'})).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Услуги заказ-наряда (dev)'})).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole('heading',{name:'Диагностика по услугам заказ-наряда (dev)'})).toBeVisible();
+  await page.setViewportSize({width:1280,height:900});
+  await page.getByRole('combobox',{name:'Тема оформления'}).selectOption('dark');
+  revoked=true;
+  await page.getByRole('link',{name:'К реестру заказ-нарядов'}).click();
+  await expect.poll(()=>new URL(page.url()).searchParams.toString()).toBe(saved);
+  await expect(page.getByRole('alert')).toContainText('нет действующего доступа');
+  await expect(page.getByRole('table')).toHaveCount(0);
+  const last=calls.filter(x=>x.pathname===base+'/orders').pop()!;
+  for(const [key,value] of new URLSearchParams(saved)){
+    if(key!=='org'&&key!=='loc')expect(last.searchParams.get(key)).toBe(value);
+  }
+  expect(last.searchParams.has('cursor')).toBe(false);
+});
+
+test('invalid link filters do not broaden the register and untrusted return context is discarded',async({page})=>{
+  const calls:URL[]=[];
+  await page.route('**/api/v1/dev/auto/organizations/**',route=>{
+    const url=new URL(route.request().url());calls.push(url);
+    if(url.pathname===base+'/orders')return route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({syntheticOnly:true,releaseAllowed:false,items:[row(order)],nextCursor:null})});
+    return route.fulfill({status:403,contentType:'application/json',body:'{"code":"FORBIDDEN"}'});
+  });
+  await page.goto('/staff/auto-order-register?'+new URLSearchParams({org,loc,documentStage:'INVALID'}));
+  await expect(page.getByRole('alert')).toContainText('Неверные параметры ссылки');
+  expect(calls).toHaveLength(0);
+  await page.getByRole('button',{name:'Сбросить все фильтры'}).click();
+  await expect(page.getByRole('table')).toContainText(order);
+  const foreign='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const candidate=new URLSearchParams({org:foreign,loc,stage:'READY',cursor:'secret-cursor',return:'https://example.org'});
+  await page.goto('/staff/auto-order-workspace?'+new URLSearchParams({
+    org,loc,order,tab:'unknown',register:candidate.toString()}));
+  const back=page.getByRole('link',{name:'К реестру заказ-нарядов'});
+  await expect(back).toHaveAttribute('href','/staff/auto-order-register?'+new URLSearchParams({org,loc}));
+  await back.click();
+  await expect(page.getByRole('table')).toContainText(order);
+  expect(new URL(page.url()).searchParams.has('cursor')).toBe(false);
+});

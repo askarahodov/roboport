@@ -1,10 +1,10 @@
 import React from 'react';
 import {Link,useSearchParams} from 'react-router-dom';
 
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const stages=['ALL','DRAFT','IN_WORK','READY','POSTED',
-  'CLIENT_ACKNOWLEDGED','CLIENT_DISPUTED','CLOSED_TECHNICAL','CANCELED'] as const;
-type Stage=typeof stages[number];
+import {uuid,stages,repairStages,documentStages,bookingStates,validDay,
+  defaultFilters,readRegisterFilters,registerParams,scopeValue,workspaceParams,
+  type Stage,type RepairStage,type DocumentStage,type BookingState,type RegisterFilters
+} from './autoOrderNavigation';
 const validResultStage=(value:unknown):value is Exclude<Stage,'ALL'>=>
   typeof value==='string' && stages.slice(1).includes(value as Stage);
 const names:Record<Stage,string>={
@@ -13,18 +13,10 @@ const names:Record<Stage,string>={
   CLIENT_DISPUTED:'Оспорен клиентом',CLOSED_TECHNICAL:'Технически закрыт',
   CANCELED:'Запись отменена',
 };
-const repairStages=['ALL','DRAFT','IN_WORK','READY'] as const;
-const documentStages=['ALL','RESTRICTED','DRAFT','PREVIEW_SEALED','POSTED','CLIENT_ACKNOWLEDGED','CLIENT_DISPUTED','CLOSED_TECHNICAL'] as const;
-const bookingStates=['ALL','SCHEDULED','CANCELED'] as const;
-type RepairStage=typeof repairStages[number];
-type DocumentStage=typeof documentStages[number];
-type BookingState=typeof bookingStates[number];
 const docNames:Record<DocumentStage,string>={ALL:'Все документы',RESTRICTED:'Недоступно по правам',
   DRAFT:'Не проведён',PREVIEW_SEALED:'Пакет сформирован',POSTED:'Технически проведён',
   CLIENT_ACKNOWLEDGED:'Подтверждён клиентом',CLIENT_DISPUTED:'Оспорен клиентом',CLOSED_TECHNICAL:'Технически закрыт'};
 const bookingNames:Record<BookingState,string>={ALL:'Все записи',SCHEDULED:'Действующая',CANCELED:'Отменена'};
-const validDay=(s:string)=>!s||(/^\d{4}-\d{2}-\d{2}$/.test(s)&&
-  Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s&&s.slice(0,4)!=='0000');
 type Order={workOrderId:string;appointmentId:string;bayId:string;
   createdAt:string;startsAt:string;endsAt:string;stage:Exclude<Stage,'ALL'>;
   repairStage:Exclude<RepairStage,'ALL'>;documentStage:Exclude<DocumentStage,'ALL'>;
@@ -63,17 +55,39 @@ function parse(raw:unknown,stage:Stage,repair:RepairStage,docStage:DocumentStage
 }
 
 export function AutoWorkOrderRegister(){
-  const [query]=useSearchParams();
-  const initial=(key:string)=>{const value=query.get(key)??'';return uuid.test(value)?value.toLowerCase():'';};
-  const [org,setOrg]=React.useState(()=>initial('org'));
-  const [loc,setLoc]=React.useState(()=>initial('loc'));
-  const [stage,setStage]=React.useState<Stage>('ALL');
-  const [repair,setRepair]=React.useState<RepairStage>('ALL');
-  const [docStage,setDocStage]=React.useState<DocumentStage>('ALL');
-  const [booking,setBooking]=React.useState<BookingState>('ALL');
-  const [fromDay,setFromDay]=React.useState(''),[toDay,setToDay]=React.useState('');
-  const [search,setSearch]=React.useState('');
-  const [applied,setApplied]=React.useState('');
+  const [query,setQuery]=useSearchParams();
+  const savedOrg=scopeValue(query,'org'),savedLoc=scopeValue(query,'loc');
+  // Незавершённый ввод UUID не попадает в URL и не запускает запрос.
+  type Draft={base:string;value:string};
+  const [orgDraft,setOrgDraft]=React.useState<Draft|null>(null);
+  const [locDraft,setLocDraft]=React.useState<Draft|null>(null);
+  const org=orgDraft?.base===savedOrg?orgDraft.value:savedOrg;
+  const loc=locDraft?.base===savedLoc?locDraft.value:savedLoc;
+  const parsedFilters=readRegisterFilters(query);
+  const appliedFilters=parsedFilters??defaultFilters;
+  const {stage,repairStage:repair,documentStage:docStage,bookingStatus:booking,
+    fromDay,toDay,orderId:applied}=appliedFilters;
+  const [search,setSearch]=React.useState(applied);
+  React.useEffect(()=>setSearch(applied),[applied]);
+
+  function writeFilters(next:RegisterFilters){
+    setQuery(registerParams(savedOrg,savedLoc,next),{replace:true});
+  }
+  function changeFilter<K extends keyof RegisterFilters>(key:K,value:RegisterFilters[K]){
+    if(parsedFilters)writeFilters({...parsedFilters,[key]:value});
+  }
+  function changeScope(key:'org'|'loc',value:string){
+    const normalized=value.trim();
+    const draftSetter=key==='org'?setOrgDraft:setLocDraft;
+    if(normalized&&!uuid.test(normalized)){
+      draftSetter({base:key==='org'?savedOrg:savedLoc,value});
+      return;
+    }
+    draftSetter(null);
+    const next=new URLSearchParams(query);
+    if(normalized)next.set(key,normalized.toLowerCase());else next.delete(key);
+    setQuery(next,{replace:true});
+  }
   const [cursor,setCursor]=React.useState<string|null>(null);
   const [history,setHistory]=React.useState<Array<string|null>>([]);
   const [selected,setSelected]=React.useState<string|null>(null);
@@ -88,13 +102,13 @@ export function AutoWorkOrderRegister(){
   const requestEpoch=React.useRef(0);
   const listController=React.useRef<AbortController|null>(null);
   const validPeriod=validDay(fromDay)&&validDay(toDay)&&(!fromDay||!toDay||fromDay<=toDay);
-  const valid=uuid.test(org.trim())&&uuid.test(loc.trim())&&validPeriod;
+  const valid=parsedFilters!==null&&uuid.test(org.trim())&&uuid.test(loc.trim())&&validPeriod;
   const base='/api/v1/dev/auto/organizations/'+encodeURIComponent(org.trim())+
     '/locations/'+encodeURIComponent(loc.trim())+'/orders';
   const scope=[org.trim(),loc.trim(),stage,applied,repair,docStage,booking,fromDay,toDay].join(':');
   const previousScope=React.useRef(scope);
   const effectiveCursor=previousScope.current===scope?cursor:null;
-  const queryKey=scope+':'+effectiveCursor+':'+revision;
+  const queryKey=scope+':'+effectiveCursor+':'+revision+':'+valid;
   if(currentScope.current!==queryKey){requestEpoch.current++;currentScope.current=queryKey;}
   function filters(){
     const params=new URLSearchParams({view:'workflow',stage,repairStage:repair,documentStage:docStage,bookingStatus:booking});
@@ -135,8 +149,8 @@ export function AutoWorkOrderRegister(){
 
   function applySearch(event:React.FormEvent){
     event.preventDefault();
-    if(search.trim()!==''&&!uuid.test(search.trim()))return;
-    setApplied(search.trim().toLowerCase());setCursor(null);
+    if(!valid||!parsedFilters||(search.trim()!==''&&!uuid.test(search.trim())))return;
+    changeFilter('orderId',search.trim().toLowerCase());setCursor(null);
     setHistory([]);setRevision(x=>x+1);
   }
   async function exportRegister(){
@@ -198,28 +212,28 @@ export function AutoWorkOrderRegister(){
       фильтры проведения и закрытия не раскрывают скрытые документы.</p>
     <div style={{display:'flex',gap:'0.75rem',flexWrap:'wrap'}}>
       <label>UUID организации <input aria-label="UUID организации" value={org}
-        onChange={e=>setOrg(e.target.value)}/></label>
+        onChange={e=>changeScope('org',e.target.value)}/></label>
       <label>UUID филиала <input aria-label="UUID филиала" value={loc}
-        onChange={e=>setLoc(e.target.value)}/></label>
+        onChange={e=>changeScope('loc',e.target.value)}/></label>
       <label>Общий статус (совместимость) <select aria-label="Состояние заказ-наряда" value={stage}
-        onChange={e=>setStage(e.target.value as Stage)}>
+        onChange={e=>changeFilter('stage',e.target.value as Stage)}>
         {stages.map(x=><option key={x} value={x}>{names[x]}</option>)}
       </select></label>
-      <label>Этап ремонта <select aria-label="Этап ремонта" value={repair} onChange={e=>setRepair(e.target.value as RepairStage)}>
+      <label>Этап ремонта <select aria-label="Этап ремонта" value={repair} onChange={e=>changeFilter('repairStage',e.target.value as RepairStage)}>
         {repairStages.map(x=><option key={x} value={x}>{names[x]}</option>)}
       </select></label>
-      <label>Состояние документа <select aria-label="Состояние документа" value={docStage} onChange={e=>setDocStage(e.target.value as DocumentStage)}>
+      <label>Состояние документа <select aria-label="Состояние документа" value={docStage} onChange={e=>changeFilter('documentStage',e.target.value as DocumentStage)}>
         {documentStages.map(x=><option key={x} value={x}>{docNames[x]}</option>)}
       </select></label>
-      <label>Состояние записи <select aria-label="Состояние записи" value={booking} onChange={e=>setBooking(e.target.value as BookingState)}>
+      <label>Состояние записи <select aria-label="Состояние записи" value={booking} onChange={e=>changeFilter('bookingStatus',e.target.value as BookingState)}>
         {bookingStates.map(x=><option key={x} value={x}>{bookingNames[x]}</option>)}
       </select></label>
-      <label>Дата записи с <input aria-label="Дата записи с" type="date" value={fromDay} onChange={e=>setFromDay(e.target.value)}/></label>
-      <label>Дата записи по <input aria-label="Дата записи по" type="date" value={toDay} onChange={e=>setToDay(e.target.value)}/></label>
-      <button type="button" onClick={()=>{setStage('ALL');setRepair('ALL');setDocStage('ALL');setBooking('ALL');
-        setFromDay('');setToDay('');setSearch('');setApplied('');setCursor(null);setHistory([]);setRevision(x=>x+1);}}>
+      <label>Дата записи с <input aria-label="Дата записи с" type="date" value={fromDay} onChange={e=>changeFilter('fromDay',e.target.value)}/></label>
+      <label>Дата записи по <input aria-label="Дата записи по" type="date" value={toDay} onChange={e=>changeFilter('toDay',e.target.value)}/></label>
+      <button type="button" onClick={()=>{writeFilters(defaultFilters);setSearch('');setCursor(null);setHistory([]);setRevision(x=>x+1);}}>
         Сбросить все фильтры</button>
     </div>
+    {parsedFilters===null&&<p role="alert">Неверные параметры ссылки. Сбросьте все фильтры перед загрузкой реестра.</p>}
     {!validPeriod&&<p role="alert">Проверьте диапазон дат записи.</p>}
     <p>Период по местной дате филиала, включительно. Этап ремонта, технический документ и запись независимы.</p>
     <form onSubmit={applySearch}>
@@ -228,7 +242,7 @@ export function AutoWorkOrderRegister(){
         value={search} onChange={e=>setSearch(e.target.value)}/></label>
       <button type="submit" disabled={!valid||(search.trim()!==''&&!uuid.test(search.trim()))}>
         Найти в реестре</button>
-      <button type="button" onClick={()=>{setSearch('');setApplied('');
+      <button type="button" onClick={()=>{setSearch('');changeFilter('orderId','');
         setCursor(null);setHistory([]);setRevision(x=>x+1);}}>Сбросить поиск</button>
     </form>
     {status==='idle'&&<p>Укажите организацию и филиал. Поиск принимает только полный UUID.</p>}
@@ -236,7 +250,7 @@ export function AutoWorkOrderRegister(){
     {status==='denied'&&<p role="alert">403 — нет действующего доступа к заказам этого филиала.</p>}
     {status==='error'&&<p role="alert">Реестр недоступен. Проверьте фильтры, сессию и попробуйте снова.
       <button type="button" onClick={()=>setRevision(x=>x+1)}>Повторить</button></p>}
-    {status==='ready'&&page&&loadedKey===queryKey&&<>
+    {valid&&status==='ready'&&page&&loadedKey===queryKey&&<>
       <div>
         <button type="button" disabled={exportBusy} onClick={()=>void exportRegister()}>
           {exportBusy?'Подготовка CSV…':'Скачать весь отфильтрованный реестр CSV'}
@@ -272,9 +286,8 @@ export function AutoWorkOrderRegister(){
           <p>Запись: <code>{row.appointmentId}</code>. Пост: <code>{row.bayId}</code>.</p>
           <p>Интервал: {new Date(row.startsAt).toLocaleString('ru-RU')} —
             {' '}{new Date(row.endsAt).toLocaleString('ru-RU')}.</p>
-          <Link to={'/staff/auto-order-workspace?'+new URLSearchParams({
-            org:org.trim(),loc:loc.trim(),order:row.workOrderId,
-          })}>Открыть рабочее место наряда</Link>
+          <Link to={'/staff/auto-order-workspace?'+workspaceParams(org.trim(),loc.trim(),
+            row.workOrderId,'services',registerParams(org.trim(),loc.trim(),appliedFilters))}>Открыть рабочее место наряда</Link>
           {' · '}
           <Link to={detailLink(row.workOrderId)}>Открыть услуги выбранного наряда</Link>
           <p>Стоимость, платежи, фото и документы доступны лишь в отдельных
