@@ -1,4 +1,5 @@
 import React from 'react';
+import {ClosedOrderComparison} from './ClosedOrderComparison';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const moneyKeys=['approvedBaseMinor','approvedExtraMinor','approvedTotalMinor',
@@ -126,5 +127,6 @@ export function AutoClosedOrderReport({org,loc,from,to,allowed}:{
         </tr>)}</tbody>
       </table></div>
     </div>}
+    <ClosedOrderComparison key={scope} org={org} loc={loc} from={from} to={to} allowed={allowed}/>
   </section>;
 }

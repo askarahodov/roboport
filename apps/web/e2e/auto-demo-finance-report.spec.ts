@@ -502,3 +502,40 @@ test('closed-order CSV denial clears previously loaded source evidence and resto
   await expect(table).toBeVisible();
   expect(downloads).toBe(0);
 });
+
+
+
+test('closed-order comparison reconciles both periods and clears on malformed data or revoke',async({page})=>{
+  const day='2030-10-27',prior='2030-10-26';
+  const previous={fromDay:prior,toDay:prior,orderCount:0,uniqueCustomers:0,singleOrderCustomers:0,
+    multipleOrderCustomers:0,additionalClosedOrders:0,approvedTotalMinor:0,simulatedPaidMinor:0,
+    simulatedRefundedMinor:0,multipleOrderBasisPoints:null,days:[{day:prior,closedOrders:0}]};
+  const current={...previous,fromDay:day,toDay:day,orderCount:3,uniqueCustomers:2,singleOrderCustomers:1,
+    multipleOrderCustomers:1,additionalClosedOrders:1,approvedTotalMinor:2500,simulatedPaidMinor:3000,
+    simulatedRefundedMinor:500,multipleOrderBasisPoints:5000,days:[{day,closedOrders:3}]};
+  const delta={orderCount:3,uniqueCustomers:2,singleOrderCustomers:1,multipleOrderCustomers:1,
+    additionalClosedOrders:1,approvedTotalMinor:2500,simulatedPaidMinor:3000,simulatedRefundedMinor:500};
+  const value={syntheticOnly:true,realMoney:false,releaseAllowed:false,retentionAvailable:false,
+    actualVisitsAvailable:false,basis:'RECONCILED_CLOSED_ORDER_PERIOD_COMPARISON',currency:'RUB',
+    timeZone:'Europe/Berlin',current,previous,delta};
+  let denied=false,malformed=false;
+  await page.route(/\/reports\/closed-orders\/comparison(?:\/export)?\?/,route=>{
+    if(new URL(route.request().url()).pathname.endsWith('/export'))
+      return route.fulfill({status:denied?403:200,contentType:'text/csv',body:'CURRENT;3'});
+    return route.fulfill({status:denied?403:200,json:malformed?{...value,delta:{...delta,orderCount:4}}:value});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/staff/auto-demo-finance-report');await fill(page);
+  const panel=page.getByRole('region',{name:'Сравнение периодов закрытых нарядов'});
+  const build=panel.getByRole('button',{name:'Сравнить периоды'});
+  await build.click();await expect(panel.getByRole('table',{name:'Сравнение показателей'})).toBeVisible();
+  await expect(panel).toContainText('50%');
+  const download=page.waitForEvent('download');
+  await panel.getByRole('button',{name:'Скачать сравнение CSV'}).click();
+  expect((await download).suggestedFilename()).toBe('auto-closed-order-comparison.csv');
+  malformed=true;await build.click();await expect(panel.getByRole('alert')).toContainText('Не удалось');
+  await expect(panel.getByRole('table')).toHaveCount(0);
+  malformed=false;await build.click();await expect(panel.getByRole('table')).toHaveCount(2);
+  denied=true;await build.click();await expect(panel.getByRole('alert')).toContainText('Доступ');
+  await expect(panel.getByRole('table')).toHaveCount(0);
+});
